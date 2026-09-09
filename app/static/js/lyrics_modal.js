@@ -96,6 +96,66 @@ function lyricsModalComponent() {
             return src || 'Онлайн';
         },
 
+        setKind(newKind) {
+            this.kind = newKind === 'txt' ? 'txt' : 'lrc';
+        },
+
+        autoDetectKind(text) {
+            const val = text !== undefined ? text : this.content;
+            if (!val || typeof val !== 'string') return;
+            const hasTimecodes = /\[\d{2}:\d{2}/.test(val);
+            this.kind = hasTimecodes ? 'lrc' : 'txt';
+        },
+
+        handleContentInput() {
+            if (this.source === 'none' || this.source === 'Не найден' || !this.source) {
+                this.source = 'Вручную';
+            }
+            if (this.content) {
+                this.autoDetectKind();
+            }
+        },
+
+        handleContentPaste(event) {
+            if (this.source === 'none' || this.source === 'Не найден' || !this.source) {
+                this.source = 'Вставлено вручную';
+            }
+            setTimeout(() => {
+                if (this.content) {
+                    this.autoDetectKind();
+                }
+            }, 50);
+        },
+
+        async pasteFromClipboard() {
+            try {
+                if (navigator.clipboard && navigator.clipboard.readText) {
+                    const text = await navigator.clipboard.readText();
+                    if (text && text.trim().length > 0) {
+                        this.content = text;
+                        this.source = 'Буфер обмена';
+                        this.autoDetectKind(text);
+                        Alpine.store('app').toast('Текст песни вставлен из буфера обмена', 'info');
+                        return;
+                    }
+                }
+            } catch (err) {
+                console.warn('Не удалось прочитать буфер обмена через API:', err);
+            }
+
+            // Запасной вариант при блокировке clipboard API (HTTP/браузерные ограничения)
+            const textarea = document.querySelector('textarea[x-model="content"]');
+            if (textarea) {
+                textarea.focus();
+            }
+            Alpine.store('app').toast('Вставьте текст комбинацией клавиш Ctrl+V в поле ввода', 'info');
+        },
+
+        clearContent() {
+            this.content = '';
+            this.source = 'Очищено';
+        },
+
         handleFileUpload(event) {
             const file = event.target.files[0];
             if (!file) return;

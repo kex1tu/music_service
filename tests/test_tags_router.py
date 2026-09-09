@@ -523,3 +523,110 @@ def test_batch_save_with_cover_base64_upload(
         assert len(list(tmp_uploads.glob("*"))) == 0
 
 
+def test_recognize_audio_endpoints(tags_client: TestClient, auth_tags_client: TestClient, temp_storage: dict):
+    """Проверка работы эндпоинта POST /tags/recognize-audio."""
+    # 1. 401 Unauthorized
+    resp_unauth = tags_client.post("/tags/recognize-audio", json={"path": "track.mp3"})
+    assert resp_unauth.status_code == 401
+
+    # 2. Успешное распознавание с моком
+    from unittest.mock import AsyncMock, patch
+
+    from app.schemas.tag import RecognizedTrackResponse
+    from app.services.recognition_service import RecognitionService
+
+    expected = RecognizedTrackResponse(
+        recognized=True,
+        title="Around the World",
+        artist="Daft Punk",
+        album="Homework",
+        year=1997,
+        genre="Electronic",
+        cover_url="https://is1-ssl.mzstatic.com/image/thumb/1000x1000cc.jpg",
+    )
+
+    with patch.object(RecognitionService, "recognize_audio", new=AsyncMock(return_value=expected)):
+        resp = auth_tags_client.post("/tags/recognize-audio", json={"path": "track.mp3"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["recognized"] is True
+        assert data["title"] == "Around the World"
+        assert data["artist"] == "Daft Punk"
+        assert data["album"] == "Homework"
+        assert data["year"] == 1997
+
+
+def test_deezer_album_endpoints(tags_client: TestClient, auth_tags_client: TestClient):
+    """Проверка эндпоинтов поиска и деталей альбома в Deezer."""
+    # 1. 401 Unauthorized
+    resp_search_unauth = tags_client.get("/tags/deezer/albums", params={"query": "Discovery"})
+    assert resp_search_unauth.status_code == 401
+
+    resp_details_unauth = tags_client.get("/tags/deezer/albums/302127")
+    assert resp_details_unauth.status_code == 401
+
+    # 2. Поиск альбомов с моком
+    from unittest.mock import AsyncMock, patch
+
+    from app.services.deezer_client import DeezerClient
+
+    mock_search = [
+        {
+            "id": 302127,
+            "title": "Discovery",
+            "artist": {"name": "Daft Punk"},
+            "cover_xl": "https://cdn-images.dzcdn.net/cover.jpg",
+            "nb_tracks": 14,
+        }
+    ]
+
+    with patch.object(DeezerClient, "search_albums", new=AsyncMock(return_value=mock_search)):
+        resp = auth_tags_client.get("/tags/deezer/albums", params={"query": "Discovery"})
+        assert resp.status_code == 200
+        results = resp.json()
+        assert len(results) == 1
+        assert results[0]["id"] == "302127"
+        assert results[0]["title"] == "Discovery"
+        assert results[0]["artist"] == "Daft Punk"
+
+    # 3. Детали альбома с моком
+    mock_album = {
+        "id": 302127,
+        "title": "Discovery",
+        "artist": {"name": "Daft Punk"},
+        "release_date": "2001-03-07",
+        "genres": {"data": [{"name": "Electronic"}]},
+        "cover_xl": "https://cdn-images.dzcdn.net/cover_xl.jpg",
+        "tracks": {
+            "data": [
+                {
+                    "track_position": 1,
+                    "title": "One More Time",
+                    "artist": {"name": "Daft Punk"},
+                    "duration": 320,
+                },
+                {
+                    "track_position": 2,
+                    "title": "Aerodynamic",
+                    "artist": {"name": "Daft Punk"},
+                    "duration": 212,
+                },
+            ]
+        },
+    }
+
+    with patch.object(DeezerClient, "get_album", new=AsyncMock(return_value=mock_album)):
+        resp = auth_tags_client.get("/tags/deezer/albums/302127")
+        assert resp.status_code == 200
+        details = resp.json()
+        assert details["id"] == "302127"
+        assert details["title"] == "Discovery"
+        assert details["artist"] == "Daft Punk"
+        assert details["year"] == 2001
+        assert details["genre"] == "Electronic"
+        assert len(details["tracks"]) == 2
+        assert details["tracks"][0]["title"] == "One More Time"
+        assert details["tracks"][1]["title"] == "Aerodynamic"
+
+
+

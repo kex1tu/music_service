@@ -135,3 +135,53 @@ class BatchSaveResponse(BaseModel):
     success: bool = Field(default=True, description="Флаг успешности операции")
     destination_dir: str = Field(..., description="Каталог размещения альбома после сохранения")
     tracks: list[TrackTags] = Field(default_factory=list, description="Список сохраненных треков")
+
+
+class RecognizeAudioRequest(BaseModel):
+    """Запрос на распознавание аудиофайла через Shazam."""
+
+    path: str = Field(..., description="Относительный путь к MP3-файлу (в библиотеке или tmp_downloads)")
+
+
+class RecognizedTrackResponse(BaseModel):
+    """Результат акустического распознавания трека через Shazam."""
+
+    recognized: bool = Field(..., description="Флаг успешного распознавания")
+    title: str | None = Field(default=None, description="Распознанное название трека")
+    artist: str | None = Field(default=None, description="Распознанный исполнитель")
+    album: str | None = Field(default=None, description="Название альбома")
+    year: int | None = Field(default=None, description="Год релиза")
+    genre: str | None = Field(default=None, description="Жанр композиции")
+    cover_url: str | None = Field(default=None, description="URL обложки высокого разрешения")
+
+
+class DeezerAlbumSearchResult(BaseModel):
+    """Элемент списка результатов поиска альбомов в Deezer."""
+
+    id: str = Field(..., description="ID альбома в Deezer")
+    title: str = Field(..., description="Название альбома")
+    artist: str = Field(..., description="Исполнитель альбома")
+    cover_url: str | None = Field(default=None, description="Обложка альбома")
+    nb_tracks: int = Field(default=0, description="Количество треков")
+    year: int | None = Field(default=None, description="Год выпуска")
+
+
+class DeezerAlbumTrackItem(BaseModel):
+    """Метаданные дорожки альбома из Deezer."""
+
+    track_number: int = Field(..., description="Порядковый номер дорожки")
+    title: str = Field(..., description="Название трека")
+    artist: str = Field(..., description="Исполнитель")
+    duration: int | None = Field(default=None, description="Длительность в секундах")
+
+
+class DeezerAlbumDetailsResponse(BaseModel):
+    """Полные метаданные альбома из Deezer для автозаполнения редактора тегов."""
+
+    id: str = Field(..., description="ID альбома в Deezer")
+    title: str = Field(..., description="Название альбома")
+    artist: str = Field(..., description="Исполнитель альбома")
+    year: int | None = Field(default=None, description="Год релиза")
+    genre: str | None = Field(default=None, description="Основной жанр")
+    cover_url: str | None = Field(default=None, description="URL обложки высокого разрешения (1000x1000)")
+    tracks: list[DeezerAlbumTrackItem] = Field(default_factory=list, description="Список треков альбома")

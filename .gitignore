@@ -1,16 +1,14 @@
+# ==============================================================================
 # Python
+# ==============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-env/
-venv/
-ENV/
 build/
 develop-eggs/
 dist/
-downloads/
 eggs/
 .eggs/
 lib/
@@ -23,33 +21,103 @@ wheels/
 .installed.cfg
 *.egg
 
+# ==============================================================================
 # Virtual environments
-.venv
+# ==============================================================================
 venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
 
-# Environment variables & secrets
+# ==============================================================================
+# Environment variables, secrets & cookies
+# ==============================================================================
 .env
+.env.*
+!.env.example
+*.pem
+*.key
 cookies.txt
+*cookies*.txt
 
-# Temporary download buffer & music library
-tmp_downloads/
-/tmp_downloads/
+# ==============================================================================
+# Storage, media libraries & temporary buffers
+# ==============================================================================
 music_library/
 /music_library/
+tmp_downloads/
+/tmp_downloads/
+downloads/
+/downloads/
+scratch/
 
-# Testing & Coverage
+# Audio & media files (prevent accidental git tracking of audio/lyrics)
+*.mp3
+*.flac
+*.m4a
+*.ogg
+*.opus
+*.wav
+*.aac
+*.alac
+*.aiff
+*.lrc
+
+# yt-dlp temporary download files
+*.part
+*.ytdl
+
+# ==============================================================================
+# Archives & Compressed files
+# ==============================================================================
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.rar
+*.7z
+*.bz2
+
+# ==============================================================================
+# Logs
+# ==============================================================================
+*.log
+logs/
+
+# ==============================================================================
+# Testing & Coverage & Linters
+# ==============================================================================
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .coverage
+.coverage.*
 htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
 
-# Agents & Automation
-.agents/
-
-# IDE & OS
+# ==============================================================================
+# IDEs & Operating Systems
+# ==============================================================================
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ==============================================================================
+# AI Assistants / Agent metadata
+# ==============================================================================
+.agents/
+.antigravity/
 

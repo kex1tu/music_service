@@ -199,6 +199,11 @@ class DeezerClient:
         data = await self._request_api("/search/track", params={"q": query, "limit": limit})
         return data.get("data", [])
 
+    async def search_albums(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+        """Выполняет поиск альбомов по текстовому запросу."""
+        data = await self._request_api("/search/album", params={"q": query, "limit": limit})
+        return data.get("data", [])
+
     async def download_cover_bytes(self, cover_url: str) -> bytes:
         """Загружает бинарные данные обложки альбома."""
         client = await self._get_client()

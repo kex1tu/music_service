@@ -19,6 +19,20 @@ function tagEditorComponent() {
         coverPreviewUrl: null,
         coverBase64: null,
         isSaving: false,
+        isFetchingLyrics: false,
+        lyricsProgress: { current: 0, total: 0 },
+
+        // Shazam Audio Recognition
+        recognizingTrackPath: null,
+        isRecognizingAll: false,
+        shazamProgress: { current: 0, total: 0 },
+
+        // Deezer Album Search
+        showDeezerModal: false,
+        deezerQuery: '',
+        isSearchingDeezer: false,
+        deezerResults: [],
+        isLoadingDeezerDetails: false,
 
         init() {
             // Следим за открытием данных редактора из глобального хранилища
@@ -45,6 +59,17 @@ function tagEditorComponent() {
 
         loadData(data) {
             this.coverBase64 = null;
+            this.isFetchingLyrics = false;
+            this.lyricsProgress = { current: 0, total: 0 };
+            this.recognizingTrackPath = null;
+            this.isRecognizingAll = false;
+            this.shazamProgress = { current: 0, total: 0 };
+            this.showDeezerModal = false;
+            this.deezerQuery = '';
+            this.deezerResults = [];
+            this.isSearchingDeezer = false;
+            this.isLoadingDeezerDetails = false;
+
             this.album = {
                 album_artist: data.album?.album_artist || '',
                 album: data.album?.album || '',
@@ -62,6 +87,94 @@ function tagEditorComponent() {
                 this.coverPreviewUrl = `/tags/cover?path=${encodeURIComponent(this.sourceDir)}&t=${Date.now()}`;
             } else {
                 this.coverPreviewUrl = null;
+            }
+        },
+
+        async fetchLyricsForAlbum(forceAll = false) {
+            if (!this.tracks || this.tracks.length === 0) {
+                Alpine.store('app').toast('Нет треков для поиска текстов', 'error');
+                return;
+            }
+            if (this.isFetchingLyrics) return;
+
+            const missing = this.tracks.filter(
+                (t) => !t.lyrics_status || t.lyrics_status === 'none'
+            );
+
+            if (missing.length === 0 && !forceAll) {
+                if (
+                    confirm(
+                        'У всех треков уже есть тексты. Выполнить повторный поиск и обновить тексты для всех треков?'
+                    )
+                ) {
+                    return this.fetchLyricsForAlbum(true);
+                }
+                return;
+            }
+
+            const targets = forceAll ? this.tracks : missing;
+            this.isFetchingLyrics = true;
+            this.lyricsProgress = { current: 0, total: targets.length };
+            let foundCount = 0;
+
+            Alpine.store('app').toast(
+                `Запущен поиск текстов для ${targets.length} треков...`,
+                'info'
+            );
+
+            try {
+                for (const track of targets) {
+                    this.lyricsProgress.current++;
+                    try {
+                        const params = new URLSearchParams({
+                            artist: track.artist || this.album.album_artist || '',
+                            title: track.title || '',
+                        });
+                        if (track.album || this.album.album) {
+                            params.append('album', track.album || this.album.album);
+                        }
+                        if (track.duration) {
+                            params.append('duration', track.duration);
+                        }
+
+                        const res = await fetch(`/lyrics/search?${params.toString()}`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            const text = data.lyrics || data.content;
+                            if (data.source && data.source !== 'none' && text) {
+                                const kind = data.synced ? 'lrc' : 'txt';
+                                const saveRes = await fetch('/lyrics', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        track_path: track.path,
+                                        content: text,
+                                        kind: kind,
+                                    }),
+                                });
+                                if (saveRes.ok) {
+                                    track.lyrics_status = kind;
+                                    foundCount++;
+                                }
+                            }
+                        }
+                    } catch (trackErr) {
+                        console.error(`Ошибка при поиске текста для "${track.title}":`, trackErr);
+                    }
+
+                    // Небольшая задержка между запросами для защиты от rate limit внешних API
+                    await new Promise((resolve) => setTimeout(resolve, 150));
+                }
+
+                const msg =
+                    foundCount > 0
+                        ? `Поиск текстов завершён: успешно найдено ${foundCount} из ${targets.length}!`
+                        : 'Поиск завершён: тексты для треков не были найдены во внешних базах';
+                Alpine.store('app').toast(msg, foundCount > 0 ? 'success' : 'info');
+            } catch (err) {
+                Alpine.store('app').toast(`Ошибка поиска текстов: ${err.message}`, 'error');
+            } finally {
+                this.isFetchingLyrics = false;
             }
         },
 
@@ -162,6 +275,200 @@ function tagEditorComponent() {
                 Alpine.store('app').toast(`Ошибка: ${err.message}`, 'error');
             } finally {
                 this.isSaving = false;
+            }
+        },
+
+        async fetchCoverBase64(url) {
+            try {
+                const res = await fetch(url);
+                if (res.ok) {
+                    const blob = await res.blob();
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        this.coverBase64 = e.target.result;
+                    };
+                    reader.readAsDataURL(blob);
+                }
+            } catch (e) {
+                console.warn('Не удалось конвертировать обложку в base64:', e);
+            }
+        },
+
+        async recognizeTrack(track) {
+            if (!track || !track.path) return;
+            this.recognizingTrackPath = track.path;
+
+            try {
+                const res = await fetch('/tags/recognize-audio', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: track.path }),
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.message || 'Ошибка распознавания');
+                }
+
+                const data = await res.json();
+                if (data.recognized) {
+                    if (data.title) track.title = data.title;
+                    if (data.artist) track.artist = data.artist;
+                    if (!this.album.album && data.album) this.album.album = data.album;
+                    if (!this.album.album_artist && data.artist) this.album.album_artist = data.artist;
+                    if (!this.album.year && data.year) this.album.year = data.year;
+                    if (!this.album.genre && data.genre) this.album.genre = data.genre;
+
+                    if (!this.coverPreviewUrl && data.cover_url) {
+                        this.coverPreviewUrl = data.cover_url;
+                        this.coverPath = null;
+                        this.fetchCoverBase64(data.cover_url);
+                    }
+
+                    Alpine.store('app').toast(`Shazam: ${data.artist} — ${data.title}`, 'success');
+                } else {
+                    Alpine.store('app').toast(`Shazam не нашел совпадений для "${track.title || track.path}"`, 'info');
+                }
+            } catch (err) {
+                Alpine.store('app').toast(`Ошибка Shazam: ${err.message}`, 'error');
+            } finally {
+                this.recognizingTrackPath = null;
+            }
+        },
+
+        async recognizeAllTracks() {
+            if (!this.tracks || this.tracks.length === 0 || this.isRecognizingAll) return;
+
+            this.isRecognizingAll = true;
+            this.shazamProgress = { current: 0, total: this.tracks.length };
+            let recognizedCount = 0;
+
+            Alpine.store('app').toast(`Запущен поиск через Shazam для ${this.tracks.length} треков...`, 'info');
+
+            try {
+                for (const track of this.tracks) {
+                    this.shazamProgress.current++;
+                    try {
+                        const res = await fetch('/tags/recognize-audio', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ path: track.path }),
+                        });
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (data.recognized) {
+                                if (data.title) track.title = data.title;
+                                if (data.artist) track.artist = data.artist;
+                                if (!this.album.album && data.album) this.album.album = data.album;
+                                if (!this.album.album_artist && data.artist) this.album.album_artist = data.artist;
+                                if (!this.album.year && data.year) this.album.year = data.year;
+                                if (!this.album.genre && data.genre) this.album.genre = data.genre;
+
+                                if (!this.coverPreviewUrl && data.cover_url) {
+                                    this.coverPreviewUrl = data.cover_url;
+                                    this.coverPath = null;
+                                    this.fetchCoverBase64(data.cover_url);
+                                }
+                                recognizedCount++;
+                            }
+                        }
+                    } catch (trackErr) {
+                        console.error('Ошибка распознавания трека:', trackErr);
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, 200));
+                }
+
+                const msg = recognizedCount > 0
+                    ? `Shazam: успешно распознано ${recognizedCount} из ${this.tracks.length} треков!`
+                    : 'Shazam не нашел совпадений для треков';
+                Alpine.store('app').toast(msg, recognizedCount > 0 ? 'success' : 'info');
+            } finally {
+                this.isRecognizingAll = false;
+            }
+        },
+
+        openDeezerSearch() {
+            this.showDeezerModal = true;
+            this.deezerResults = [];
+            const albumPart = this.album.album || '';
+            const artistPart = this.album.album_artist || '';
+            this.deezerQuery = (albumPart ? `${artistPart} ${albumPart}` : (this.tracks[0]?.artist ? `${this.tracks[0].artist} ${this.tracks[0].title || ''}` : '')).trim();
+            if (this.deezerQuery) {
+                this.searchDeezerAlbums();
+            }
+        },
+
+        closeDeezerSearch() {
+            this.showDeezerModal = false;
+        },
+
+        async searchDeezerAlbums() {
+            if (!this.deezerQuery || !this.deezerQuery.trim()) return;
+            this.isSearchingDeezer = true;
+            this.deezerResults = [];
+
+            try {
+                const res = await fetch(`/tags/deezer/albums?query=${encodeURIComponent(this.deezerQuery.trim())}`);
+                if (res.ok) {
+                    this.deezerResults = await res.json();
+                    if (this.deezerResults.length === 0) {
+                        Alpine.store('app').toast('Альбомы в Deezer не найдены', 'info');
+                    }
+                } else {
+                    const err = await res.json();
+                    throw new Error(err.message || 'Ошибка поиска в Deezer');
+                }
+            } catch (err) {
+                Alpine.store('app').toast(`Ошибка: ${err.message}`, 'error');
+            } finally {
+                this.isSearchingDeezer = false;
+            }
+        },
+
+        async applyDeezerAlbum(albumId) {
+            if (!albumId) return;
+            this.isLoadingDeezerDetails = true;
+
+            try {
+                const res = await fetch(`/tags/deezer/albums/${albumId}`);
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.message || 'Не удалось загрузить данные альбома');
+                }
+
+                const data = await res.json();
+                this.album.album = data.title || this.album.album;
+                this.album.album_artist = data.artist || this.album.album_artist;
+                if (data.year) this.album.year = data.year;
+                if (data.genre) this.album.genre = data.genre;
+
+                if (data.cover_url) {
+                    this.coverPreviewUrl = data.cover_url;
+                    this.coverPath = null;
+                    this.fetchCoverBase64(data.cover_url);
+                }
+
+                if (data.tracks && data.tracks.length > 0) {
+                    this.tracks.forEach((track, idx) => {
+                        const dt = data.tracks[idx];
+                        if (dt) {
+                            track.track_number = dt.track_number;
+                            track.title = dt.title;
+                            track.artist = dt.artist;
+                            track.album = data.title;
+                            track.album_artist = data.artist;
+                            if (data.year) track.year = data.year;
+                            if (data.genre) track.genre = data.genre;
+                        }
+                    });
+                }
+
+                this.closeDeezerSearch();
+                Alpine.store('app').toast(`Альбом "${data.title}" успешно применен!`, 'success');
+            } catch (err) {
+                Alpine.store('app').toast(`Ошибка: ${err.message}`, 'error');
+            } finally {
+                this.isLoadingDeezerDetails = false;
             }
         },
 

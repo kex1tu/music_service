@@ -9,10 +9,11 @@
 
 import base64
 import logging
+import re
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.core.exceptions import NotFoundError, TagError
 from app.dependencies import (
@@ -25,9 +26,16 @@ from app.schemas.tag import (
     AlbumDetailsResponse,
     AlbumTags,
     BatchSaveResponse,
+    DeezerAlbumDetailsResponse,
+    DeezerAlbumSearchResult,
+    DeezerAlbumTrackItem,
+    RecognizeAudioRequest,
+    RecognizedTrackResponse,
     SaveAlbumRequest,
     TrackTags,
 )
+from app.services.deezer_client import DeezerClient
+from app.services.recognition_service import RecognitionService
 from app.services.tag_service import TagService
 
 router = APIRouter(prefix="/tags", tags=["tags"])
@@ -43,6 +51,25 @@ def get_tag_service(
 
 
 TagServiceDep = Annotated[TagService, Depends(get_tag_service)]
+
+
+def get_recognition_service(
+    music_sandbox: MusicSandboxDep,
+    tmp_sandbox: TmpSandboxDep,
+) -> RecognitionService:
+    """Фабрика зависимости сервиса RecognitionService."""
+    return RecognitionService(music_sandbox=music_sandbox, tmp_sandbox=tmp_sandbox)
+
+
+RecognitionServiceDep = Annotated[RecognitionService, Depends(get_recognition_service)]
+
+
+def get_deezer_client() -> DeezerClient:
+    """Фабрика зависимости клиента DeezerClient."""
+    return DeezerClient()
+
+
+DeezerClientDep = Annotated[DeezerClient, Depends(get_deezer_client)]
 
 
 @router.get("", response_model=AlbumDetailsResponse | TrackTags)
@@ -224,3 +251,94 @@ def batch_save_tags(
                     uploads_dir.rmdir()
             except OSError:
                 pass
+
+
+@router.post("/recognize-audio", response_model=RecognizedTrackResponse)
+async def recognize_audio(
+    request: RecognizeAudioRequest,
+    _: CurrentUserDep,
+    recognition_service: RecognitionServiceDep,
+) -> RecognizedTrackResponse:
+    """Распознает трек по его аудиосодержимому через Shazam."""
+    return await recognition_service.recognize_audio(request.path)
+
+
+@router.get("/deezer/albums", response_model=list[DeezerAlbumSearchResult])
+async def search_deezer_albums(
+    query: str = Query(..., description="Поисковый запрос (название альбома или артист)"),
+    _: CurrentUserDep = ...,
+    deezer_client: DeezerClientDep = ...,
+    limit: int = Query(default=6, ge=1, le=20),
+) -> list[DeezerAlbumSearchResult]:
+    """Поиск альбомов в публичном каталоге Deezer."""
+    items = await deezer_client.search_albums(query=query, limit=limit)
+    results: list[DeezerAlbumSearchResult] = []
+    for item in items:
+        artist_obj = item.get("artist", {})
+        artist_name = artist_obj.get("name", "") if isinstance(artist_obj, dict) else ""
+        cover_url = item.get("cover_xl") or item.get("cover_big") or item.get("cover_medium") or item.get("cover")
+        results.append(
+            DeezerAlbumSearchResult(
+                id=str(item.get("id")),
+                title=item.get("title", ""),
+                artist=artist_name,
+                cover_url=cover_url,
+                nb_tracks=item.get("nb_tracks", 0),
+                year=None,
+            )
+        )
+    return results
+
+
+@router.get("/deezer/albums/{album_id}", response_model=DeezerAlbumDetailsResponse)
+async def get_deezer_album_details(
+    album_id: str,
+    _: CurrentUserDep,
+    deezer_client: DeezerClientDep,
+) -> DeezerAlbumDetailsResponse:
+    """Получение официальных метаданных альбома, обложки и треклиста из Deezer."""
+    data = await deezer_client.get_album(album_id)
+    artist_obj = data.get("artist", {})
+    artist_name = artist_obj.get("name", "") if isinstance(artist_obj, dict) else ""
+
+    release_date = data.get("release_date")
+    year: int | None = None
+    if release_date:
+        m = re.match(r"^(\d{4})", str(release_date))
+        if m:
+            year = int(m.group(1))
+
+    genre: str | None = None
+    genres_data = data.get("genres", {})
+    genres_list = genres_data.get("data", []) if isinstance(genres_data, dict) else []
+    if genres_list and isinstance(genres_list, list):
+        genre_names = [g.get("name") for g in genres_list if isinstance(g, dict) and g.get("name")]
+        if genre_names:
+            genre = "\\\\".join(genre_names)
+
+    cover_url = deezer_client.extract_best_cover_url(data)
+
+    tracks_data = data.get("tracks", {}).get("data", [])
+    tracks_items: list[DeezerAlbumTrackItem] = []
+    for idx, t in enumerate(tracks_data):
+        track_num = t.get("track_position") or (idx + 1)
+        t_artist = deezer_client.format_artists(t) if ("contributors" in t or "artist" in t) else artist_name
+        tracks_items.append(
+            DeezerAlbumTrackItem(
+                track_number=int(track_num),
+                title=t.get("title", ""),
+                artist=t_artist,
+                duration=t.get("duration"),
+            )
+        )
+
+    return DeezerAlbumDetailsResponse(
+        id=str(data.get("id")),
+        title=data.get("title", ""),
+        artist=artist_name,
+        year=year,
+        genre=genre,
+        cover_url=cover_url,
+        tracks=tracks_items,
+    )
+

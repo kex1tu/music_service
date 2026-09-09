@@ -78,3 +78,64 @@ def test_downloader_js_polling_interval():
 
     assert "}, 1000);" in content, "Polling interval must be 1000ms in downloader.js"
     assert "}, 1500);" not in content, "Outdated 1500ms polling interval found in downloader.js"
+
+
+def test_lyrics_features_in_tag_editor_and_lyrics_modal(client: TestClient):
+    """Проверка наличия кнопки поиска текстов для альбома и расширенных функций вставки текста."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+
+    # 1. Проверка кнопки пакетного поиска текстов для альбома в редакторе тегов
+    assert "@click=\"fetchLyricsForAlbum()\"" in html, "fetchLyricsForAlbum button missing in index.html"
+    assert "Найти тексты для альбома" in html or "lyricsProgress" in html
+
+    # 2. Проверка кнопки вставки текста из буфера и переключателя формата в модальном окне текстов
+    assert "@click=\"pasteFromClipboard()\"" in html, "pasteFromClipboard button missing in index.html"
+    assert "Вставить текст" in html
+    assert "@click=\"setKind('lrc')\"" in html, "LRC format switcher button missing in index.html"
+    assert "@click=\"setKind('txt')\"" in html, "TXT format switcher button missing in index.html"
+    assert "@input=\"handleContentInput()\"" in html, "handleContentInput handler missing on textarea"
+    assert "@paste=\"handleContentPaste($event)\"" in html, "handleContentPaste handler missing on textarea"
+
+    # 3. Проверка методов в tag_editor.js
+    tag_editor_js = (PROJECT_ROOT / "app" / "static" / "js" / "tag_editor.js").read_text(encoding="utf-8")
+    assert "fetchLyricsForAlbum" in tag_editor_js
+    assert "isFetchingLyrics" in tag_editor_js
+
+    # 4. Проверка методов в lyrics_modal.js
+    lyrics_modal_js = (PROJECT_ROOT / "app" / "static" / "js" / "lyrics_modal.js").read_text(encoding="utf-8")
+    assert "pasteFromClipboard" in lyrics_modal_js
+    assert "autoDetectKind" in lyrics_modal_js
+    assert "handleContentInput" in lyrics_modal_js
+    assert "clearContent" in lyrics_modal_js
+
+
+def test_shazam_and_deezer_features_in_tag_editor(client: TestClient):
+    """Проверка наличия элементов управления Shazam и поиска в Deezer в Tag Editor."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+
+    # 1. Проверка кнопки и модального окна поиска в Deezer
+    assert "@click=\"openDeezerSearch()\"" in html, "openDeezerSearch button missing in index.html"
+    assert "Найти в Deezer" in html
+    assert "showDeezerModal" in html
+    assert "@click=\"searchDeezerAlbums()\"" in html
+    assert "@click=\"applyDeezerAlbum(item.id)\"" in html
+
+    # 2. Проверка кнопок Shazam (пакетной и индивидуальной)
+    assert "@click=\"recognizeAllTracks()\"" in html, "recognizeAllTracks button missing in index.html"
+    assert "Распознать всё (Shazam)" in html or "shazamProgress" in html
+    assert "@click=\"recognizeTrack(track)\"" in html, "recognizeTrack button missing in table"
+
+    # 3. Проверка реализации методов в tag_editor.js
+    tag_editor_js = (PROJECT_ROOT / "app" / "static" / "js" / "tag_editor.js").read_text(encoding="utf-8")
+    assert "recognizeTrack" in tag_editor_js
+    assert "recognizeAllTracks" in tag_editor_js
+    assert "openDeezerSearch" in tag_editor_js
+    assert "searchDeezerAlbums" in tag_editor_js
+    assert "applyDeezerAlbum" in tag_editor_js
+    assert "fetchCoverBase64" in tag_editor_js
+
+
