@@ -1,0 +1,27 @@
+[Unit]
+Description=Music Downloader & Tag Manager Service
+After=network.target
+
+[Service]
+Type=simple
+User=music
+Group=music
+WorkingDirectory=/opt/music-manager
+EnvironmentFile=/opt/music-manager/.env
+ExecStart=/opt/music-manager/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8010
+Restart=on-failure
+RestartSec=5s
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

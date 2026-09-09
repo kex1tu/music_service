@@ -13,6 +13,12 @@ from app.config import Settings
 from app.core.exceptions import AuthenticationError
 from app.core.sandbox import PathSandbox
 from app.services.auth_service import AuthService
+from app.services.deezer_client import DeezerClient
+from app.services.download_service import DownloadService
+from app.services.file_manager_service import FileManagerService
+from app.services.organizer_service import OrganizerService
+from app.services.source_resolver import SourceResolver
+from app.services.tag_service import TagService
 
 
 @lru_cache(maxsize=1)
@@ -87,5 +93,99 @@ def get_tmp_sandbox(settings: SettingsDep) -> PathSandbox:
 
 MusicSandboxDep = Annotated[PathSandbox, Depends(get_music_sandbox)]
 TmpSandboxDep = Annotated[PathSandbox, Depends(get_tmp_sandbox)]
+
+
+_deezer_client: DeezerClient | None = None
+_source_resolver: SourceResolver | None = None
+_download_service: DownloadService | None = None
+
+
+def get_deezer_client() -> DeezerClient:
+    """Провайдер синглтона DeezerClient."""
+    global _deezer_client
+    if _deezer_client is None:
+        _deezer_client = DeezerClient()
+    return _deezer_client
+
+
+DeezerClientDep = Annotated[DeezerClient, Depends(get_deezer_client)]
+
+
+def get_source_resolver(
+    deezer_client: DeezerClientDep,
+    settings: SettingsDep,
+) -> SourceResolver:
+    """Провайдер синглтона SourceResolver."""
+    global _source_resolver
+    if _source_resolver is None:
+        _source_resolver = SourceResolver(
+            deezer_client=deezer_client,
+            cobalt_api_url=settings.COBALT_API_URL,
+            allowed_domains=settings.ALLOWED_DOWNLOAD_DOMAINS,
+            cookies_path=settings.cookies_file,
+        )
+    return _source_resolver
+
+
+SourceResolverDep = Annotated[SourceResolver, Depends(get_source_resolver)]
+
+
+def get_download_service(
+    settings: SettingsDep,
+    tmp_sandbox: TmpSandboxDep,
+    source_resolver: SourceResolverDep,
+    deezer_client: DeezerClientDep,
+) -> DownloadService:
+    """Провайдер синглтона DownloadService (хранилище задач в памяти)."""
+    global _download_service
+    if _download_service is None:
+        _download_service = DownloadService(
+            settings=settings,
+            tmp_sandbox=tmp_sandbox,
+            source_resolver=source_resolver,
+            deezer_client=deezer_client,
+        )
+    return _download_service
+
+
+DownloadServiceDep = Annotated[DownloadService, Depends(get_download_service)]
+ 
+ 
+def get_tag_service(
+    music_sandbox: MusicSandboxDep,
+    tmp_sandbox: TmpSandboxDep,
+) -> TagService:
+    """Провайдер сервиса работы с тегами TagService."""
+    return TagService(music_sandbox=music_sandbox, tmp_sandbox=tmp_sandbox)
+
+
+TagServiceDep = Annotated[TagService, Depends(get_tag_service)]
+
+
+def get_file_manager_service(
+    music_sandbox: MusicSandboxDep,
+    tag_service: TagServiceDep,
+) -> FileManagerService:
+    """Провайдер сервиса файлового менеджера FileManagerService."""
+    return FileManagerService(music_sandbox=music_sandbox, tag_service=tag_service)
+
+
+FileManagerServiceDep = Annotated[FileManagerService, Depends(get_file_manager_service)]
+
+
+def get_organizer_service(
+    music_sandbox: MusicSandboxDep,
+    tmp_sandbox: TmpSandboxDep,
+    tag_service: TagServiceDep,
+) -> OrganizerService:
+    """Провайдер сервиса организации медиатеки OrganizerService."""
+    return OrganizerService(
+        music_sandbox=music_sandbox,
+        tmp_sandbox=tmp_sandbox,
+        tag_service=tag_service,
+    )
+
+
+OrganizerServiceDep = Annotated[OrganizerService, Depends(get_organizer_service)]
 
 

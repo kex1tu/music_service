@@ -29,15 +29,22 @@ venv/
 
 # Environment variables & secrets
 .env
+cookies.txt
 
-# Temporary download buffer
+# Temporary download buffer & music library
 tmp_downloads/
 /tmp_downloads/
+music_library/
+/music_library/
 
 # Testing & Coverage
 .pytest_cache/
+.ruff_cache/
 .coverage
 htmlcov/
+
+# Agents & Automation
+.agents/
 
 # IDE & OS
 .idea/
@@ -45,3 +52,4 @@ htmlcov/
 *.swp
 *.swo
 .DS_Store
+

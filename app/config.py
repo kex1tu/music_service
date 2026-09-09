@@ -10,6 +10,8 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 class Settings(BaseSettings):
     """Типизированные настройки приложения."""
@@ -22,6 +24,12 @@ class Settings(BaseSettings):
     TMP_DIR: Path = Field(
         default=Path("tmp_downloads"),
         description="Каталог временного буфера загрузок",
+    )
+
+    # Файлы аутентификации yt-dlp
+    YTDLP_COOKIES_PATH: Path | None = Field(
+        default=None,
+        description="Путь к файлу cookies.txt для yt-dlp (обход возрастных ограничений)",
     )
 
     # Безопасность и аутентификация
@@ -74,6 +82,40 @@ class Settings(BaseSettings):
         description="Частота дискретизации аудио (Hz)",
     )
 
+    # Параметры загрузчика и очереди
+    MAX_CONCURRENT_DOWNLOADS: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description="Максимальное количество параллельных фоновых загрузок",
+    )
+    MATCHER_CONCURRENCY: int = Field(
+        default=4,
+        ge=1,
+        le=10,
+        description="Максимальное количество параллельных запросов сопоставления AudioMatcher (3-5)",
+    )
+    JOB_TTL_HOURS: int = Field(
+        default=24,
+        ge=1,
+        le=168,
+        description="Время жизни временных файлов задачи (часов) до очистки сборщиком мусора",
+    )
+    COBALT_API_URL: str | None = Field(
+        default=None,
+        description="URL шлюза Cobalt API для запасного скачивания потоков",
+    )
+    ALLOWED_DOWNLOAD_DOMAINS: tuple[str, ...] = (
+        "youtube.com",
+        "music.youtube.com",
+        "youtu.be",
+        "soundcloud.com",
+        "on.soundcloud.com",
+        "deezer.com",
+        "deezer.page.link",
+        "link.deezer.com",
+    )
+
     # Сетевые параметры сервиса
     HOST: str = Field(
         default="127.0.0.1",
@@ -101,3 +143,35 @@ class Settings(BaseSettings):
     def normalize_paths(cls, value: Path) -> Path:
         """Нормализует путь и преобразует его в абсолютный."""
         return value.expanduser().resolve()
+
+    @property
+    def cookies_file(self) -> Path | None:
+        """Возвращает валидный путь к файлу cookies.txt, если он существует.
+
+        Двухуровневый поиск:
+        1. Если задан YTDLP_COOKIES_PATH, проверяет его относительно PROJECT_ROOT,
+           CWD или как абсолютный путь.
+        2. Если не задан или файл не найден, проверяет cookies.txt в PROJECT_ROOT или CWD.
+        """
+        if self.YTDLP_COOKIES_PATH:
+            candidate = self.YTDLP_COOKIES_PATH.expanduser()
+            if not candidate.is_absolute():
+                resolved_root = (PROJECT_ROOT / candidate).resolve()
+                if resolved_root.is_file():
+                    return resolved_root
+                resolved_cwd = (Path.cwd() / candidate).resolve()
+                if resolved_cwd.is_file():
+                    return resolved_cwd
+            elif candidate.is_file():
+                return candidate
+
+        # Автоматическое обнаружение cookies.txt в корне проекта или CWD
+        root_cookies = (PROJECT_ROOT / "cookies.txt").resolve()
+        if root_cookies.is_file():
+            return root_cookies
+
+        cwd_cookies = (Path.cwd() / "cookies.txt").resolve()
+        if cwd_cookies.is_file():
+            return cwd_cookies
+
+        return None

@@ -32,7 +32,23 @@ def test_index_page(client: TestClient):
     response = client.get("/")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "Music Downloader & Tag Manager" in response.text
+    assert "Music Manager" in response.text
+    assert "downloaderComponent" in response.text
+
+
+def test_static_assets_served(client: TestClient):
+    """Проверка доступности статических JS и CSS файлов без сборщиков."""
+    assets = [
+        "/static/css/style.css",
+        "/static/js/downloader.js",
+        "/static/js/tag_editor.js",
+        "/static/js/lyrics_modal.js",
+        "/static/js/file_manager.js",
+    ]
+    for asset in assets:
+        resp = client.get(asset)
+        assert resp.status_code == 200, f"Static asset {asset} returned {resp.status_code}"
+        assert len(resp.content) > 0
 
 
 def test_verify_storage_directory_success(tmp_path: Path):

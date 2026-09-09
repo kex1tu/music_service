@@ -1,16 +1,1044 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" class="h-full">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Music Downloader & Tag Manager</title>
+
+    <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#ecfdf5',
+                            500: '#10b981',
+                            600: '#059669',
+                            700: '#047857',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Кастомные стили -->
+    <link rel="stylesheet" href="/static/css/style.css">
+
+    <!-- Компоненты приложения -->
+    <script src="/static/js/downloader.js"></script>
+    <script src="/static/js/tag_editor.js"></script>
+    <script src="/static/js/lyrics_modal.js"></script>
+    <script src="/static/js/file_manager.js"></script>
+
+    <!-- Alpine.js CDN -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.store('app', {
+                user: null,
+                activeTab: 'downloader',
+                activeModal: null,
+                toasts: [],
+                currentJobId: null,
+
+                tagEditorData: null,
+                deleteConfirmData: null,
+
+                init() {
+                    this.checkAuth();
+                },
+
+                async checkAuth() {
+                    try {
+                        const res = await fetch('/api/auth/me');
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.user = data.user || data.login || 'admin';
+                        } else {
+                            this.user = null;
+                        }
+                    } catch (e) {
+                        this.user = null;
+                    }
+                },
+
+                async logout() {
+                    try {
+                        await fetch('/logout', { method: 'POST' });
+                    } catch (e) {
+                        console.error(e);
+                    }
+                    this.user = null;
+                    this.toast('Вы вышли из системы', 'info');
+                },
+
+                toast(message, type = 'info') {
+                    const id = Date.now() + Math.random();
+                    this.toasts.push({ id, message, type });
+                    setTimeout(() => {
+                        this.toasts = this.toasts.filter(t => t.id !== id);
+                    }, 4000);
+                },
+
+                openTagEditor(data) {
+                    this.tagEditorData = data;
+                    this.activeModal = 'tag_editor';
+                },
+
+                closeTagEditor() {
+                    this.tagEditorData = null;
+                    if (this.activeModal === 'tag_editor') {
+                        this.activeModal = null;
+                    }
+                },
+
+                openLyricsModal(track) {
+                    this.activeModal = 'lyrics';
+                    window.dispatchEvent(new CustomEvent('lyrics-modal-opened', { detail: track }));
+                },
+
+                closeLyricsModal() {
+                    if (this.activeModal === 'lyrics') {
+                        if (this.tagEditorData) {
+                            this.activeModal = 'tag_editor';
+                        } else {
+                            this.activeModal = null;
+                        }
+                    }
+                }
+            });
+        });
+    </script>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen flex items-center justify-center">
-    <div class="text-center p-8 bg-gray-800 rounded-lg shadow-xl border border-gray-700">
-        <h1 class="text-3xl font-bold mb-4 text-emerald-400">Music Downloader & Tag Manager</h1>
-        <p class="text-gray-400">Сервис активен. Core / Bootstrap инициализирован успешно.</p>
+<body class="bg-gray-950 text-gray-100 min-h-full flex flex-col font-sans selection:bg-emerald-500 selection:text-white" x-data>
+
+    <!-- Верхняя панель навигации -->
+    <header class="bg-gray-900 border-b border-gray-800 sticky top-0 z-30 shadow-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <!-- Логотип -->
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                    <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12.5 15q1.05 0 1.775-.725T15 12.5V7h2q.425 0 .713-.288T18 6t-.288-.712T17 5h-2q-.425 0-.712.288T14 6v4.5q-.325-.25-.7-.375T12.5 10q-1.05 0-1.775.725T10 12.5t.725 1.775T12.5 15M8 18q-.825 0-1.412-.587T6 16V4q0-.825.588-1.412T8 2h12q.825 0 1.413.588T22 4v12q0 .825-.587 1.413T20 18zm-4 4q-.825 0-1.412-.587T2 20V7q0-.425.288-.712T3 6t.713.288T4 7v13h13q.425 0 .713.288T18 21t-.288.713T17 22z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-base font-bold text-white tracking-wide">Music Manager</h1>
+                    <p class="text-xs text-gray-400">Downloader & Tag Editor</p>
+                </div>
+            </div>
+
+            <!-- Вкладки -->
+            <nav class="flex space-x-2 bg-gray-950 p-1 rounded-lg border border-gray-800">
+                <button
+                    @click="$store.app.activeTab = 'downloader'"
+                    :class="$store.app.activeTab === 'downloader' ? 'bg-emerald-600 text-white font-medium shadow' : 'text-gray-400 hover:text-gray-200'"
+                    class="px-4 py-1.5 rounded-md text-sm transition-all flex items-center space-x-2">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M11.625 15.513q-.175-.063-.325-.213l-3.6-3.6q-.3-.3-.288-.7t.288-.7q.3-.3.713-.312t.712.287L11 12.15V5q0-.425.288-.712T12 4t.713.288T13 5v7.15l1.875-1.875q.3-.3.713-.288t.712.313q.275.3.288.7t-.288.7l-3.6 3.6q-.15.15-.325.213t-.375.062t-.375-.062M6 20q-.825 0-1.412-.587T4 18v-2q0-.425.288-.712T5 15t.713.288T6 16v2h12v-2q0-.425.288-.712T19 15t.713.288T20 16v2q0 .825-.587 1.413T18 20z"/>
+                    </svg>
+                    <span>Загрузчик</span>
+                </button>
+                <button
+                    @click="$store.app.activeTab = 'files'; $dispatch('refresh-file-manager')"
+                    :class="$store.app.activeTab === 'files' ? 'bg-emerald-600 text-white font-medium shadow' : 'text-gray-400 hover:text-gray-200'"
+                    class="px-4 py-1.5 rounded-md text-sm transition-all flex items-center space-x-2">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M4 20q-.825 0-1.412-.587T2 18V6q0-.825.588-1.412T4 4h5.175q.4 0 .763.15t.637.425L12 6h8q.825 0 1.413.588T22 8v10q0 .825-.587 1.413T20 20zm0-2h16V8h-8.825l-2-2H4zm0 0V6z"/>
+                    </svg>
+                    <span>Файлы медиатеки</span>
+                </button>
+            </nav>
+
+            <!-- Пользователь / Вход -->
+            <div class="flex items-center space-x-3">
+                <template x-if="$store.app.user">
+                    <div class="flex items-center space-x-3">
+                        <div class="flex items-center space-x-1.5 text-xs text-gray-400 bg-gray-800/60 px-2.5 py-1 rounded border border-gray-700/50">
+                            <svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M9.175 10.825Q8 9.65 8 8t1.175-2.825T12 4t2.825 1.175T16 8t-1.175 2.825T12 12t-2.825-1.175M4 18v-.8q0-.85.438-1.562T5.6 14.55q1.55-.775 3.15-1.162T12 13t3.25.388t3.15 1.162q.725.375 1.163 1.088T20 17.2v.8q0 .825-.587 1.413T18 20H6q-.825 0-1.412-.587T4 18m2 0h12v-.8q0-.275-.137-.5t-.363-.35q-1.35-.675-2.725-1.012T12 15t-2.775.338T6.5 16.35q-.225.125-.363.35T6 17.2zm7.413-8.587Q14 8.825 14 8t-.587-1.412T12 6t-1.412.588T10 8t.588 1.413T12 10t1.413-.587M12 18"/>
+                            </svg>
+                            <span>Пользователь: <strong class="text-gray-200" x-text="$store.app.user"></strong></span>
+                        </div>
+                        <button
+                            @click="$store.app.logout()"
+                            class="text-xs px-2.5 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 transition flex items-center space-x-1.5">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h6q.425 0 .713.288T12 4t-.288.713T11 5H5v14h6q.425 0 .713.288T12 20t-.288.713T11 21zm12.175-8H10q-.425 0-.712-.288T9 12t.288-.712T10 11h7.175L15.3 9.125q-.275-.275-.275-.675t.275-.7t.7-.313t.725.288L20.3 11.3q.3.3.3.7t-.3.7l-3.575 3.575q-.3.3-.712.288t-.713-.313q-.275-.3-.262-.712t.287-.688z"/>
+                            </svg>
+                            <span>Выйти</span>
+                        </button>
+                    </div>
+                </template>
+                <template x-if="!$store.app.user">
+                    <button
+                        @click="$store.app.activeModal = 'login'"
+                        class="text-xs px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition flex items-center space-x-1.5">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M13 21q-.425 0-.712-.288T12 20t.288-.712T13 19h6V5h-6q-.425 0-.712-.288T12 4t.288-.712T13 3h6q.825 0 1.413.588T21 5v14q0 .825-.587 1.413T19 21zm-1.825-8H4q-.425 0-.712-.288T3 12t.288-.712T4 11h7.175L9.3 9.125q-.275-.275-.275-.675t.275-.7t.7-.313t.725.288L14.3 11.3q.3.3.3.7t-.3.7l-3.575 3.575q-.3.3-.712.288T9.3 16.25q-.275-.3-.262-.712t.287-.688z"/>
+                        </svg>
+                        <span>Войти</span>
+                    </button>
+                </template>
+            </div>
+        </div>
+    </header>
+
+    <!-- Основная рабочая область -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+
+        <!-- ==================== ВКЛАДКА 1: ЗАГРУЗЧИК ==================== -->
+        <section x-show="$store.app.activeTab === 'downloader'" x-data="downloaderComponent()" class="space-y-6 animate-fade-in">
+            <!-- Карточка формы загрузки -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl">
+                <h2 class="text-lg font-semibold text-white mb-2">Загрузка музыки</h2>
+                <p class="text-sm text-gray-400 mb-6">
+                    Вставьте ссылку на трек, альбом или плейлист из Deezer, YouTube Music или SoundCloud.
+                </p>
+
+                <form @submit.prevent="submitDownload()" class="space-y-4">
+                    <div class="flex flex-col sm:flex-row gap-3">
+                        <!-- Поле ввода URL -->
+                        <div class="flex-1 relative">
+                            <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-500">
+                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M7 17q-2.075 0-3.537-1.463T2 12t1.463-3.537T7 7h3q.425 0 .713.288T11 8t-.288.713T10 9H7q-1.25 0-2.125.875T4 12t.875 2.125T7 15h3q.425 0 .713.288T11 16t-.288.713T10 17zm2-4q-.425 0-.712-.288T8 12t.288-.712T9 11h6q.425 0 .713.288T16 12t-.288.713T15 13zm5 4q-.425 0-.712-.288T13 16t.288-.712T14 15h3q1.25 0 2.125-.875T20 12t-.875-2.125T17 9h-3q-.425 0-.712-.288T13 8t.288-.712T14 7h3q2.075 0 3.538 1.463T22 12t-1.463 3.538T17 17z"/>
+                                </svg>
+                            </div>
+                            <input
+                                type="url"
+                                x-model="url"
+                                placeholder="https://www.deezer.com/album/... или https://music.youtube.com/..."
+                                required
+                                class="w-full bg-gray-950 border border-gray-700 rounded-lg pl-10 pr-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition text-sm">
+                        </div>
+
+                        <!-- Выбор источника -->
+                        <div class="sm:w-48">
+                            <select
+                                x-model="source"
+                                class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-3 text-gray-200 focus:outline-none focus:border-emerald-500 text-sm">
+                                <option value="auto">Автоопределение</option>
+                                <option value="deezer">Deezer</option>
+                                <option value="youtube">YouTube / YT Music</option>
+                                <option value="soundcloud">SoundCloud</option>
+                            </select>
+                        </div>
+
+                        <!-- Кнопка запуска -->
+                        <button
+                            type="submit"
+                            :disabled="isSubmitting || (job && job.status !== 'READY' && job.status !== 'ERROR')"
+                            class="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-medium rounded-lg text-sm transition flex items-center justify-center space-x-2 shadow-lg shadow-emerald-600/20">
+                            <template x-if="isSubmitting">
+                                <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
+                                </svg>
+                            </template>
+                            <template x-if="!isSubmitting">
+                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M11.625 15.513q-.175-.063-.325-.213l-3.6-3.6q-.3-.3-.288-.7t.288-.7q.3-.3.713-.312t.712.287L11 12.15V5q0-.425.288-.712T12 4t.713.288T13 5v7.15l1.875-1.875q.3-.3.713-.288t.712.313q.275.3.288.7t-.288.7l-3.6 3.6q-.15.15-.325.213t-.375.062t-.375-.062M6 20q-.825 0-1.412-.587T4 18v-2q0-.425.288-.712T5 15t.713.288T6 16v2h12v-2q0-.425.288-.712T19 15t.713.288T20 16v2q0 .825-.587 1.413T18 20z"/>
+                                </svg>
+                            </template>
+                            <span x-text="isSubmitting ? 'Обработка...' : 'Скачать'"></span>
+                        </button>
+                    </div>
+                </form>
+
+                <!-- Статус активной задачи загрузки -->
+                <template x-if="job">
+                    <div class="mt-6 pt-6 border-t border-gray-800 space-y-3">
+                        <div class="flex items-center justify-between gap-4">
+                            <div class="flex items-center space-x-3 min-w-0">
+                                <span class="text-xs font-semibold px-2.5 py-1 rounded uppercase tracking-wider flex-shrink-0"
+                                    :class="{
+                                        'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30': job.status === 'QUEUED' || job.status === 'RESOLVING',
+                                        'bg-blue-500/20 text-blue-400 border border-blue-500/30': job.status === 'DOWNLOADING',
+                                        'bg-purple-500/20 text-purple-400 border border-purple-500/30': job.status === 'CONVERTING',
+                                        'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30': job.status === 'TAGGING',
+                                        'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30': job.status === 'READY',
+                                        'bg-red-500/20 text-red-400 border border-red-500/30': job.status === 'ERROR',
+                                    }"
+                                    x-text="job.status">
+                                </span>
+                                <span class="text-sm text-gray-300 font-medium min-w-0 truncate" x-text="job.current_step" :title="job.current_step"></span>
+                            </div>
+                            <div class="flex items-center space-x-2 flex-shrink-0">
+                                <template x-if="job.total_tracks > 1">
+                                    <span class="text-xs text-gray-500 font-mono" x-text="`(${job.completed_tracks}/${job.total_tracks})`"></span>
+                                </template>
+                                <span class="text-xs text-emerald-400 font-semibold font-mono" x-text="`${Math.min(100, Math.max(0, Math.round(job.progress || 0)))}%`"></span>
+                            </div>
+                        </div>
+
+                        <!-- Прогресс-бар -->
+                        <div class="w-full bg-gray-950 rounded-full h-2.5 overflow-hidden border border-gray-800">
+                            <div
+                                class="bg-gradient-to-r from-emerald-500 to-teal-400 h-2.5 rounded-full transition-all duration-300"
+                                :style="`width: ${Math.min(100, Math.max(0, Math.round(job.progress || 0)))}%`"></div>
+                        </div>
+
+                        <!-- Сообщение об ошибке при ERROR -->
+                        <template x-if="job.status === 'ERROR'">
+                            <div class="p-3 bg-red-900/20 border border-red-700/40 rounded-lg text-xs text-red-300">
+                                <strong class="font-bold">Ошибка:</strong> <span x-text="job.error"></span>
+                            </div>
+                        </template>
+
+                        <!-- Кнопки действий задачи -->
+                        <div class="flex items-center justify-end space-x-3 pt-2">
+                            <template x-if="job.status === 'READY'">
+                                <button
+                                    @click="openTagEditorForJob(job.id)"
+                                    class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition shadow flex items-center space-x-1.5">
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="m21.4 14.25l-7.15 7.15q-.3.3-.675.45t-.75.15t-.75-.15t-.675-.45l-8.825-8.825q-.275-.275-.425-.637T2 11.175V4q0-.825.588-1.412T4 2h7.175q.4 0 .775.163t.65.437l8.8 8.825q.3.3.438.675t.137.75t-.137.738t-.438.662M6.5 8q.625 0 1.063-.437T8 6.5t-.437-1.062T6.5 5t-1.062.438T5 6.5t.438 1.063T6.5 8"/>
+                                    </svg>
+                                    <span>Открыть в редакторе тегов</span>
+                                </button>
+                            </template>
+                            <template x-if="job.status !== 'READY' && job.status !== 'ERROR'">
+                                <button
+                                    @click="cancelJob()"
+                                    class="px-3 py-1.5 bg-red-800/80 hover:bg-red-700 text-red-200 text-xs rounded transition flex items-center space-x-1.5">
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="m12 13.4l2.9 2.9q.275.275.7.275t.7-.275t.275-.7t-.275-.7L13.4 12l2.9-2.9q.275-.275.275-.7t-.275-.7t-.7-.275t-.7.275L12 10.6L9.1 7.7q-.275-.275-.7-.275t-.7.275t-.275.7t.275.7l2.9 2.9l-2.9 2.9q-.275.275-.275.7t.275.7t.7.275t.7-.275zm0 8.6q-2.075 0-3.9-.788t-3.175-2.137T2.788 15.9T2 12t.788-3.9t2.137-3.175T8.1 2.788T12 2t3.9.788t3.175 2.137T21.213 8.1T22 12t-.788 3.9t-2.137 3.175t-3.175 2.138T12 22"/>
+                                    </svg>
+                                    <span>Отменить</span>
+                                </button>
+                            </template>
+                            <button
+                                @click="resetForm()"
+                                class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded transition flex items-center space-x-1.5">
+                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M9.825 20.7q-2.575-.725-4.2-2.837T4 13q0-1.425.475-2.713t1.35-2.362q.275-.3.675-.313t.725.313q.275.275.288.675t-.263.75q-.6.775-.925 1.7T6 13q0 2.025 1.188 3.613t3.062 2.162q.325.1.538.375t.212.6q0 .5-.35.788t-.825.162m4.35 0q-.475.125-.825-.175t-.35-.8q0-.3.213-.575t.537-.375q1.875-.6 3.063-2.175T18 13q0-2.5-1.75-4.25T12 7h-.075l.4.4q.275.275.275.7t-.275.7t-.7.275t-.7-.275l-2.1-2.1q-.15-.15-.212-.325T8.55 6t.063-.375t.212-.325l2.1-2.1q.275-.275.7-.275t.7.275t.275.7t-.275.7l-.4.4H12q3.35 0 5.675 2.325T20 13q0 2.725-1.625 4.85t-4.2 2.85"/>
+                                </svg>
+                                <span>Сбросить</span>
+                            </button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Информационная карточка -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-gray-900/60 border border-gray-800/80 rounded-xl p-5">
+                    <div class="flex items-center space-x-3 mb-2">
+                        <span class="w-8 h-8 rounded-lg bg-pink-500/10 text-pink-400 flex items-center justify-center">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M7 17V7q0-.425.288-.712T8 6t.713.288T9 7v10q0 .425-.288.713T8 18t-.712-.288T7 17m4 4V3q0-.425.288-.712T12 2t.713.288T13 3v18q0 .425-.288.713T12 22t-.712-.288T11 21m-8-8v-2q0-.425.288-.712T4 10t.713.288T5 11v2q0 .425-.288.713T4 14t-.712-.288T3 13m12 4V7q0-.425.288-.712T16 6t.713.288T17 7v10q0 .425-.288.713T16 18t-.712-.288T15 17m4-4v-2q0-.425.288-.712T20 10t.713.288T21 11v2q0 .425-.288.713T20 14t-.712-.288T19 13"/>
+                            </svg>
+                        </span>
+                        <h3 class="text-sm font-semibold text-white">Deezer API</h3>
+                    </div>
+                    <p class="text-xs text-gray-400 leading-relaxed">
+                        Студийные метаданные альбомов, треков и несжатые обложки 1400×1400 без сторонних аккаунтов.
+                    </p>
+                </div>
+                <div class="bg-gray-900/60 border border-gray-800/80 rounded-xl p-5">
+                    <div class="flex items-center space-x-3 mb-2">
+                        <span class="w-8 h-8 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M8 17.175V6.825q0-.425.3-.713t.7-.287q.125 0 .263.037t.262.113l8.15 5.175q.225.15.338.375t.112.475t-.112.475t-.338.375l-8.15 5.175q-.125.075-.262.113T9 18.175q-.4 0-.7-.288t-.3-.712"/>
+                            </svg>
+                        </span>
+                        <h3 class="text-sm font-semibold text-white">YouTube & YT Music</h3>
+                    </div>
+                    <p class="text-xs text-gray-400 leading-relaxed">
+                        Интеллектуальный поиск AudioMatcher с проверкой таймингов ±2с и официальных релиз-каналов.
+                    </p>
+                </div>
+                <div class="bg-gray-900/60 border border-gray-800/80 rounded-xl p-5">
+                    <div class="flex items-center space-x-3 mb-2">
+                        <span class="w-8 h-8 rounded-lg bg-orange-500/10 text-orange-400 flex items-center justify-center">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M6.5 20q-2.275 0-3.887-1.575T1 14.575q0-1.95 1.175-3.475T5.25 9.15q.625-2.3 2.5-3.725T12 4q2.925 0 4.963 2.038T19 11q1.725.2 2.863 1.488T23 15.5q0 1.875-1.312 3.188T18.5 20zm0-2h12q1.05 0 1.775-.725T21 15.5t-.725-1.775T18.5 13H17v-2q0-2.075-1.463-3.538T12 6T8.463 7.463T7 11h-.5q-1.45 0-2.475 1.025T3 14.5t1.025 2.475T6.5 18m5.5-6"/>
+                            </svg>
+                        </span>
+                        <h3 class="text-sm font-semibold text-white">SoundCloud</h3>
+                    </div>
+                    <p class="text-xs text-gray-400 leading-relaxed">
+                        Прямая загрузка оригинального аудиопотока и транскодирование в MP3 320 kbps через ffmpeg.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== ВКЛАДКА 2: ФАЙЛОВЫЙ МЕНЕДЖЕР ==================== -->
+        <section x-show="$store.app.activeTab === 'files'" x-data="fileManagerComponent()" class="space-y-4 animate-fade-in">
+            <!-- Навигационная панель хлебных крошек -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-md">
+                <nav class="flex items-center space-x-2 text-sm overflow-x-auto">
+                    <template x-for="(crumb, idx) in breadcrumbs" :key="crumb.path">
+                        <div class="flex items-center space-x-2">
+                            <template x-if="idx > 0">
+                                <span class="text-gray-600">/</span>
+                            </template>
+                            <button
+                                @click="navigateTo(crumb.path)"
+                                :class="idx === breadcrumbs.length - 1 ? 'font-semibold text-emerald-400' : 'text-gray-400 hover:text-gray-200'"
+                                class="transition text-sm flex items-center space-x-1">
+                                <template x-if="idx === 0">
+                                    <svg class="w-3.5 h-3.5 inline mr-1 text-emerald-400/80" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M6 19h3v-5q0-.425.288-.712T10 13h4q.425 0 .713.288T15 14v5h3v-9l-6-4.5L6 10zm-2 0v-9q0-.475.213-.9t.587-.7l6-4.5q.525-.4 1.2-.4t1.2.4l6 4.5q.375.275.588.7T20 10v9q0 .825-.588 1.413T18 21h-4q-.425 0-.712-.288T13 20v-5h-2v5q0 .425-.288.713T10 21H6q-.825 0-1.412-.587T4 19m8-6.75"/>
+                                    </svg>
+                                </template>
+                                <span x-text="crumb.name"></span>
+                            </button>
+                        </div>
+                    </template>
+                </nav>
+
+                <div class="flex items-center space-x-2">
+                    <template x-if="parentPath !== null">
+                        <button
+                            @click="navigateUp()"
+                            class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded transition flex items-center space-x-1">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="m7.825 13l4.9 4.9q.3.3.288.7t-.313.7q-.3.275-.7.288t-.7-.288l-6.6-6.6q-.15-.15-.213-.325T4.426 12t.063-.375t.212-.325l6.6-6.6q.275-.275.688-.275t.712.275q.3.3.3.713t-.3.712L7.825 11H19q.425 0 .713.288T20 12t-.288.713T19 13z"/>
+                            </svg>
+                            <span>Назад</span>
+                        </button>
+                    </template>
+                    <button
+                        @click="loadDirectory(currentPath)"
+                        class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded transition flex items-center space-x-1">
+                        <svg class="w-3.5 h-3.5" :class="isLoading ? 'animate-spin' : ''" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V5q0-.425.288-.712T19 4t.713.288T20 5v5q0 .425-.288.713T19 11h-5q-.425 0-.712-.288T13 10t.288-.712T14 9h3.2q-.8-1.4-2.187-2.2T12 6Q9.5 6 7.75 7.75T6 12t1.75 4.25T12 18q1.7 0 3.113-.862t2.187-2.313q.2-.35.563-.487t.737-.013q.4.125.575.525t-.025.75q-1.025 2-2.925 3.2T12 20"/>
+                        </svg>
+                        <span>Обновить</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Таблица элементов каталога -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm text-gray-300">
+                        <thead class="bg-gray-950/80 text-xs text-gray-400 uppercase tracking-wider border-b border-gray-800">
+                            <tr>
+                                <th class="py-3 px-4 w-12">#</th>
+                                <th class="py-3 px-4">Имя / Композиция</th>
+                                <th class="py-3 px-4">Исполнитель</th>
+                                <th class="py-3 px-4">Альбом</th>
+                                <th class="py-3 px-4 text-center">Текст</th>
+                                <th class="py-3 px-4 text-right">Длительность</th>
+                                <th class="py-3 px-4 text-right">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-800/60">
+                            <!-- Пустое состояние -->
+                            <template x-if="items.length === 0 && !isLoading">
+                                <tr>
+                                    <td colspan="7" class="py-12 text-center text-gray-500">
+                                        Каталог пуст
+                                    </td>
+                                </tr>
+                            </template>
+
+                            <!-- Элементы -->
+                            <template x-for="item in items" :key="item.path">
+                                <tr class="hover:bg-gray-800/40 transition group">
+                                    <!-- Номер или Иконка -->
+                                    <td class="py-3 px-4 text-gray-500">
+                                        <template x-if="item.type === 'directory'">
+                                            <svg class="w-5 h-5 text-amber-400" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M4 20q-.825 0-1.412-.587T2 18V6q0-.825.588-1.412T4 4h5.175q.4 0 .763.15t.637.425L12 6h8q.825 0 1.413.588T22 8v10q0 .825-.587 1.413T20 20z"/>
+                                            </svg>
+                                        </template>
+                                        <template x-if="item.type === 'file'">
+                                            <div class="flex items-center space-x-1.5">
+                                                <svg class="w-3.5 h-3.5 text-emerald-400/80" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M7.175 19.825Q6 18.65 6 17t1.175-2.825T10 13q.575 0 1.063.138t.937.412V4q0-.425.288-.712T13 3h4q.425 0 .713.288T18 4v2q0 .425-.288.713T17 7h-3v10q0 1.65-1.175 2.825T10 21t-2.825-1.175"/>
+                                                </svg>
+                                                <span x-text="item.track_number || '—'"></span>
+                                            </div>
+                                        </template>
+                                    </td>
+
+                                    <!-- Имя / Название -->
+                                    <td class="py-3 px-4 font-medium text-white">
+                                        <template x-if="item.type === 'directory'">
+                                            <button
+                                                @click="navigateTo(item.path)"
+                                                class="hover:text-emerald-400 transition text-left flex items-center space-x-2">
+                                                <span x-text="item.name"></span>
+                                                <template x-if="item.track_count">
+                                                    <span class="text-xs text-gray-500" x-text="`(${item.track_count} треков)`"></span>
+                                                </template>
+                                            </button>
+                                        </template>
+                                        <template x-if="item.type === 'file'">
+                                            <div class="flex items-center space-x-2">
+                                                <span x-text="item.title || item.name"></span>
+                                            </div>
+                                        </template>
+                                    </td>
+
+                                    <!-- Исполнитель -->
+                                    <td class="py-3 px-4 text-gray-400" x-text="item.artist || '—'"></td>
+
+                                    <!-- Альбом -->
+                                    <td class="py-3 px-4 text-gray-400" x-text="item.album || '—'"></td>
+
+                                    <!-- Статус текста -->
+                                    <td class="py-3 px-4 text-center">
+                                        <template x-if="item.type === 'file' && item.extension === '.mp3'">
+                                            <div>
+                                                <span
+                                                    class="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider"
+                                                    :class="{
+                                                        'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30': item.lyrics_status === 'lrc',
+                                                        'bg-blue-500/20 text-blue-400 border border-blue-500/30': item.lyrics_status === 'txt',
+                                                        'bg-gray-800 text-gray-500': item.lyrics_status === 'none'
+                                                    }"
+                                                    x-text="item.lyrics_status === 'lrc' ? 'LRC' : (item.lyrics_status === 'txt' ? 'TXT' : 'НЕТ')">
+                                                </span>
+                                            </div>
+                                        </template>
+                                    </td>
+
+                                    <!-- Длительность -->
+                                    <td class="py-3 px-4 text-right text-gray-400" x-text="formatDuration(item.duration)"></td>
+
+                                    <!-- Действия -->
+                                    <td class="py-3 px-4 text-right">
+                                        <div class="flex items-center justify-end space-x-2">
+                                            <!-- Редактировать теги -->
+                                            <template x-if="item.type === 'directory'">
+                                                <button
+                                                    @click="openInTagEditor(item)"
+                                                    title="Редактировать альбом"
+                                                    class="px-2.5 py-1 bg-gray-800 hover:bg-emerald-600 hover:text-white text-gray-300 rounded text-xs transition flex items-center space-x-1">
+                                                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                                                        <path d="M4 21q-.425 0-.712-.288T3 20v-2.425q0-.4.15-.763t.425-.637L16.2 3.575q.3-.275.663-.425t.762-.15t.775.15t.65.45L20.425 5q.3.275.437.65T21 6.4q0 .4-.138.763t-.437.662l-12.6 12.6q-.275.275-.638.425t-.762.15zM17.6 7.8L19 6.4L17.6 5l-1.4 1.4z"/>
+                                                    </svg>
+                                                    <span>Редактировать</span>
+                                                </button>
+                                            </template>
+                                            <template x-if="item.type === 'file' && item.extension === '.mp3'">
+                                                <button
+                                                    @click="openInTagEditor(item)"
+                                                    title="Редактировать теги"
+                                                    class="px-2.5 py-1 bg-gray-800 hover:bg-emerald-600 hover:text-white text-gray-300 rounded text-xs transition flex items-center space-x-1">
+                                                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                                                        <path d="m21.4 14.25l-7.15 7.15q-.3.3-.675.45t-.75.15t-.75-.15t-.675-.45l-8.825-8.825q-.275-.275-.425-.637T2 11.175V4q0-.825.588-1.412T4 2h7.175q.4 0 .775.163t.65.437l8.8 8.825q.3.3.438.675t.137.75t-.137.738t-.438.662M6.5 8q.625 0 1.063-.437T8 6.5t-.437-1.062T6.5 5t-1.062.438T5 6.5t.438 1.063T6.5 8"/>
+                                                    </svg>
+                                                    <span>Теги</span>
+                                                </button>
+                                            </template>
+
+                                            <!-- Удалить -->
+                                            <button
+                                                @click="promptDelete(item)"
+                                                title="Удалить"
+                                                class="p-1 hover:bg-red-500/20 text-gray-500 hover:text-red-400 rounded transition">
+                                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zM17 6H7v13h10zm-6.287 10.713Q11 16.425 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288M7 6v13z"/>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ==================== МОДАЛЬНОЕ ОКНО 1: TAG EDITOR ==================== -->
+    <div
+        x-show="$store.app.activeModal === 'tag_editor'"
+        x-cloak
+        class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4 overflow-y-auto"
+        x-data="tagEditorComponent()">
+        <div
+            @click.outside="close()"
+            class="bg-gray-900 border border-gray-700 rounded-2xl max-w-5xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-fade-in">
+            
+            <!-- Заголовок модального окна -->
+            <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-950/60">
+                <div class="flex items-center space-x-3">
+                    <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="m21.4 14.25l-7.15 7.15q-.3.3-.675.45t-.75.15t-.75-.15t-.675-.45l-8.825-8.825q-.275-.275-.425-.637T2 11.175V4q0-.825.588-1.412T4 2h7.175q.4 0 .775.163t.65.437l8.8 8.825q.3.3.438.675t.137.75t-.137.738t-.438.662M6.5 8q.625 0 1.063-.437T8 6.5t-.437-1.062T6.5 5t-1.062.438T5 6.5t.438 1.063T6.5 8"/>
+                        </svg>
+                    </div>
+                    <h2 class="text-base font-bold text-white">Редактор тегов ID3v2.4</h2>
+                </div>
+                <button
+                    @click="close()"
+                    class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 transition">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Тело модального окна -->
+            <div class="flex-1 overflow-y-auto p-6 space-y-6">
+                <!-- ВЕРХНИЙ БЛОК: Метаданные уровня альбома -->
+                <div class="bg-gray-950/70 border border-gray-800 rounded-xl p-5">
+                    <div class="flex flex-col md:flex-row gap-6">
+                        <!-- Обложка -->
+                        <div class="flex flex-col items-center space-y-3">
+                            <div class="w-36 h-36 rounded-lg bg-gray-900 border border-gray-800 flex items-center justify-center overflow-hidden shadow-inner relative group">
+                                <template x-if="coverPreviewUrl">
+                                    <img :src="coverPreviewUrl" alt="Cover" class="w-full h-full object-cover">
+                                </template>
+                                <template x-if="!coverPreviewUrl">
+                                    <svg class="w-12 h-12 text-gray-700" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h14q.825 0 1.413.588T21 5v14q0 .825-.587 1.413T19 21zm0-2h14V5H5zm0 0V5zm2-2h10q.3 0 .45-.275t-.05-.525l-2.75-3.675q-.15-.2-.4-.2t-.4.2L11.25 16L9.4 13.525q-.15-.2-.4-.2t-.4.2l-2 2.675q-.2.25-.05.525T7 17"/>
+                                    </svg>
+                                </template>
+                                <label class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer transition text-xs text-white font-medium space-x-1">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M6 20q-.825 0-1.412-.587T4 18v-2q0-.425.288-.712T5 15t.713.288T6 16v2h12v-2q0-.425.288-.712T19 15t.713.288T20 16v2q0 .825-.587 1.413T18 20zm5-12.15L9.125 9.725q-.3.3-.712.288T7.7 9.7q-.275-.3-.288-.7t.288-.7l3.6-3.6q.15-.15.325-.212T12 4.425t.375.063t.325.212l3.6 3.6q.3.3.288.7t-.288.7q-.3.3-.712.313t-.713-.288L13 7.85V15q0 .425-.288.713T12 16t-.712-.288T11 15z"/>
+                                    </svg>
+                                    <span>Изменить</span>
+                                    <input type="file" accept="image/jpeg,image/png" @change="handleCoverUpload($event)" class="hidden">
+                                </label>
+                            </div>
+                            <label class="text-xs text-emerald-400 hover:underline cursor-pointer flex items-center space-x-1">
+                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M6 20q-.825 0-1.412-.587T4 18v-2q0-.425.288-.712T5 15t.713.288T6 16v2h12v-2q0-.425.288-.712T19 15t.713.288T20 16v2q0 .825-.587 1.413T18 20zm5-12.15L9.125 9.725q-.3.3-.712.288T7.7 9.7q-.275-.3-.288-.7t.288-.7l3.6-3.6q.15-.15.325-.212T12 4.425t.375.063t.325.212l3.6 3.6q.3.3.288.7t-.288.7q-.3.3-.712.313t-.713-.288L13 7.85V15q0 .425-.288.713T12 16t-.712-.288T11 15z"/>
+                                </svg>
+                                <span>Загрузить обложку</span>
+                                <input type="file" accept="image/jpeg,image/png" @change="handleCoverUpload($event)" class="hidden">
+                            </label>
+                        </div>
+
+                        <!-- Поля альбома -->
+                        <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-400 mb-1">Исполнитель альбома (Album Artist)</label>
+                                <input
+                                    type="text"
+                                    x-model="album.album_artist"
+                                    placeholder="Daft Punk\\Pharrell Williams"
+                                    class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+                                <p class="text-[10px] text-gray-500 mt-0.5">Разделитель множественных артистов: \\</p>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-400 mb-1">Название альбома (Album Title)</label>
+                                <input
+                                    type="text"
+                                    x-model="album.album"
+                                    placeholder="Discovery"
+                                    class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-400 mb-1">Год релиза (Year)</label>
+                                <input
+                                    type="number"
+                                    x-model="album.year"
+                                    placeholder="2001"
+                                    class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-400 mb-1">Жанры (Genre)</label>
+                                <input
+                                    type="text"
+                                    x-model="album.genre"
+                                    placeholder="House\\Electronic"
+                                    class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+                            </div>
+
+                            <div class="sm:col-span-2 pt-2 flex justify-end">
+                                <button
+                                    type="button"
+                                    @click="applyAlbumToAll()"
+                                    class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-emerald-400 hover:text-emerald-300 text-xs font-semibold rounded-lg border border-emerald-500/30 transition flex items-center space-x-1.5">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="m12 16.175l3.9-3.875q.275-.275.688-.288t.712.288q.275.275.275.7t-.275.7l-4.6 4.6q-.15.15-.325.213t-.375.062t-.375-.062t-.325-.213l-4.6-4.6q-.275-.275-.288-.687T6.7 12.3q.275-.275.7-.275t.7.275zm0-6L15.9 6.3q.275-.275.688-.287t.712.287q.275.275.275.7t-.275.7l-4.6 4.6q-.15.15-.325.213t-.375.062t-.375-.062t-.325-.213L6.7 7.7q-.275-.275-.288-.687T6.7 6.3q.275-.275.7-.275t.7.275z"/>
+                                    </svg>
+                                    <span>Применить ко всем трекам ниже</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- НИЖНИЙ БЛОК: Список треков -->
+                <div class="space-y-3">
+                    <h3 class="text-sm font-semibold text-white">Список треков альбома</h3>
+                    <div class="border border-gray-800 rounded-xl overflow-hidden shadow">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider border-b border-gray-800">
+                                <tr>
+                                    <th class="py-2.5 px-3 w-16">#</th>
+                                    <th class="py-2.5 px-3">Название трека</th>
+                                    <th class="py-2.5 px-3">Исполнитель</th>
+                                    <th class="py-2.5 px-3 text-center w-28">Текст</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-800/60 bg-gray-900/40">
+                                <template x-for="(track, index) in tracks" :key="track.path || index">
+                                    <tr class="hover:bg-gray-800/30">
+                                        <td class="py-2 px-3">
+                                            <input
+                                                type="number"
+                                                x-model="track.track_number"
+                                                class="w-12 bg-gray-950 border border-gray-700 rounded px-1.5 py-1 text-center text-white focus:outline-none focus:border-emerald-500">
+                                        </td>
+                                        <td class="py-2 px-3">
+                                            <input
+                                                type="text"
+                                                x-model="track.title"
+                                                placeholder="Название трека"
+                                                class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500">
+                                        </td>
+                                        <td class="py-2 px-3">
+                                            <input
+                                                type="text"
+                                                x-model="track.artist"
+                                                placeholder="Исполнитель"
+                                                class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500">
+                                        </td>
+                                        <td class="py-2 px-3 text-center">
+                                            <button
+                                                type="button"
+                                                @click="openLyrics(track, index)"
+                                                class="px-2.5 py-1 rounded text-[11px] font-semibold transition flex items-center justify-center space-x-1 mx-auto"
+                                                :class="{
+                                                    'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30': track.lyrics_status === 'lrc',
+                                                    'bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30': track.lyrics_status === 'txt',
+                                                    'bg-gray-800 text-gray-400 hover:bg-gray-700': !track.lyrics_status || track.lyrics_status === 'none'
+                                                }">
+                                                <span x-text="track.lyrics_status === 'lrc' ? 'LRC' : (track.lyrics_status === 'txt' ? 'TXT' : '+ Текст')"></span>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Подвал модального окна -->
+            <div class="px-6 py-4 border-t border-gray-800 bg-gray-950 flex items-center justify-end space-x-3">
+                <button
+                    type="button"
+                    @click="close()"
+                    class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold rounded-lg transition">
+                    Отмена
+                </button>
+                <button
+                    type="button"
+                    @click="saveAlbum()"
+                    :disabled="isSaving"
+                    class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition flex items-center space-x-2 shadow-lg shadow-emerald-600/30">
+                    <template x-if="isSaving">
+                        <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
+                        </svg>
+                    </template>
+                    <template x-if="!isSaving">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h11.175q.4 0 .763.15t.637.425l2.85 2.85q.275.275.425.638t.15.762V19q0 .825-.587 1.413T19 21zm9.125-3.875Q15 16.25 15 15t-.875-2.125T12 12t-2.125.875T9 15t.875 2.125T12 18t2.125-.875M7 10h7q.425 0 .713-.288T15 9V7q0-.425-.288-.712T14 6H7q-.425 0-.712.288T6 7v2q0 .425.288.713T7 10"/>
+                        </svg>
+                    </template>
+                    <span x-text="isSaving ? 'Сохранение...' : 'Сохранить в медиатеку'"></span>
+                </button>
+            </div>
+        </div>
     </div>
+
+    <!-- ==================== МОДАЛЬНОЕ ОКНО 2: LYRICS MODAL ==================== -->
+    <div
+        x-show="$store.app.activeModal === 'lyrics'"
+        x-cloak
+        class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4"
+        x-data="lyricsModalComponent()">
+        <div
+            @click.outside="close()"
+            class="bg-gray-900 border border-gray-700 rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-fade-in">
+            
+            <!-- Заголовок -->
+            <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-950/60">
+                <div>
+                    <h2 class="text-sm font-bold text-white">Текст песни</h2>
+                    <p class="text-xs text-gray-400" x-text="track ? `${track.artist} — ${track.title}` : ''"></p>
+                </div>
+                <button
+                    @click="close()"
+                    class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 transition">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Действия поиска и источник -->
+            <div class="px-6 py-3 bg-gray-950 border-b border-gray-800 flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center space-x-2">
+                    <span class="text-xs text-gray-400">Источник:</span>
+                    <span class="text-xs font-semibold px-2 py-0.5 rounded bg-gray-800 text-gray-200 border border-gray-700" x-text="source"></span>
+                    <span class="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 uppercase" x-text="kind"></span>
+                </div>
+
+                <div class="flex items-center space-x-2">
+                    <button
+                        type="button"
+                        @click="searchOnline()"
+                        :disabled="isLoading"
+                        class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-xs text-gray-300 rounded transition flex items-center space-x-1.5">
+                        <template x-if="isLoading">
+                            <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
+                            </svg>
+                        </template>
+                        <template x-if="!isLoading">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M9.5 16q-2.725 0-4.612-1.888T3 9.5t1.888-4.612T9.5 3t4.613 1.888T16 9.5q0 1.1-.35 2.075T14.7 13.3l5.6 5.6q.275.275.275.7t-.275.7t-.7.275t-.7-.275l-5.6-5.6q-.75.6-1.725.95T9.5 16m0-2q1.875 0 3.188-1.312T14 9.5t-1.312-3.187T9.5 5T6.313 6.313T5 9.5t1.313 3.188T9.5 14"/>
+                            </svg>
+                        </template>
+                        <span>Поиск онлайн</span>
+                    </button>
+                    <label class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-xs text-gray-300 rounded cursor-pointer transition flex items-center space-x-1.5">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M11 14.825V18q0 .425.288.713T12 19t.713-.288T13 18v-3.175l.9.9q.15.15.338.225t.375.063t.362-.088t.325-.225q.275-.3.288-.7t-.288-.7l-2.6-2.6q-.15-.15-.325-.212T12 11.425t-.375.063t-.325.212l-2.6 2.6q-.3.3-.287.7t.312.7q.3.275.7.288t.7-.288zM6 22q-.825 0-1.412-.587T4 20V4q0-.825.588-1.412T6 2h7.175q.4 0 .763.15t.637.425l4.85 4.85q.275.275.425.638t.15.762V20q0 .825-.587 1.413T18 22zm7-14q0 .425.288.713T14 9h4l-5-5z"/>
+                        </svg>
+                        <span>Загрузить файл</span>
+                        <input type="file" accept=".lrc,.txt" @change="handleFileUpload($event)" class="hidden">
+                    </label>
+                </div>
+            </div>
+
+            <!-- Textarea с текстом песни -->
+            <div class="flex-1 p-6 overflow-hidden flex flex-col">
+                <textarea
+                    x-model="content"
+                    placeholder="[00:01.00] Синхронизированный текст или обычные слова песни..."
+                    class="w-full flex-1 bg-gray-950 border border-gray-700 rounded-xl p-4 text-xs font-mono text-gray-200 focus:outline-none focus:border-emerald-500 resize-none"></textarea>
+            </div>
+
+            <!-- Подвал -->
+            <div class="px-6 py-4 border-t border-gray-800 bg-gray-950 flex items-center justify-between">
+                <div>
+                    <template x-if="content">
+                        <button
+                            type="button"
+                            @click="deleteLyrics()"
+                            class="text-xs text-red-400 hover:text-red-300 transition flex items-center space-x-1.5">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zM17 6H7v13h10zm-6.287 10.713Q11 16.425 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288M7 6v13z"/>
+                            </svg>
+                            <span>Удалить файл текста</span>
+                        </button>
+                    </template>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <button
+                        type="button"
+                        @click="close()"
+                        class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold rounded-lg transition">
+                        Закрыть
+                    </button>
+                    <button
+                        type="button"
+                        @click="saveLyrics()"
+                        :disabled="isSaving || !content"
+                        class="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition flex items-center space-x-1.5">
+                        <template x-if="isSaving">
+                            <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
+                            </svg>
+                        </template>
+                        <template x-if="!isSaving">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="m9.55 15.15l8.475-8.475q.3-.3.7-.3t.7.3t.3.713t-.3.712l-9.175 9.2q-.3.3-.7.3t-.7-.3L4.55 13q-.3-.3-.288-.712t.313-.713t.713-.3t.712.3z"/>
+                            </svg>
+                        </template>
+                        <span x-text="isSaving ? 'Сохранение...' : 'Сохранить текст'"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== МОДАЛЬНОЕ ОКНО 3: DELETE CONFIRM ==================== -->
+    <div
+        x-show="$store.app.activeModal === 'delete_confirm'"
+        x-cloak
+        class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
+        <div
+            @click.outside="$store.app.activeModal = null"
+            class="bg-gray-900 border border-red-800/50 rounded-xl max-w-md w-full p-6 shadow-2xl animate-fade-in space-y-4">
+            <div class="flex items-center space-x-3 text-red-400">
+                <div class="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
+                    <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M2.725 21q-.275 0-.5-.137t-.35-.363t-.137-.488t.137-.512l9.25-16q.15-.25.388-.375T12 3t.488.125t.387.375l9.25 16q.15.25.138.513t-.138.487t-.35.363t-.5.137zm1.725-2h15.1L12 6zm8.263-1.287Q13 17.425 13 17t-.288-.712T12 16t-.712.288T11 17t.288.713T12 18t.713-.288m0-3Q13 14.425 13 14v-3q0-.425-.288-.712T12 10t-.712.288T11 11v3q0 .425.288.713T12 15t.713-.288M12 12.5"/>
+                    </svg>
+                </div>
+                <h3 class="text-base font-bold text-white">Подтверждение удаления</h3>
+            </div>
+
+            <p class="text-xs text-gray-300 leading-relaxed">
+                Вы уверены, что хотите удалить:
+                <br>
+                <strong class="text-white font-mono" x-text="$store.app.deleteConfirmData ? $store.app.deleteConfirmData.name : ''"></strong>?
+                <br>
+                <span class="text-red-400 text-[11px]">Это действие необратимо.</span>
+            </p>
+
+            <div class="pt-2 flex justify-end space-x-3">
+                <button
+                    type="button"
+                    @click="$store.app.activeModal = null"
+                    class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold rounded-lg transition">
+                    Отмена
+                </button>
+                <button
+                    type="button"
+                    @click="window.dispatchEvent(new CustomEvent('confirm-delete-action'))"
+                    class="px-5 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-lg transition shadow-lg shadow-red-600/30 flex items-center space-x-1.5">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zm3.713-4.288Q11 16.426 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288"/>
+                    </svg>
+                    <span>Удалить</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Слушатель события удаления -->
+    <div x-init="window.addEventListener('confirm-delete-action', async () => {
+        const item = $store.app.deleteConfirmData;
+        if (!item) return;
+        try {
+            const res = await fetch(`/files?path=${encodeURIComponent(item.path)}`, { method: 'DELETE' });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.message || 'Сбой при удалении');
+            }
+            $store.app.toast(`Удалено: ${item.name}`, 'success');
+            $store.app.activeModal = null;
+            $store.app.deleteConfirmData = null;
+            $dispatch('refresh-file-manager');
+        } catch (e) {
+            $store.app.toast(`Ошибка: ${e.message}`, 'error');
+        }
+    })"></div>
+
+    <!-- ==================== МОДАЛЬНОЕ ОКНО 4: ВХОД (LOGIN) ==================== -->
+    <div
+        x-show="$store.app.activeModal === 'login'"
+        x-cloak
+        class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4"
+        x-data="{
+            loginUser: '',
+            password: '',
+            isLoggingIn: false,
+            error: null,
+            async doLogin() {
+                this.isLoggingIn = true;
+                this.error = null;
+                try {
+                    const res = await fetch('/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ login: this.loginUser, password: this.password })
+                    });
+                    if (!res.ok) {
+                        const err = await res.json();
+                        throw new Error(err.message || 'Неверный логин или пароль');
+                    }
+                    Alpine.store('app').user = this.loginUser;
+                    Alpine.store('app').toast('Авторизация успешна', 'success');
+                    Alpine.store('app').activeModal = null;
+                } catch (e) {
+                    this.error = e.message;
+                } finally {
+                    this.isLoggingIn = false;
+                }
+            }
+        }">
+        <div
+            @click.outside="$store.app.activeModal = null"
+            class="bg-gray-900 border border-gray-700 rounded-2xl max-w-sm w-full p-6 shadow-2xl animate-fade-in space-y-4">
+            <h3 class="text-base font-bold text-white text-center">Авторизация</h3>
+
+            <form @submit.prevent="doLogin()" class="space-y-4">
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">Логин</label>
+                    <input
+                        type="text"
+                        x-model="loginUser"
+                        required
+                        class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">Пароль</label>
+                    <input
+                        type="password"
+                        x-model="password"
+                        required
+                        class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+                </div>
+
+                <template x-if="error">
+                    <p class="text-xs text-red-400" x-text="error"></p>
+                </template>
+
+                <button
+                    type="submit"
+                    :disabled="isLoggingIn"
+                    class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition shadow-lg shadow-emerald-600/30 flex items-center justify-center space-x-2">
+                    <template x-if="isLoggingIn">
+                        <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
+                        </svg>
+                    </template>
+                    <template x-if="!isLoggingIn">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M13 21q-.425 0-.712-.288T12 20t.288-.712T13 19h6V5h-6q-.425 0-.712-.288T12 4t.288-.712T13 3h6q.825 0 1.413.588T21 5v14q0 .825-.587 1.413T19 21zm-1.825-8H4q-.425 0-.712-.288T3 12t.288-.712T4 11h7.175L9.3 9.125q-.275-.275-.275-.675t.275-.7t.7-.313t.725.288L14.3 11.3q.3.3.3.7t-.3.7l-3.575 3.575q-.3.3-.712.288T9.3 16.25q-.275-.3-.262-.712t.287-.688z"/>
+                        </svg>
+                    </template>
+                    <span x-text="isLoggingIn ? 'Проверка...' : 'Войти'"></span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ==================== СИСТЕМА УВЕДОМЛЕНИЙ (TOASTS) ==================== -->
+    <div class="fixed bottom-4 right-4 z-50 flex flex-col space-y-2 pointer-events-none">
+        <template x-for="t in $store.app.toasts" :key="t.id">
+            <div
+                class="pointer-events-auto px-4 py-3 rounded-lg shadow-xl text-xs font-medium max-w-sm animate-fade-in border flex items-center space-x-2.5"
+                :class="{
+                    'bg-emerald-950 border-emerald-700 text-emerald-200': t.type === 'success',
+                    'bg-red-950 border-red-700 text-red-200': t.type === 'error',
+                    'bg-gray-900 border-gray-700 text-gray-200': t.type === 'info',
+                }">
+                <template x-if="t.type === 'success'">
+                    <svg class="w-4 h-4 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="m10.6 13.8l-2.15-2.15q-.275-.275-.7-.275t-.7.275t-.275.7t.275.7L9.9 15.9q.3.3.7.3t.7-.3l5.65-5.65q.275-.275.275-.7t-.275-.7t-.7-.275t-.7.275zM12 22q-2.075 0-3.9-.788t-3.175-2.137T2.788 15.9T2 12t.788-3.9t2.137-3.175T8.1 2.788T12 2t3.9.788t3.175 2.137T21.213 8.1T22 12t-.788 3.9t-2.137 3.175t-3.175 2.138T12 22m0-2q3.35 0 5.675-2.325T20 12t-2.325-5.675T12 4T6.325 6.325T4 12t2.325 5.675T12 20m0-8"/>
+                    </svg>
+                </template>
+                <template x-if="t.type === 'error'">
+                    <svg class="w-4 h-4 text-red-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12.713 16.713Q13 16.425 13 16t-.288-.712T12 15t-.712.288T11 16t.288.713T12 17t.713-.288m0-4Q13 12.425 13 12V8q0-.425-.288-.712T12 7t-.712.288T11 8v4q0 .425.288.713T12 13t.713-.288M12 22q-2.075 0-3.9-.788t-3.175-2.137T2.788 15.9T2 12t.788-3.9t2.137-3.175T8.1 2.788T12 2t3.9.788t3.175 2.137T21.213 8.1T22 12t-.788 3.9t-2.137 3.175t-3.175 2.138T12 22m0-2q3.35 0 5.675-2.325T20 12t-2.325-5.675T12 4T6.325 6.325T4 12t2.325 5.675T12 20m0-8"/>
+                    </svg>
+                </template>
+                <template x-if="t.type === 'info'">
+                    <svg class="w-4 h-4 text-blue-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12.713 16.713Q13 16.425 13 16v-4q0-.425-.288-.712T12 11t-.712.288T11 12v4q0 .425.288.713T12 17t.713-.288m0-8Q13 8.425 13 8t-.288-.712T12 7t-.712.288T11 8t.288.713T12 9t.713-.288M12 22q-2.075 0-3.9-.788t-3.175-2.137T2.788 15.9T2 12t.788-3.9t2.137-3.175T8.1 2.788T12 2t3.9.788t3.175 2.137T21.213 8.1T22 12t-.788 3.9t-2.137 3.175t-3.175 2.138T12 22m0-2q3.35 0 5.675-2.325T20 12t-2.325-5.675T12 4T6.325 6.325T4 12t2.325 5.675T12 20m0-8"/>
+                    </svg>
+                </template>
+                <span x-text="t.message"></span>
+            </div>
+        </template>
+    </div>
+
 </body>
 </html>

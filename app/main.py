@@ -6,12 +6,14 @@
 компонентов (DI) и не содержит доменной бизнес-логики.
 """
 
+import asyncio
 import logging
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +24,10 @@ from app.config import Settings
 from app.core.exceptions import MusicManagerError, StorageConfigurationError
 from app.dependencies import get_settings
 from app.routers.auth import router as auth_router
+from app.routers.downloads import router as downloads_router
+from app.routers.files import router as files_router
+from app.routers.lyrics import router as lyrics_router
+from app.routers.tags import router as tags_router
 
 logger = logging.getLogger("music_manager")
 
@@ -58,7 +64,40 @@ async def lifespan(app: FastAPI):
         settings.TMP_DIR,
     )
 
-    yield
+    # Фоновая задача периодической очистки устаревших загрузок по TTL (раз в час)
+    async def _periodic_cleanup():
+        while True:
+            try:
+                await asyncio.sleep(3600)
+                from app.dependencies import (
+                    get_deezer_client,
+                    get_download_service,
+                    get_source_resolver,
+                    get_tmp_sandbox,
+                )
+
+                dc = get_deezer_client()
+                sr = get_source_resolver(dc, settings)
+                sb = get_tmp_sandbox(settings)
+                svc = get_download_service(settings, sb, sr, dc)
+                cleaned = svc.cleanup_expired_jobs()
+                if cleaned > 0:
+                    logger.info("Сборщик мусора удалил %d устаревших задач/каталогов", cleaned)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Сбой при фоновой очистке TMP_DIR: %s", exc)
+
+    cleanup_task = asyncio.create_task(_periodic_cleanup())
+
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
 
     logger.info("Остановка приложения Music Downloader & Tag Manager.")
 
@@ -114,7 +153,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content={
                 "error": "VALIDATION_ERROR",
                 "message": "Ошибка валидации параметров запроса",
-                "details": exc.errors(),
+                "details": jsonable_encoder(exc.errors()),
             },
         )
 
@@ -163,6 +202,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Регистрация роутеров
     application.include_router(auth_router)
+    application.include_router(downloads_router)
+    application.include_router(tags_router)
+    application.include_router(lyrics_router)
+    application.include_router(files_router)
 
     return application
 

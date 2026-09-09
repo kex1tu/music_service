@@ -65,6 +65,20 @@ class DownloadError(MusicManagerError):
     error_code = "DOWNLOAD_FAILED"
 
 
+class UnsupportedSourceError(MusicManagerError):
+    """URL не поддерживается или не входит в белый список разрешенных доменов."""
+
+    status_code = 400
+    error_code = "UNSUPPORTED_SOURCE"
+
+
+class AudioMatchError(DownloadError):
+    """Не удалось найти подходящий аудиопоток для трека."""
+
+    status_code = 502
+    error_code = "AUDIO_MATCH_FAILED"
+
+
 class TagError(MusicManagerError):
     """Базовая ошибка обработки метаданных ID3."""
 
