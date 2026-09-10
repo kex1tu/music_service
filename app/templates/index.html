@@ -29,11 +29,11 @@
     <link rel="stylesheet" href="/static/css/style.css">
 
     <!-- Компоненты приложения -->
-    <script src="/static/js/downloader.js"></script>
-    <script src="/static/js/tag_editor.js"></script>
-    <script src="/static/js/lyrics_modal.js"></script>
-    <script src="/static/js/file_manager.js"></script>
-    <script src="/static/js/library_audit.js"></script>
+    <script src="/static/js/downloader.js?v=20260910_02"></script>
+    <script src="/static/js/tag_editor.js?v=20260910_02"></script>
+    <script src="/static/js/lyrics_modal.js?v=20260910_02"></script>
+    <script src="/static/js/file_manager.js?v=20260910_02"></script>
+    <script src="/static/js/library_audit.js?v=20260910_02"></script>
 
     <!-- Alpine.js CDN -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -456,7 +456,7 @@
     <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
 
         <!-- ==================== ВКЛАДКА 1: ЗАГРУЗЧИК ==================== -->
-        <section x-show="$store.app.activeTab === 'downloader'" x-data="downloaderComponent()" class="space-y-6 animate-fade-in">
+        <section x-show="$store.app.activeTab === 'downloader'" x-data="{ inputMode: 'single', ...(typeof downloaderComponent === 'function' ? downloaderComponent() : {}) }" class="space-y-6 animate-fade-in">
             <!-- Карточка формы загрузки -->
             <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl">
                 <h2 class="text-lg font-semibold text-white mb-2">Загрузка музыки</h2>
@@ -469,8 +469,8 @@
                     <div class="flex items-center space-x-2 border-b border-gray-800 pb-3">
                         <button
                             type="button"
-                            @click="inputMode = 'single'; setMode('single')"
-                            :class="inputMode === 'single' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40' : 'text-gray-400 hover:text-gray-200 border-transparent'"
+                            @click="inputMode = 'single'; if (typeof setMode === 'function') setMode('single')"
+                            :class="inputMode !== 'batch' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40' : 'text-gray-400 hover:text-gray-200 border-transparent'"
                             class="px-3 py-1.5 rounded-md text-xs font-medium border transition flex items-center space-x-1.5">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M7 17q-2.075 0-3.537-1.463T2 12t1.463-3.537T7 7h3q.425 0 .713.288T11 8t-.288.713T10 9H7q-1.25 0-2.125.875T4 12t.875 2.125T7 15h3q.425 0 .713.288T11 16t-.288.713T10 17zm2-4q-.425 0-.712-.288T8 12t.288-.712T9 11h6q.425 0 .713.288T16 12t-.288.713T15 13zm5 4q-.425 0-.712-.288T13 16t.288-.712T14 15h3q1.25 0 2.125-.875T20 12t-.875-2.125T17 9h-3q-.425 0-.712-.288T13 8t.288-.712T14 7h3q2.075 0 3.538 1.463T22 12t-1.463 3.538T17 17z"/>
@@ -479,14 +479,14 @@
                         </button>
                         <button
                             type="button"
-                            @click="inputMode = 'batch'; setMode('batch')"
+                            @click="inputMode = 'batch'; if (typeof setMode === 'function') setMode('batch')"
                             :class="inputMode === 'batch' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40' : 'text-gray-400 hover:text-gray-200 border-transparent'"
                             class="px-3 py-1.5 rounded-md text-xs font-medium border transition flex items-center space-x-1.5">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M4 18q-.825 0-1.412-.587T2 16V4q0-.825.588-1.412T4 2h12q.825 0 1.413.588T18 4v12q0 .825-.587 1.413T16 18zm16 4q-.825 0-1.412-.587T18 20V7q0-.425.288-.712T19 6t.713.288T20 7v13h-13q-.425 0-.712-.288T6 19t.288-.712T7 18h13z"/>
                             </svg>
                             <span>Список ссылок (пакетно)</span>
-                            <template x-if="parsedBatchUrls.length > 0">
+                            <template x-if="parsedBatchUrls && parsedBatchUrls.length > 0">
                                 <span class="px-1.5 py-0.2 bg-emerald-500 text-gray-950 rounded-full text-[10px] font-bold" x-text="parsedBatchUrls.length"></span>
                             </template>
                         </button>
@@ -494,7 +494,7 @@
 
                     <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
                         <!-- Поле ввода URL (одиночный режим) -->
-                        <div x-show="inputMode === 'single'" class="flex-1 relative">
+                        <div x-show="inputMode !== 'batch'" class="flex-1 relative">
                             <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-500">
                                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M7 17q-2.075 0-3.537-1.463T2 12t1.463-3.537T7 7h3q.425 0 .713.288T11 8t-.288.713T10 9H7q-1.25 0-2.125.875T4 12t.875 2.125T7 15h3q.425 0 .713.288T11 16t-.288.713T10 17zm2-4q-.425 0-.712-.288T8 12t.288-.712T9 11h6q.425 0 .713.288T16 12t-.288.713T15 13zm5 4q-.425 0-.712-.288T13 16t.288-.712T14 15h3q1.25 0 2.125-.875T20 12t-.875-2.125T17 9h-3q-.425 0-.712-.288T13 8t.288-.712T14 7h3q2.075 0 3.538 1.463T22 12t-1.463 3.538T17 17z"/>
@@ -566,7 +566,7 @@
                                     <path d="M11.625 15.513q-.175-.063-.325-.213l-3.6-3.6q-.3-.3-.288-.7t.288-.7q.3-.3.713-.312t.712.287L11 12.15V5q0-.425.288-.712T12 4t.713.288T13 5v7.15l1.875-1.875q.3-.3.713-.288t.712.313q.275.3.288.7t-.288.7l-3.6 3.6q-.15.15-.325.213t-.375.062t-.375-.062M6 20q-.825 0-1.412-.587T4 18v-2q0-.425.288-.712T5 15t.713.288T6 16v2h12v-2q0-.425.288-.712T19 15t.713.288T20 16v2q0 .825-.587 1.413T18 20z"/>
                                 </svg>
                             </template>
-                            <span x-text="isSubmitting ? 'Обработка...' : (inputMode === 'batch' ? 'Добавить в очередь' : 'Скачать')"></span>
+                            <span x-text="isSubmitting ? 'Обработка...' : (inputMode === 'batch' ? 'Добавить в очередь' : 'Скачать')">Скачать</span>
                         </button>
                     </div>
                 </form>
