@@ -198,7 +198,7 @@
             <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl">
                 <h2 class="text-lg font-semibold text-white mb-2">Загрузка музыки</h2>
                 <p class="text-sm text-gray-400 mb-6">
-                    Вставьте ссылку на трек, альбом или плейлист из Deezer, YouTube Music или SoundCloud.
+                    Вставьте ссылку на трек, альбом или плейлист из Яндекс Музыки, Spotify, Apple Music, Deezer, YouTube Music или SoundCloud.
                 </p>
 
                 <form @submit.prevent="submitDownload()" class="space-y-4">
@@ -213,7 +213,7 @@
                             <input
                                 type="url"
                                 x-model="url"
-                                placeholder="https://www.deezer.com/album/... или https://music.youtube.com/..."
+                                placeholder="https://music.yandex.ru/... https://open.spotify.com/... https://music.apple.com/... https://deezer.com/..."
                                 required
                                 class="w-full bg-gray-950 border border-gray-700 rounded-lg pl-10 pr-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition text-sm">
                         </div>
@@ -224,6 +224,9 @@
                                 x-model="source"
                                 class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-3 text-gray-200 focus:outline-none focus:border-emerald-500 text-sm">
                                 <option value="auto">Автоопределение</option>
+                                <option value="yandex">Яндекс Музыка</option>
+                                <option value="spotify">Spotify</option>
+                                <option value="applemusic">Apple Music</option>
                                 <option value="deezer">Deezer</option>
                                 <option value="youtube">YouTube / YT Music</option>
                                 <option value="soundcloud">SoundCloud</option>
@@ -325,8 +328,19 @@
                 </template>
             </div>
 
-            <!-- Информационная карточка -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- Информационные карточки поддерживаемых источников -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-gray-900/60 border border-gray-800/80 rounded-xl p-5">
+                    <div class="flex items-center space-x-3 mb-2">
+                        <span class="w-8 h-8 rounded-lg bg-yellow-500/10 text-yellow-400 flex items-center justify-center font-bold text-xs">
+                            ЯМ
+                        </span>
+                        <h3 class="text-sm font-semibold text-white">Яндекс & Стриминги</h3>
+                    </div>
+                    <p class="text-xs text-gray-400 leading-relaxed">
+                        Импорт плейлистов из Яндекс Музыки, Spotify и Apple Music. Обложки высокого разрешения до 1400×1400.
+                    </p>
+                </div>
                 <div class="bg-gray-900/60 border border-gray-800/80 rounded-xl p-5">
                     <div class="flex items-center space-x-3 mb-2">
                         <span class="w-8 h-8 rounded-lg bg-pink-500/10 text-pink-400 flex items-center justify-center">
@@ -337,7 +351,7 @@
                         <h3 class="text-sm font-semibold text-white">Deezer API</h3>
                     </div>
                     <p class="text-xs text-gray-400 leading-relaxed">
-                        Студийные метаданные альбомов, треков и несжатые обложки 1400×1400 без сторонних аккаунтов.
+                        Студийные метаданные альбомов, треков, номера дорожек, ISRC и несжатые обложки 1400×1400.
                     </p>
                 </div>
                 <div class="bg-gray-900/60 border border-gray-800/80 rounded-xl p-5">
@@ -720,13 +734,15 @@
                             </button>
                         </div>
                     </div>
-                    <div class="border border-gray-800 rounded-xl overflow-hidden shadow">
-                        <table class="w-full text-left text-xs">
+                    <div class="border border-gray-800 rounded-xl overflow-x-auto shadow">
+                        <table class="w-full text-left text-xs min-w-[760px]">
                             <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider border-b border-gray-800">
                                 <tr>
                                     <th class="py-2.5 px-3 w-16">#</th>
-                                    <th class="py-2.5 px-3">Название трека</th>
-                                    <th class="py-2.5 px-3">Исполнитель</th>
+                                    <th class="py-2.5 px-3 min-w-[140px]">Название трека</th>
+                                    <th class="py-2.5 px-3 min-w-[130px]">Исполнитель</th>
+                                    <th class="py-2.5 px-3 min-w-[130px]">Альбом</th>
+                                    <th class="py-2.5 px-3 w-20">Год</th>
                                     <th class="py-2.5 px-3 text-center w-24">Аудио</th>
                                     <th class="py-2.5 px-3 text-center w-24">Текст</th>
                                 </tr>
@@ -753,6 +769,20 @@
                                                 x-model="track.artist"
                                                 placeholder="Исполнитель"
                                                 class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500">
+                                        </td>
+                                        <td class="py-2 px-3">
+                                            <input
+                                                type="text"
+                                                x-model="track.album"
+                                                placeholder="Альбом"
+                                                class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500">
+                                        </td>
+                                        <td class="py-2 px-3">
+                                            <input
+                                                type="number"
+                                                x-model="track.year"
+                                                placeholder="Год"
+                                                class="w-20 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-center text-white focus:outline-none focus:border-emerald-500">
                                         </td>
                                         <td class="py-2 px-3 text-center">
                                             <button

@@ -71,6 +71,18 @@ class Settings(BaseSettings):
         default=None,
         description="API токен Genius (при необходимости)",
     )
+    YANDEX_MUSIC_TOKEN: str | None = Field(
+        default=None,
+        description="OAuth токен Яндекс Музыки (для прямого скачивания 320 kbps MP3 без YouTube)",
+    )
+    SPOTIFY_CLIENT_ID: str | None = Field(
+        default=None,
+        description="Client ID приложения Spotify (опционально для официального Web API)",
+    )
+    SPOTIFY_CLIENT_SECRET: str | None = Field(
+        default=None,
+        description="Client Secret приложения Spotify (опционально для официального Web API)",
+    )
 
     # Аудио-параметры (конвертация)
     AUDIO_BITRATE: str = Field(
@@ -114,6 +126,13 @@ class Settings(BaseSettings):
         "deezer.com",
         "deezer.page.link",
         "link.deezer.com",
+        "music.yandex.ru",
+        "music.yandex.com",
+        "music.yandex.by",
+        "music.yandex.kz",
+        "open.spotify.com",
+        "spotify.link",
+        "music.apple.com",
     )
 
     # Сетевые параметры сервиса

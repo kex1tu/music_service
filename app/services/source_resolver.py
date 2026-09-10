@@ -20,7 +20,10 @@ from rapidfuzz import fuzz, utils
 from app.config import Settings
 from app.core.exceptions import AudioMatchError, UnsupportedSourceError
 from app.schemas.download import ResolvedTrack
+from app.services.apple_music_client import AppleMusicClient
 from app.services.deezer_client import DeezerClient
+from app.services.spotify_client import SpotifyClient
+from app.services.yandex_client import YandexMusicClient
 
 logger = logging.getLogger("music_manager.resolver")
 
@@ -490,9 +493,19 @@ class SourceResolver:
             "deezer.com",
             "deezer.page.link",
             "link.deezer.com",
+            "music.yandex.ru",
+            "music.yandex.com",
+            "music.yandex.by",
+            "music.yandex.kz",
+            "open.spotify.com",
+            "spotify.link",
+            "music.apple.com",
         ),
         cookies_path: Path | None = None,
         settings: Settings | None = None,
+        yandex_client: YandexMusicClient | None = None,
+        spotify_client: SpotifyClient | None = None,
+        apple_music_client: AppleMusicClient | None = None,
     ) -> None:
         self._deezer = deezer_client
         self._cookies_path = cookies_path
@@ -507,9 +520,23 @@ class SourceResolver:
             except Exception:  # noqa: BLE001
                 class _FallbackSettings:
                     MATCHER_CONCURRENCY = 4
+                    YANDEX_MUSIC_TOKEN = None
+                    SPOTIFY_CLIENT_ID = None
+                    SPOTIFY_CLIENT_SECRET = None
                 self._settings = _FallbackSettings()  # type: ignore[assignment]
 
-    def detect_source(self, url: str) -> Literal["soundcloud", "youtube", "deezer"]:
+        self._yandex = yandex_client or YandexMusicClient(
+            token=getattr(self._settings, "YANDEX_MUSIC_TOKEN", None)
+        )
+        self._spotify = spotify_client or SpotifyClient(
+            client_id=getattr(self._settings, "SPOTIFY_CLIENT_ID", None),
+            client_secret=getattr(self._settings, "SPOTIFY_CLIENT_SECRET", None),
+        )
+        self._apple = apple_music_client or AppleMusicClient()
+
+    def detect_source(
+        self, url: str
+    ) -> Literal["soundcloud", "youtube", "deezer", "yandex", "spotify", "applemusic"]:
         """Проверяет URL по белому списку доменов и возвращает тип источника.
 
         Raises:
@@ -532,6 +559,12 @@ class SourceResolver:
 
         if "deezer.com" in hostname or "deezer.page.link" in hostname:
             return "deezer"
+        if "music.yandex." in hostname or hostname == "music.yandex.ru":
+            return "yandex"
+        if "spotify.com" in hostname or "spotify.link" in hostname:
+            return "spotify"
+        if "apple.com" in hostname:
+            return "applemusic"
         if "soundcloud.com" in hostname:
             return "soundcloud"
         if "youtube.com" in hostname or "youtu.be" in hostname:
@@ -553,6 +586,12 @@ class SourceResolver:
 
         if source == "deezer":
             return await self._resolve_deezer(url)
+        if source == "yandex":
+            return await self._resolve_yandex(url)
+        if source == "spotify":
+            return await self._resolve_spotify(url)
+        if source == "applemusic":
+            return await self._resolve_apple_music(url)
         if source in ("youtube", "soundcloud"):
             return await self._resolve_ytdlp(url, source)
 
@@ -681,6 +720,367 @@ class SourceResolver:
             return album_meta, tracks
 
         raise UnsupportedSourceError(f"Неподдерживаемый тип ресурса Deezer: {res_type}")
+
+    async def _resolve_yandex(self, url: str) -> tuple[dict[str, Any], list[ResolvedTrack]]:
+        """Разрешает трек, альбом или плейлист Яндекс Музыки."""
+        res_type, params = await self._yandex.parse_url(url)
+
+        if res_type == "track":
+            track_id = params["track_id"]
+            data = await self._yandex.get_track(track_id)
+            title = data.get("title", "Unknown Track")
+            artists = YandexMusicClient.format_artists(data.get("artists", []))
+            dur_ms = data.get("durationMs") or 0
+            duration = safe_int_duration(round(dur_ms / 1000.0))
+            cover_url = YandexMusicClient.format_cover(data.get("ogImage") or data.get("coverUri"))
+
+            albums = data.get("albums", [])
+            album_info = albums[0] if albums else {}
+            album_title = album_info.get("title", "")
+            album_artist = YandexMusicClient.format_artists(album_info.get("artists", [])) or artists
+            year = album_info.get("year")
+
+            # Проверяем прямое скачивание с серверов Яндекса
+            audio_url = await self._yandex.get_direct_download_url(track_id)
+            if not audio_url:
+                audio_url = await self._matcher.find_best_match(
+                    title=title,
+                    artist=artists.replace("\\\\", " "),
+                    duration=duration,
+                    cobalt_fallback_url=self._cobalt_api_url,
+                )
+
+            track = ResolvedTrack(
+                track_id=str(data.get("id", track_id)),
+                track_number=1,
+                title=title,
+                artist=artists,
+                album=album_title,
+                album_artist=album_artist,
+                year=year,
+                duration=duration,
+                cover_url=cover_url,
+                audio_source_url=audio_url,
+            )
+            album_meta = {
+                "album": album_title,
+                "album_artist": album_artist,
+                "year": year,
+                "cover_url": cover_url,
+            }
+            return album_meta, [track]
+
+        if res_type in ("album", "playlist"):
+            if res_type == "album":
+                data = await self._yandex.get_album(params["album_id"])
+                album_title = data.get("title", "Unknown Album")
+                album_artist = YandexMusicClient.format_artists(data.get("artists", []))
+                year_val = data.get("year")
+                cover_url = YandexMusicClient.format_cover(data.get("ogImage") or data.get("coverUri"))
+                raw_tracks: list[dict[str, Any]] = []
+                for vol in data.get("volumes", []):
+                    if isinstance(vol, list):
+                        raw_tracks.extend(vol)
+            else:
+                data = await self._yandex.get_playlist(params.get("owner", ""), params.get("kind", ""))
+                album_title = data.get("title", "Unknown Playlist")
+                owner_info = data.get("owner", {})
+                album_artist = owner_info.get("name") or owner_info.get("login") or "Yandex Music"
+                year_val = None
+                cover_url = YandexMusicClient.format_cover(data.get("ogImage") or data.get("cover", {}).get("uri"))
+                raw_tracks = data.get("tracks", [])
+
+            semaphore = asyncio.Semaphore(self._settings.MATCHER_CONCURRENCY)
+
+            async def _resolve_single_yandex_track(item: dict[str, Any], default_pos: int) -> ResolvedTrack:
+                t_data = item.get("track", item) if isinstance(item, dict) else {}
+                t_title = t_data.get("title", "Unknown Track")
+                t_artists = YandexMusicClient.format_artists(t_data.get("artists", []))
+                dur_ms = t_data.get("durationMs") or 0
+                t_duration = safe_int_duration(round(dur_ms / 1000.0))
+                t_id = str(t_data.get("id", default_pos))
+
+                t_albums = t_data.get("albums", [])
+                t_album_info = t_albums[0] if t_albums else {}
+                t_album = t_album_info.get("title", album_title)
+                t_year = t_album_info.get("year", year_val)
+                t_cover = YandexMusicClient.format_cover(t_data.get("ogImage") or t_data.get("coverUri")) or cover_url
+
+                audio_url = ""
+                track_status = "pending"
+                error_msg: str | None = None
+
+                try:
+                    # Проверяем прямой URL
+                    audio_url = await self._yandex.get_direct_download_url(t_id)
+                    if not audio_url:
+                        async with semaphore:
+                            audio_url = await self._matcher.find_best_match(
+                                title=t_title,
+                                artist=t_artists.replace("\\\\", " "),
+                                duration=t_duration,
+                                cobalt_fallback_url=self._cobalt_api_url,
+                            )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Не удалось сопоставить трек Яндекс Музыки '%s - %s': %s", t_artists, t_title, exc)
+                    track_status = "error"
+                    error_msg = str(exc)
+                    audio_url = ""
+
+                return ResolvedTrack(
+                    track_id=t_id,
+                    track_number=default_pos,
+                    title=t_title,
+                    artist=t_artists,
+                    album=t_album,
+                    album_artist=album_artist,
+                    year=t_year,
+                    duration=t_duration,
+                    cover_url=t_cover,
+                    audio_source_url=audio_url,
+                    status=track_status,
+                    error=error_msg,
+                )
+
+            tasks = [
+                _resolve_single_yandex_track(item, idx)
+                for idx, item in enumerate(raw_tracks, start=1)
+            ]
+            tracks = list(await asyncio.gather(*tasks))
+
+            if tracks and all(t.status == "error" for t in tracks):
+                raise AudioMatchError("Не удалось сопоставить ни один трек из коллекции Яндекс Музыки")
+
+            album_meta = {
+                "album": album_title,
+                "album_artist": album_artist,
+                "year": year_val,
+                "cover_url": cover_url,
+            }
+            return album_meta, tracks
+
+        raise UnsupportedSourceError(f"Неподдерживаемый тип ресурса Яндекс Музыки: {res_type}")
+
+    async def _resolve_spotify(self, url: str) -> tuple[dict[str, Any], list[ResolvedTrack]]:
+        """Разрешает трек, альбом или плейлист Spotify."""
+        res_type, res_id = await self._spotify.parse_url(url)
+
+        if res_type == "track":
+            data = await self._spotify.get_track(res_id)
+            title = data.get("title", "Unknown Track")
+            artist = data.get("artist", "Unknown Artist")
+            duration = safe_int_duration(data.get("duration"))
+            cover_url = data.get("cover_url")
+
+            audio_url = await self._matcher.find_best_match(
+                title=title,
+                artist=artist.replace("\\\\", " "),
+                duration=duration,
+                cobalt_fallback_url=self._cobalt_api_url,
+            )
+
+            track = ResolvedTrack(
+                track_id=res_id,
+                track_number=1,
+                title=title,
+                artist=artist,
+                album=data.get("album", ""),
+                album_artist=data.get("album_artist", artist),
+                year=data.get("year"),
+                duration=duration,
+                isrc=data.get("isrc"),
+                cover_url=cover_url,
+                audio_source_url=audio_url,
+            )
+            album_meta = {
+                "album": track.album,
+                "album_artist": track.album_artist,
+                "year": track.year,
+                "cover_url": cover_url,
+            }
+            return album_meta, [track]
+
+        if res_type in ("album", "playlist"):
+            data = (
+                await self._spotify.get_album(res_id)
+                if res_type == "album"
+                else await self._spotify.get_playlist(res_id)
+            )
+
+            album_title = data.get("title", "Unknown Collection")
+            album_artist = data.get("artist", "Spotify")
+            year_val = data.get("year")
+            cover_url = data.get("cover_url")
+            raw_tracks = data.get("tracks", [])
+
+            semaphore = asyncio.Semaphore(self._settings.MATCHER_CONCURRENCY)
+
+            async def _resolve_single_spotify_track(item: dict[str, Any], default_pos: int) -> ResolvedTrack:
+                t_title = item.get("title", "Unknown Track")
+                t_artists = item.get("artist", album_artist)
+                t_duration = safe_int_duration(item.get("duration"))
+
+                audio_url = ""
+                track_status = "pending"
+                error_msg: str | None = None
+
+                try:
+                    async with semaphore:
+                        audio_url = await self._matcher.find_best_match(
+                            title=t_title,
+                            artist=t_artists.replace("\\\\", " "),
+                            duration=t_duration,
+                            cobalt_fallback_url=self._cobalt_api_url,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Не удалось сопоставить трек Spotify '%s - %s': %s", t_artists, t_title, exc)
+                    track_status = "error"
+                    error_msg = str(exc)
+                    audio_url = ""
+
+                return ResolvedTrack(
+                    track_id=str(item.get("id", default_pos)),
+                    track_number=int(item.get("track_number") or default_pos),
+                    title=t_title,
+                    artist=t_artists,
+                    album=item.get("album", album_title),
+                    album_artist=item.get("album_artist", album_artist),
+                    year=item.get("year", year_val),
+                    duration=t_duration,
+                    isrc=item.get("isrc"),
+                    cover_url=cover_url,
+                    audio_source_url=audio_url,
+                    status=track_status,
+                    error=error_msg,
+                )
+
+            tasks = [
+                _resolve_single_spotify_track(item, idx)
+                for idx, item in enumerate(raw_tracks, start=1)
+            ]
+            tracks = list(await asyncio.gather(*tasks))
+
+            if tracks and all(t.status == "error" for t in tracks):
+                raise AudioMatchError("Не удалось сопоставить ни один трек из коллекции Spotify")
+
+            album_meta = {
+                "album": album_title,
+                "album_artist": album_artist,
+                "year": year_val,
+                "cover_url": cover_url,
+            }
+            return album_meta, tracks
+
+        raise UnsupportedSourceError(f"Неподдерживаемый тип ресурса Spotify: {res_type}")
+
+    async def _resolve_apple_music(self, url: str) -> tuple[dict[str, Any], list[ResolvedTrack]]:
+        """Разрешает трек, альбом или плейлист Apple Music."""
+        res_type, params = self._apple.parse_url(url)
+
+        if res_type == "track":
+            track_id = params["track_id"]
+            data = await self._apple.get_track(url, track_id)
+            title = data.get("title", "Unknown Track")
+            artist = data.get("artist", "Unknown Artist")
+            duration = safe_int_duration(data.get("duration"))
+            cover_url = data.get("cover_url")
+
+            audio_url = await self._matcher.find_best_match(
+                title=title,
+                artist=artist.replace("\\\\", " "),
+                duration=duration,
+                cobalt_fallback_url=self._cobalt_api_url,
+            )
+
+            track = ResolvedTrack(
+                track_id=track_id,
+                track_number=1,
+                title=title,
+                artist=artist,
+                album=data.get("album", ""),
+                album_artist=data.get("album_artist", artist),
+                year=data.get("year"),
+                duration=duration,
+                isrc=data.get("isrc"),
+                cover_url=cover_url,
+                audio_source_url=audio_url,
+            )
+            album_meta = {
+                "album": track.album,
+                "album_artist": track.album_artist,
+                "year": track.year,
+                "cover_url": cover_url,
+            }
+            return album_meta, [track]
+
+        if res_type in ("album", "playlist"):
+            data = await self._apple.get_collection(url)
+            album_title = data.get("title", "Unknown Collection")
+            album_artist = data.get("artist", "Apple Music")
+            year_val = data.get("year")
+            cover_url = data.get("cover_url")
+            raw_tracks = data.get("tracks", [])
+
+            semaphore = asyncio.Semaphore(self._settings.MATCHER_CONCURRENCY)
+
+            async def _resolve_single_apple_track(item: dict[str, Any], default_pos: int) -> ResolvedTrack:
+                t_title = item.get("title", "Unknown Track")
+                t_artists = item.get("artist", album_artist)
+                t_duration = safe_int_duration(item.get("duration"))
+                t_cover = item.get("cover_url") or cover_url
+
+                audio_url = ""
+                track_status = "pending"
+                error_msg: str | None = None
+
+                try:
+                    async with semaphore:
+                        audio_url = await self._matcher.find_best_match(
+                            title=t_title,
+                            artist=t_artists.replace("\\\\", " "),
+                            duration=t_duration,
+                            cobalt_fallback_url=self._cobalt_api_url,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Не удалось сопоставить трек Apple Music '%s - %s': %s", t_artists, t_title, exc)
+                    track_status = "error"
+                    error_msg = str(exc)
+                    audio_url = ""
+
+                return ResolvedTrack(
+                    track_id=str(item.get("id", default_pos)),
+                    track_number=int(item.get("track_number") or default_pos),
+                    title=t_title,
+                    artist=t_artists,
+                    album=item.get("album", album_title),
+                    album_artist=item.get("album_artist", album_artist),
+                    year=item.get("year", year_val),
+                    duration=t_duration,
+                    isrc=item.get("isrc"),
+                    cover_url=t_cover,
+                    audio_source_url=audio_url,
+                    status=track_status,
+                    error=error_msg,
+                )
+
+            tasks = [
+                _resolve_single_apple_track(item, idx)
+                for idx, item in enumerate(raw_tracks, start=1)
+            ]
+            tracks = list(await asyncio.gather(*tasks))
+
+            if tracks and all(t.status == "error" for t in tracks):
+                raise AudioMatchError("Не удалось сопоставить ни один трек из коллекции Apple Music")
+
+            album_meta = {
+                "album": album_title,
+                "album_artist": album_artist,
+                "year": year_val,
+                "cover_url": cover_url,
+            }
+            return album_meta, tracks
+
+        raise UnsupportedSourceError(f"Неподдерживаемый тип ресурса Apple Music: {res_type}")
 
     async def _resolve_ytdlp(
         self, url: str, source: str

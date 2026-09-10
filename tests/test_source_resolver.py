@@ -25,13 +25,18 @@ def test_detect_source_whitelist():
     assert resolver.detect_source("https://youtu.be/dQw4w9WgXcQ") == "youtube"
     assert resolver.detect_source("https://soundcloud.com/daftpunkofficial/get-lucky") == "soundcloud"
     assert resolver.detect_source("soundcloud.com/daftpunkofficial/get-lucky") == "soundcloud"
+    assert resolver.detect_source("https://music.yandex.ru/album/123/track/456") == "yandex"
+    assert resolver.detect_source("music.yandex.kz/track/456") == "yandex"
+    assert resolver.detect_source("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT") == "spotify"
+    assert resolver.detect_source("spotify.link/xyz123") == "spotify"
+    assert resolver.detect_source("https://music.apple.com/us/album/discovery/697194953") == "applemusic"
 
     # Запрещенные домены
     with pytest.raises(UnsupportedSourceError):
         resolver.detect_source("https://evil-site.com/track.mp3")
 
     with pytest.raises(UnsupportedSourceError):
-        resolver.detect_source("https://spotify.com/track/12345")
+        resolver.detect_source("https://unknown-streaming-service.net/track/12345")
 
 
 def test_audio_matcher_scoring():
@@ -1238,6 +1243,124 @@ async def test_source_resolver_soundcloud_single_track_artist_title_split():
         assert len(tracks) == 1
         assert tracks[0].artist == "Justice"
         assert tracks[0].title == "Genesis"
+
+
+@pytest.mark.asyncio
+async def test_resolve_yandex_track():
+    """Проверка полного разрешения одиночного трека Яндекс Музыки через SourceResolver."""
+    mock_yandex = AsyncMock()
+    mock_yandex.parse_url.return_value = ("track", {"track_id": "12345"})
+    mock_yandex.get_track.return_value = {
+        "id": 12345,
+        "title": "Звезда по имени Солнце",
+        "artists": [{"name": "Кино"}],
+        "durationMs": 225000,
+        "albums": [{"title": "Звезда по имени Солнце", "year": 1989}],
+        "ogImage": "avatars.yandex.net/get-music-content/1/2/%%",
+    }
+    mock_yandex.format_artists.return_value = "Кино"
+    mock_yandex.format_cover.return_value = "https://avatars.yandex.net/get-music-content/1/2/1000x1000"
+    mock_yandex.get_direct_download_url.return_value = None
+
+    mock_matcher = AsyncMock()
+    mock_matcher.find_best_match.return_value = "https://www.youtube.com/watch?v=kino123"
+
+    resolver = SourceResolver(
+        deezer_client=MagicMock(),
+        audio_matcher=mock_matcher,
+        yandex_client=mock_yandex,
+    )
+
+    meta, tracks = await resolver.resolve("https://music.yandex.ru/track/12345")
+    assert meta["album"] == "Звезда по имени Солнце"
+    assert len(tracks) == 1
+    assert tracks[0].title == "Звезда по имени Солнце"
+    assert tracks[0].artist == "Кино"
+    assert tracks[0].year == 1989
+    assert tracks[0].audio_source_url == "https://www.youtube.com/watch?v=kino123"
+
+
+@pytest.mark.asyncio
+async def test_resolve_spotify_playlist():
+    """Проверка полного разрешения плейлиста Spotify через SourceResolver."""
+    mock_spotify = AsyncMock()
+    mock_spotify.parse_url.return_value = ("playlist", "pl123")
+    mock_spotify.get_playlist.return_value = {
+        "id": "pl123",
+        "title": "Rock Classics",
+        "artist": "Spotify",
+        "cover_url": "https://i.scdn.co/image/cover640",
+        "tracks": [
+            {
+                "id": "t1",
+                "track_number": 1,
+                "title": "Back In Black",
+                "artist": "AC/DC",
+                "duration": 255,
+                "album": "Back In Black",
+                "year": 1980,
+            }
+        ],
+    }
+
+    mock_matcher = AsyncMock()
+    mock_matcher.find_best_match.return_value = "https://www.youtube.com/watch?v=acdc123"
+
+    resolver = SourceResolver(
+        deezer_client=MagicMock(),
+        audio_matcher=mock_matcher,
+        spotify_client=mock_spotify,
+    )
+
+    meta, tracks = await resolver.resolve("https://open.spotify.com/playlist/pl123")
+    assert meta["album"] == "Rock Classics"
+    assert len(tracks) == 1
+    assert tracks[0].title == "Back In Black"
+    assert tracks[0].artist == "AC/DC"
+    assert tracks[0].audio_source_url == "https://www.youtube.com/watch?v=acdc123"
+
+
+@pytest.mark.asyncio
+async def test_resolve_apple_music_album():
+    """Проверка полного разрешения альбома Apple Music через SourceResolver."""
+    mock_apple = MagicMock()
+    mock_apple.parse_url.return_value = ("album", {"album_id": "697194953"})
+    mock_apple.get_collection = AsyncMock(
+        return_value={
+            "title": "Discovery",
+            "artist": "Daft Punk",
+            "year": 2001,
+            "cover_url": "https://is1-ssl.mzstatic.com/image/1400x1400bb.jpg",
+            "tracks": [
+                {
+                    "id": "t1",
+                    "track_number": 1,
+                    "title": "One More Time",
+                    "artist": "Daft Punk",
+                    "duration": 320,
+                    "album": "Discovery",
+                    "year": 2001,
+                }
+            ],
+        }
+    )
+
+    mock_matcher = AsyncMock()
+    mock_matcher.find_best_match.return_value = "https://www.youtube.com/watch?v=daft123"
+
+    resolver = SourceResolver(
+        deezer_client=MagicMock(),
+        audio_matcher=mock_matcher,
+        apple_music_client=mock_apple,
+    )
+
+    meta, tracks = await resolver.resolve("https://music.apple.com/us/album/discovery/697194953")
+    assert meta["album"] == "Discovery"
+    assert len(tracks) == 1
+    assert tracks[0].title == "One More Time"
+    assert tracks[0].artist == "Daft Punk"
+    assert tracks[0].audio_source_url == "https://www.youtube.com/watch?v=daft123"
+
 
 
 

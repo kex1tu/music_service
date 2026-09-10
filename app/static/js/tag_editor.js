@@ -77,7 +77,11 @@ function tagEditorComponent() {
                 genre: data.album?.genre || '',
             };
 
-            this.tracks = (data.tracks || []).map((t) => ({ ...t }));
+            this.tracks = (data.tracks || []).map((t) => ({
+                ...t,
+                album: (t.album !== undefined && t.album !== null && t.album !== '') ? t.album : (this.album.album || ''),
+                year: (t.year !== undefined && t.year !== null && t.year !== '') ? t.year : (this.album.year || null),
+            }));
             this.sourceDir = data.sourceDir || '';
             this.coverPath = data.coverPath || null;
 
@@ -314,6 +318,8 @@ function tagEditorComponent() {
                 if (data.recognized) {
                     if (data.title) track.title = data.title;
                     if (data.artist) track.artist = data.artist;
+                    if (data.album) track.album = data.album;
+                    if (data.year) track.year = data.year;
                     if (!this.album.album && data.album) this.album.album = data.album;
                     if (!this.album.album_artist && data.artist) this.album.album_artist = data.artist;
                     if (!this.album.year && data.year) this.album.year = data.year;
@@ -359,6 +365,8 @@ function tagEditorComponent() {
                             if (data.recognized) {
                                 if (data.title) track.title = data.title;
                                 if (data.artist) track.artist = data.artist;
+                                if (data.album) track.album = data.album;
+                                if (data.year) track.year = data.year;
                                 if (!this.album.album && data.album) this.album.album = data.album;
                                 if (!this.album.album_artist && data.artist) this.album.album_artist = data.artist;
                                 if (!this.album.year && data.year) this.album.year = data.year;

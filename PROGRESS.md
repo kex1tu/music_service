@@ -1,9 +1,9 @@
 # PROGRESS.md — Матрица статусов реализации Music Downloader & Tag Manager
 
 ## Текущий статус проекта
-- **Общий прогресс:** 18 / 18 компонентов завершены (100%)
-- **Активный этап:** Все блоки (1–9), включая извлечение метаданных и обложек плейлистов SoundCloud, конвертацию WebP, очистку временных файлов и исключение ID3v1, полностью завершены.
-- **Результаты тестов:** 407/407 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
+- **Общий прогресс:** 22 / 22 компонентов завершены (100%)
+- **Активный этап:** Все блоки (1–12), включая импорт плейлистов, альбомов и треков из Яндекс Музыки, Spotify и Apple Music с параллельным сопоставлением через AudioMatcher, полностью завершены.
+- **Результаты тестов:** 441/441 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
 
 
 
@@ -112,6 +112,20 @@
 | **R2: Поиск альбомов и треклистов в Deezer API** | `app/services/deezer_client.py`, `app/schemas/tag.py`, `app/routers/tags.py`, `tests/test_tags_router.py` | **DONE** | Реализован метод `DeezerClient.search_albums` и эндпоинты `GET /tags/deezer/albums` и `GET /tags/deezer/albums/{album_id}`. Позволяет искать официальные релизы по названию/артисту, получать валидированные треклисты с нумерацией, исполнителями (`format_artists`), годами, жанрами и обложками `cover_xl`. |
 | **R3: Интеграция в UI редактора тегов (Tag Editor)** | `app/templates/index.html`, `app/static/js/tag_editor.js`, `tests/test_frontend.py` | **DONE** | 1) Добавлена кнопка «Найти в Deezer» в блоке общих тегов альбома, открывающая модальное окно поиска с живым предпросмотром альбомов, автозаполнением всех метаданных альбома, треклиста и обложки через Base64 Data URL. 2) Добавлена кнопка «Распознать всё (Shazam)» в шапку списка треков для пакетной идентификации неизвестных треков с прогресс-баром и защитой от перегрузки. 3) Добавлены индивидуальные кнопки «Shazam» в строке каждого трека таблицы для точечного распознавания. Тесты UI-элементов в `tests/test_frontend.py`. |
 | **R4: Верификация, линтинг и тесты** | `requirements.txt`, `tests/` | **DONE** | Библиотека `shazamio` добавлена в `requirements.txt`. Все 415 тестов успешно проходят (`pytest`), линтер `ruff check` чист (0 ошибок). |
+
+---
+
+## Блок 12: Импорт плейлистов, альбомов и треков из Яндекс Музыки, Spotify и Apple Music (2026-09-09T20:30:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Клиент Яндекс Музыки (`YandexMusicClient`)** | `app/services/yandex_client.py`, `tests/test_yandex_client.py` | **DONE** | Асинхронный клиент Яндекс Музыки: парсинг URL треков в альбомах, одиночных треков, альбомов и плейлистов (включая редиректы UUID); извлечение метаданных и треклистов без авторизации через JSON Web Handlers (`handlers/*.jsx`); форматирование студийных обложек 1000×1000 (`%%` -> `1000x1000`); генерация прямых ссылок на оригинальные MP3 320 kbps с CDN Яндекса при наличии `YANDEX_MUSIC_TOKEN`. 11 тестов в `tests/test_yandex_client.py`. |
+| **R2: Клиент Spotify (`SpotifyClient`)** | `app/services/spotify_client.py`, `tests/test_spotify_client.py` | **DONE** | Асинхронный клиент Spotify: парсинг треков, альбомов, плейлистов и коротких ссылок `spotify.link`; режим out-of-the-box без API-ключей через Next.js Embed Scraper (`__NEXT_DATA__`); поддержка официального Spotify Web API с OAuth Client Credentials и постраничной загрузкой при указании `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET`; извлечение обложек 640×640 и ISRC кодов. 7 тестов в `tests/test_spotify_client.py`. |
+| **R3: Клиент Apple Music (`AppleMusicClient`)** | `app/services/apple_music_client.py`, `tests/test_apple_music_client.py` | **DONE** | Асинхронный клиент Apple Music: парсинг треков внутри альбомов (`?i=...`), песен, альбомов и плейлистов; извлечение метаданных без авторизации через `serialized-server-data` и Schema.org `ld+json`; автоматический апскейл обложек до студийного разрешения 1400×1400 (`{w}x{h}bb.jpg` -> `1400x1400bb.jpg`); разбор длительности ISO 8601. 4 теста в `tests/test_apple_music_client.py`. |
+| **R4: Интеграция в конвейер загрузки (`SourceResolver` & DI)** | `app/services/source_resolver.py`, `app/dependencies.py`, `app/schemas/download.py`, `app/config.py`, `.env.example`, `tests/test_source_resolver.py` | **DONE** | Автоопределение источников `yandex`, `spotify`, `applemusic` в `detect_source`; расширение `ALLOWED_DOWNLOAD_DOMAINS` и схемы `CreateDownloadRequest`; параллельное сопоставление треков через `AudioMatcher` с семафором `MATCHER_CONCURRENCY`; поддержка прямого скачивания MP3 с Яндекса; изоляция сбойных треков. 3 интеграционных теста в `tests/test_source_resolver.py`. |
+| **R5: Пользовательский интерфейс и подсказки** | `app/templates/index.html` | **DONE** | Обновлен плейсхолдер и текст формы ввода URL (поддержка ссылок Яндекс Музыки, Spotify, Apple Music, Deezer, YouTube Music, SoundCloud); добавлены новые опции в селектор источника; обновлены информационные карточки поддерживаемых сервисов. |
+| **R6: Верификация, линтинг и тесты** | `tests/` | **DONE** | Все 441 тест успешно пройдены (`pytest tests/ -v`, 100% pass), линтер `ruff check` чист (0 замечаний). Полное соблюдение инвариантов Zero-Database, PathSandbox, ID3v2.4 и внешних текстов песен. |
+
 
 
 

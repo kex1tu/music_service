@@ -139,3 +139,16 @@ def test_shazam_and_deezer_features_in_tag_editor(client: TestClient):
     assert "fetchCoverBase64" in tag_editor_js
 
 
+def test_track_album_and_year_fields_in_tag_editor(client: TestClient):
+    """Проверка наличия полей 'Альбом' и 'Год' для каждого трека в таблице Tag Editor."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+
+    assert 'x-model="track.album"' in html
+    assert 'x-model="track.year"' in html
+    assert "Альбом" in html
+    assert "Год" in html
+
+
+

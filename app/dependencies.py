@@ -123,6 +123,7 @@ def get_source_resolver(
             cobalt_api_url=settings.COBALT_API_URL,
             allowed_domains=settings.ALLOWED_DOWNLOAD_DOMAINS,
             cookies_path=settings.cookies_file,
+            settings=settings,
         )
     return _source_resolver
 
