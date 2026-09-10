@@ -64,6 +64,16 @@
                     jobs: [],
                     pollInterval: null,
 
+                    get activeCount() {
+                        return (this.summary?.active_jobs || 0) + (this.summary?.queued_jobs || 0);
+                    },
+                    get totalCount() {
+                        return this.summary?.total_tracks || 0;
+                    },
+                    get percent() {
+                        return Math.round(this.summary?.overall_progress || 0);
+                    },
+
                     async init() {
                         await this.fetchQueue();
                         this.startPolling();
@@ -454,7 +464,7 @@
                     Вставьте ссылку на трек, альбом или плейлист из Яндекс Музыки, Spotify, Apple Music, Deezer, YouTube Music или SoundCloud.
                 </p>
 
-                <form @submit.prevent="submitDownload()" class="space-y-4">
+                <form @submit.prevent="submitDownload()" class="space-y-4" novalidate>
                     <!-- Переключатель режима: Одна ссылка / Список ссылок -->
                     <div class="flex items-center space-x-2 border-b border-gray-800 pb-3">
                         <button
@@ -482,35 +492,49 @@
                         </button>
                     </div>
 
-                    <div class="flex flex-col sm:flex-row gap-3">
+                    <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
                         <!-- Поле ввода URL (одиночный режим) -->
-                        <template x-if="inputMode === 'single'">
-                            <div class="flex-1 relative">
-                                <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-500">
-                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M7 17q-2.075 0-3.537-1.463T2 12t1.463-3.537T7 7h3q.425 0 .713.288T11 8t-.288.713T10 9H7q-1.25 0-2.125.875T4 12t.875 2.125T7 15h3q.425 0 .713.288T11 16t-.288.713T10 17zm2-4q-.425 0-.712-.288T8 12t.288-.712T9 11h6q.425 0 .713.288T16 12t-.288.713T15 13zm5 4q-.425 0-.712-.288T13 16t.288-.712T14 15h3q1.25 0 2.125-.875T20 12t-.875-2.125T17 9h-3q-.425 0-.712-.288T13 8t.288-.712T14 7h3q2.075 0 3.538 1.463T22 12t-1.463 3.538T17 17z"/>
-                                    </svg>
-                                </div>
-                                <input
-                                    type="url"
-                                    x-model="url"
-                                    placeholder="https://music.yandex.ru/... https://open.spotify.com/... https://music.apple.com/... https://deezer.com/..."
-                                    required
-                                    class="w-full bg-gray-950 border border-gray-700 rounded-lg pl-10 pr-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition text-sm">
+                        <div x-show="inputMode === 'single'" class="flex-1 relative">
+                            <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-500">
+                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M7 17q-2.075 0-3.537-1.463T2 12t1.463-3.537T7 7h3q.425 0 .713.288T11 8t-.288.713T10 9H7q-1.25 0-2.125.875T4 12t.875 2.125T7 15h3q.425 0 .713.288T11 16t-.288.713T10 17zm2-4q-.425 0-.712-.288T8 12t.288-.712T9 11h6q.425 0 .713.288T16 12t-.288.713T15 13zm5 4q-.425 0-.712-.288T13 16t.288-.712T14 15h3q1.25 0 2.125-.875T20 12t-.875-2.125T17 9h-3q-.425 0-.712-.288T13 8t.288-.712T14 7h3q2.075 0 3.538 1.463T22 12t-1.463 3.538T17 17z"/>
+                                </svg>
                             </div>
-                        </template>
+                            <input
+                                type="text"
+                                inputmode="url"
+                                x-model="url"
+                                placeholder="https://music.yandex.ru/... https://open.spotify.com/... https://music.apple.com/... https://deezer.com/..."
+                                class="w-full bg-gray-950 border border-gray-700 rounded-lg pl-10 pr-24 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition text-sm">
+                            <div class="absolute inset-y-0 right-0 pr-2 flex items-center space-x-1.5">
+                                <button
+                                    type="button"
+                                    x-show="url"
+                                    @click="url = ''"
+                                    class="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition"
+                                    title="Очистить поле">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="m12 13.4l2.9 2.9q.275.275.7.275t.7-.275t.275-.7t-.275-.7L13.4 12l2.9-2.9q.275-.275.275-.7t-.275-.7t-.7-.275t-.7.275L12 10.6L9.1 7.7q-.275-.275-.7-.275t-.7.275t-.275.7t.275.7l2.9 2.9l-2.9 2.9q-.275.275-.275.7t.275.7t.7.275t.7-.275zm0 8.6q-2.075 0-3.9-.788t-3.175-2.137T2.788 15.9T2 12t.788-3.9t2.137-3.175T8.1 2.788T12 2t3.9.788t3.175 2.137T21.213 8.1T22 12t-.788 3.9t-2.137 3.175t-3.175 2.138T12 22"/>
+                                    </svg>
+                                </button>
+                                <button
+                                    type="button"
+                                    @click="pasteUrl()"
+                                    class="px-2 py-1 rounded text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white transition flex items-center space-x-1"
+                                    title="Вставить из буфера">
+                                    <span>Вставить</span>
+                                </button>
+                            </div>
+                        </div>
 
                         <!-- Поле ввода списка URL (пакетный режим) -->
-                        <template x-if="inputMode === 'batch'">
-                            <div class="flex-1">
-                                <textarea
-                                    x-model="batchUrlsText"
-                                    rows="3"
-                                    placeholder="Вставьте по одной ссылке на строку (от 1 до 20):&#10;https://music.yandex.ru/album/...&#10;https://open.spotify.com/album/..."
-                                    required
-                                    class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition text-xs font-mono"></textarea>
-                            </div>
-                        </template>
+                        <div x-show="inputMode === 'batch'" class="flex-1">
+                            <textarea
+                                x-model="batchUrlsText"
+                                rows="3"
+                                placeholder="Вставьте по одной ссылке на строку (от 1 до 20):&#10;https://music.yandex.ru/album/...&#10;https://open.spotify.com/album/..."
+                                class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition text-xs font-mono"></textarea>
+                        </div>
 
                         <!-- Выбор источника -->
                         <div class="sm:w-48">

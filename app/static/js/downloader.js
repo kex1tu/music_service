@@ -18,6 +18,19 @@ function downloaderComponent() {
             this.inputMode = mode;
         },
 
+        async pasteUrl() {
+            try {
+                if (navigator.clipboard && navigator.clipboard.readText) {
+                    const text = await navigator.clipboard.readText();
+                    if (text) {
+                        this.url = text.trim();
+                    }
+                }
+            } catch (err) {
+                Alpine.store('app').toast('Не удалось получить текст из буфера обмена', 'error');
+            }
+        },
+
         get parsedBatchUrls() {
             return (this.batchUrlsText || '')
                 .split('\n')
@@ -30,11 +43,15 @@ function downloaderComponent() {
         },
 
         async submitBatchDownloads() {
-            const urls = this.parsedBatchUrls;
-            if (!urls.length) {
+            const rawUrls = this.parsedBatchUrls;
+            if (!rawUrls.length) {
                 Alpine.store('app').toast('Введите хотя бы одну ссылку в список', 'error');
                 return;
             }
+
+            const urls = rawUrls.map((u) =>
+                !/^https?:\/\//i.test(u) && u.includes('.') ? 'https://' + u : u
+            );
 
             this.isSubmitting = true;
             try {
@@ -71,10 +88,14 @@ function downloaderComponent() {
                 return this.submitBatchDownloads();
             }
 
-            const cleanUrl = this.url.trim();
+            let cleanUrl = this.url.trim();
             if (!cleanUrl) {
                 Alpine.store('app').toast('Введите корректный URL для загрузки', 'error');
                 return;
+            }
+
+            if (!/^https?:\/\//i.test(cleanUrl) && cleanUrl.includes('.')) {
+                cleanUrl = 'https://' + cleanUrl;
             }
 
             this.isSubmitting = true;
@@ -101,6 +122,7 @@ function downloaderComponent() {
 
                 const jobData = await response.json();
                 this.job = jobData;
+                this.url = '';
                 Alpine.store('app').currentJobId = jobData.id;
                 Alpine.store('app').toast('Задача загрузки добавлена в очередь', 'info');
 
