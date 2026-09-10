@@ -148,6 +148,8 @@ def list_directory(
     file_manager: FileManagerServiceDep = ...,
 ) -> DirectoryListingResponse:
     """Возвращает содержимое указанного каталога медиатеки с метаданными треков."""
+    if path.strip() == "[object Object]":
+        path = ""
     return file_manager.list_dir(path)
 
 

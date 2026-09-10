@@ -19,12 +19,22 @@ function fileManagerComponent() {
 
             // Слушаем событие обновления из других компонентов
             window.addEventListener('refresh-file-manager', (e) => {
-                const targetPath = e.detail || this.currentPath;
+                let targetPath = '';
+                if (typeof e.detail === 'string') {
+                    targetPath = e.detail;
+                } else if (e.detail && typeof e.detail.path === 'string') {
+                    targetPath = e.detail.path;
+                } else if (typeof this.currentPath === 'string' && this.currentPath !== '[object Object]') {
+                    targetPath = this.currentPath;
+                }
                 this.loadDirectory(targetPath);
             });
         },
 
         async loadDirectory(path) {
+            if (typeof path !== 'string' || path === '[object Object]') {
+                path = (typeof this.currentPath === 'string' && this.currentPath !== '[object Object]') ? this.currentPath : '';
+            }
             this.isLoading = true;
 
             try {

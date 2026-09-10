@@ -389,7 +389,7 @@
                     <span>Загрузчик</span>
                 </button>
                 <button
-                    @click="$store.app.activeTab = 'files'; $dispatch('refresh-file-manager')"
+                    @click="$store.app.activeTab = 'files'; $dispatch('refresh-file-manager', '')"
                     :class="$store.app.activeTab === 'files' ? 'bg-emerald-600 text-white font-medium shadow' : 'text-gray-400 hover:text-gray-200'"
                     class="px-3 sm:px-4 py-1.5 rounded-md text-sm transition-all flex items-center space-x-2">
                     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
@@ -2022,7 +2022,7 @@
             if (item.onDeleted && typeof item.onDeleted === 'function') {
                 await item.onDeleted();
             }
-            $dispatch('refresh-file-manager');
+            $dispatch('refresh-file-manager', '');
         } catch (e) {
             $store.app.toast(`Ошибка: ${e.message}`, 'error');
         }
