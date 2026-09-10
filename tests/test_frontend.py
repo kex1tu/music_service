@@ -276,5 +276,46 @@ def test_floating_queue_widget_ui(client: TestClient):
     assert "Очередь загрузок" in html
 
 
+def test_tag_editor_grouped_releases_and_per_track_covers_ui(client: TestClient):
+    """Проверка элементов управления группировкой по релизам, обложек треков и режима синглов."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+
+    # 1. Переключатель вида (По релизам vs Сплошной список)
+    assert "viewMode = 'grouped'" in html
+    assert "viewMode = 'flat'" in html
+    assert "По релизам" in html
+    assert "Сплошной список" in html
+
+    # 2. Кнопка автопоиска обложек синглов
+    assert "@click=\"fetchSinglesCovers()\"" in html
+    assert "⚡ Обложки синглов" in html
+
+    # 3. Галерея обложек для трека и группы
+    assert "openTrackCoverGallery" in html
+    assert "openGroupCoverGallery" in html
+    assert "applyAlbumCoverToGroup" in html
+    assert "toggleGroupCollapse" in html
+
+    # 4. Чекбоксы организации в подвале
+    assert 'x-model="groupByAlbum"' in html
+    assert 'x-model="singlesMode"' in html
+    assert "Раскладывать по альбомам" in html
+    assert "Режим синглов (Artist/Track)" in html
+
+    # 5. Проверка методов и свойств в tag_editor.js
+    tag_editor_js = (PROJECT_ROOT / "app" / "static" / "js" / "tag_editor.js").read_text(encoding="utf-8")
+    assert "groupedReleases" in tag_editor_js
+    assert "openTrackCoverGallery" in tag_editor_js
+    assert "openGroupCoverGallery" in tag_editor_js
+    assert "applyAlbumCoverToGroup" in tag_editor_js
+    assert "fetchSinglesCovers" in tag_editor_js
+    assert "isSearchingSinglesCovers" in tag_editor_js
+    assert "singlesMode" in tag_editor_js
+    assert "groupByAlbum" in tag_editor_js
+
+
+
 
 

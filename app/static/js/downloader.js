@@ -14,11 +14,19 @@ function downloaderComponent() {
         job: null,
         pollInterval: null,
 
+        setMode(mode) {
+            this.inputMode = mode;
+        },
+
         get parsedBatchUrls() {
             return (this.batchUrlsText || '')
                 .split('\n')
                 .map((u) => u.trim())
                 .filter((u) => u.length > 0);
+        },
+
+        getParsedBatchUrls() {
+            return this.parsedBatchUrls;
         },
 
         async submitBatchDownloads() {

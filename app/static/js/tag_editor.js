@@ -39,6 +39,71 @@ function tagEditorComponent() {
         coverSourceFilter: 'all',
         selectedCoverUrl: null,
 
+        // Release Grouping & Singles Mode
+        viewMode: 'grouped', // 'grouped' | 'flat'
+        collapsedGroups: {},
+        coverGalleryTarget: { type: 'album', id: null, originalIndex: null },
+        isSearchingSinglesCovers: false,
+        singlesCoverProgress: { current: 0, total: 0 },
+        singlesMode: false,
+        groupByAlbum: true,
+
+        get groupedReleases() {
+            const groups = {};
+            (this.tracks || []).forEach((track, originalIndex) => {
+                const albumName = (track.album || '').trim();
+                const isSingle = !albumName || this.singlesMode;
+                const key = isSingle ? '__singles__' : albumName.toLowerCase();
+
+                if (!groups[key]) {
+                    groups[key] = {
+                        id: key,
+                        isSingles: isSingle,
+                        title: isSingle ? 'Синглы и отдельные треки' : (track.album || 'Неизвестный альбом'),
+                        albumArtist: track.album_artist || this.album.album_artist || track.artist || '',
+                        year: track.year || this.album.year || null,
+                        genre: track.genre || this.album.genre || '',
+                        coverPreviewUrl: null,
+                        items: [],
+                    };
+                }
+                groups[key].items.push({ track, originalIndex });
+            });
+
+            const result = Object.values(groups);
+            result.forEach((group) => {
+                if (!group.isSingles) {
+                    const firstWithCover = group.items.find(
+                        (it) => it.track.cover_preview_url || it.track.cover_url || it.track.cover_base64
+                    );
+                    if (firstWithCover) {
+                        group.coverPreviewUrl =
+                            firstWithCover.track.cover_preview_url ||
+                            firstWithCover.track.cover_url ||
+                            firstWithCover.track.cover_base64;
+                    } else if (this.coverPreviewUrl) {
+                        group.coverPreviewUrl = this.coverPreviewUrl;
+                    }
+                }
+            });
+
+            result.sort((a, b) => {
+                if (a.isSingles) return 1;
+                if (b.isSingles) return -1;
+                return a.title.localeCompare(b.title);
+            });
+
+            return result;
+        },
+
+        toggleGroupCollapse(groupId) {
+            this.collapsedGroups[groupId] = !this.collapsedGroups[groupId];
+        },
+
+        isGroupCollapsed(groupId) {
+            return !!this.collapsedGroups[groupId];
+        },
+
         // Deezer Album Search
         showDeezerModal: false,
         deezerQuery: '',
@@ -70,6 +135,13 @@ function tagEditorComponent() {
         },
 
         loadData(data) {
+            this.viewMode = 'grouped';
+            this.collapsedGroups = {};
+            this.coverGalleryTarget = { type: 'album', id: null, originalIndex: null };
+            this.isSearchingSinglesCovers = false;
+            this.singlesCoverProgress = { current: 0, total: 0 };
+            this.singlesMode = false;
+            this.groupByAlbum = true;
             this.coverBase64 = null;
             this.selectedCoverUrl = null;
             this.draggedIndex = null;
@@ -105,6 +177,9 @@ function tagEditorComponent() {
                 disc_total: t.disc_total || (data.album?.disc_total || null),
                 album: (t.album !== undefined && t.album !== null && t.album !== '') ? t.album : (this.album.album || ''),
                 year: (t.year !== undefined && t.year !== null && t.year !== '') ? t.year : (this.album.year || null),
+                cover_url: t.cover_url || null,
+                cover_base64: t.cover_base64 || null,
+                cover_preview_url: t.has_cover && t.path ? `/tags/cover?path=${encodeURIComponent(t.path)}&t=${Date.now()}` : null,
             }));
             this.sourceDir = data.sourceDir || '';
             this.coverPath = data.coverPath || null;
@@ -274,7 +349,9 @@ function tagEditorComponent() {
                         year: t.year ? parseInt(t.year, 10) : (this.album.year ? parseInt(this.album.year, 10) : null),
                         genre: t.genre || this.album.genre || '',
                         lyrics_status: t.lyrics_status || 'none',
-                        has_cover: t.has_cover || !!this.coverPreviewUrl,
+                        has_cover: t.has_cover || !!t.cover_preview_url || !!t.cover_url || !!this.coverPreviewUrl,
+                        cover_url: t.cover_url || null,
+                        cover_base64: t.cover_base64 || null,
                     })),
                     source_dir: this.sourceDir,
                     cover_path: this.coverPath,
@@ -282,6 +359,8 @@ function tagEditorComponent() {
                     cover_url: this.selectedCoverUrl || null,
                     apply_album_to_tracks: false, // уже применены пользователем
                     reorganize: true, // переместить в каноническую структуру MUSIC_DIR
+                    singles_mode: this.singlesMode,
+                    group_by_album: this.viewMode === 'grouped',
                 };
 
                 const res = await fetch('/tags/batch', {
@@ -665,6 +744,7 @@ function tagEditorComponent() {
         },
 
         openCoverGallery() {
+            this.coverGalleryTarget = { type: 'album', id: null, originalIndex: null };
             this.showCoverGalleryModal = true;
             this.coverSourceFilter = 'all';
             const albumPart = this.album.album || '';
@@ -679,6 +759,97 @@ function tagEditorComponent() {
             if (this.coverSearchQuery) {
                 this.searchCovers();
             }
+        },
+
+        openGroupCoverGallery(group) {
+            this.coverGalleryTarget = { type: 'group', group: group };
+            this.showCoverGalleryModal = true;
+            this.coverSourceFilter = 'all';
+            const artistPart = group.albumArtist || this.album.album_artist || '';
+            const titlePart = group.isSingles ? '' : group.title;
+            this.coverSearchQuery = `${artistPart} ${titlePart}`.trim() || (this.tracks[0]?.artist || '');
+            if (this.coverSearchQuery) {
+                this.searchCovers();
+            }
+        },
+
+        openTrackCoverGallery(originalIndex, track) {
+            this.coverGalleryTarget = { type: 'track', originalIndex: originalIndex, track: track };
+            this.showCoverGalleryModal = true;
+            this.coverSourceFilter = 'all';
+            const artistPart = track.artist || track.album_artist || this.album.album_artist || '';
+            this.coverSearchQuery = `${artistPart} ${track.title || ''}`.trim();
+            if (this.coverSearchQuery) {
+                this.searchCovers();
+            }
+        },
+
+        applyAlbumCoverToGroup(group) {
+            if (!this.coverPreviewUrl && !this.selectedCoverUrl) {
+                this.openGroupCoverGallery(group);
+                return;
+            }
+            const cov = this.selectedCoverUrl || this.coverPreviewUrl;
+            group.coverPreviewUrl = cov;
+            group.items.forEach((itemObj) => {
+                itemObj.track.cover_url = cov;
+                itemObj.track.cover_preview_url = cov;
+                itemObj.track.has_cover = true;
+            });
+            Alpine.store('app').toast(`Обложка применена ко всем трекам релиза "${group.title}"`, 'success');
+        },
+
+        async fetchSinglesCovers() {
+            if (!this.tracks || this.tracks.length === 0) return;
+            const targets = this.tracks.filter(
+                (t) => (!t.album || !t.album.trim() || this.singlesMode) && !t.cover_preview_url && !t.cover_url
+            );
+
+            if (targets.length === 0) {
+                Alpine.store('app').toast('Все синглы уже имеют обложки', 'info');
+                return;
+            }
+
+            this.isSearchingSinglesCovers = true;
+            this.singlesCoverProgress = { current: 0, total: targets.length };
+            let foundCount = 0;
+
+            Alpine.store('app').toast(
+                `Запущен автопоиск обложек для ${targets.length} синглов...`,
+                'info'
+            );
+
+            for (let i = 0; i < targets.length; i++) {
+                const track = targets[i];
+                this.singlesCoverProgress.current = i + 1;
+
+                const q = `${track.artist || this.album.album_artist || ''} ${track.title || ''}`.trim();
+                if (q) {
+                    try {
+                        const res = await fetch(
+                            `/tags/covers/search?query=${encodeURIComponent(q)}&limit=1`
+                        );
+                        if (res.ok) {
+                            const results = await res.json();
+                            if (results && results.length > 0) {
+                                track.cover_url = results[0].cover_url;
+                                track.cover_preview_url = results[0].cover_url;
+                                track.has_cover = true;
+                                foundCount++;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Ошибка поиска обложки для трека', track.title, e);
+                    }
+                }
+                await new Promise((r) => setTimeout(r, 150));
+            }
+
+            this.isSearchingSinglesCovers = false;
+            Alpine.store('app').toast(
+                `Автопоиск обложек завершен: найдено ${foundCount} из ${targets.length}`,
+                foundCount > 0 ? 'success' : 'warning'
+            );
         },
 
         closeCoverGallery() {
@@ -719,16 +890,46 @@ function tagEditorComponent() {
 
         selectCover(item) {
             if (!item || !item.cover_url) return;
-            this.coverPreviewUrl = item.cover_url;
-            this.selectedCoverUrl = item.cover_url;
-            this.coverPath = null;
-            this.coverBase64 = null;
-            this.fetchCoverBase64(item.cover_url);
+
+            if (this.coverGalleryTarget?.type === 'track') {
+                const idx = this.coverGalleryTarget.originalIndex;
+                const tr = this.tracks[idx] || this.coverGalleryTarget.track;
+                if (tr) {
+                    tr.cover_url = item.cover_url;
+                    tr.cover_preview_url = item.cover_url;
+                    tr.has_cover = true;
+                }
+                Alpine.store('app').toast(
+                    `Выбрана обложка для трека "${tr?.title || ''}" (${item.source.toUpperCase()})`,
+                    'success'
+                );
+            } else if (this.coverGalleryTarget?.type === 'group') {
+                const group = this.coverGalleryTarget.group;
+                if (group) {
+                    group.coverPreviewUrl = item.cover_url;
+                    group.items.forEach((itemObj) => {
+                        itemObj.track.cover_url = item.cover_url;
+                        itemObj.track.cover_preview_url = item.cover_url;
+                        itemObj.track.has_cover = true;
+                    });
+                }
+                Alpine.store('app').toast(
+                    `Выбрана обложка для релиза "${group?.title || ''}" (${item.source.toUpperCase()})`,
+                    'success'
+                );
+            } else {
+                this.coverPreviewUrl = item.cover_url;
+                this.selectedCoverUrl = item.cover_url;
+                this.coverPath = null;
+                this.coverBase64 = null;
+                this.fetchCoverBase64(item.cover_url);
+                Alpine.store('app').toast(
+                    `Выбрана обложка альбома (${item.source.toUpperCase()} ${item.width}x${item.height})`,
+                    'success'
+                );
+            }
+
             this.closeCoverGallery();
-            Alpine.store('app').toast(
-                `Выбрана обложка (${item.source.toUpperCase()} ${item.width}x${item.height})`,
-                'success'
-            );
         },
 
         close() {

@@ -766,4 +766,92 @@ def test_batch_save_with_disc_numbers(
     assert tags2.track_total == 6
 
 
+def test_batch_save_with_per_track_covers_and_singles_mode(
+    auth_tags_client: TestClient, temp_storage: dict[str, Path]
+):
+    """Проверка сохранения пакета с индивидуальными обложками треков (cover_base64),
+    записью их в ID3v2.4 APIC и организацией в режиме синглов.
+    """
+    import base64
+
+    tmp_dir = temp_storage["tmp_dir"]
+    music_dir = temp_storage["music_dir"]
+
+    job_dir = tmp_dir / "job_singles_batch" / "converted"
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    t1 = job_dir / "01. Hit One.mp3"
+    t2 = job_dir / "02. Hit Two.mp3"
+    t1.write_bytes(MINIMAL_MP3)
+    t2.write_bytes(MINIMAL_MP3)
+
+    cov1_b64 = "data:image/jpeg;base64," + base64.b64encode(DUMMY_JPEG).decode()
+    cov2_b64 = "data:image/png;base64," + base64.b64encode(DUMMY_PNG).decode()
+
+    payload = {
+        "album": {
+            "album_artist": "Singles Artist",
+            "year": 2024,
+        },
+        "tracks": [
+            {
+                "path": "job_singles_batch/converted/01. Hit One.mp3",
+                "track_number": 1,
+                "title": "Hit One",
+                "artist": "Artist Alpha",
+                "album": "Single One",
+                "year": 2023,
+                "cover_base64": cov1_b64,
+            },
+            {
+                "path": "job_singles_batch/converted/02. Hit Two.mp3",
+                "track_number": 1,
+                "title": "Hit Two",
+                "artist": "Artist Beta",
+                "album": "Single Two",
+                "year": 2024,
+                "cover_base64": cov2_b64,
+            },
+        ],
+        "source_dir": "job_singles_batch/converted",
+        "singles_mode": True,
+        "group_by_album": True,
+    }
+
+    resp = auth_tags_client.put("/tags/batch", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+
+    # Проверяем, что оба трека успешно перемещены и содержат свои ID3v2.4 APIC обложки
+    svc = TagService(music_sandbox=PathSandbox(music_dir))
+
+    t1_rel = data["tracks"][0]["path"]
+    t2_rel = data["tracks"][1]["path"]
+
+    t1_abs = music_dir / t1_rel
+    t2_abs = music_dir / t2_rel
+
+    assert t1_abs.exists()
+    assert t2_abs.exists()
+
+    # Проверка наличия cover.jpg / cover.png в папках синглов
+    assert (t1_abs.parent / "cover.jpg").exists()
+    assert (t2_abs.parent / "cover.png").exists()
+
+    # Проверка вшитой обложки в сам MP3 через TagService
+    cov1_res = svc.read_cover(t1_abs)
+    assert cov1_res is not None
+    cov1_art, mime1 = cov1_res
+    assert cov1_art is not None
+    assert mime1 == "image/jpeg"
+
+    cov2_res = svc.read_cover(t2_abs)
+    assert cov2_res is not None
+    cov2_art, mime2 = cov2_res
+    assert cov2_art is not None
+    assert mime2 == "image/png"
+
+
+
 

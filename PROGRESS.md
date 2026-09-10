@@ -1,9 +1,9 @@
 # PROGRESS.md — Матрица статусов реализации Music Downloader & Tag Manager
 
 ## Текущий статус проекта
-- **Общий прогресс:** 25 / 25 компонентов завершены (100%)
-- **Активный этап:** Все блоки (1–15), включая пакетный режим загрузки, плавающий менеджер очередей, мгновенный глобальный поиск по медиатеке (`Ctrl+K`) и полнофункциональную вкладку «Аудит медиатеки» (автопоиск текстов, поиск дубликатов, поиск релизов без обложек), полностью реализованы и протестированы.
-- **Результаты тестов:** 472/472 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
+- **Общий прогресс:** 26 / 26 компонентов завершены (100%)
+- **Активный этап:** Все блоки (1–16), включая группировку по релизам в Tag Editor (альбомы и синглы), 40×40 обложки каждого трека, автопоиск обложек синглов, безопасную мультиальбомную организацию в `OrganizerService` и фикс свитчера пакетного/одиночного ввода ссылок загрузчика, полностью реализованы и протестированы.
+- **Результаты тестов:** 478/478 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -153,6 +153,19 @@
 | **R1: Мгновенный глобальный поиск (`Ctrl+K`) и In-Memory LibraryIndex** | `app/schemas/library_audit.py`, `app/services/library_audit_service.py`, `app/routers/files.py`, `app/templates/index.html`, `tests/test_global_search.py`, `tests/test_frontend.py` | **DONE** | Разработан сервис `LibraryAuditService` с in-memory индексацией и инкрементальным кэшированием по `st_mtime` (строгий инвариант Zero-Database). Эндпоинт `GET /files/search?query=...` с фильтрацией по артистам, альбомам и трекам. В шапку сайта встроена поисковая строка с горячей клавишей `Ctrl+K`, debounce 250мс, выпадающим списком результатов по категориям и быстрым переходом в директорию трека/альбома. 5 тестов в `tests/test_global_search.py` и 1 UI-тест в `tests/test_frontend.py`. |
 | **R2: Дашборд аудита, пакетный автопоиск текстов и удаление дубликатов** | `app/schemas/library_audit.py`, `app/services/library_audit_service.py`, `app/routers/files.py`, `app/static/js/library_audit.js`, `app/templates/index.html`, `tests/test_library_audit.py`, `tests/test_frontend.py` | **DONE** | Создана новая вкладка «Аудит медиатеки» (`activeTab === 'audit'`) и Alpine-компонент `libraryAuditComponent()`. 1) Дашборд из 4 метрических карточек (всего треков/релизов, без текстов, без обложек, дубликаты). 2) Подраздел треков без текстов с кнопкой «Найти недостающие тексты для всех» (фоновый асинхронный опрос LRCLIB/Genius с ограничением частоты запросов и прогресс-баром). 3) Подраздел релизов без обложек с переходом в папку. 4) Поиск дубликатов песен (композитный нормализованный ключ + проверка длительности/размера) с безопасным удалением копий через модальное окно и `PathSandbox`. 6 тестов в `tests/test_library_audit.py` и 1 UI-тест в `tests/test_frontend.py`. |
 | **R3: Верификация, линтинг и тесты** | `tests/` | **DONE** | Все 472 теста успешно пройдены (`pytest tests/ -v`, 100% pass), линтер `ruff check app tests` чист (0 замечаний). Строгое соблюдение Zero-Database, PathSandbox, ID3v2.4 и no-build архитектуры. |
+
+---
+
+## Блок 16: Группировка релизов в Tag Editor, обложки треков/синглов и мультирелизный Organizer (2026-09-10T13:50:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Исправление свитчера загрузчика (Single/Batch URL Input Switcher)** | `app/static/js/downloader.js`, `app/templates/index.html`, `tests/test_frontend.py` | **DONE** | Устранена коллизия HTML5 `:required` валидации скрытых инпутов при переключении между «Одна ссылка» и «Список ссылок (пакетно)». Директивы `x-show` заменены на условный рендеринг `<template x-if="inputMode === 'single'">` и `<template x-if="inputMode === 'batch'">`. Добавлены методы `setMode(mode)` и геттер `getParsedBatchUrls()`. |
+| **R2: Группировка релизов в Tag Editor (Accordion Grouped View + Flat View)** | `app/static/js/tag_editor.js`, `app/templates/index.html`, `tests/test_frontend.py` | **DONE** | В `tagEditorComponent` реализован реактивный геттер `groupedReleases`, формирующий виртуальные группы альбомов и синглов с сохранением прямых ссылок на объекты `this.tracks`. Добавлен переключатель режимов отображения таблицы («По релизам» / «Сплошной список») и аккордеон с возможностью сворачивания групп (`toggleGroupCollapse`, `isGroupCollapsed`). В шапку каждого релиза выведены миниатюра обложки, счетчик треков, кнопка подбора обложки релиза (`openGroupCoverGallery`) и распространения главной обложки (`applyAlbumCoverToGroup`). |
+| **R3: Персональные обложки треков (40×40 thumbnails, Multi-source Gallery & Batch Singles Cover Search)** | `app/static/js/tag_editor.js`, `app/templates/index.html`, `tests/test_frontend.py` | **DONE** | В таблицу треков Tag Editor добавлена колонка с 40×40 миниатюрами обложек (`openTrackCoverGallery`), позволяющая выбирать индивидуальный арт для каждого трека через мультисервисную галерею (Apple Music, Deezer, Яндекс Музыка, Spotify). Разработана функция `fetchSinglesCovers()` для пакетного автоматического поиска официальных обложек синглов через Deezer Search API с ограничением частоты запросов, реактивным прогресс-баром и toast-уведомлением. |
+| **R4: Бэкенд мультирелизной организации и режим синглов (OrganizerService, Tag Router & Schemas)** | `app/schemas/tag.py`, `app/services/organizer_service.py`, `app/routers/tags.py`, `tests/test_organizer_service.py`, `tests/test_tags_router.py` | **DONE** | В `TrackTags` добавлены поля `cover_url` и `cover_base64`. В `SaveAlbumRequest` добавлены флаги `singles_mode` и `group_by_album`. В `OrganizerService` реализован метод `compute_single_dir(track, default_artist)` и мультирелизное распределение файлов: треки разных альбомов раскладываются по своим папкам `{Artist}/{Album} - {Year}/`, а синглы — по `{Artist}/{Title} - Single ({Year})/`. Запись персональных `cover.jpg` / `cover.png` для каждой папки релиза из `track_covers_data`. В роутере `PUT /tags/batch` поддержана декодировка индивидуальных обложек и вшивание APIC в каждый MP3. 4 новых теста в `tests/test_organizer_service.py` и `tests/test_tags_router.py`. |
+| **R5: Верификация, линтинг и тесты** | `tests/` | **DONE** | Все 478 тестов успешно пройдены (`pytest tests/ -v`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). Полное соблюдение архитектурных инвариантов: Zero-Database, PathSandbox, ID3v2.4 и no-build архитектура. |
+
 
 
 

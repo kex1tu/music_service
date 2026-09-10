@@ -15,6 +15,7 @@ import re
 import shutil
 import threading
 import uuid
+from contextlib import ExitStack
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -201,6 +202,29 @@ class OrganizerService:
         track_rel_path = f"{album_rel_dir}/{clean_filename}"
         return album_rel_dir, track_rel_path
 
+    def compute_single_dir(
+        self,
+        track: TrackTags,
+        default_artist: str = "Unknown Artist",
+    ) -> str:
+        """Вычисляет канонический относительный путь каталога сингла внутри MUSIC_DIR.
+
+        Шаблон: {Artist}/{Title} - Single ({Year}) или {Artist}/{Title} - Single
+        """
+        artist_raw = track.album_artist or track.artist or default_artist or "Unknown Artist"
+        clean_artist = self.sanitize_component(artist_raw, fallback="Unknown Artist")
+
+        title_raw = track.title or (Path(track.path).stem if track.path else "Track")
+        clean_title = self.sanitize_component(title_raw, fallback="Track")
+
+        if track.year and 1000 <= track.year <= 2999:
+            folder_name = f"{clean_title} - Single ({track.year})"
+        else:
+            folder_name = f"{clean_title} - Single"
+
+        clean_folder = self.sanitize_component(folder_name, fallback=folder_name)
+        return f"{clean_artist}/{clean_folder}"
+
     def _resolve_source_path(self, rel_path: str) -> Path:
         """Разрешает исходный относительный путь через TagService или подходящую песочницу."""
         if self._tag_service is not None:
@@ -306,22 +330,28 @@ class OrganizerService:
         source_dir: str,
         cover_path: str | None = None,
         reorganize: bool = False,
+        singles_mode: bool = False,
+        group_by_album: bool = True,
+        track_covers_data: dict[str, bytes] | None = None,
     ) -> OrganizerResult:
         """Перемещает или реорганизует файлы альбома в постоянную медиатеку MUSIC_DIR.
 
-        Использует двухфазный стейджинг для защиты от потери данных при изменении порядка
-        (swap), циклическом переименовании или совпадении имен треков.
-        Если файлы находятся в TMP_DIR — они безусловно перемещаются в постоянную медиатеку.
-        Если файлы уже находятся в MUSIC_DIR — перемещение выполняется только если reorganize=True.
-        При перемещении переносятся ассоциированные тексты песен (.lrc/.txt) и обложка (cover.jpg).
-        Пустые старые папки удаляются.
+        Поддерживает:
+        - Одиночные альбомы и мультиальбомные пакеты (group_by_album=True).
+        - Режим синглов (singles_mode=True): треки раскладываются по {Artist}/{Title} - Single ({Year})/.
+        - Запись cover.jpg для каждого релиза и сингла из track_covers_data или cover_path.
+        - Двухфазный стейджинг (.stage_*) для защиты от потери данных и коллизий.
+        - Автоматическую зачистку пустых директорий.
 
         Args:
             album: Метаданные альбома.
             tracks: Список треков для перемещения.
             source_dir: Исходный каталог (tmp job dir или существующий каталог).
-            cover_path: Опциональный путь к файлу обложки.
+            cover_path: Опциональный путь к файлу обложки альбома.
             reorganize: Флаг принудительной реорганизации существующей папки в медиатеке.
+            singles_mode: Флаг режима синглов (каждый трек в персональную папку сингла).
+            group_by_album: Флаг группировки разнородных треков по релизам.
+            track_covers_data: Словарь с бинарными данными обложек {track_path: bytes}.
 
         Returns:
             OrganizerResult с итоговым каталогом и обновленными треками.
@@ -352,17 +382,72 @@ class OrganizerService:
             return OrganizerResult(destination_dir=source_dir, tracks=tracks)
 
         if not tracks:
-            # Если треков нет, но запрошена реорганизация — возвращаем целевой путь каталога
             dummy_track = TrackTags(path="", track_number=1, title="Track")
             target_album_rel_dir = self.compute_album_dir(album, [dummy_track])
             return OrganizerResult(destination_dir=target_album_rel_dir, tracks=[])
 
-        # Единый целевой каталог для всех треков альбома
-        target_album_rel_dir = self.compute_album_dir(album, tracks)
+        # 1. Группировка треков по релизам (альбомы и синглы)
+        groups: dict[str, dict] = {}
 
-        with _get_album_lock(target_album_rel_dir.lower()):
-            target_album_abs_dir = self._music_sandbox.resolve(target_album_rel_dir)
-            target_album_abs_dir.mkdir(parents=True, exist_ok=True)
+        if not singles_mode and not group_by_album:
+            groups["__all__"] = {
+                "key": "__all__",
+                "is_single": False,
+                "album_tags": album,
+                "tracks": list(enumerate(tracks)),
+            }
+        else:
+            for idx, track in enumerate(tracks):
+                effective_album = "" if singles_mode else (track.album or album.album or "").strip()
+                if singles_mode or not effective_album:
+                    key = f"__single__{idx}_{track.path}"
+                    groups[key] = {
+                        "key": key,
+                        "is_single": True,
+                        "album_tags": None,
+                        "tracks": [(idx, track)],
+                    }
+                else:
+                    effective_artist = (track.album_artist or album.album_artist or "").strip()
+                    key = f"__album__{effective_artist.lower()}__{effective_album.lower()}"
+                    if key not in groups:
+                        groups[key] = {
+                            "key": key,
+                            "is_single": False,
+                            "album_tags": AlbumTags(
+                                album=effective_album,
+                                album_artist=effective_artist or album.album_artist,
+                                year=track.year or album.year,
+                                genre=track.genre or album.genre,
+                                disc_total=track.disc_total or album.disc_total,
+                            ),
+                            "tracks": [],
+                        }
+                    groups[key]["tracks"].append((idx, track))
+
+        for group in groups.values():
+            if group["is_single"]:
+                _, s_track = group["tracks"][0]
+                group["target_rel_dir"] = self.compute_single_dir(
+                    s_track,
+                    default_artist=album.album_artist or album.album or "Unknown Artist",
+                )
+            else:
+                group["target_rel_dir"] = self.compute_album_dir(
+                    group["album_tags"],
+                    [t for _, t in group["tracks"]],
+                )
+
+        unique_target_dirs = sorted({g["target_rel_dir"].lower() for g in groups.values()})
+
+        with ExitStack() as stack:
+            for t_dir in unique_target_dirs:
+                stack.enter_context(_get_album_lock(t_dir))
+
+            for group in groups.values():
+                t_abs = self._music_sandbox.resolve(group["target_rel_dir"])
+                t_abs.mkdir(parents=True, exist_ok=True)
+                group["target_abs_dir"] = t_abs
 
             old_dirs_to_clean: set[Path] = set()
             if not is_tmp and source_dir:
@@ -373,7 +458,6 @@ class OrganizerService:
                 except (PathTraversalError, OSError) as exc:
                     logger.debug("Проверка каталога источника: %s", exc)
 
-            # Собираем канонические пути всех исходных файлов текущего батча для защиты от коллизий
             all_src_resolved: set[Path] = set()
             for t in tracks:
                 if t.path:
@@ -384,81 +468,96 @@ class OrganizerService:
                     except (PathTraversalError, OSError):
                         pass
 
-            # 1. Валидация источников и построение плана перемещения с защитой от дублирования имен
+            # 2. Построение планов перемещения
             move_plans: list[dict] = []
-            used_target_paths: set[Path] = set()
+            used_target_paths_by_group: dict[str, set[Path]] = {g["key"]: set() for g in groups.values()}
 
-            for idx, track in enumerate(tracks):
-                src_track_abs = self._resolve_source_path(track.path)
-                if not src_track_abs.exists():
-                    raise NotFoundError(f"Аудиофайл не найден: {track.path}")
+            for group in groups.values():
+                used_target_paths = used_target_paths_by_group[group["key"]]
+                target_group_rel_dir = group["target_rel_dir"]
+                is_single_group = group["is_single"]
 
-                if not is_tmp and src_track_abs.is_relative_to(self._music_sandbox.root):
-                    old_dirs_to_clean.add(src_track_abs.parent)
+                for group_idx, (orig_idx, track) in enumerate(group["tracks"]):
+                    src_track_abs = self._resolve_source_path(track.path)
+                    if not src_track_abs.exists():
+                        raise NotFoundError(f"Аудиофайл не найден: {track.path}")
 
-                track_num = max(1, track.track_number if track.track_number else idx + 1)
-                title_raw = track.title or Path(track.path).stem or f"Track_{track_num}"
-                clean_title = self.sanitize_component(title_raw, fallback=f"Track_{track_num}", max_length=150)
-                if clean_title.lower().endswith(".mp3"):
-                    clean_title = clean_title[:-4].rstrip(". ")
-                    if not clean_title:
-                        clean_title = f"Track_{track_num}"
+                    if not is_tmp and src_track_abs.is_relative_to(self._music_sandbox.root):
+                        old_dirs_to_clean.add(src_track_abs.parent)
 
-                filename = f"{track_num:02d}. {clean_title}.mp3"
-                clean_filename = self.sanitize_component(filename, fallback=f"{track_num:02d}. Track.mp3", max_length=180)
-                target_track_rel_path = f"{target_album_rel_dir}/{clean_filename}"
-                target_track_abs = self._music_sandbox.resolve(target_track_rel_path)
+                    if is_single_group:
+                        track_num = max(1, track.track_number if (track.track_number and not singles_mode) else 1)
+                        title_raw = track.title or Path(track.path).stem or "Track"
+                        clean_title = self.sanitize_component(title_raw, fallback="Track", max_length=150)
+                        if clean_title.lower().endswith(".mp3"):
+                            clean_title = clean_title[:-4].rstrip(". ")
+                            if not clean_title:
+                                clean_title = "Track"
+                        filename = f"01. {clean_title}.mp3" if singles_mode else f"{track_num:02d}. {clean_title}.mp3"
+                    else:
+                        track_num = max(1, track.track_number if track.track_number else group_idx + 1)
+                        title_raw = track.title or Path(track.path).stem or f"Track_{track_num}"
+                        clean_title = self.sanitize_component(title_raw, fallback=f"Track_{track_num}", max_length=150)
+                        if clean_title.lower().endswith(".mp3"):
+                            clean_title = clean_title[:-4].rstrip(". ")
+                            if not clean_title:
+                                clean_title = f"Track_{track_num}"
+                        filename = f"{track_num:02d}. {clean_title}.mp3"
 
-                # Дедупликация target_track_abs внутри батча и от независимых файлов на диске
-                dup_idx = 2
-                while (target_track_abs in used_target_paths) or (
-                    target_track_abs.exists() and target_track_abs.resolve() not in all_src_resolved
-                ):
-                    clean_filename = self.sanitize_component(
-                        f"{track_num:02d}. {clean_title} ({dup_idx}).mp3",
-                        fallback=f"{track_num:02d}. Track_{dup_idx}.mp3",
-                        max_length=180,
-                    )
-                    target_track_rel_path = f"{target_album_rel_dir}/{clean_filename}"
+                    clean_filename = self.sanitize_component(filename, fallback=f"{track_num:02d}. Track.mp3", max_length=180)
+                    target_track_rel_path = f"{target_group_rel_dir}/{clean_filename}"
                     target_track_abs = self._music_sandbox.resolve(target_track_rel_path)
-                    dup_idx += 1
 
-                used_target_paths.add(target_track_abs)
+                    dup_idx = 2
+                    while (target_track_abs in used_target_paths) or (
+                        target_track_abs.exists() and target_track_abs.resolve() not in all_src_resolved
+                    ):
+                        clean_filename = self.sanitize_component(
+                            f"{track_num:02d}. {clean_title} ({dup_idx}).mp3",
+                            fallback=f"{track_num:02d}. Track_{dup_idx}.mp3",
+                            max_length=180,
+                        )
+                        target_track_rel_path = f"{target_group_rel_dir}/{clean_filename}"
+                        target_track_abs = self._music_sandbox.resolve(target_track_rel_path)
+                        dup_idx += 1
 
-                # Ассоциированные тексты песен (.lrc и .txt)
-                lyrics_plans: list[tuple[Path, Path]] = []
-                for ext in (".lrc", ".txt"):
-                    src_lyrics = src_track_abs.with_suffix(ext)
-                    if src_lyrics.exists() and src_lyrics.is_file():
-                        target_lyrics = target_track_abs.with_suffix(ext)
-                        lyrics_plans.append((src_lyrics, target_lyrics))
+                    used_target_paths.add(target_track_abs)
 
-                move_plans.append({
-                    "track": track,
-                    "src_track_abs": src_track_abs,
-                    "target_track_abs": target_track_abs,
-                    "target_track_rel_path": target_track_rel_path,
-                    "lyrics_plans": lyrics_plans,
-                })
+                    lyrics_plans: list[tuple[Path, Path]] = []
+                    for ext in (".lrc", ".txt"):
+                        src_lyrics = src_track_abs.with_suffix(ext)
+                        if src_lyrics.exists() and src_lyrics.is_file():
+                            target_lyrics = target_track_abs.with_suffix(ext)
+                            lyrics_plans.append((src_lyrics, target_lyrics))
 
-            # 2. Фаза 1: Стейджинг перемещаемых файлов во временные имена
-            # Освобождает исходные пути, устраняя перезапись при смене номеров дорожек местами (swap)
-            # и обеспечивая корректное переименование регистра (case-only rename).
-            # Защищен откатом при любых непредвиденных ошибках ввода-вывода (гарантия сохранности данных).
+                    move_plans.append({
+                        "orig_idx": orig_idx,
+                        "track": track,
+                        "group": group,
+                        "track_num": track_num,
+                        "clean_title": clean_title,
+                        "src_track_abs": src_track_abs,
+                        "target_track_abs": target_track_abs,
+                        "target_track_rel_path": target_track_rel_path,
+                        "lyrics_plans": lyrics_plans,
+                    })
+
+            # 3. Фаза 1: Стейджинг
             stage_records: list[dict] = []
             try:
                 for plan in move_plans:
                     src_abs: Path = plan["src_track_abs"]
                     target_abs: Path = plan["target_track_abs"]
+                    stage_dir: Path = plan["group"]["target_abs_dir"]
 
                     if src_abs.resolve() != target_abs.resolve() or str(src_abs) != str(target_abs):
-                        stage_track = target_album_abs_dir / f".stage_{uuid.uuid4().hex}_{target_abs.name[:64]}"
+                        stage_track = stage_dir / f".stage_{uuid.uuid4().hex}_{target_abs.name[:64]}"
                         shutil.move(str(src_abs), str(stage_track))
 
                         staged_lyrics_list: list[tuple[Path, Path, Path]] = []
                         for s_lyr, t_lyr in plan["lyrics_plans"]:
                             if s_lyr.resolve() != t_lyr.resolve() or str(s_lyr) != str(t_lyr):
-                                stage_lyr = target_album_abs_dir / f".stage_{uuid.uuid4().hex}_{t_lyr.name[:64]}"
+                                stage_lyr = stage_dir / f".stage_{uuid.uuid4().hex}_{t_lyr.name[:64]}"
                                 shutil.move(str(s_lyr), str(stage_lyr))
                                 staged_lyrics_list.append((stage_lyr, t_lyr, s_lyr))
                             else:
@@ -478,7 +577,6 @@ class OrganizerService:
                             "staged_lyrics": [(s, t, s) for s, t in plan["lyrics_plans"]],
                         })
             except Exception:
-                # Откат стейджинга при сбое (защита от потери исходных файлов пользователя)
                 for record in stage_records:
                     if record.get("staged_track") and record["staged_track"].exists():
                         try:
@@ -493,8 +591,8 @@ class OrganizerService:
                                 logger.warning("Сбой отката текста: %s", rollback_err)
                 raise
 
-            # 3. Фаза 2: Коммит из стейджинга в финальные пути
-            updated_tracks: list[TrackTags] = []
+            # 4. Фаза 2: Коммит
+            updated_tracks_by_orig_idx: dict[int, TrackTags] = {}
             for record in stage_records:
                 plan = record["plan"]
                 target_abs = record["target_track"]
@@ -519,74 +617,108 @@ class OrganizerService:
                 track: TrackTags = plan["track"]
                 updated_track = track.model_copy()
                 updated_track.path = plan["target_track_rel_path"]
-                updated_track.album = album.album or track.album
-                updated_track.album_artist = album.album_artist or track.album_artist
-                updated_track.year = album.year or track.year
-                if album.genre:
-                    updated_track.genre = album.genre
-                updated_tracks.append(updated_track)
+                updated_track.track_number = plan["track_num"]
 
-            # 4. Обработка обложки альбома (cover.jpg / cover.png)
-            def _choose_cover_target(src_file: Path) -> Path:
+                group = plan["group"]
+                if group["is_single"]:
+                    updated_track.album = track.album or f"{plan['clean_title']} - Single"
+                    updated_track.album_artist = track.album_artist or album.album_artist
+                    updated_track.year = track.year or album.year
+                    if album.genre:
+                        updated_track.genre = track.genre or album.genre
+                else:
+                    g_album: AlbumTags = group["album_tags"]
+                    updated_track.album = g_album.album or track.album
+                    updated_track.album_artist = g_album.album_artist or track.album_artist
+                    updated_track.year = g_album.year or track.year
+                    if g_album.genre:
+                        updated_track.genre = g_album.genre
+
+                updated_tracks_by_orig_idx[plan["orig_idx"]] = updated_track
+
+            # 5. Обработка обложек для каждого релиза
+            def _choose_cover_target(src_file: Path, target_dir: Path) -> Path:
                 try:
                     head = src_file.read_bytes()[:8]
                     if head.startswith(b"\x89PNG") or src_file.suffix.lower() == ".png":
-                        return target_album_abs_dir / "cover.png"
+                        return target_dir / "cover.png"
                 except OSError:
                     pass
-                return target_album_abs_dir / "cover.jpg"
+                return target_dir / "cover.jpg"
 
-            target_cover_abs = target_album_abs_dir / "cover.jpg"
-            cover_handled = False
+            for group in groups.values():
+                target_dir = group["target_abs_dir"]
+                if (target_dir / "cover.jpg").exists() or (target_dir / "cover.png").exists():
+                    continue
 
-            if cover_path:
+                cover_written = False
+
+                # Из track_covers_data (индивидуальные обложки треков/синглов)
+                if track_covers_data:
+                    for _, tr in group["tracks"]:
+                        if track_covers_data.get(tr.path):
+                            cov_data = track_covers_data[tr.path]
+                            is_png = cov_data[:8].startswith(b"\x89PNG")
+                            ext = "png" if is_png else "jpg"
+                            cov_file = target_dir / f"cover.{ext}"
+                            cov_file.write_bytes(cov_data)
+                            cover_written = True
+                            break
+
+                # Из переданного cover_path (обложка альбома)
+                if not cover_written and cover_path:
+                    try:
+                        src_cover = self._resolve_source_path(cover_path)
+                        if src_cover.exists() and src_cover.is_file():
+                            target_cover_abs = _choose_cover_target(src_cover, target_dir)
+                            if src_cover.resolve() != target_cover_abs.resolve():
+                                shutil.copy2(str(src_cover), str(target_cover_abs))
+                            cover_written = True
+                    except (PathTraversalError, OSError) as exc:
+                        logger.debug("Сбой обработки cover_path для группы: %s", exc)
+
+                # Из файлов источника (cover.jpg/png и т.д.)
+                if not cover_written:
+                    try:
+                        src_dir_abs = self._resolve_source_path(source_dir)
+                        dir_to_check = src_dir_abs if src_dir_abs.is_dir() else src_dir_abs.parent
+                        if dir_to_check.is_dir():
+                            candidates = (
+                                "cover.jpg",
+                                "cover.jpeg",
+                                "cover.png",
+                                "folder.jpg",
+                                "folder.jpeg",
+                                "folder.png",
+                                "front.jpg",
+                                "front.png",
+                            )
+                            for cand_name in candidates:
+                                cand_file = dir_to_check / cand_name
+                                if cand_file.exists() and cand_file.is_file():
+                                    target_cover_abs = _choose_cover_target(cand_file, target_dir)
+                                    if cand_file.resolve() != target_cover_abs.resolve():
+                                        shutil.copy2(str(cand_file), str(target_cover_abs))
+                                    cover_written = True
+                                    break
+                    except (PathTraversalError, OSError) as exc:
+                        logger.debug("Сбой поиска обложки в source_dir: %s", exc)
+
+            # Если cover_path был в медиатеке и реорганизуется — зачищаем старый файл
+            if cover_path and not is_tmp:
                 try:
                     src_cover = self._resolve_source_path(cover_path)
-                    if src_cover.exists() and src_cover.is_file():
-                        target_cover_abs = _choose_cover_target(src_cover)
-                        if src_cover.resolve() != target_cover_abs.resolve():
-                            shutil.copy2(str(src_cover), str(target_cover_abs))
-                            # При перемещении из библиотеки зачищаем старую обложку для удаления пустой папки
-                            if not is_tmp and src_cover.is_relative_to(self._music_sandbox.root):
-                                try:
-                                    src_cover.unlink()
-                                except OSError:
-                                    pass
-                        cover_handled = True
-                except (PathTraversalError, OSError) as exc:
-                    logger.debug("Сбой обработки cover_path '%s': %s", cover_path, exc)
+                    if (
+                        src_cover.exists()
+                        and src_cover.is_file()
+                        and src_cover.is_relative_to(self._music_sandbox.root)
+                        and not any(src_cover.resolve() == (g["target_abs_dir"] / src_cover.name).resolve() for g in groups.values())
+                    ):
+                        src_cover.unlink(missing_ok=True)
+                except (PathTraversalError, OSError):
+                    pass
 
-            if not cover_handled and not (target_album_abs_dir / "cover.jpg").exists() and not (target_album_abs_dir / "cover.png").exists():
-                try:
-                    src_dir_abs = self._resolve_source_path(source_dir)
-                    dir_to_check = src_dir_abs if src_dir_abs.is_dir() else src_dir_abs.parent
-                    if dir_to_check.is_dir():
-                        candidates = (
-                            "cover.jpg",
-                            "cover.jpeg",
-                            "cover.png",
-                            "folder.jpg",
-                            "folder.jpeg",
-                            "folder.png",
-                            "front.jpg",
-                            "front.png",
-                        )
-                        for cand_name in candidates:
-                            cand_file = dir_to_check / cand_name
-                            if cand_file.exists() and cand_file.is_file():
-                                target_cover_abs = _choose_cover_target(cand_file)
-                                if cand_file.resolve() != target_cover_abs.resolve():
-                                    shutil.copy2(str(cand_file), str(target_cover_abs))
-                                    if not is_tmp and cand_file.is_relative_to(self._music_sandbox.root):
-                                        try:
-                                            cand_file.unlink()
-                                        except OSError:
-                                            pass
-                                break
-                except (PathTraversalError, OSError) as exc:
-                    logger.debug("Сбой поиска обложки в source_dir '%s': %s", source_dir, exc)
-
-            # 5. Очистка исходных директорий
+            # 6. Очистка исходных директорий
             if is_tmp:
                 try:
                     src_dir_abs = self._resolve_source_path(source_dir)
@@ -604,7 +736,18 @@ class OrganizerService:
                 for old_dir in old_dirs_to_clean:
                     self.cleanup_empty_directories(old_dir)
 
+            # 7. Вычисление результирующего destination_dir
+            all_target_dirs = [g["target_rel_dir"] for g in groups.values()]
+            if len(all_target_dirs) == 1:
+                destination_dir = all_target_dirs[0]
+            else:
+                try:
+                    common = os.path.commonpath(all_target_dirs)
+                    destination_dir = common if common else all_target_dirs[0]
+                except ValueError:
+                    destination_dir = all_target_dirs[0]
+
             return OrganizerResult(
-                destination_dir=target_album_rel_dir,
-                tracks=updated_tracks,
+                destination_dir=destination_dir,
+                tracks=[updated_tracks_by_orig_idx[i] for i in range(len(tracks))],
             )

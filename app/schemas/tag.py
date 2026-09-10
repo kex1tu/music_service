@@ -111,6 +111,14 @@ class TrackTags(BaseModel):
         default=False,
         description="Признак наличия встроенной фронтальной обложки (APIC type=3)",
     )
+    cover_url: str | None = Field(
+        default=None,
+        description="Внешний URL обложки для трека (для синглов или индивидуального арта)",
+    )
+    cover_base64: str | None = Field(
+        default=None,
+        description="Base64-кодированное изображение индивидуальной обложки трека",
+    )
 
 
 class AlbumDetailsResponse(BaseModel):
@@ -150,6 +158,14 @@ class SaveAlbumRequest(BaseModel):
     reorganize: bool = Field(
         default=False,
         description="Реорганизовать файлы существующего альбома по структуре медиатеки",
+    )
+    singles_mode: bool = Field(
+        default=False,
+        description="Режим синглов: каждый трек организуется в индивидуальную папку сингла",
+    )
+    group_by_album: bool = Field(
+        default=True,
+        description="Группировать треки по альбомам при реорганизации медиатеки",
     )
 
 

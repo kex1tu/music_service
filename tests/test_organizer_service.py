@@ -507,3 +507,171 @@ def test_concurrent_album_reorganization_serialized(
     for t_rel in results:
         assert (music_dir / t_rel).exists()
 
+
+def test_compute_single_dir(organizer: tuple[OrganizerService, TagService, Path, Path]):
+    """Проверка генерации пути для синглов: {Artist}/{Title} - Single ({Year})."""
+    org, _, _, _ = organizer
+
+    track = TrackTags(path="dummy.mp3", track_number=1, title="Solo Hit", artist="Avicii", year=2013)
+    assert org.compute_single_dir(track, default_artist="Various Artists") == "Avicii/Solo Hit - Single (2013)"
+
+    # Без года
+    track_no_year = TrackTags(path="dummy.mp3", track_number=1, title="Solo Hit", artist="Avicii", year=None)
+    assert org.compute_single_dir(track_no_year, default_artist="Various Artists") == "Avicii/Solo Hit - Single"
+
+    # Fallback на default_artist при отсутствии артиста в треке
+    track_no_artist = TrackTags(path="dummy.mp3", track_number=1, title="No Artist Hit", year=2020)
+    assert org.compute_single_dir(track_no_artist, default_artist="Fallback Artist") == "Fallback Artist/No Artist Hit - Single (2020)"
+
+
+def test_organize_multi_release_with_group_by_album(
+    organizer: tuple[OrganizerService, TagService, Path, Path],
+):
+    """Проверка реорганизации пакета треков, принадлежащих разным альбомам и синглам,
+    с корректным распределением по каталогам и сохранением cover.jpg в каждый альбом.
+    """
+    org, _, music_dir, tmp_dir = organizer
+
+    job_dir = tmp_dir / "job_multi" / "converted"
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    t1_file = job_dir / "01. Discovery 1.mp3"
+    t1_file.write_bytes(MINIMAL_MP3)
+    t2_file = job_dir / "02. Homework 1.mp3"
+    t2_file.write_bytes(MINIMAL_MP3)
+    t3_file = job_dir / "03. Solo Single.mp3"
+    t3_file.write_bytes(MINIMAL_MP3)
+
+    tracks = [
+        TrackTags(
+            path="job_multi/converted/01. Discovery 1.mp3",
+            track_number=1,
+            title="One More Time",
+            artist="Daft Punk",
+            album="Discovery",
+            year=2001,
+        ),
+        TrackTags(
+            path="job_multi/converted/02. Homework 1.mp3",
+            track_number=1,
+            title="Da Funk",
+            artist="Daft Punk",
+            album="Homework",
+            year=1997,
+        ),
+        TrackTags(
+            path="job_multi/converted/03. Solo Single.mp3",
+            track_number=1,
+            title="Get Lucky",
+            artist="Daft Punk",
+            album="",  # Сингл
+            year=2013,
+        ),
+    ]
+
+    default_album = AlbumTags(album_artist="Daft Punk", album="", year=2024)
+
+    # Запускаем организацию с group_by_album=True, singles_mode=False
+    track_covers = {"job_multi/converted/01. Discovery 1.mp3": DUMMY_JPEG}
+    res = org.organize_album(
+        album=default_album,
+        tracks=tracks,
+        source_dir="job_multi/converted",
+        track_covers_data=track_covers,
+        group_by_album=True,
+        singles_mode=False,
+    )
+
+    # Проверяем, что первый трек попал в Daft Punk/Discovery - 2001
+    assert res.tracks[0].path == "Daft Punk/Discovery - 2001/01. One More Time.mp3"
+    assert (music_dir / res.tracks[0].path).exists()
+    assert (music_dir / "Daft Punk/Discovery - 2001/cover.jpg").exists()
+
+    # Второй трек попал в Daft Punk/Homework - 1997
+    assert res.tracks[1].path == "Daft Punk/Homework - 1997/01. Da Funk.mp3"
+    assert (music_dir / res.tracks[1].path).exists()
+
+    # Третий трек (сингл без альбома) попал в Daft Punk/Get Lucky - Single (2013)/01. Get Lucky.mp3
+    assert res.tracks[2].path == "Daft Punk/Get Lucky - Single (2013)/01. Get Lucky.mp3"
+    assert (music_dir / res.tracks[2].path).exists()
+
+
+def test_organize_with_singles_mode(
+    organizer: tuple[OrganizerService, TagService, Path, Path],
+):
+    """Проверка принудительного режима синглов (singles_mode=True): все треки
+    раскладываются в отдельные папки синглов независимо от наличия альбома.
+    """
+    org, _, music_dir, tmp_dir = organizer
+
+    job_dir = tmp_dir / "job_singles" / "converted"
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    t1_file = job_dir / "01. Solo.mp3"
+    t1_file.write_bytes(MINIMAL_MP3)
+
+    tracks = [
+        TrackTags(
+            path="job_singles/converted/01. Solo.mp3",
+            track_number=1,
+            title="Midnight City",
+            artist="M83",
+            album="Hurry Up, We're Dreaming",
+            year=2011,
+        )
+    ]
+    album = AlbumTags(album_artist="M83", album="Hurry Up, We're Dreaming", year=2011)
+
+    res = org.organize_album(
+        album=album,
+        tracks=tracks,
+        source_dir="job_singles/converted",
+        singles_mode=True,
+    )
+
+    assert res.tracks[0].path == "M83/Midnight City - Single (2011)/01. Midnight City.mp3"
+    assert (music_dir / res.tracks[0].path).exists()
+
+
+
+
+def test_organize_with_individual_track_covers_data(
+    organizer: tuple[OrganizerService, TagService, Path, Path],
+):
+    """Проверка сохранения обложек из track_covers_data для отдельных релизов."""
+    org, _, music_dir, tmp_dir = organizer
+
+    job_dir = tmp_dir / "job_covers" / "converted"
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    t1_file = job_dir / "01. Track.mp3"
+    t1_file.write_bytes(MINIMAL_MP3)
+
+    tracks = [
+        TrackTags(
+            path="job_covers/converted/01. Track.mp3",
+            track_number=1,
+            title="Track One",
+            artist="Custom Artist",
+            album="Custom Album",
+            year=2022,
+        )
+    ]
+    album = AlbumTags(album_artist="Custom Artist", album="Custom Album", year=2022)
+
+    custom_cover = b"\xff\xd8\xff\xe0" + b"CUSTOM_COVER" * 10
+    track_covers = {"job_covers/converted/01. Track.mp3": custom_cover}
+
+    org.organize_album(
+        album=album,
+        tracks=tracks,
+        source_dir="job_covers/converted",
+        track_covers_data=track_covers,
+        group_by_album=True,
+    )
+
+    album_cover_path = music_dir / "Custom Artist/Custom Album - 2022/cover.jpg"
+    assert album_cover_path.exists()
+    assert album_cover_path.read_bytes() == custom_cover
+
+

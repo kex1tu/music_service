@@ -235,20 +235,52 @@ async def batch_save_tags(
 
         # 3. Сохраняем теги каждого трека через TagService
         saved_tracks: list[TrackTags] = []
+        track_covers_data: dict[str, bytes] = {}
+
         for track in tracks_to_process:
             resolved_file = tag_service.resolve_path(track.path)
             if not resolved_file.exists():
                 raise NotFoundError(f"Аудиофайл не найден: {track.path}")
 
+            track_cover_bytes: bytes | None = None
+            track_cover_mime = "image/jpeg"
+
+            if track.cover_base64:
+                try:
+                    raw_b64 = track.cover_base64.strip()
+                    if "," in raw_b64:
+                        header, raw_b64 = raw_b64.split(",", 1)
+                        if "png" in header.lower():
+                            track_cover_mime = "image/png"
+                        else:
+                            track_cover_mime = "image/jpeg"
+                    track_cover_bytes = base64.b64decode(raw_b64)
+                except (ValueError, OSError) as exc:
+                    logger.warning("Сбой декодирования обложки трека %s base64: %s", track.path, exc)
+            elif track.cover_url:
+                try:
+                    dl_bytes, dl_mime = await tag_service.download_cover(track.cover_url)
+                    track_cover_bytes = dl_bytes
+                    track_cover_mime = dl_mime
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Сбой скачивания обложки трека %s по URL '%s': %s", track.path, track.cover_url, exc)
+
+            if track_cover_bytes is None:
+                track_cover_bytes = cover_bytes
+                track_cover_mime = cover_mime
+
+            if track_cover_bytes is not None:
+                track_covers_data[track.path] = track_cover_bytes
+
             track_to_save = track.model_copy()
-            if cover_bytes is not None:
+            if track_cover_bytes is not None:
                 track_to_save.has_cover = True
 
             tag_service.write_tags(
                 file_path=resolved_file,
                 tags=track_to_save,
-                cover_bytes=cover_bytes,
-                cover_mime=cover_mime,
+                cover_bytes=track_cover_bytes,
+                cover_mime=track_cover_mime,
             )
 
             saved_track = tag_service.read_tags(resolved_file, rel_path=track.path)
@@ -261,6 +293,9 @@ async def batch_save_tags(
             source_dir=request.source_dir,
             cover_path=effective_cover_path,
             reorganize=request.reorganize,
+            singles_mode=request.singles_mode,
+            group_by_album=request.group_by_album,
+            track_covers_data=track_covers_data,
         )
 
         return BatchSaveResponse(
