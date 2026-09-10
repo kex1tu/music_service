@@ -1,9 +1,9 @@
 # PROGRESS.md — Матрица статусов реализации Music Downloader & Tag Manager
 
 ## Текущий статус проекта
-- **Общий прогресс:** 27 / 27 компонентов завершены (100%)
-- **Активный этап:** Все блоки (1–17), включая удаление верхнего глобального меню альбома и внедрение Release Cards с полноценными метаданными и обложками для каждого альбома/сингла в Tag Editor, полностью реализованы и протестированы.
-- **Результаты тестов:** 478/478 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
+- **Общий прогресс:** 28 / 28 компонентов завершены (100%)
+- **Активный этап:** Все блоки (1–18), включая загрузку музыки с торрентов (BitTorrent / Magnet / .torrent через aria2c), CUE-сплиттинг, извлечение Vorbis/ID3 тегов и конвертацию в MP3 320k CBR, полностью реализованы и протестированы.
+- **Результаты тестов:** 496/496 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -175,6 +175,19 @@
 | **R1: Удаление глобального блока и внедрение Release Cards** | `app/templates/index.html`, `app/static/js/tag_editor.js`, `tests/test_frontend.py` | **DONE** | Полностью удален верхний глобальный блок уровня альбома (бывшие строки 1260–1372). Вместо этого в режиме `viewMode === 'grouped'` каждый альбом и группа синглов отображаются в виде полноценной карточки релиза (`x-for="group in releases" :key="group.id"`): шапка с аккордеоном (32×32 обложка, название, бейджи, счетчик треков, кнопка галереи); раскрывающееся тело с большим меню релиза (обложка 128×128, загрузка файла, галерея, инпуты Album Artist, Album Title, Year, Discs, Genre, кнопки `Найти в Deezer`, `Перенумеровать 1..N`, `Найти тексты`, `Применить к трекам релиза`) и вложенной таблицей треков релиза. |
 | **R2: Персистентный массив `releases` и аккордеон в тулбаре** | `app/static/js/tag_editor.js`, `app/templates/index.html` | **DONE** | Для устранения потери фокуса при вводе в инпуты `x-model` динамический геттер заменен на постоянный реактивный массив `this.releases`, инициализируемый методом `buildReleasesFromTracks()`. Добавлены методы `expandAllGroups()`, `collapseAllGroups()`, `handleGroupCoverUpload(event, group)`, `applyGroupToTracks(group)`, `renumberGroupTracks(group)`, `fetchLyricsForGroup(group, forceAll)`. В тулбар добавлены кнопки быстрого сворачивания и разворачивания всех аккордеонов. |
 | **R3: Верификация, линтинг и тесты** | `tests/test_frontend.py` | **DONE** | Все 478 тестов успешно пройдены (`pytest`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). Полное соблюдение архитектурных инвариантов. |
+
+---
+
+## Блок 18: Загрузка музыки с торрентов (BitTorrent / Magnet / .torrent через aria2c) (2026-09-10T15:05:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Конфигурация, безопасность и схемы** | `app/config.py`, `app/core/exceptions.py`, `app/schemas/download.py`, `app/services/source_resolver.py`, `.env.example` | **DONE** | Добавлены настройки BitTorrent в `Settings` (`TORRENT_ENABLED`, `ARIA2C_PATH`, `TORRENT_PEER_PORT=6881`, `TORRENT_SEED_TIME=0`, `TORRENT_MAX_PEERS=55`, `TORRENT_TIMEOUT=300`, `TORRENT_MAX_SIZE_GB=50`). Добавлено доменное исключение `TorrentError(DownloadError)` (HTTP 502). В `CreateDownloadRequest` и `CreateBatchDownloadRequest` расширен литерал `source` значением `"torrent"`. В `SourceResolver.detect_source` добавлено распознавание схемы `magnet:?` без блокировки доменами. Обновлен `.env.example`. |
+| **R2: Сервис торрентов, CUE-сплиттер и извлечение тегов (TorrentService)** | `app/services/torrent_service.py` | **DONE** | Разработан `TorrentService`: запуск процесса `aria2c` с неблокирующим потоковым разбором stdout (`ARIA2C_PROGRESS_REGEX`: скорость, пиры, процент, ETA). Защита от переполнения диска при превышении `TORRENT_MAX_SIZE_GB`. Класс `CueSheetParser`: парсинг CUE-листов в UTF-8 и Windows-1251, расчет таймкодов треков и автоматическая нарезка монолитных аудиорипов через `ffmpeg -c copy`. Рекурсивное обнаружение аудиофайлов по белому списку расширений (`.flac`, `.mp3`, `.m4a`, `.wav`, `.ape`, `.wv`, `.ogg`, `.opus`, `.aac`). Извлечение метаданных (EasyID3/Vorbis) и графических обложек (`folder.jpg`, `cover.jpg`, APIC/FLAC pictures). |
+| **R3: Интеграция в DownloadService и API роутер** | `app/services/download_service.py`, `app/dependencies.py`, `app/routers/downloads.py` | **DONE** | Внедрен `_execute_torrent_pipeline` в `DownloadService`: скачивание раздачи через `aria2c` (0..70%), анализ содержимого и CUE-сплиттинг (70..75%), конвертация в эталонный MP3 320 kbps CBR через `ffmpeg` (75..95%), запись ID3v2.4 тегов через `mutagen` (95..100%), статус `READY`. `TorrentService` подключен в DI `get_download_service`. В роутере добавлен эндпоинт `POST /downloads/torrent` для multipart/form-data загрузки файлов `.torrent` с валидацией расширения. |
+| **R4: Пользовательский интерфейс (Frontend no-build)** | `app/templates/index.html`, `app/static/js/downloader.js` | **DONE** | В карточку Загрузчика добавлена кнопка и drag-and-drop область «Загрузить .torrent» (`uploadTorrentFile`, `handleTorrentDrop`, `handleTorrentDragOver`). В выпадающий список источников добавлен вариант «Торрент / Magnet». В `downloader.js` устранено искажение Magnet-ссылок в одиночном и пакетном режимах (защита от принудительного добавления `https://`). Живое отображение скорости и пиров торрента в строке шага задачи. |
+| **R5: Верификация, линтинг и тесты** | `tests/test_torrent_service.py`, `tests/test_downloads_router.py`, `tests/test_download_service.py`, `tests/test_source_resolver.py` | **DONE** | Разработано 13 новых юнит-тестов в `test_torrent_service.py` (парсинг regex, размер в байтах, CUE UTF-8 / Windows-1251, ffmpeg сплит, фильтрация файлов, mutagen теги, mock aria2c, таймауты, лимит размера). 3 новых теста в `test_downloads_router.py` (magnet link, .torrent upload, 400 на невалидный файл). 2 новых теста в `test_download_service.py` (torrent pipeline success, disabled error). 1 новый ассерт в `test_source_resolver.py`. Все 496 тестов пройдены (`pytest`, 100% pass), `ruff check app tests` чист (All checks passed!). |
+
 
 
 

@@ -1773,6 +1773,122 @@ async def test_download_pipeline_track_cover_cleanup_on_exception(tmp_sandbox):
         assert len(list(raw_dir.iterdir())) == 0
 
 
+@pytest.mark.asyncio
+async def test_torrent_pipeline_success(tmp_sandbox):
+    """Проверка успешного прохождения пайплайна загрузки торрента в DownloadService."""
+    from app.config import Settings
+    from app.services.download_service import DownloadService
+
+    settings = Settings(
+        SECRET_KEY="test_secret_key_fixed_length_32_bytes!!",
+        ADMIN_PASSWORD_HASH="$2b$12$e8Y5t1hWzC181zK0m7oKeej1eM0.7tH2l4aG5p8fW9xK0yZ1a2b3c",
+        MUSIC_DIR=tmp_sandbox.root / "music",
+        TMP_DIR=tmp_sandbox.root / "tmp",
+        MAX_CONCURRENT_DOWNLOADS=1,
+    )
+
+    mock_resolver = MagicMock()
+    mock_deezer = MagicMock()
+    mock_torrent = MagicMock()
+
+    # Задаем поведение мока торрента
+    async def fake_download(magnet_or_torrent_path, output_dir, on_progress=None):
+        if on_progress:
+            on_progress(100, "10MiB", "15", "0s")
+        # Создаем фиктивный аудиофайл
+        (output_dir / "01. Test Track.flac").write_bytes(b"FLAC_DATA")
+
+    mock_torrent.download_torrent = AsyncMock(side_effect=fake_download)
+
+    fake_tracks = [
+        ResolvedTrack(
+            track_id="torrent_1",
+            track_number=1,
+            title="Test Track",
+            artist="Test Artist",
+            album="Test Album",
+            album_artist="Test Artist",
+            year=2024,
+            genre="Electronic",
+            duration=180,
+            audio_source_url="",
+        )
+    ]
+    mock_torrent.inspect_and_prepare = AsyncMock(
+        return_value=(
+            {"album": "Test Album", "album_artist": "Test Artist", "year": 2024, "cover_url": None},
+            fake_tracks,
+        )
+    )
+
+    svc = DownloadService(
+        settings=settings,
+        tmp_sandbox=tmp_sandbox,
+        source_resolver=mock_resolver,
+        deezer_client=mock_deezer,
+        torrent_service=mock_torrent,
+    )
+
+    async def fake_transcode(input_raw, output_mp3):
+        output_mp3.write_bytes(b"MP3_DATA")
+
+    with (
+        patch.object(svc, "_transcode_to_mp3", side_effect=fake_transcode),
+        patch.object(svc, "_write_draft_tags"),
+    ):
+        job = await svc.create_job(
+            url="magnet:?xt=urn:btih:d2474e86c95b19b8bcfdb92bc12c9d44667cfa36",
+            source="torrent",
+        )
+
+        for _ in range(50):
+            if job.status in (JobStatus.READY, JobStatus.ERROR):
+                break
+            await asyncio.sleep(0.05)
+
+        assert job.status == JobStatus.READY
+        assert job.completed_tracks == 1
+        assert len(job.tracks) == 1
+        assert job.tracks[0].title == "Test Track"
+
+
+@pytest.mark.asyncio
+async def test_torrent_pipeline_service_disabled(tmp_sandbox):
+    """Проверка ошибки при запуске торрент-задачи, если TorrentService не передан."""
+    from app.config import Settings
+    from app.services.download_service import DownloadService
+
+    settings = Settings(
+        SECRET_KEY="test_secret_key_fixed_length_32_bytes!!",
+        ADMIN_PASSWORD_HASH="$2b$12$e8Y5t1hWzC181zK0m7oKeej1eM0.7tH2l4aG5p8fW9xK0yZ1a2b3c",
+        MUSIC_DIR=tmp_sandbox.root / "music",
+        TMP_DIR=tmp_sandbox.root / "tmp",
+        MAX_CONCURRENT_DOWNLOADS=1,
+    )
+
+    svc = DownloadService(
+        settings=settings,
+        tmp_sandbox=tmp_sandbox,
+        source_resolver=MagicMock(),
+        deezer_client=MagicMock(),
+        torrent_service=None,  # отключен
+    )
+
+    job = await svc.create_job(
+        url="magnet:?xt=urn:btih:d2474e86c95b19b8bcfdb92bc12c9d44667cfa36",
+        source="torrent",
+    )
+
+    for _ in range(50):
+        if job.status in (JobStatus.READY, JobStatus.ERROR):
+            break
+        await asyncio.sleep(0.05)
+
+    assert job.status == JobStatus.ERROR
+    assert "Поддержка торрентов отключена" in str(job.error)
+
+
+
 
 
 

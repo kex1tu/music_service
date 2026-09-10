@@ -117,6 +117,45 @@ class Settings(BaseSettings):
         default=None,
         description="URL шлюза Cobalt API для запасного скачивания потоков",
     )
+    
+    # Торрент-загрузчик (BitTorrent через aria2c)
+    TORRENT_ENABLED: bool = Field(
+        default=True,
+        description="Включить поддержку загрузки музыки с торрентов (Magnet / .torrent)",
+    )
+    ARIA2C_PATH: str = Field(
+        default="aria2c",
+        description="Путь к исполняемому файлу aria2c",
+    )
+    TORRENT_PEER_PORT: int = Field(
+        default=6881,
+        ge=1024,
+        le=65535,
+        description="Начальный порт для входящих BitTorrent пиров",
+    )
+    TORRENT_SEED_TIME: int = Field(
+        default=0,
+        ge=0,
+        description="Время сидинга после завершения загрузки (минут, 0 = отключен)",
+    )
+    TORRENT_MAX_PEERS: int = Field(
+        default=55,
+        ge=5,
+        le=200,
+        description="Максимальное количество пиров на задачу загрузки",
+    )
+    TORRENT_TIMEOUT: int = Field(
+        default=300,
+        ge=30,
+        description="Таймаут ожидания пиров/метаданных торрента (секунд)",
+    )
+    TORRENT_MAX_SIZE_GB: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description="Максимальный размер торрент-раздачи (ГБ, по умолчанию 50)",
+    )
+
     ALLOWED_DOWNLOAD_DOMAINS: tuple[str, ...] = (
         "youtube.com",
         "music.youtube.com",

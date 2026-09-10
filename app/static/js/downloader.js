@@ -50,7 +50,7 @@ function downloaderComponent() {
             }
 
             const urls = rawUrls.map((u) =>
-                !/^https?:\/\//i.test(u) && u.includes('.') ? 'https://' + u : u
+                !/^https?:\/\//i.test(u) && !/^magnet:\?/i.test(u) && u.includes('.') ? 'https://' + u : u
             );
 
             this.isSubmitting = true;
@@ -94,7 +94,7 @@ function downloaderComponent() {
                 return;
             }
 
-            if (!/^https?:\/\//i.test(cleanUrl) && cleanUrl.includes('.')) {
+            if (!/^https?:\/\//i.test(cleanUrl) && !/^magnet:\?/i.test(cleanUrl) && cleanUrl.includes('.')) {
                 cleanUrl = 'https://' + cleanUrl;
             }
 
@@ -269,6 +269,62 @@ function downloaderComponent() {
             }
             this.job = null;
             this.url = '';
+        },
+
+        async uploadTorrentFile(event) {
+            const file = event.target?.files?.[0] || event.dataTransfer?.files?.[0];
+            if (!file) return;
+
+            if (!file.name.toLowerCase().endsWith('.torrent')) {
+                Alpine.store('app').toast('Допускаются только файлы .torrent', 'error');
+                return;
+            }
+
+            this.isSubmitting = true;
+            this.job = null;
+            if (this.pollInterval) {
+                clearInterval(this.pollInterval);
+                this.pollInterval = null;
+            }
+
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const response = await fetch('/downloads/torrent', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.message || 'Ошибка загрузки .torrent файла');
+                }
+
+                const jobData = await response.json();
+                this.job = jobData;
+                Alpine.store('app').currentJobId = jobData.id;
+                Alpine.store('app').toast(`Торрент "${file.name}" поставлен в очередь`, 'success');
+
+                this.startPolling(jobData.id);
+            } catch (err) {
+                Alpine.store('app').toast(err.message, 'error');
+            } finally {
+                this.isSubmitting = false;
+                // Сброс input[type=file]
+                if (event.target && event.target.value) {
+                    event.target.value = '';
+                }
+            }
+        },
+
+        handleTorrentDrop(event) {
+            event.preventDefault();
+            this.uploadTorrentFile(event);
+        },
+
+        handleTorrentDragOver(event) {
+            event.preventDefault();
         },
     };
 }

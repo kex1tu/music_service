@@ -2,6 +2,8 @@
 
 Предоставляет эндпоинты:
 - POST /downloads — постановка задачи в очередь (HTTP 202 Accepted)
+- POST /downloads/batch — пакетное создание задач
+- POST /downloads/torrent — загрузка файла .torrent (multipart/form-data)
 - GET /downloads/{job_id} — опрос статуса и прогресса (long-polling)
 - GET /downloads/{job_id}/tracks — получение черновых метаданных треков (для Tag Editor)
 - DELETE /downloads/{job_id} — отмена задачи и удаление временных файлов
@@ -9,10 +11,12 @@
 """
 
 import logging
+import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, File, UploadFile, status
 
-from app.dependencies import CurrentUserDep, DownloadServiceDep
+from app.dependencies import CurrentUserDep, DownloadServiceDep, TmpSandboxDep
 from app.schemas.download import (
     BatchDownloadResponse,
     CreateBatchDownloadRequest,
@@ -71,6 +75,43 @@ async def create_batch_downloads(
         jobs=[j.to_response() for j in jobs],
         total_queued=len(jobs),
     )
+
+
+@router.post(
+    "/torrent",
+    response_model=DownloadJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Загрузка файла .torrent",
+    description="Принимает файл .torrent через multipart/form-data, сохраняет во временный каталог и запускает загрузку.",
+)
+async def upload_torrent_file(
+    download_service: DownloadServiceDep,
+    current_user: CurrentUserDep,
+    tmp_sandbox: TmpSandboxDep,
+    file: Annotated[UploadFile, File(description="Файл .torrent")],
+) -> DownloadJobResponse:
+    """Создает задачу загрузки из загруженного файла .torrent."""
+    if not file.filename or not file.filename.lower().endswith(".torrent"):
+        from app.core.exceptions import UnsupportedSourceError
+
+        raise UnsupportedSourceError("Допускаются только файлы с расширением .torrent")
+
+    # Сохраняем .torrent файл во временный каталог
+    torrent_id = uuid.uuid4().hex
+    torrent_dir = tmp_sandbox.resolve(f"_torrents/{torrent_id}")
+    torrent_dir.mkdir(parents=True, exist_ok=True)
+    torrent_path = tmp_sandbox.resolve(f"_torrents/{torrent_id}/{file.filename}")
+
+    content = await file.read()
+    torrent_path.write_bytes(content)
+
+    logger.info(
+        "Пользователь '%s' загрузил .torrent файл: %s (%d байт)",
+        current_user, file.filename, len(content),
+    )
+
+    job = await download_service.create_job(url=str(torrent_path), source="torrent")
+    return job.to_response()
 
 
 @router.get(

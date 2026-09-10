@@ -30,7 +30,7 @@ class CreateDownloadRequest(BaseModel):
         description="URL трека, альбома или плейлиста (YouTube, SoundCloud, Deezer)",
         examples=["https://www.deezer.com/album/302127"],
     )
-    source: Literal["auto", "soundcloud", "youtube", "deezer", "yandex", "spotify", "applemusic"] = Field(
+    source: Literal["auto", "soundcloud", "youtube", "deezer", "yandex", "spotify", "applemusic", "torrent"] = Field(
         default="auto",
         description="Явное указание источника или 'auto' для автоматического определения по URL",
     )
@@ -45,7 +45,7 @@ class CreateBatchDownloadRequest(BaseModel):
         description="Список URL треков, альбомов или плейлистов",
         examples=[["https://www.deezer.com/album/302127", "https://soundcloud.com/artist/sets/album"]],
     )
-    source: Literal["auto", "soundcloud", "youtube", "deezer", "yandex", "spotify", "applemusic"] = Field(
+    source: Literal["auto", "soundcloud", "youtube", "deezer", "yandex", "spotify", "applemusic", "torrent"] = Field(
         default="auto",
         description="Явное указание источника или 'auto' для автоматического определения",
     )

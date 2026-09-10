@@ -21,6 +21,7 @@ from app.services.lyrics_service import GeniusClient, LrclibClient, LyricsServic
 from app.services.organizer_service import OrganizerService
 from app.services.source_resolver import SourceResolver
 from app.services.tag_service import TagService
+from app.services.torrent_service import TorrentService
 
 
 @lru_cache(maxsize=1)
@@ -142,11 +143,15 @@ def get_download_service(
     """Провайдер синглтона DownloadService (хранилище задач в памяти)."""
     global _download_service
     if _download_service is None:
+        torrent_svc: TorrentService | None = None
+        if settings.TORRENT_ENABLED:
+            torrent_svc = TorrentService(settings=settings)
         _download_service = DownloadService(
             settings=settings,
             tmp_sandbox=tmp_sandbox,
             source_resolver=source_resolver,
             deezer_client=deezer_client,
+            torrent_service=torrent_svc,
         )
     return _download_service
 

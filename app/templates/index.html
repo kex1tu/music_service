@@ -458,38 +458,51 @@
         <!-- ==================== ВКЛАДКА 1: ЗАГРУЗЧИК ==================== -->
         <section x-show="$store.app.activeTab === 'downloader'" x-data="{ inputMode: 'single', ...(typeof downloaderComponent === 'function' ? downloaderComponent() : {}) }" class="space-y-6 animate-fade-in">
             <!-- Карточка формы загрузки -->
-            <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl">
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl"
+                 @drop="if (typeof handleTorrentDrop === 'function') handleTorrentDrop($event)"
+                 @dragover="if (typeof handleTorrentDragOver === 'function') handleTorrentDragOver($event)">
                 <h2 class="text-lg font-semibold text-white mb-2">Загрузка музыки</h2>
                 <p class="text-sm text-gray-400 mb-6">
-                    Вставьте ссылку на трек, альбом или плейлист из Яндекс Музыки, Spotify, Apple Music, Deezer, YouTube Music или SoundCloud.
+                    Вставьте ссылку на трек, альбом или плейлист (Яндекс Музыка, Spotify, Apple Music, Deezer, YouTube, SoundCloud), либо Magnet-ссылку или .torrent файл.
                 </p>
 
                 <form @submit.prevent="submitDownload()" class="space-y-4" novalidate>
-                    <!-- Переключатель режима: Одна ссылка / Список ссылок -->
-                    <div class="flex items-center space-x-2 border-b border-gray-800 pb-3">
-                        <button
-                            type="button"
-                            @click="inputMode = 'single'; if (typeof setMode === 'function') setMode('single')"
-                            :class="inputMode !== 'batch' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40' : 'text-gray-400 hover:text-gray-200 border-transparent'"
-                            class="px-3 py-1.5 rounded-md text-xs font-medium border transition flex items-center space-x-1.5">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M7 17q-2.075 0-3.537-1.463T2 12t1.463-3.537T7 7h3q.425 0 .713.288T11 8t-.288.713T10 9H7q-1.25 0-2.125.875T4 12t.875 2.125T7 15h3q.425 0 .713.288T11 16t-.288.713T10 17zm2-4q-.425 0-.712-.288T8 12t.288-.712T9 11h6q.425 0 .713.288T16 12t-.288.713T15 13zm5 4q-.425 0-.712-.288T13 16t.288-.712T14 15h3q1.25 0 2.125-.875T20 12t-.875-2.125T17 9h-3q-.425 0-.712-.288T13 8t.288-.712T14 7h3q2.075 0 3.538 1.463T22 12t-1.463 3.538T17 17z"/>
+                    <!-- Переключатель режима: Одна ссылка / Список ссылок / Загрузка .torrent -->
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-3">
+                        <div class="flex items-center space-x-2">
+                            <button
+                                type="button"
+                                @click="inputMode = 'single'; if (typeof setMode === 'function') setMode('single')"
+                                :class="inputMode !== 'batch' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40' : 'text-gray-400 hover:text-gray-200 border-transparent'"
+                                class="px-3 py-1.5 rounded-md text-xs font-medium border transition flex items-center space-x-1.5">
+                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M7 17q-2.075 0-3.537-1.463T2 12t1.463-3.537T7 7h3q.425 0 .713.288T11 8t-.288.713T10 9H7q-1.25 0-2.125.875T4 12t.875 2.125T7 15h3q.425 0 .713.288T11 16t-.288.713T10 17zm2-4q-.425 0-.712-.288T8 12t.288-.712T9 11h6q.425 0 .713.288T16 12t-.288.713T15 13zm5 4q-.425 0-.712-.288T13 16t.288-.712T14 15h3q1.25 0 2.125-.875T20 12t-.875-2.125T17 9h-3q-.425 0-.712-.288T13 8t.288-.712T14 7h3q2.075 0 3.538 1.463T22 12t-1.463 3.538T17 17z"/>
+                                </svg>
+                                <span>Одна ссылка / Magnet</span>
+                            </button>
+                            <button
+                                type="button"
+                                @click="inputMode = 'batch'; if (typeof setMode === 'function') setMode('batch')"
+                                :class="inputMode === 'batch' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40' : 'text-gray-400 hover:text-gray-200 border-transparent'"
+                                class="px-3 py-1.5 rounded-md text-xs font-medium border transition flex items-center space-x-1.5">
+                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M4 18q-.825 0-1.412-.587T2 16V4q0-.825.588-1.412T4 2h12q.825 0 1.413.588T18 4v12q0 .825-.587 1.413T16 18zm16 4q-.825 0-1.412-.587T18 20V7q0-.425.288-.712T19 6t.713.288T20 7v13h-13q-.425 0-.712-.288T6 19t.288-.712T7 18h13z"/>
+                                </svg>
+                                <span>Список ссылок (пакетно)</span>
+                                <template x-if="parsedBatchUrls && parsedBatchUrls.length > 0">
+                                    <span class="px-1.5 py-0.2 bg-emerald-500 text-gray-950 rounded-full text-[10px] font-bold" x-text="parsedBatchUrls.length"></span>
+                                </template>
+                            </button>
+                        </div>
+
+                        <!-- Кнопка загрузки .torrent файла -->
+                        <label class="cursor-pointer px-3 py-1.5 rounded-md text-xs font-medium border border-gray-700 hover:border-emerald-500/40 bg-gray-950/60 text-gray-300 hover:text-emerald-400 transition flex items-center space-x-1.5" title="Перетащите сюда или выберите .torrent файл">
+                            <svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M11 16V7.85l-2.6 2.6L7 9l5-5l5 5l-1.4 1.45l-2.6-2.6V16zm-7 4q-.825 0-1.412-.587T2 18v-3h2v3h16v-3h2v3q0 .825-.587 1.413T20 20z"/>
                             </svg>
-                            <span>Одна ссылка</span>
-                        </button>
-                        <button
-                            type="button"
-                            @click="inputMode = 'batch'; if (typeof setMode === 'function') setMode('batch')"
-                            :class="inputMode === 'batch' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40' : 'text-gray-400 hover:text-gray-200 border-transparent'"
-                            class="px-3 py-1.5 rounded-md text-xs font-medium border transition flex items-center space-x-1.5">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M4 18q-.825 0-1.412-.587T2 16V4q0-.825.588-1.412T4 2h12q.825 0 1.413.588T18 4v12q0 .825-.587 1.413T16 18zm16 4q-.825 0-1.412-.587T18 20V7q0-.425.288-.712T19 6t.713.288T20 7v13h-13q-.425 0-.712-.288T6 19t.288-.712T7 18h13z"/>
-                            </svg>
-                            <span>Список ссылок (пакетно)</span>
-                            <template x-if="parsedBatchUrls && parsedBatchUrls.length > 0">
-                                <span class="px-1.5 py-0.2 bg-emerald-500 text-gray-950 rounded-full text-[10px] font-bold" x-text="parsedBatchUrls.length"></span>
-                            </template>
-                        </button>
+                            <span>Загрузить .torrent</span>
+                            <input type="file" accept=".torrent" @change="if (typeof uploadTorrentFile === 'function') uploadTorrentFile($event)" class="hidden">
+                        </label>
                     </div>
 
                     <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
@@ -504,7 +517,7 @@
                                 type="text"
                                 inputmode="url"
                                 x-model="url"
-                                placeholder="https://music.yandex.ru/... https://open.spotify.com/... https://music.apple.com/... https://deezer.com/..."
+                                placeholder="https://... или magnet:?xt=urn:btih:..."
                                 class="w-full bg-gray-950 border border-gray-700 rounded-lg pl-10 pr-24 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition text-sm">
                             <div class="absolute inset-y-0 right-0 pr-2 flex items-center space-x-1.5">
                                 <button
@@ -532,7 +545,7 @@
                             <textarea
                                 x-model="batchUrlsText"
                                 rows="3"
-                                placeholder="Вставьте по одной ссылке на строку (от 1 до 20):&#10;https://music.yandex.ru/album/...&#10;https://open.spotify.com/album/..."
+                                placeholder="Вставьте по одной ссылке на строку (от 1 до 20):&#10;https://music.yandex.ru/album/...&#10;https://open.spotify.com/album/...&#10;magnet:?xt=urn:btih:..."
                                 class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition text-xs font-mono"></textarea>
                         </div>
 
@@ -542,6 +555,7 @@
                                 x-model="source"
                                 class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-3 text-gray-200 focus:outline-none focus:border-emerald-500 text-sm">
                                 <option value="auto">Автоопределение</option>
+                                <option value="torrent">Торрент / Magnet</option>
                                 <option value="yandex">Яндекс Музыка</option>
                                 <option value="spotify">Spotify</option>
                                 <option value="applemusic">Apple Music</option>

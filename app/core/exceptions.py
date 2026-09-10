@@ -79,6 +79,13 @@ class AudioMatchError(DownloadError):
     error_code = "AUDIO_MATCH_FAILED"
 
 
+class TorrentError(DownloadError):
+    """Сбой загрузки или обработки торрент-раздачи (BitTorrent/Magnet)."""
+
+    status_code = 502
+    error_code = "TORRENT_FAILED"
+
+
 class TagError(MusicManagerError):
     """Базовая ошибка обработки метаданных ID3."""
 

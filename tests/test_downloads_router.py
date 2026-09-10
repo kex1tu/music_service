@@ -137,3 +137,41 @@ def test_cancel_download(authenticated_client: TestClient):
         # После удаления задача не должна находиться
         get_resp = authenticated_client.get(f"/downloads/{job_id}")
         assert get_resp.status_code == 404
+
+
+def test_create_magnet_download(authenticated_client: TestClient):
+    """Проверка создания задачи по Magnet-ссылке (HTTP 202, source='torrent')."""
+    with patch.object(DownloadService, "_execute_pipeline", new=AsyncMock()):
+        magnet_url = "magnet:?xt=urn:btih:d2474e86c95b19b8bcfdb92bc12c9d44667cfa36&dn=TestAlbum"
+        resp = authenticated_client.post(
+            "/downloads",
+            json={"url": magnet_url, "source": "auto"},
+        )
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["source"] == "torrent"
+        assert data["status"] == "QUEUED"
+        assert data["url"] == magnet_url
+
+
+def test_upload_torrent_file(authenticated_client: TestClient):
+    """Проверка загрузки файла .torrent через multipart/form-data (HTTP 202)."""
+    with patch.object(DownloadService, "_execute_pipeline", new=AsyncMock()):
+        torrent_bytes = b"d8:announce31:http://tracker.example.com/announcee"
+        files = {"file": ("album.torrent", torrent_bytes, "application/x-bittorrent")}
+
+        resp = authenticated_client.post("/downloads/torrent", files=files)
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["source"] == "torrent"
+        assert data["status"] == "QUEUED"
+        assert "album.torrent" in data["url"]
+
+
+def test_upload_torrent_invalid_extension(authenticated_client: TestClient):
+    """Проверка отклонения загрузки файла с невалидным расширением (HTTP 400)."""
+    files = {"file": ("song.mp3", b"FAKE_MP3", "audio/mpeg")}
+    resp = authenticated_client.post("/downloads/torrent", files=files)
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "UNSUPPORTED_SOURCE"
+

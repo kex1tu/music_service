@@ -30,6 +30,11 @@ from app.schemas.download import (
 )
 from app.services.deezer_client import DeezerClient
 from app.services.source_resolver import SourceResolver
+from app.services.torrent_service import (
+    TorrentService,
+    discover_audio_files,
+    find_cover_art,
+)
 
 logger = logging.getLogger("music_manager.downloader")
 
@@ -161,11 +166,13 @@ class DownloadService:
         tmp_sandbox: PathSandbox,
         source_resolver: SourceResolver,
         deezer_client: DeezerClient,
+        torrent_service: TorrentService | None = None,
     ) -> None:
         self._settings = settings
         self._sandbox = tmp_sandbox
         self._resolver = source_resolver
         self._deezer = deezer_client
+        self._torrent = torrent_service
         self._jobs: dict[str, DownloadJob] = {}
         self._semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_DOWNLOADS)
         self._lock = asyncio.Lock()
@@ -326,6 +333,11 @@ class DownloadService:
                 converted_dir = self._sandbox.resolve(f"{job.id}/converted")
                 raw_dir.mkdir(parents=True, exist_ok=True)
                 converted_dir.mkdir(parents=True, exist_ok=True)
+
+                # Торрент-источники обрабатываются отдельным пайплайном
+                if job.source == "torrent":
+                    await self._execute_torrent_pipeline(job, raw_dir, converted_dir)
+                    return
 
                 album_meta, tracks = await self._resolver.resolve(job.url, job.source)
                 job.album_metadata = album_meta
@@ -626,6 +638,176 @@ class DownloadService:
                                 pass
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("Сбой при очистке остаточных файлов в %s/raw: %s", job.id, exc)
+
+    async def _execute_torrent_pipeline(
+        self,
+        job: DownloadJob,
+        raw_dir: Path,
+        converted_dir: Path,
+    ) -> None:
+        """Специализированный пайплайн загрузки торрентов.
+
+        Этапы:
+        1. Загрузка раздачи через aria2c (0..70% прогресса).
+        2. Инспекция: обнаружение аудио, CUE-сплиттинг, извлечение тегов (70..75%).
+        3. Конвертация каждого трека в MP3 320 kbps CBR (75..95%).
+        4. Запись черновых ID3v2.4 тегов (95..100%).
+        """
+        if self._torrent is None:
+            raise DownloadError("Поддержка торрентов отключена (TorrentService не инициализирован)")
+
+        try:
+            # --- Этап 1: Загрузка через aria2c ---
+            job.status = JobStatus.DOWNLOADING
+            job.current_step = "Загрузка торрента: ожидание пиров…"
+            job.progress = 2.0
+            job.updated_at = datetime.now(timezone.utc)
+
+            def on_torrent_progress(percent: int, speed: str, peers: str, eta: str) -> None:
+                job.progress = min(70.0, max(job.progress, round(percent * 0.70, 1)))
+                eta_display = f", ETA: {eta}" if eta else ""
+                job.current_step = (
+                    f"Загрузка торрента: {percent}% | ↓ {speed} | Пиры: {peers}{eta_display}"
+                )
+                job.updated_at = datetime.now(timezone.utc)
+
+            await self._torrent.download_torrent(
+                magnet_or_torrent_path=job.url,
+                output_dir=raw_dir,
+                on_progress=on_torrent_progress,
+            )
+
+            # --- Этап 2: Инспекция и подготовка метаданных ---
+            job.status = JobStatus.CONVERTING
+            job.current_step = "Анализ содержимого раздачи и извлечение метаданных…"
+            job.progress = 70.0
+            job.updated_at = datetime.now(timezone.utc)
+
+            album_meta, resolved_tracks = await self._torrent.inspect_and_prepare(raw_dir)
+            job.album_metadata = album_meta
+            job.tracks = resolved_tracks
+
+            if not resolved_tracks:
+                raise DownloadError("В раздаче не обнаружено аудиофайлов")
+
+            # Поиск обложки
+            audio_files = discover_audio_files(raw_dir)
+            cover_file = find_cover_art(raw_dir, audio_files)
+
+            if cover_file and cover_file.exists():
+                cover_bytes = cover_file.read_bytes()
+                if cover_bytes:
+                    cover_bytes = await self._ensure_jpeg_cover(cover_bytes)
+                    job_cover = self._sandbox.resolve(f"{job.id}/cover.jpg")
+                    job_cover.write_bytes(cover_bytes)
+                    job.cover_relative_path = str(self._sandbox.to_relative(job_cover))
+                    cover_file = job_cover
+
+            job.progress = 75.0
+            job.updated_at = datetime.now(timezone.utc)
+
+            # --- Этап 3: Конвертация в MP3 320 kbps CBR ---
+            total = len(resolved_tracks)
+            used_filenames: set[str] = set()
+
+            for idx, track in enumerate(resolved_tracks, start=1):
+                track_progress_base = 75.0 + (idx - 1) / total * 20.0  # 75..95%
+
+                job.status = JobStatus.CONVERTING
+                job.current_step = f"Конвертация {idx}/{total}: {track.title} → MP3 320k"
+                job.progress = min(95.0, max(job.progress, round(track_progress_base, 1)))
+                job.updated_at = datetime.now(timezone.utc)
+
+                # Находим исходный аудиофайл
+                if idx <= len(audio_files):
+                    source_audio = audio_files[idx - 1]
+                else:
+                    logger.warning("Не найден аудиофайл для трека %d/%d", idx, total)
+                    track.status = "error"
+                    track.error = "Исходный аудиофайл не найден"
+                    continue
+
+                # Формируем безопасное имя файла
+                clean_title = (
+                    re.sub(r'[\x00-\x1f/\\:*?"<>|%]', "_", (track.title or "").strip()).strip(". ")
+                    or f"Track_{idx}"
+                )
+                if len(clean_title) > 180:
+                    clean_title = clean_title[:180].rstrip(". ") or f"Track_{idx}"
+
+                clean_filename = f"{track.track_number:02d}. {clean_title}.mp3"
+                if clean_filename in used_filenames:
+                    dup_idx = 2
+                    while f"{track.track_number:02d}. {clean_title} ({dup_idx}).mp3" in used_filenames:
+                        dup_idx += 1
+                    clean_filename = f"{track.track_number:02d}. {clean_title} ({dup_idx}).mp3"
+
+                used_filenames.add(clean_filename)
+                mp3_path = self._sandbox.resolve(f"{job.id}/converted/{clean_filename}")
+
+                try:
+                    await self._transcode_to_mp3(
+                        input_raw=source_audio,
+                        output_mp3=mp3_path,
+                    )
+
+                    # --- Этап 4: Запись ID3v2.4 тегов ---
+                    job.status = JobStatus.TAGGING
+                    tag_progress = 95.0 + idx / total * 5.0  # 95..100%
+                    job.progress = min(100.0, max(job.progress, round(tag_progress, 1)))
+                    job.current_step = f"Запись тегов {idx}/{total}: {track.title}"
+                    job.updated_at = datetime.now(timezone.utc)
+
+                    self._write_draft_tags(
+                        mp3_path=mp3_path,
+                        track=track,
+                        cover_file=cover_file,
+                    )
+
+                    track.status = "ready"
+                    track.converted_path = str(self._sandbox.to_relative(mp3_path))
+                    job.completed_tracks += 1
+
+                except Exception as exc:
+                    logger.warning(
+                        "Сбой обработки торрент-трека %d/%d (%s): %s",
+                        idx, total, track.title, exc,
+                    )
+                    track.status = "error"
+                    track.error = str(exc)
+                    if mp3_path.exists():
+                        try:
+                            mp3_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                    if total == 1:
+                        raise
+
+            # Завершение задачи
+            job.status = JobStatus.READY
+            job.progress = 100.0
+            if job.completed_tracks < total:
+                skipped = total - job.completed_tracks
+                if job.completed_tracks == 0:
+                    job.current_step = f"Завершено: 0/{total} треков сконвертировано ({skipped} с ошибками)"
+                else:
+                    job.current_step = (
+                        f"Готово к проверке тегов ({job.completed_tracks}/{total} сконвертировано, {skipped} пропущено)"
+                    )
+            else:
+                job.current_step = "Готово к проверке тегов"
+            job.updated_at = datetime.now(timezone.utc)
+            logger.info(
+                "Торрент-задача %s завершена (%d/%d треков)",
+                job.id, job.completed_tracks, total,
+            )
+
+        except Exception as exc:
+            logger.exception("Сбой торрент-задачи %s", job.id)
+            job.status = JobStatus.ERROR
+            job.error = str(exc)
+            job.current_step = f"Ошибка: {exc}"
+            job.updated_at = datetime.now(timezone.utc)
 
     async def _download_raw_stream(
         self,

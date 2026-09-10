@@ -536,13 +536,17 @@ class SourceResolver:
 
     def detect_source(
         self, url: str
-    ) -> Literal["soundcloud", "youtube", "deezer", "yandex", "spotify", "applemusic"]:
+    ) -> Literal["soundcloud", "youtube", "deezer", "yandex", "spotify", "applemusic", "torrent"]:
         """Проверяет URL по белому списку доменов и возвращает тип источника.
 
         Raises:
             UnsupportedSourceError: Если домен не входит в список разрешенных.
         """
+        # Торрент-источники не имеют HTTP-домена — проверяем протокол magnet
         url_clean = url.strip()
+        if url_clean.startswith("magnet:?"):
+            return "torrent"
+
         if not re.match(r"^https?://", url_clean, re.IGNORECASE):
             url_clean = f"https://{url_clean}"
         parsed = urllib.parse.urlparse(url_clean)
@@ -594,6 +598,11 @@ class SourceResolver:
             return await self._resolve_apple_music(url)
         if source in ("youtube", "soundcloud"):
             return await self._resolve_ytdlp(url, source)
+
+        if source == "torrent":
+            # Торренты обрабатываются напрямую через TorrentService в DownloadService;
+            # возвращаем маркер отложенного разрешения метаданных.
+            return {"album": "", "album_artist": "", "year": None, "cover_url": None}, []
 
         raise UnsupportedSourceError(f"Неподдерживаемый источник: {source}")
 
