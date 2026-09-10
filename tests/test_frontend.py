@@ -118,11 +118,11 @@ def test_shazam_and_deezer_features_in_tag_editor(client: TestClient):
     html = resp.text
 
     # 1. Проверка кнопки и модального окна поиска в Deezer
-    assert "@click=\"openDeezerSearch()\"" in html, "openDeezerSearch button missing in index.html"
+    assert "openDeezerSearch" in html, "openDeezerSearch missing in index.html"
     assert "Найти в Deezer" in html
     assert "showDeezerModal" in html
-    assert "@click=\"searchDeezerAlbums()\"" in html
-    assert "@click=\"applyDeezerAlbum(item.id)\"" in html
+    assert '@click="searchDeezerAlbums()"' in html
+    assert '@click="applyDeezerAlbum(item.id)"' in html
 
     # 2. Проверка кнопок Shazam (пакетной и индивидуальной)
     assert "@click=\"recognizeAllTracks()\"" in html, "recognizeAllTracks button missing in index.html"
@@ -163,10 +163,14 @@ def test_clean_titles_dnd_renumber_and_cover_gallery_in_tag_editor(client: TestC
     assert '@click="renumberTracks()"' in html, "renumberTracks button missing in index.html"
     assert "Перенумеровать" in html
 
-    # 2. Кнопка открытия галереи обложек и поле общего числа дисков
-    assert '@click="openCoverGallery()"' in html, "openCoverGallery button missing in index.html"
-    assert "Выбрать из галереи" in html
-    assert 'x-model="album.disc_total"' in html, "album.disc_total input missing in index.html"
+    # 2. Карточки релизов вместо старого верхнего глобального меню
+    assert "ВЕРХНИЙ БЛОК: Метаданные уровня альбома" not in html, "Old global album block must be removed"
+    assert 'x-for="group in releases"' in html, "Release cards repeater missing in index.html"
+    assert 'x-model="group.discTotal"' in html, "group.discTotal input missing in release cards"
+    assert 'openGroupCoverGallery' in html or 'openCoverGallery' in html
+    assert 'handleGroupCoverUpload' in html, "handleGroupCoverUpload handler missing in release cards"
+    assert 'expandAllGroups()' in html, "expandAllGroups button missing in toolbar"
+    assert 'collapseAllGroups()' in html, "collapseAllGroups button missing in toolbar"
 
     # 3. Элементы таблицы треков: Drag-and-Drop, номер диска и индивидуальная очистка
     assert '@dragstart="onDragStart($event, index)"' in html, "DND dragstart missing on track row"

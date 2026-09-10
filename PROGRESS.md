@@ -1,8 +1,8 @@
 # PROGRESS.md — Матрица статусов реализации Music Downloader & Tag Manager
 
 ## Текущий статус проекта
-- **Общий прогресс:** 26 / 26 компонентов завершены (100%)
-- **Активный этап:** Все блоки (1–16), включая группировку по релизам в Tag Editor (альбомы и синглы), 40×40 обложки каждого трека, автопоиск обложек синглов, безопасную мультиальбомную организацию в `OrganizerService` и фикс свитчера пакетного/одиночного ввода ссылок загрузчика, полностью реализованы и протестированы.
+- **Общий прогресс:** 27 / 27 компонентов завершены (100%)
+- **Активный этап:** Все блоки (1–17), включая удаление верхнего глобального меню альбома и внедрение Release Cards с полноценными метаданными и обложками для каждого альбома/сингла в Tag Editor, полностью реализованы и протестированы.
 - **Результаты тестов:** 478/478 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
@@ -165,6 +165,16 @@
 | **R3: Персональные обложки треков (40×40 thumbnails, Multi-source Gallery & Batch Singles Cover Search)** | `app/static/js/tag_editor.js`, `app/templates/index.html`, `tests/test_frontend.py` | **DONE** | В таблицу треков Tag Editor добавлена колонка с 40×40 миниатюрами обложек (`openTrackCoverGallery`), позволяющая выбирать индивидуальный арт для каждого трека через мультисервисную галерею (Apple Music, Deezer, Яндекс Музыка, Spotify). Разработана функция `fetchSinglesCovers()` для пакетного автоматического поиска официальных обложек синглов через Deezer Search API с ограничением частоты запросов, реактивным прогресс-баром и toast-уведомлением. |
 | **R4: Бэкенд мультирелизной организации и режим синглов (OrganizerService, Tag Router & Schemas)** | `app/schemas/tag.py`, `app/services/organizer_service.py`, `app/routers/tags.py`, `tests/test_organizer_service.py`, `tests/test_tags_router.py` | **DONE** | В `TrackTags` добавлены поля `cover_url` и `cover_base64`. В `SaveAlbumRequest` добавлены флаги `singles_mode` и `group_by_album`. В `OrganizerService` реализован метод `compute_single_dir(track, default_artist)` и мультирелизное распределение файлов: треки разных альбомов раскладываются по своим папкам `{Artist}/{Album} - {Year}/`, а синглы — по `{Artist}/{Title} - Single ({Year})/`. Запись персональных `cover.jpg` / `cover.png` для каждой папки релиза из `track_covers_data`. В роутере `PUT /tags/batch` поддержана декодировка индивидуальных обложек и вшивание APIC в каждый MP3. 4 новых теста в `tests/test_organizer_service.py` и `tests/test_tags_router.py`. |
 | **R5: Верификация, линтинг и тесты** | `tests/` | **DONE** | Все 478 тестов успешно пройдены (`pytest tests/ -v`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). Полное соблюдение архитектурных инвариантов: Zero-Database, PathSandbox, ID3v2.4 и no-build архитектура. |
+
+---
+
+## Блок 17: Release Cards в Tag Editor — перенос меню метаданных внутрь каждого релиза (2026-09-10T14:30:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Удаление глобального блока и внедрение Release Cards** | `app/templates/index.html`, `app/static/js/tag_editor.js`, `tests/test_frontend.py` | **DONE** | Полностью удален верхний глобальный блок уровня альбома (бывшие строки 1260–1372). Вместо этого в режиме `viewMode === 'grouped'` каждый альбом и группа синглов отображаются в виде полноценной карточки релиза (`x-for="group in releases" :key="group.id"`): шапка с аккордеоном (32×32 обложка, название, бейджи, счетчик треков, кнопка галереи); раскрывающееся тело с большим меню релиза (обложка 128×128, загрузка файла, галерея, инпуты Album Artist, Album Title, Year, Discs, Genre, кнопки `Найти в Deezer`, `Перенумеровать 1..N`, `Найти тексты`, `Применить к трекам релиза`) и вложенной таблицей треков релиза. |
+| **R2: Персистентный массив `releases` и аккордеон в тулбаре** | `app/static/js/tag_editor.js`, `app/templates/index.html` | **DONE** | Для устранения потери фокуса при вводе в инпуты `x-model` динамический геттер заменен на постоянный реактивный массив `this.releases`, инициализируемый методом `buildReleasesFromTracks()`. Добавлены методы `expandAllGroups()`, `collapseAllGroups()`, `handleGroupCoverUpload(event, group)`, `applyGroupToTracks(group)`, `renumberGroupTracks(group)`, `fetchLyricsForGroup(group, forceAll)`. В тулбар добавлены кнопки быстрого сворачивания и разворачивания всех аккордеонов. |
+| **R3: Верификация, линтинг и тесты** | `tests/test_frontend.py` | **DONE** | Все 478 тестов успешно пройдены (`pytest`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). Полное соблюдение архитектурных инвариантов. |
 
 
 

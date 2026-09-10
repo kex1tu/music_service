@@ -41,6 +41,7 @@ function tagEditorComponent() {
 
         // Release Grouping & Singles Mode
         viewMode: 'grouped', // 'grouped' | 'flat'
+        releases: [],
         collapsedGroups: {},
         coverGalleryTarget: { type: 'album', id: null, originalIndex: null },
         isSearchingSinglesCovers: false,
@@ -49,28 +50,40 @@ function tagEditorComponent() {
         groupByAlbum: true,
 
         get groupedReleases() {
-            const groups = {};
+            return this.releases;
+        },
+
+        buildReleasesFromTracks() {
+            const groupsMap = {};
+            const order = [];
+
             (this.tracks || []).forEach((track, originalIndex) => {
                 const albumName = (track.album || '').trim();
                 const isSingle = !albumName || this.singlesMode;
                 const key = isSingle ? '__singles__' : albumName.toLowerCase();
 
-                if (!groups[key]) {
-                    groups[key] = {
+                if (!groupsMap[key]) {
+                    groupsMap[key] = {
                         id: key,
                         isSingles: isSingle,
                         title: isSingle ? 'Синглы и отдельные треки' : (track.album || 'Неизвестный альбом'),
-                        albumArtist: track.album_artist || this.album.album_artist || track.artist || '',
+                        albumTitle: isSingle ? '' : (track.album || ''),
+                        albumArtist: track.album_artist || track.artist || this.album.album_artist || '',
                         year: track.year || this.album.year || null,
+                        discTotal: track.disc_total || this.album.disc_total || 1,
                         genre: track.genre || this.album.genre || '',
                         coverPreviewUrl: null,
+                        coverPath: null,
+                        coverBase64: null,
+                        selectedCoverUrl: null,
                         items: [],
                     };
+                    order.push(key);
                 }
-                groups[key].items.push({ track, originalIndex });
+                groupsMap[key].items.push({ track, originalIndex });
             });
 
-            const result = Object.values(groups);
+            const result = order.map((key) => groupsMap[key]);
             result.forEach((group) => {
                 if (!group.isSingles) {
                     const firstWithCover = group.items.find(
@@ -81,9 +94,16 @@ function tagEditorComponent() {
                             firstWithCover.track.cover_preview_url ||
                             firstWithCover.track.cover_url ||
                             firstWithCover.track.cover_base64;
+                        group.coverBase64 = firstWithCover.track.cover_base64 || null;
+                        group.selectedCoverUrl = firstWithCover.track.cover_url || null;
                     } else if (this.coverPreviewUrl) {
                         group.coverPreviewUrl = this.coverPreviewUrl;
+                        group.coverPath = this.coverPath;
+                        group.coverBase64 = this.coverBase64;
+                        group.selectedCoverUrl = this.selectedCoverUrl;
                     }
+                } else if (this.coverPreviewUrl) {
+                    group.coverPreviewUrl = this.coverPreviewUrl;
                 }
             });
 
@@ -93,7 +113,7 @@ function tagEditorComponent() {
                 return a.title.localeCompare(b.title);
             });
 
-            return result;
+            this.releases = result;
         },
 
         toggleGroupCollapse(groupId) {
@@ -104,8 +124,21 @@ function tagEditorComponent() {
             return !!this.collapsedGroups[groupId];
         },
 
+        expandAllGroups() {
+            this.collapsedGroups = {};
+        },
+
+        collapseAllGroups() {
+            const nextCollapsed = {};
+            (this.releases || []).forEach((g) => {
+                nextCollapsed[g.id] = true;
+            });
+            this.collapsedGroups = nextCollapsed;
+        },
+
         // Deezer Album Search
         showDeezerModal: false,
+        activeDeezerGroup: null,
         deezerQuery: '',
         isSearchingDeezer: false,
         deezerResults: [],
@@ -156,6 +189,7 @@ function tagEditorComponent() {
             this.isRecognizingAll = false;
             this.shazamProgress = { current: 0, total: 0 };
             this.showDeezerModal = false;
+            this.activeDeezerGroup = null;
             this.deezerQuery = '';
             this.deezerResults = [];
             this.isSearchingDeezer = false;
@@ -191,6 +225,8 @@ function tagEditorComponent() {
             } else {
                 this.coverPreviewUrl = null;
             }
+
+            this.buildReleasesFromTracks();
         },
 
         async fetchLyricsForAlbum(forceAll = false) {
@@ -296,6 +332,33 @@ function tagEditorComponent() {
             Alpine.store('app').toast('Параметры альбома скопированы во все треки', 'info');
         },
 
+        handleGroupCoverUpload(event, group) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (!file.type.startsWith('image/')) {
+                Alpine.store('app').toast('Пожалуйста, выберите изображение (JPEG или PNG)', 'error');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const dataUrl = e.target.result;
+                group.coverPreviewUrl = dataUrl;
+                group.coverBase64 = dataUrl;
+                group.selectedCoverUrl = null;
+                group.coverPath = null;
+                group.items.forEach((it) => {
+                    it.track.cover_preview_url = dataUrl;
+                    it.track.cover_base64 = dataUrl;
+                    it.track.cover_url = null;
+                    it.track.has_cover = true;
+                });
+                Alpine.store('app').toast(`Обложка установлена для релиза "${group.albumTitle || group.title}"`, 'success');
+            };
+            reader.readAsDataURL(file);
+        },
+
         handleCoverUpload(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -309,9 +372,157 @@ function tagEditorComponent() {
             reader.onload = (e) => {
                 this.coverPreviewUrl = e.target.result;
                 this.coverBase64 = e.target.result;
+                if (this.releases && this.releases[0]) {
+                    this.releases[0].coverPreviewUrl = e.target.result;
+                    this.releases[0].coverBase64 = e.target.result;
+                }
                 Alpine.store('app').toast('Новая обложка выбрана для альбома', 'info');
             };
             reader.readAsDataURL(file);
+        },
+
+        applyGroupToTracks(group) {
+            if (!group || !group.items || group.items.length === 0) return;
+
+            group.items.forEach((itemObj) => {
+                const track = itemObj.track;
+                if (group.albumTitle) track.album = group.albumTitle;
+                if (group.albumArtist) track.album_artist = group.albumArtist;
+                if (group.year !== null && group.year !== undefined && group.year !== '') {
+                    track.year = parseInt(group.year, 10);
+                }
+                if (group.genre) track.genre = group.genre;
+                if (group.discTotal !== null && group.discTotal !== undefined && group.discTotal !== '') {
+                    track.disc_total = parseInt(group.discTotal, 10);
+                }
+                const cov = group.selectedCoverUrl || group.coverPreviewUrl;
+                if (cov) {
+                    track.cover_url = group.selectedCoverUrl || (cov.startsWith('http') ? cov : null);
+                    track.cover_base64 = group.coverBase64 || (cov.startsWith('data:') ? cov : null);
+                    track.cover_preview_url = cov;
+                    track.has_cover = true;
+                }
+            });
+
+            Alpine.store('app').toast(`Параметры релиза "${group.albumTitle || group.title}" применены к трекам (${group.items.length})`, 'info');
+        },
+
+        renumberGroupTracks(group) {
+            if (!group || !group.items || group.items.length === 0) return;
+
+            const hasMultipleDiscs = group.items.some((it) => it.track.disc_number && it.track.disc_number > 1);
+            if (hasMultipleDiscs) {
+                const counters = {};
+                for (const it of group.items) {
+                    const disc = it.track.disc_number || 1;
+                    counters[disc] = (counters[disc] || 0) + 1;
+                    it.track.track_number = counters[disc];
+                }
+                for (const it of group.items) {
+                    const disc = it.track.disc_number || 1;
+                    it.track.track_total = counters[disc];
+                }
+                const maxDisc = Math.max(...Object.keys(counters).map(Number));
+                group.discTotal = maxDisc;
+                for (const it of group.items) {
+                    it.track.disc_total = maxDisc;
+                }
+            } else {
+                const total = group.items.length;
+                group.items.forEach((it, index) => {
+                    it.track.track_number = index + 1;
+                    it.track.track_total = total;
+                    it.track.disc_number = 1;
+                    it.track.disc_total = 1;
+                });
+                group.discTotal = 1;
+            }
+            Alpine.store('app').toast(`Треки релиза "${group.albumTitle || group.title}" перенумерованы (1..${group.items.length})!`, 'success');
+        },
+
+        async fetchLyricsForGroup(group, forceAll = false) {
+            if (!group || !group.items || group.items.length === 0) return;
+            const groupTracks = group.items.map((it) => it.track);
+            if (this.isFetchingLyrics) return;
+
+            const missing = groupTracks.filter(
+                (t) => !t.lyrics_status || t.lyrics_status === 'none'
+            );
+
+            if (missing.length === 0 && !forceAll) {
+                if (
+                    confirm(
+                        `У всех треков релиза "${group.albumTitle || group.title}" уже есть тексты. Выполнить повторный поиск?`
+                    )
+                ) {
+                    return this.fetchLyricsForGroup(group, true);
+                }
+                return;
+            }
+
+            const targets = forceAll ? groupTracks : missing;
+            this.isFetchingLyrics = true;
+            this.lyricsProgress = { current: 0, total: targets.length };
+            let foundCount = 0;
+
+            Alpine.store('app').toast(
+                `Поиск текстов для релиза "${group.albumTitle || group.title}" (${targets.length} треков)...`,
+                'info'
+            );
+
+            try {
+                for (const track of targets) {
+                    this.lyricsProgress.current++;
+                    try {
+                        const params = new URLSearchParams({
+                            artist: track.artist || group.albumArtist || this.album.album_artist || '',
+                            title: track.title || '',
+                        });
+                        const alb = track.album || group.albumTitle || (!group.isSingles ? group.title : '');
+                        if (alb) {
+                            params.append('album', alb);
+                        }
+                        if (track.duration) {
+                            params.append('duration', track.duration);
+                        }
+
+                        const res = await fetch(`/lyrics/search?${params.toString()}`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            const text = data.lyrics || data.content;
+                            if (data.source && data.source !== 'none' && text) {
+                                const kind = data.synced ? 'lrc' : 'txt';
+                                const saveRes = await fetch('/lyrics', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        track_path: track.path,
+                                        content: text,
+                                        kind: kind,
+                                    }),
+                                });
+                                if (saveRes.ok) {
+                                    track.lyrics_status = kind;
+                                    foundCount++;
+                                }
+                            }
+                        }
+                    } catch (trackErr) {
+                        console.error(`Ошибка при поиске текста для "${track.title}":`, trackErr);
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, 150));
+                }
+
+                const msg =
+                    foundCount > 0
+                        ? `Поиск текстов для "${group.albumTitle || group.title}": найдено ${foundCount} из ${targets.length}!`
+                        : `Поиск завершён: тексты для треков релиза "${group.albumTitle || group.title}" не найдены`;
+                Alpine.store('app').toast(msg, foundCount > 0 ? 'success' : 'info');
+            } catch (err) {
+                Alpine.store('app').toast(`Ошибка поиска текстов: ${err.message}`, 'error');
+            } finally {
+                this.isFetchingLyrics = false;
+            }
         },
 
         openLyrics(track, index) {
@@ -327,14 +538,39 @@ function tagEditorComponent() {
             this.isSaving = true;
 
             try {
+                // Применяем метаданные групп релиза к входящим в них трекам
+                this.releases.forEach((group) => {
+                    group.items.forEach((itemObj) => {
+                        const trk = itemObj.track;
+                        if (!group.isSingles) {
+                            if (group.albumTitle) trk.album = group.albumTitle;
+                            if (group.albumArtist) trk.album_artist = group.albumArtist;
+                            if (group.year) trk.year = parseInt(group.year, 10);
+                            if (group.genre) trk.genre = group.genre;
+                            if (group.discTotal) trk.disc_total = parseInt(group.discTotal, 10);
+                        }
+                        const cov = group.selectedCoverUrl || group.coverPreviewUrl;
+                        if (cov && !trk.cover_url && !trk.cover_base64) {
+                            if (group.selectedCoverUrl) trk.cover_url = group.selectedCoverUrl;
+                            else if (group.coverBase64) trk.cover_base64 = group.coverBase64;
+                            else if (cov.startsWith('http')) trk.cover_url = cov;
+                            else if (cov.startsWith('data:')) trk.cover_base64 = cov;
+                            trk.has_cover = true;
+                        }
+                    });
+                });
+
+                const firstRelease = this.releases[0];
+                const isSingleAlbum = this.releases.length === 1 && !firstRelease?.isSingles;
+
                 const payload = {
                     album: {
-                        album: this.album.album || '',
-                        album_artist: this.album.album_artist || '',
-                        year: this.album.year ? parseInt(this.album.year, 10) : null,
-                        genre: this.album.genre || '',
-                        cover_path: this.coverPath,
-                        disc_total: this.album.disc_total ? parseInt(this.album.disc_total, 10) : null,
+                        album: isSingleAlbum ? (firstRelease.albumTitle || '') : (this.album.album || ''),
+                        album_artist: isSingleAlbum ? (firstRelease.albumArtist || '') : (this.album.album_artist || ''),
+                        year: isSingleAlbum && firstRelease.year ? parseInt(firstRelease.year, 10) : (this.album.year ? parseInt(this.album.year, 10) : null),
+                        genre: isSingleAlbum ? (firstRelease.genre || '') : (this.album.genre || ''),
+                        cover_path: isSingleAlbum ? firstRelease.coverPath : this.coverPath,
+                        disc_total: isSingleAlbum && firstRelease.discTotal ? parseInt(firstRelease.discTotal, 10) : (this.album.disc_total ? parseInt(this.album.disc_total, 10) : null),
                     },
                     tracks: this.tracks.map((t) => ({
                         path: t.path,
@@ -344,23 +580,23 @@ function tagEditorComponent() {
                         disc_total: t.disc_total ? parseInt(t.disc_total, 10) : null,
                         title: t.title || '',
                         artist: t.artist || '',
-                        album: t.album || this.album.album || '',
-                        album_artist: t.album_artist || this.album.album_artist || '',
-                        year: t.year ? parseInt(t.year, 10) : (this.album.year ? parseInt(this.album.year, 10) : null),
-                        genre: t.genre || this.album.genre || '',
+                        album: t.album || '',
+                        album_artist: t.album_artist || '',
+                        year: t.year ? parseInt(t.year, 10) : null,
+                        genre: t.genre || '',
                         lyrics_status: t.lyrics_status || 'none',
-                        has_cover: t.has_cover || !!t.cover_preview_url || !!t.cover_url || !!this.coverPreviewUrl,
+                        has_cover: t.has_cover || !!t.cover_preview_url || !!t.cover_url || !!t.cover_base64,
                         cover_url: t.cover_url || null,
                         cover_base64: t.cover_base64 || null,
                     })),
                     source_dir: this.sourceDir,
-                    cover_path: this.coverPath,
-                    cover_base64: this.coverBase64 || null,
-                    cover_url: this.selectedCoverUrl || null,
-                    apply_album_to_tracks: false, // уже применены пользователем
+                    cover_path: isSingleAlbum ? firstRelease.coverPath : this.coverPath,
+                    cover_base64: isSingleAlbum ? firstRelease.coverBase64 : (this.coverBase64 || null),
+                    cover_url: isSingleAlbum ? firstRelease.selectedCoverUrl : (this.selectedCoverUrl || null),
+                    apply_album_to_tracks: false, // теги уже корректно распределены по трекам
                     reorganize: true, // переместить в каноническую структуру MUSIC_DIR
                     singles_mode: this.singlesMode,
-                    group_by_album: this.viewMode === 'grouped',
+                    group_by_album: this.groupByAlbum,
                 };
 
                 const res = await fetch('/tags/batch', {
@@ -375,7 +611,7 @@ function tagEditorComponent() {
                 }
 
                 const result = await res.json();
-                Alpine.store('app').toast('Альбом успешно сохранен и размещен в медиатеке!', 'success');
+                Alpine.store('app').toast('Теги успешно сохранены и треки размещены в медиатеке!', 'success');
 
                 // Закрываем редактор
                 Alpine.store('app').closeTagEditor();
@@ -503,7 +739,25 @@ function tagEditorComponent() {
             }
         },
 
-        openDeezerSearch() {
+        openDeezerSearchForGroup(group) {
+            this.activeDeezerGroup = group;
+            this.showDeezerModal = true;
+            this.deezerResults = [];
+            const albumPart = group.albumTitle || (!group.isSingles ? group.title : '') || '';
+            const artistPart = group.albumArtist || group.items[0]?.track?.artist || '';
+            this.deezerQuery = (albumPart ? `${artistPart} ${albumPart}` : (group.items[0]?.track?.artist ? `${group.items[0].track.artist} ${group.items[0].track.title || ''}` : '')).trim();
+            if (this.deezerQuery) {
+                this.searchDeezerAlbums();
+            }
+        },
+
+        openDeezerSearch(group = null) {
+            if (group) {
+                return this.openDeezerSearchForGroup(group);
+            }
+            if (this.releases && this.releases.length > 0) {
+                return this.openDeezerSearchForGroup(this.releases[0]);
+            }
             this.showDeezerModal = true;
             this.deezerResults = [];
             const albumPart = this.album.album || '';
@@ -516,6 +770,7 @@ function tagEditorComponent() {
 
         closeDeezerSearch() {
             this.showDeezerModal = false;
+            this.activeDeezerGroup = null;
         },
 
         async searchDeezerAlbums() {
@@ -553,30 +808,67 @@ function tagEditorComponent() {
                 }
 
                 const data = await res.json();
-                this.album.album = data.title || this.album.album;
-                this.album.album_artist = data.artist || this.album.album_artist;
-                if (data.year) this.album.year = data.year;
-                if (data.genre) this.album.genre = data.genre;
+                const targetGroup = this.activeDeezerGroup || (this.releases && this.releases[0]) || null;
 
-                if (data.cover_url) {
-                    this.coverPreviewUrl = data.cover_url;
-                    this.coverPath = null;
-                    this.fetchCoverBase64(data.cover_url);
-                }
+                if (targetGroup) {
+                    targetGroup.albumTitle = data.title || targetGroup.albumTitle;
+                    targetGroup.title = data.title || targetGroup.title;
+                    targetGroup.albumArtist = data.artist || targetGroup.albumArtist;
+                    if (data.year) targetGroup.year = data.year;
+                    if (data.genre) targetGroup.genre = data.genre;
 
-                if (data.tracks && data.tracks.length > 0) {
-                    this.tracks.forEach((track, idx) => {
-                        const dt = data.tracks[idx];
-                        if (dt) {
-                            track.track_number = dt.track_number;
-                            track.title = dt.title;
-                            track.artist = dt.artist;
-                            track.album = data.title;
-                            track.album_artist = data.artist;
-                            if (data.year) track.year = data.year;
-                            if (data.genre) track.genre = data.genre;
-                        }
-                    });
+                    if (data.cover_url) {
+                        targetGroup.coverPreviewUrl = data.cover_url;
+                        targetGroup.selectedCoverUrl = data.cover_url;
+                        targetGroup.coverPath = null;
+                        targetGroup.coverBase64 = null;
+                    }
+
+                    if (data.tracks && data.tracks.length > 0) {
+                        targetGroup.items.forEach((it, idx) => {
+                            const dt = data.tracks[idx];
+                            if (dt) {
+                                it.track.track_number = dt.track_number;
+                                it.track.title = dt.title;
+                                it.track.artist = dt.artist;
+                                it.track.album = data.title;
+                                it.track.album_artist = data.artist;
+                                if (data.year) it.track.year = data.year;
+                                if (data.genre) it.track.genre = data.genre;
+                            }
+                            if (data.cover_url) {
+                                it.track.cover_url = data.cover_url;
+                                it.track.cover_preview_url = data.cover_url;
+                                it.track.has_cover = true;
+                            }
+                        });
+                    }
+                } else {
+                    this.album.album = data.title || this.album.album;
+                    this.album.album_artist = data.artist || this.album.album_artist;
+                    if (data.year) this.album.year = data.year;
+                    if (data.genre) this.album.genre = data.genre;
+
+                    if (data.cover_url) {
+                        this.coverPreviewUrl = data.cover_url;
+                        this.coverPath = null;
+                        this.fetchCoverBase64(data.cover_url);
+                    }
+
+                    if (data.tracks && data.tracks.length > 0) {
+                        this.tracks.forEach((track, idx) => {
+                            const dt = data.tracks[idx];
+                            if (dt) {
+                                track.track_number = dt.track_number;
+                                track.title = dt.title;
+                                track.artist = dt.artist;
+                                track.album = data.title;
+                                track.album_artist = data.artist;
+                                if (data.year) track.year = data.year;
+                                if (data.genre) track.genre = data.genre;
+                            }
+                        });
+                    }
                 }
 
                 this.closeDeezerSearch();
@@ -585,6 +877,7 @@ function tagEditorComponent() {
                 Alpine.store('app').toast(`Ошибка: ${err.message}`, 'error');
             } finally {
                 this.isLoadingDeezerDetails = false;
+                this.activeDeezerGroup = null;
             }
         },
 
@@ -703,6 +996,7 @@ function tagEditorComponent() {
             this.tracks.splice(targetIndex, 0, moved);
             this.draggedIndex = null;
             this.dragOverIndex = null;
+            this.buildReleasesFromTracks();
             Alpine.store('app').toast('Порядок треков изменён', 'info');
         },
 
@@ -743,7 +1037,13 @@ function tagEditorComponent() {
             Alpine.store('app').toast('Треки успешно перенумерованы!', 'success');
         },
 
-        openCoverGallery() {
+        openCoverGallery(group = null) {
+            if (group) {
+                return this.openGroupCoverGallery(group);
+            }
+            if (this.releases && this.releases.length > 0) {
+                return this.openGroupCoverGallery(this.releases[0]);
+            }
             this.coverGalleryTarget = { type: 'album', id: null, originalIndex: null };
             this.showCoverGalleryModal = true;
             this.coverSourceFilter = 'all';
@@ -766,7 +1066,7 @@ function tagEditorComponent() {
             this.showCoverGalleryModal = true;
             this.coverSourceFilter = 'all';
             const artistPart = group.albumArtist || this.album.album_artist || '';
-            const titlePart = group.isSingles ? '' : group.title;
+            const titlePart = group.isSingles ? '' : (group.albumTitle || group.title);
             this.coverSearchQuery = `${artistPart} ${titlePart}`.trim() || (this.tracks[0]?.artist || '');
             if (this.coverSearchQuery) {
                 this.searchCovers();
@@ -785,18 +1085,21 @@ function tagEditorComponent() {
         },
 
         applyAlbumCoverToGroup(group) {
-            if (!this.coverPreviewUrl && !this.selectedCoverUrl) {
+            const cov = group.selectedCoverUrl || group.coverPreviewUrl || this.selectedCoverUrl || this.coverPreviewUrl;
+            if (!cov) {
                 this.openGroupCoverGallery(group);
                 return;
             }
-            const cov = this.selectedCoverUrl || this.coverPreviewUrl;
             group.coverPreviewUrl = cov;
+            group.selectedCoverUrl = cov.startsWith('http') ? cov : null;
+            group.coverBase64 = cov.startsWith('data:') ? cov : null;
             group.items.forEach((itemObj) => {
-                itemObj.track.cover_url = cov;
+                itemObj.track.cover_url = cov.startsWith('http') ? cov : null;
+                itemObj.track.cover_base64 = cov.startsWith('data:') ? cov : null;
                 itemObj.track.cover_preview_url = cov;
                 itemObj.track.has_cover = true;
             });
-            Alpine.store('app').toast(`Обложка применена ко всем трекам релиза "${group.title}"`, 'success');
+            Alpine.store('app').toast(`Обложка применена ко всем трекам релиза "${group.albumTitle || group.title}"`, 'success');
         },
 
         async fetchSinglesCovers() {
@@ -907,14 +1210,18 @@ function tagEditorComponent() {
                 const group = this.coverGalleryTarget.group;
                 if (group) {
                     group.coverPreviewUrl = item.cover_url;
+                    group.selectedCoverUrl = item.cover_url;
+                    group.coverBase64 = null;
+                    group.coverPath = null;
                     group.items.forEach((itemObj) => {
                         itemObj.track.cover_url = item.cover_url;
                         itemObj.track.cover_preview_url = item.cover_url;
+                        itemObj.track.cover_base64 = null;
                         itemObj.track.has_cover = true;
                     });
                 }
                 Alpine.store('app').toast(
-                    `Выбрана обложка для релиза "${group?.title || ''}" (${item.source.toUpperCase()})`,
+                    `Выбрана обложка для релиза "${group?.albumTitle || group?.title || ''}" (${item.source.toUpperCase()})`,
                     'success'
                 );
             } else {
