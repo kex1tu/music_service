@@ -7,10 +7,13 @@
 Все операции строго изолированы через PathSandbox.
 """
 
+import asyncio
 import logging
 import re
+import urllib.parse
 from pathlib import Path
 
+import httpx
 from mutagen import MutagenError
 from mutagen.id3 import (
     APIC,
@@ -21,6 +24,7 @@ from mutagen.id3 import (
     TIT2,
     TPE1,
     TPE2,
+    TPOS,
     TRCK,
     PictureType,
 )
@@ -35,7 +39,13 @@ from app.core.exceptions import (
     TagWriteError,
 )
 from app.core.sandbox import PathSandbox
-from app.schemas.tag import AlbumDetailsResponse, AlbumTags, TrackTags
+from app.schemas.tag import (
+    AlbumDetailsResponse,
+    AlbumTags,
+    CoverSearchResultItem,
+    TrackTags,
+)
+from app.services.yandex_client import YandexMusicClient
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +57,12 @@ class TagService:
         self,
         music_sandbox: PathSandbox,
         tmp_sandbox: PathSandbox | None = None,
+        http_client: httpx.AsyncClient | None = None,
     ) -> None:
         """Инициализирует сервис песочницами медиатеки и временного буфера."""
         self._music_sandbox = music_sandbox
         self._tmp_sandbox = tmp_sandbox
+        self._http_client = http_client
 
     def parse_multivalue(self, raw: str | None) -> list[str]:
         """Разбивает строку с несколькими значениями на список строк.
@@ -166,14 +178,37 @@ class TagService:
 
         # 5. Номер дорожки (TRCK)
         track_number = 1
+        track_total: int | None = None
         if "TRCK" in tags and tags["TRCK"].text:
             raw_trck = str(tags["TRCK"].text[0]).strip()
-            match = re.match(r"^(\d+)", raw_trck)
+            match = re.match(r"^(\d+)(?:/(\d+))?", raw_trck)
             if match:
                 try:
                     track_number = max(1, int(match.group(1)))
                 except ValueError:
                     track_number = 1
+                if match.group(2):
+                    try:
+                        track_total = max(1, int(match.group(2)))
+                    except ValueError:
+                        track_total = None
+
+        # 5.1 Номер диска (TPOS)
+        disc_number = 1
+        disc_total: int | None = None
+        if "TPOS" in tags and tags["TPOS"].text:
+            raw_tpos = str(tags["TPOS"].text[0]).strip()
+            m_tpos = re.match(r"^(\d+)(?:/(\d+))?", raw_tpos)
+            if m_tpos:
+                try:
+                    disc_number = max(1, int(m_tpos.group(1)))
+                except ValueError:
+                    disc_number = 1
+                if m_tpos.group(2):
+                    try:
+                        disc_total = max(1, int(m_tpos.group(2)))
+                    except ValueError:
+                        disc_total = None
 
         # 6. Год релиза (TDRC или TYER)
         year: int | None = None
@@ -228,6 +263,9 @@ class TagService:
         return TrackTags(
             path=norm_path,
             track_number=track_number,
+            track_total=track_total,
+            disc_number=disc_number,
+            disc_total=disc_total,
             title=title,
             artist=artist,
             album=album,
@@ -291,9 +329,17 @@ class TagService:
 
             # 5. Номер дорожки
             if tags.track_number:
-                id3_tags.add(TRCK(encoding=3, text=[str(tags.track_number)]))
+                trck_val = f"{tags.track_number}/{tags.track_total}" if tags.track_total else str(tags.track_number)
+                id3_tags.add(TRCK(encoding=3, text=[trck_val]))
             else:
                 id3_tags.delall("TRCK")
+
+            # 5.1 Номер диска (TPOS)
+            if tags.disc_number:
+                tpos_val = f"{tags.disc_number}/{tags.disc_total}" if tags.disc_total else str(tags.disc_number)
+                id3_tags.add(TPOS(encoding=3, text=[tpos_val]))
+            else:
+                id3_tags.delall("TPOS")
 
             # 6. Год релиза (TDRC по стандарту ID3v2.4)
             if tags.year:
@@ -458,6 +504,8 @@ class TagService:
                 item.year = album.year
             if album.genre:
                 item.genre = album.genre
+            if album.disc_total is not None:
+                item.disc_total = album.disc_total
             updated.append(item)
         return updated
 
@@ -475,6 +523,7 @@ class TagService:
                     album_artist=track.album_artist or track.artist,
                     year=track.year,
                     genre=track.genre,
+                    disc_total=track.disc_total,
                 )
                 cover_info = self.read_cover(dir_path)
                 return AlbumDetailsResponse(
@@ -511,8 +560,8 @@ class TagService:
             track_tags = self.read_tags(mp3_file, rel_path=track_rel_path)
             tracks.append(track_tags)
 
-        # Сортировка по номеру дорожки, затем имени файла/названию
-        tracks.sort(key=lambda t: (t.track_number, t.title.lower(), t.path))
+        # Сортировка по номеру диска, номеру дорожки, затем имени файла/названию
+        tracks.sort(key=lambda t: (t.disc_number, t.track_number, t.title.lower(), t.path))
 
         album_artist = ""
         album_title = ""
@@ -531,6 +580,14 @@ class TagService:
 
         if not album_artist and tracks:
             album_artist = tracks[0].artist
+
+        disc_totals = [t.disc_total for t in tracks if t.disc_total]
+        disc_numbers = [t.disc_number for t in tracks if t.disc_number]
+        album_disc_total = (
+            max(disc_totals)
+            if disc_totals
+            else (max(disc_numbers) if (disc_numbers and max(disc_numbers) > 1) else None)
+        )
 
         cover_info = self.read_cover(dir_path)
         has_cover = (cover_info is not None) or any(t.has_cover for t in tracks)
@@ -558,6 +615,7 @@ class TagService:
             year=year,
             genre=genre,
             cover_path=cover_path,
+            disc_total=album_disc_total,
         )
 
         return AlbumDetailsResponse(
@@ -566,3 +624,372 @@ class TagService:
             has_cover=has_cover,
             cover_path=cover_path,
         )
+
+    @classmethod
+    def clean_title(cls, title: str, current_artist: str = "") -> tuple[str, str]:
+        """Интеллектуальная очистка названия трека от мусора и извлечение фитов (Clean Titles & Feat Extractor).
+
+        - Удаляет мусорные суффиксы в скобках [ ... ] и ( ... ):
+          Official Video, Official Music Video, Official Audio, Audio, Video, Lyric Video,
+          Lyrics, Clip Officiel, Visualizer, HD, HQ, 4K, 1080p, 720p, Prod. by ..., Remastered и т.д.
+        - Извлекает фит-исполнителей (feat., ft., featuring), разбивает по разделителям
+          (&, ,, and, и, x) и дополняет список исполнителей через \\\\ без дубликатов.
+        - Удаляет ведущие порядковые номера: "01. Title", "01 - Title" -> "Title".
+        - Удаляет дублирование артиста в начале названия: "Artist - Title" -> "Title",
+          а если исполнитель не был задан — устанавливает его из префикса.
+
+        Returns:
+            Кортеж (cleaned_title, updated_artist).
+        """
+        raw_title = str(title or "").strip()
+        if not raw_title:
+            return "", current_artist or ""
+
+        # Список артистов (чистим и разбиваем существующий current_artist)
+        artists_list: list[str] = [
+            a.strip()
+            for a in re.split(r"\\+|\x00", str(current_artist or ""))
+            if a.strip()
+        ]
+
+        # 1. Удаление ведущих порядковых номеров: "01. ", "01 - ", "01 "
+        raw_title = re.sub(r"^\s*\d{1,3}\s*[\.\-–—]\s*", "", raw_title)
+        raw_title = re.sub(r"^\s*\d{1,3}\s+", "", raw_title)
+
+        # 2. Проверка дублирования артиста в начале названия: "Artist - Title"
+        m_artist = re.match(r"^([^\-–—]+?)\s*[-–—]\s*(.+)$", raw_title)
+        if m_artist:
+            cand_artist = m_artist.group(1).strip()
+            rest_title = m_artist.group(2).strip()
+            if artists_list:
+                existing_lower = [a.lower() for a in artists_list]
+                if cand_artist.lower() in existing_lower:
+                    raw_title = rest_title
+            else:
+                # Если исполнитель не был задан — берём его из префикса
+                artists_list.append(cand_artist)
+                raw_title = rest_title
+
+        # 3. Извлечение feat / ft / featuring
+        # 3.1. Внутри скобок (...) или [...]
+        feat_bracket_regex = re.compile(
+            r"[\(\[]\s*(?:feat\.?|ft\.?|featuring)\s+([^\]\)]+?)[\)\]]",
+            re.IGNORECASE,
+        )
+        for m in list(feat_bracket_regex.finditer(raw_title)):
+            feat_content = m.group(1).strip()
+            raw_title = raw_title[: m.start()] + " " + raw_title[m.end() :]
+            parts = re.split(
+                r"\s*(?:,|&|/|\\+|\band\b|\bи\b|\bx\b)\s*",
+                feat_content,
+                flags=re.IGNORECASE,
+            )
+            for p in parts:
+                p_clean = p.strip()
+                if p_clean and p_clean.lower() not in [a.lower() for a in artists_list]:
+                    artists_list.append(p_clean)
+
+        # 3.2. Без скобок в конце строки или перед разделителем
+        feat_plain_regex = re.compile(
+            r"\b(?:feat\.?|ft\.?|featuring)\s+([^\[\]\(\)\-]+)$",
+            re.IGNORECASE,
+        )
+        m_plain = feat_plain_regex.search(raw_title)
+        if m_plain:
+            feat_content = m_plain.group(1).strip()
+            raw_title = raw_title[: m_plain.start()].strip()
+            parts = re.split(
+                r"\s*(?:,|&|/|\\+|\band\b|\bи\b|\bx\b)\s*",
+                feat_content,
+                flags=re.IGNORECASE,
+            )
+            for p in parts:
+                p_clean = p.strip()
+                if p_clean and p_clean.lower() not in [a.lower() for a in artists_list]:
+                    artists_list.append(p_clean)
+
+        # 4. Удаление мусорных суффиксов в скобках [ ... ] и ( ... )
+        junk_pattern = re.compile(
+            r"[\(\[]\s*(?:"
+            r"(?:(?:official|music|4k|hd|hq|1080p|720p)\s+)*(?:video|audio|visualizer|clip\s*officiel|lyric\s*video|lyrics)|"
+            r"official|"
+            r"audio|"
+            r"video|"
+            r"visualizer|"
+            r"lyrics|"
+            r"clip\s*officiel|"
+            r"hd|"
+            r"hq|"
+            r"4k|"
+            r"1080p|"
+            r"720p|"
+            r"prod\.?\s*by[^\)\]]+|"
+            r"remaster(?:ed)?(?:\s*\d{4})?"
+            r")\s*[\)\]]",
+            re.IGNORECASE,
+        )
+        raw_title = junk_pattern.sub("", raw_title)
+
+        # 5. Очистка пустых скобок, лишних пробелов и дефисов
+        raw_title = re.sub(r"[\(\[]\s*[\)\]]", "", raw_title)
+        raw_title = re.sub(r"\s+", " ", raw_title).strip(" \t-–—._")
+
+        if not raw_title:
+            raw_title = title.strip()
+
+        updated_artist = "\\\\".join(artists_list)
+        return raw_title, updated_artist
+
+    async def download_cover(self, url: str) -> tuple[bytes, str]:
+        """Скачивает изображение обложки по внешнему URL и определяет MIME-тип."""
+        client = self._http_client
+        should_close = False
+        if client is None:
+            client = httpx.AsyncClient(
+                timeout=httpx.Timeout(15.0, connect=10.0),
+                headers={"User-Agent": "MusicManager/1.0"},
+                follow_redirects=True,
+            )
+            should_close = True
+
+        try:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                raise TagError(f"Не удалось скачать обложку: HTTP {resp.status_code}")
+            content = resp.content
+            if not content:
+                raise TagError("Получен пустой ответ при скачивании обложки")
+
+            # Сигнатуры форматов изображений
+            if content.startswith(b"\x89PNG"):
+                mime = "image/png"
+            elif content.startswith(b"\xff\xd8\xff"):
+                mime = "image/jpeg"
+            elif content.startswith(b"RIFF") and len(content) >= 12 and content[8:12] == b"WEBP":
+                mime = "image/webp"
+            else:
+                ct = resp.headers.get("content-type", "").lower()
+                if "png" in ct:
+                    mime = "image/png"
+                elif "webp" in ct:
+                    mime = "image/webp"
+                else:
+                    mime = "image/jpeg"
+            return content, mime
+        finally:
+            if should_close:
+                await client.aclose()
+
+    async def _search_apple_covers(
+        self, client: httpx.AsyncClient, query: str
+    ) -> list[CoverSearchResultItem]:
+        """Поиск обложек в Apple Music / iTunes Search API."""
+        try:
+            url = "https://itunes.apple.com/search"
+            resp = await client.get(url, params={"term": query, "entity": "album", "limit": 8})
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            results: list[CoverSearchResultItem] = []
+            for item in data.get("results", []):
+                art100 = item.get("artworkUrl100")
+                if not art100:
+                    continue
+                # Замена 100x100bb на 1400x1400bb
+                cover_url = re.sub(r"\d+x\d+bb(?:\.jpg|\.png)?", "1400x1400bb.jpg", art100)
+                if not cover_url.endswith((".jpg", ".png", ".jpeg")):
+                    cover_url = f"{cover_url}.jpg"
+                title = item.get("collectionName") or item.get("trackName") or ""
+                artist = item.get("artistName") or ""
+                year = None
+                rel_date = item.get("releaseDate")
+                if rel_date:
+                    m = re.match(r"^(\d{4})", str(rel_date))
+                    if m:
+                        year = int(m.group(1))
+                results.append(
+                    CoverSearchResultItem(
+                        source="apple",
+                        title=title,
+                        artist=artist,
+                        cover_url=cover_url,
+                        width=1400,
+                        height=1400,
+                        year=year,
+                    )
+                )
+            return results
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Сбой поиска обложек в Apple Music: %s", exc)
+            return []
+
+    async def _search_deezer_covers(
+        self, client: httpx.AsyncClient, query: str
+    ) -> list[CoverSearchResultItem]:
+        """Поиск обложек в Deezer API."""
+        try:
+            url = "https://api.deezer.com/search/album"
+            resp = await client.get(url, params={"q": query, "limit": 8})
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            results: list[CoverSearchResultItem] = []
+            for item in data.get("data", []):
+                cover_url = (
+                    item.get("cover_xl")
+                    or item.get("cover_big")
+                    or item.get("cover_medium")
+                    or item.get("cover")
+                )
+                if not cover_url:
+                    continue
+                title = item.get("title") or ""
+                artist_obj = item.get("artist", {})
+                artist = artist_obj.get("name", "") if isinstance(artist_obj, dict) else ""
+                results.append(
+                    CoverSearchResultItem(
+                        source="deezer",
+                        title=title,
+                        artist=artist,
+                        cover_url=cover_url,
+                        width=1400,
+                        height=1400,
+                        year=None,
+                    )
+                )
+            return results
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Сбой поиска обложек в Deezer: %s", exc)
+            return []
+
+    async def _search_yandex_covers(
+        self, client: httpx.AsyncClient, query: str
+    ) -> list[CoverSearchResultItem]:
+        """Поиск обложек в Яндекс Музыке."""
+        try:
+            url = "https://music.yandex.ru/handlers/music-search.jsx"
+            resp = await client.get(url, params={"text": query, "type": "albums"})
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            albums_data = data.get("albums", {})
+            items = albums_data.get("items", []) if isinstance(albums_data, dict) else []
+            results: list[CoverSearchResultItem] = []
+            for item in items[:8]:
+                cover_uri = item.get("ogImage") or item.get("coverUri")
+                if not cover_uri:
+                    continue
+                cover_url = YandexMusicClient.format_cover(cover_uri, size="1000x1000")
+                if not cover_url:
+                    continue
+                title = item.get("title") or ""
+                artists_data = item.get("artists", [])
+                artist = YandexMusicClient.format_artists(artists_data) if artists_data else ""
+                year = item.get("year")
+                results.append(
+                    CoverSearchResultItem(
+                        source="yandex",
+                        title=title,
+                        artist=artist,
+                        cover_url=cover_url,
+                        width=1000,
+                        height=1000,
+                        year=year,
+                    )
+                )
+            return results
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Сбой поиска обложек в Яндекс Музыке: %s", exc)
+            return []
+
+    async def _search_spotify_covers(
+        self, client: httpx.AsyncClient, query: str
+    ) -> list[CoverSearchResultItem]:
+        """Поиск обложек в Spotify."""
+        try:
+            url = "https://open.spotify.com/search/" + urllib.parse.quote(query)
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                return []
+            covers = re.findall(r"https://i\.scdn\.co/image/([a-zA-Z0-9]+)", resp.text)
+            results: list[CoverSearchResultItem] = []
+            seen: set[str] = set()
+            for cid in covers:
+                if cid not in seen:
+                    seen.add(cid)
+                    results.append(
+                        CoverSearchResultItem(
+                            source="spotify",
+                            title=query,
+                            artist="",
+                            cover_url=f"https://i.scdn.co/image/{cid}",
+                            width=640,
+                            height=640,
+                            year=None,
+                        )
+                    )
+                    if len(results) >= 4:
+                        break
+            return results
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Сбой поиска обложек в Spotify: %s", exc)
+            return []
+
+    async def search_covers(
+        self,
+        query: str,
+        limit: int = 12,
+    ) -> list[CoverSearchResultItem]:
+        """Ищет обложки высокого разрешения в публичных сервисах (Apple Music, Deezer, Yandex, Spotify)."""
+        clean_q = query.strip()
+        if not clean_q:
+            return []
+
+        client = self._http_client
+        should_close = False
+        if client is None:
+            client = httpx.AsyncClient(
+                timeout=httpx.Timeout(12.0, connect=8.0),
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+                    ),
+                    "Accept": "application/json",
+                },
+                follow_redirects=True,
+            )
+            should_close = True
+
+        try:
+            tasks = [
+                self._search_apple_covers(client, clean_q),
+                self._search_deezer_covers(client, clean_q),
+                self._search_yandex_covers(client, clean_q),
+                self._search_spotify_covers(client, clean_q),
+            ]
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+            all_items: list[CoverSearchResultItem] = []
+            seen_urls: set[str] = set()
+
+            valid_lists: list[list[CoverSearchResultItem]] = [
+                r for r in responses if isinstance(r, list)
+            ]
+            max_len = max((len(r) for r in valid_lists), default=0)
+            for i in range(max_len):
+                for r in valid_lists:
+                    if i < len(r):
+                        item = r[i]
+                        if item.cover_url not in seen_urls:
+                            seen_urls.add(item.cover_url)
+                            all_items.append(item)
+                            if len(all_items) >= limit:
+                                break
+                if len(all_items) >= limit:
+                    break
+
+            return all_items[:limit]
+        finally:
+            if should_close:
+                await client.aclose()

@@ -497,3 +497,244 @@ def test_tag_service_save_strips_id3v1(service_and_paths):
     assert not data.endswith(v1_tag)
     assert data[-128:-125] != b"TAG"
 
+
+def test_clean_title_junk_removal():
+    """Проверка очистки мусорных суффиксов из названий треков."""
+    samples = [
+        ("Song Name [Official Video]", "Song Name"),
+        ("Track Title (1080p)", "Track Title"),
+        ("Hit Single [Prod. by Metro Boomin]", "Hit Single"),
+        ("Beautiful Melody (Lyric Video)", "Beautiful Melody"),
+        ("Greatest Hits [Remastered 2021]", "Greatest Hits"),
+        ("Album Version (Official Audio)", "Album Version"),
+        ("Music Clip [Official Music Video]", "Music Clip"),
+        ("Clip [Clip Officiel]", "Clip"),
+        ("Cool Track [4K Visualizer]", "Cool Track"),
+    ]
+    for raw, expected in samples:
+        cleaned, _ = TagService.clean_title(raw, "")
+        assert cleaned == expected
+
+
+def test_clean_title_feat_extractor():
+    """Проверка извлечения соисполнителей (feat., ft., featuring) в поле артистов."""
+    # 1. В скобках с разделителем &
+    title, artists = TagService.clean_title("Song Title (feat. Drake & Future)", "Kendrick Lamar")
+    assert title == "Song Title"
+    assert artists == "Kendrick Lamar\\\\Drake\\\\Future"
+
+    # 2. Квадратные скобки [ft. ...]
+    title, artists = TagService.clean_title("Creepin' [ft. The Weeknd, 21 Savage]", "Metro Boomin")
+    assert title == "Creepin'"
+    assert artists == "Metro Boomin\\\\The Weeknd\\\\21 Savage"
+
+    # 3. Без скобок в конце строки
+    title, artists = TagService.clean_title("Where Are Ü Now feat. Justin Bieber", "Skrillex\\\\Diplo")
+    assert title == "Where Are Ü Now"
+    assert artists == "Skrillex\\\\Diplo\\\\Justin Bieber"
+
+    # 4. Дедупликация артистов (не добавлять повторно)
+    title, artists = TagService.clean_title("Hotline Bling (feat. Drake)", "Drake")
+    assert title == "Hotline Bling"
+    assert artists == "Drake"
+
+
+def test_clean_title_artist_prefix_and_track_numbers():
+    """Проверка удаления ведущих номеров треков и префикса артиста (Artist - Title)."""
+    # Номера дорожек в начале
+    assert TagService.clean_title("01. Get Lucky", "Daft Punk")[0] == "Get Lucky"
+    assert TagService.clean_title("05 - Technologic", "Daft Punk")[0] == "Technologic"
+    assert TagService.clean_title("12 Harder Better Faster Stronger", "Daft Punk")[0] == "Harder Better Faster Stronger"
+
+    # Префикс совпадает с current_artist
+    t, a = TagService.clean_title("Daft Punk - One More Time", "Daft Punk")
+    assert t == "One More Time"
+    assert a == "Daft Punk"
+
+    # Префикс переносится в артиста, если поле артиста было пустым
+    t, a = TagService.clean_title("Daft Punk - One More Time", "")
+    assert t == "One More Time"
+    assert a == "Daft Punk"
+
+
+def test_id3v24_tpos_disc_number(service_and_paths):
+    """Проверка записи и чтения номера и общего количества дисков (TPOS) в ID3v2.4."""
+    svc, music_dir, _ = service_and_paths
+    track_file = music_dir / "disc_test.mp3"
+    track_file.write_bytes(MINIMAL_MP3)
+
+    # 1. Запись с общим числом дисков: 1/2
+    svc.write_tags(
+        track_file,
+        TrackTags(
+            path="disc_test.mp3",
+            title="Disc 1 Track",
+            disc_number=1,
+            disc_total=2,
+            track_number=1,
+        ),
+    )
+    tags_read = svc.read_tags(track_file, rel_path="disc_test.mp3")
+    assert tags_read.disc_number == 1
+    assert tags_read.disc_total == 2
+
+    raw_id3 = ID3(str(track_file))
+    assert "TPOS" in raw_id3
+    assert raw_id3["TPOS"].text[0] == "1/2"
+
+    # 2. Запись только номера диска без общего числа: 2
+    svc.write_tags(
+        track_file,
+        TrackTags(
+            path="disc_test.mp3",
+            title="Disc 2 Track",
+            disc_number=2,
+            disc_total=None,
+            track_number=1,
+        ),
+    )
+    tags_read2 = svc.read_tags(track_file, rel_path="disc_test.mp3")
+    assert tags_read2.disc_number == 2
+    assert tags_read2.disc_total is None
+
+    raw_id3_2 = ID3(str(track_file))
+    assert raw_id3_2["TPOS"].text[0] == "2"
+
+
+def test_id3v24_trck_total(service_and_paths):
+    """Проверка записи и чтения номера дорожки с общим числом (TRCK, например 05/12)."""
+    svc, music_dir, _ = service_and_paths
+    track_file = music_dir / "track_total_test.mp3"
+    track_file.write_bytes(MINIMAL_MP3)
+
+    svc.write_tags(
+        track_file,
+        TrackTags(
+            path="track_total_test.mp3",
+            title="Track 5 of 12",
+            track_number=5,
+            track_total=12,
+        ),
+    )
+    tags_read = svc.read_tags(track_file, rel_path="track_total_test.mp3")
+    assert tags_read.track_number == 5
+    assert tags_read.track_total == 12
+
+    raw_id3 = ID3(str(track_file))
+    assert "TRCK" in raw_id3
+    assert raw_id3["TRCK"].text[0] == "5/12"
+
+
+@pytest.mark.asyncio
+async def test_download_cover(service_and_paths):
+    """Проверка скачивания изображения обложки и определения MIME-типа."""
+    svc, _, _ = service_and_paths
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    # 1. Скачивание валидного JPEG
+    mock_resp_jpeg = AsyncMock()
+    mock_resp_jpeg.status_code = 200
+    mock_resp_jpeg.content = DUMMY_JPEG
+    mock_resp_jpeg.headers = {"content-type": "image/jpeg"}
+
+    with patch.object(httpx.AsyncClient, "get", new=AsyncMock(return_value=mock_resp_jpeg)):
+        data, mime = await svc.download_cover("https://example.com/cover.jpg")
+        assert data == DUMMY_JPEG
+        assert mime == "image/jpeg"
+
+    # 2. Скачивание валидного PNG
+    mock_resp_png = AsyncMock()
+    mock_resp_png.status_code = 200
+    mock_resp_png.content = DUMMY_PNG
+    mock_resp_png.headers = {"content-type": "image/png"}
+
+    with patch.object(httpx.AsyncClient, "get", new=AsyncMock(return_value=mock_resp_png)):
+        data, mime = await svc.download_cover("https://example.com/cover.png")
+        assert data == DUMMY_PNG
+        assert mime == "image/png"
+
+    # 3. HTTP 404 вызывает TagError
+    mock_resp_404 = AsyncMock()
+    mock_resp_404.status_code = 404
+    mock_resp_404.content = b""
+
+    with (
+        patch.object(httpx.AsyncClient, "get", new=AsyncMock(return_value=mock_resp_404)),
+        pytest.raises(TagError, match="HTTP 404"),
+    ):
+        await svc.download_cover("https://example.com/missing.jpg")
+
+
+@pytest.mark.asyncio
+async def test_search_covers_aggregation(service_and_paths):
+    """Проверка параллельного поиска обложек в мульти-источниках (Apple, Deezer, Yandex, Spotify)."""
+    svc, _, _ = service_and_paths
+    from unittest.mock import MagicMock, patch
+
+    import httpx
+
+    def mock_get_dispatch(url, *args, **kwargs):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        url_str = str(url)
+        if "itunes.apple.com" in url_str:
+            mock_resp.json.return_value = {
+                "results": [
+                    {
+                        "collectionName": "Discovery",
+                        "artistName": "Daft Punk",
+                        "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/100x100bb.jpg",
+                        "releaseDate": "2001-03-07T08:00:00Z",
+                    }
+                ]
+            }
+        elif "api.deezer.com" in url_str:
+            mock_resp.json.return_value = {
+                "data": [
+                    {
+                        "title": "Discovery",
+                        "artist": {"name": "Daft Punk"},
+                        "cover_xl": "https://e-cdns-images.dzcdn.net/images/cover/1400x1400.jpg",
+                    }
+                ]
+            }
+        elif "music.yandex.ru" in url_str:
+            mock_resp.json.return_value = {
+                "albums": {
+                    "items": [
+                        {
+                            "title": "Discovery",
+                            "artists": [{"name": "Daft Punk"}],
+                            "coverUri": "avatars.yandex.net/get-music-content/123/%%",
+                            "year": 2001,
+                        }
+                    ]
+                }
+            }
+        elif "open.spotify.com" in url_str:
+            mock_resp.text = '<img src="https://i.scdn.co/image/ab67616d0000b273discovery123"/>'
+        else:
+            mock_resp.status_code = 404
+        return mock_resp
+
+    with patch.object(httpx.AsyncClient, "get", side_effect=mock_get_dispatch):
+        results = await svc.search_covers("Discovery Daft Punk", limit=10)
+        assert len(results) >= 3
+        sources = {r.source for r in results}
+        assert "apple" in sources
+        assert "deezer" in sources
+        assert "yandex" in sources
+
+        # Проверка апскейла Apple Music с 100x100bb до 1400x1400bb
+        apple_item = next(r for r in results if r.source == "apple")
+        assert "1400x1400bb.jpg" in apple_item.cover_url
+        assert apple_item.width == 1400
+        assert apple_item.year == 2001
+
+        # Проверка форматирования Яндекс Музыки до 1000x1000
+        yandex_item = next(r for r in results if r.source == "yandex")
+        assert "1000x1000" in yandex_item.cover_url
+        assert yandex_item.width == 1000
+

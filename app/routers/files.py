@@ -12,13 +12,125 @@ import logging
 
 from fastapi import APIRouter, Query
 
-from app.dependencies import CurrentUserDep, FileManagerServiceDep
+from app.dependencies import (
+    CurrentUserDep,
+    FileManagerServiceDep,
+    LibraryAuditServiceDep,
+)
 from app.schemas.files import DeleteFileResponse, DirectoryListingResponse
+from app.schemas.library_audit import (
+    AuditSummaryResponse,
+    BatchLyricsProgressResponse,
+    DuplicatesResponse,
+    LibrarySearchResponse,
+    MissingCoverItem,
+    MissingLyricsItem,
+)
 from app.schemas.tag import TrackTags
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/files", tags=["files"])
+
+
+@router.get(
+    "/search",
+    response_model=LibrarySearchResponse,
+    summary="Глобальный поиск по медиатеке",
+    description="Выполняет быстрый поиск по артистам, альбомам и названиям треков.",
+)
+async def search_library(
+    query: str = Query(..., min_length=1, description="Поисковый запрос"),
+    limit: int = Query(default=20, ge=1, le=100, description="Максимальное количество результатов в каждой категории"),
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> LibrarySearchResponse:
+    """Возвращает сгруппированные результаты поиска по медиатеке."""
+    return await audit_service.search(query=query, limit=limit)
+
+
+@router.get(
+    "/audit/summary",
+    response_model=AuditSummaryResponse,
+    summary="Сводные метрики аудита медиатеки",
+    description="Возвращает общее число треков, альбомов, отсутствующих текстов, обложек и дубликатов.",
+)
+async def get_audit_summary(
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> AuditSummaryResponse:
+    """Возвращает дашборд-сводку аудита медиатеки."""
+    return await audit_service.get_summary()
+
+
+@router.get(
+    "/audit/missing-lyrics",
+    response_model=list[MissingLyricsItem],
+    summary="Список треков без текстов песен",
+    description="Возвращает список MP3 треков, рядом с которыми нет файлов .lrc или .txt.",
+)
+async def get_missing_lyrics(
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> list[MissingLyricsItem]:
+    """Возвращает треки без текстов."""
+    return await audit_service.get_missing_lyrics()
+
+
+@router.post(
+    "/audit/missing-lyrics/fetch-all",
+    response_model=BatchLyricsProgressResponse,
+    summary="Запуск пакетного поиска недостающих текстов",
+    description="Запускает фоновый сбор текстов через LRCLIB и Genius для всех треков без слов.",
+)
+async def start_batch_lyrics_fetch(
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> BatchLyricsProgressResponse:
+    """Инициирует фоновый поиск текстов песен."""
+    return audit_service.start_batch_lyrics_fetch()
+
+
+@router.get(
+    "/audit/missing-lyrics/progress",
+    response_model=BatchLyricsProgressResponse,
+    summary="Прогресс пакетного поиска текстов",
+    description="Возвращает текущее состояние и счетчик прогресса фонового поиска текстов.",
+)
+async def get_batch_lyrics_progress(
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> BatchLyricsProgressResponse:
+    """Возвращает текущий прогресс автопоиска текстов."""
+    return audit_service.get_batch_lyrics_progress()
+
+
+@router.get(
+    "/audit/missing-covers",
+    response_model=list[MissingCoverItem],
+    summary="Список релизов и треков без обложек",
+    description="Возвращает папки альбомов и отдельные треки, у которых отсутствует графическая обложка.",
+)
+async def get_missing_covers(
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> list[MissingCoverItem]:
+    """Возвращает релизы без обложек."""
+    return await audit_service.get_missing_covers()
+
+
+@router.get(
+    "/audit/duplicates",
+    response_model=DuplicatesResponse,
+    summary="Поиск дубликатов песен",
+    description="Находит песни с одинаковым исполнителем и названием и схожей длительностью.",
+)
+async def get_library_duplicates(
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> DuplicatesResponse:
+    """Возвращает группы найденных дубликатов."""
+    return await audit_service.find_duplicates()
 
 
 @router.get(

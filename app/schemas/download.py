@@ -36,6 +36,21 @@ class CreateDownloadRequest(BaseModel):
     )
 
 
+class CreateBatchDownloadRequest(BaseModel):
+    """Запрос на пакетное создание задач загрузки."""
+
+    urls: list[str] = Field(
+        ...,
+        min_length=1,
+        description="Список URL треков, альбомов или плейлистов",
+        examples=[["https://www.deezer.com/album/302127", "https://soundcloud.com/artist/sets/album"]],
+    )
+    source: Literal["auto", "soundcloud", "youtube", "deezer", "yandex", "spotify", "applemusic"] = Field(
+        default="auto",
+        description="Явное указание источника или 'auto' для автоматического определения",
+    )
+
+
 class ResolvedTrack(BaseModel):
     """Нормализованное представление трека, объединяющее метаданные и аудиопоток."""
 
@@ -150,6 +165,26 @@ class DownloadJobResponse(BaseModel):
         ...,
         description="ISO-таймстемп создания задачи",
     )
+
+
+class BatchDownloadResponse(BaseModel):
+    """Ответ на создание пакета задач загрузки."""
+
+    job_ids: list[str] = Field(..., description="Список идентификаторов созданных задач")
+    jobs: list[DownloadJobResponse] = Field(..., description="Список созданных задач со статусом QUEUED")
+    total_queued: int = Field(..., description="Количество поставленных в очередь задач")
+
+
+class QueueSummaryResponse(BaseModel):
+    """Сводка состояния очереди загрузок для плавающего виджета и мониторинга."""
+
+    active_jobs: int = Field(default=0, description="Количество активно скачиваемых задач")
+    queued_jobs: int = Field(default=0, description="Количество задач в очереди ожидания")
+    completed_jobs: int = Field(default=0, description="Количество успешно завершенных задач")
+    error_jobs: int = Field(default=0, description="Количество задач с ошибкой")
+    total_tracks: int = Field(default=0, description="Общее число треков во всех актуальных задачах")
+    completed_tracks: int = Field(default=0, description="Число успешно скачанных/сконвертированных треков")
+    overall_progress: float = Field(default=0.0, ge=0.0, le=100.0, description="Агрегированный процент выполнения очереди")
 
 
 class DownloadTracksResponse(BaseModel):

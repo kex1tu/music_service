@@ -27,6 +27,18 @@ function tagEditorComponent() {
         isRecognizingAll: false,
         shazamProgress: { current: 0, total: 0 },
 
+        // Drag-and-Drop
+        draggedIndex: null,
+        dragOverIndex: null,
+
+        // Cover Gallery
+        showCoverGalleryModal: false,
+        coverSearchQuery: '',
+        isSearchingCovers: false,
+        coverGalleryResults: [],
+        coverSourceFilter: 'all',
+        selectedCoverUrl: null,
+
         // Deezer Album Search
         showDeezerModal: false,
         deezerQuery: '',
@@ -59,6 +71,13 @@ function tagEditorComponent() {
 
         loadData(data) {
             this.coverBase64 = null;
+            this.selectedCoverUrl = null;
+            this.draggedIndex = null;
+            this.dragOverIndex = null;
+            this.showCoverGalleryModal = false;
+            this.coverSearchQuery = '';
+            this.coverGalleryResults = [];
+            this.isSearchingCovers = false;
             this.isFetchingLyrics = false;
             this.lyricsProgress = { current: 0, total: 0 };
             this.recognizingTrackPath = null;
@@ -75,10 +94,15 @@ function tagEditorComponent() {
                 album: data.album?.album || '',
                 year: data.album?.year || null,
                 genre: data.album?.genre || '',
+                disc_total: data.album?.disc_total || null,
             };
 
             this.tracks = (data.tracks || []).map((t) => ({
                 ...t,
+                track_number: t.track_number !== undefined && t.track_number !== null ? t.track_number : 1,
+                track_total: t.track_total || null,
+                disc_number: t.disc_number !== undefined && t.disc_number !== null ? t.disc_number : 1,
+                disc_total: t.disc_total || (data.album?.disc_total || null),
                 album: (t.album !== undefined && t.album !== null && t.album !== '') ? t.album : (this.album.album || ''),
                 year: (t.year !== undefined && t.year !== null && t.year !== '') ? t.year : (this.album.year || null),
             }));
@@ -235,10 +259,14 @@ function tagEditorComponent() {
                         year: this.album.year ? parseInt(this.album.year, 10) : null,
                         genre: this.album.genre || '',
                         cover_path: this.coverPath,
+                        disc_total: this.album.disc_total ? parseInt(this.album.disc_total, 10) : null,
                     },
                     tracks: this.tracks.map((t) => ({
                         path: t.path,
                         track_number: parseInt(t.track_number, 10) || 1,
+                        track_total: t.track_total ? parseInt(t.track_total, 10) : null,
+                        disc_number: parseInt(t.disc_number, 10) || 1,
+                        disc_total: t.disc_total ? parseInt(t.disc_total, 10) : null,
                         title: t.title || '',
                         artist: t.artist || '',
                         album: t.album || this.album.album || '',
@@ -251,6 +279,7 @@ function tagEditorComponent() {
                     source_dir: this.sourceDir,
                     cover_path: this.coverPath,
                     cover_base64: this.coverBase64 || null,
+                    cover_url: this.selectedCoverUrl || null,
                     apply_album_to_tracks: false, // уже применены пользователем
                     reorganize: true, // переместить в каноническую структуру MUSIC_DIR
                 };
@@ -478,6 +507,228 @@ function tagEditorComponent() {
             } finally {
                 this.isLoadingDeezerDetails = false;
             }
+        },
+
+        cleanTrackTitle(track) {
+            if (!track || !track.title) return;
+            let rawTitle = String(track.title).trim();
+            if (!rawTitle) return;
+
+            let artists = track.artist
+                ? track.artist.split(/\\+|\x00/).map((a) => a.trim()).filter(Boolean)
+                : [];
+
+            // 1. Ведущие порядковые номера: "01. ", "01 - ", "01 "
+            rawTitle = rawTitle.replace(/^\s*\d{1,3}\s*[\.\-–—]\s*/, '').replace(/^\s*\d{1,3}\s+/, '');
+
+            // 2. Артист в начале названия: "Artist - Title"
+            const artistMatch = rawTitle.match(/^([^\-–—]+?)\s*[-–—]\s*(.+)$/);
+            if (artistMatch) {
+                const candArtist = artistMatch[1].trim();
+                const restTitle = artistMatch[2].trim();
+                if (artists.length > 0) {
+                    const lowerArtists = artists.map((a) => a.toLowerCase());
+                    if (lowerArtists.includes(candArtist.toLowerCase())) {
+                        rawTitle = restTitle;
+                    }
+                } else {
+                    artists.push(candArtist);
+                    rawTitle = restTitle;
+                }
+            }
+
+            // 3. Извлечение feat / ft / featuring
+            // 3.1. Внутри скобок (...) или [...]
+            const bracketFeatRegex = /[\(\[]\s*(?:feat\.?|ft\.?|featuring)\s+([^\]\)]+?)[\)\]]/gi;
+            let m;
+            while ((m = bracketFeatRegex.exec(rawTitle)) !== null) {
+                const featContent = m[1].trim();
+                rawTitle = rawTitle.slice(0, m.index) + ' ' + rawTitle.slice(m.index + m[0].length);
+                bracketFeatRegex.lastIndex = m.index;
+                const parts = featContent.split(/\s*(?:,|&|\/|\\+|\band\b|\bи\b|\bx\b)\s*/i);
+                for (const p of parts) {
+                    const pClean = p.trim();
+                    if (pClean && !artists.some((a) => a.toLowerCase() === pClean.toLowerCase())) {
+                        artists.push(pClean);
+                    }
+                }
+            }
+
+            // 3.2. В конце названия без скобок: "Song feat. Artist2"
+            const plainFeatMatch = rawTitle.match(/\b(?:feat\.?|ft\.?|featuring)\s+([^\[\]\(\)\-]+)$/i);
+            if (plainFeatMatch) {
+                const featContent = plainFeatMatch[1].trim();
+                rawTitle = rawTitle.slice(0, plainFeatMatch.index).trim();
+                const parts = featContent.split(/\s*(?:,|&|\/|\\+|\band\b|\bи\b|\bx\b)\s*/i);
+                for (const p of parts) {
+                    const pClean = p.trim();
+                    if (pClean && !artists.some((a) => a.toLowerCase() === pClean.toLowerCase())) {
+                        artists.push(pClean);
+                    }
+                }
+            }
+
+            // 4. Удаление мусорных суффиксов в скобках
+            const junkRegex = /[\(\[]\s*(?:(?:(?:official|music|4k|hd|hq|1080p|720p)\s+)*(?:video|audio|visualizer|clip\s*officiel|lyric\s*video|lyrics)|official|audio|video|visualizer|lyrics|clip\s*officiel|hd|hq|4k|1080p|720p|prod\.?\s*by[^\)\]]+|remaster(?:ed)?(?:\s*\d{4})?)\s*[\)\]]/gi;
+            rawTitle = rawTitle.replace(junkRegex, '');
+
+            // 5. Очистка пустых скобок, лишних пробелов и дефисов
+            rawTitle = rawTitle.replace(/[\(\[]\s*[\)\]]/g, '');
+            rawTitle = rawTitle.replace(/\s+/g, ' ').replace(/^[\s\-–—._]+|[\s\-–—._]+$/g, '');
+
+            if (rawTitle) {
+                track.title = rawTitle;
+            }
+            if (artists.length > 0) {
+                track.artist = artists.join('\\\\');
+            }
+        },
+
+        cleanTitles() {
+            if (!this.tracks || this.tracks.length === 0) return;
+            let modified = 0;
+            for (const track of this.tracks) {
+                const oldTitle = track.title;
+                const oldArtist = track.artist;
+                this.cleanTrackTitle(track);
+                if (track.title !== oldTitle || track.artist !== oldArtist) {
+                    modified++;
+                }
+            }
+            Alpine.store('app').toast(`Очищено названий и извлечено фитов: ${modified}`, 'info');
+        },
+
+        onDragStart(event, index) {
+            this.draggedIndex = index;
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', String(index));
+            }
+        },
+
+        onDragOver(event, index) {
+            event.preventDefault();
+            if (event.dataTransfer) {
+                event.dataTransfer.dropEffect = 'move';
+            }
+            this.dragOverIndex = index;
+        },
+
+        onDrop(event, targetIndex) {
+            event.preventDefault();
+            if (this.draggedIndex === null || this.draggedIndex === targetIndex) {
+                this.dragOverIndex = null;
+                return;
+            }
+            const [moved] = this.tracks.splice(this.draggedIndex, 1);
+            this.tracks.splice(targetIndex, 0, moved);
+            this.draggedIndex = null;
+            this.dragOverIndex = null;
+            Alpine.store('app').toast('Порядок треков изменён', 'info');
+        },
+
+        onDragEnd() {
+            this.draggedIndex = null;
+            this.dragOverIndex = null;
+        },
+
+        renumberTracks() {
+            if (!this.tracks || this.tracks.length === 0) return;
+            const hasMultipleDiscs = this.tracks.some((t) => t.disc_number && t.disc_number > 1);
+            if (hasMultipleDiscs) {
+                const counters = {};
+                for (const t of this.tracks) {
+                    const disc = t.disc_number || 1;
+                    counters[disc] = (counters[disc] || 0) + 1;
+                    t.track_number = counters[disc];
+                }
+                for (const t of this.tracks) {
+                    const disc = t.disc_number || 1;
+                    t.track_total = counters[disc];
+                }
+                const maxDisc = Math.max(...Object.keys(counters).map(Number));
+                this.album.disc_total = maxDisc;
+                for (const t of this.tracks) {
+                    t.disc_total = maxDisc;
+                }
+            } else {
+                const total = this.tracks.length;
+                this.tracks.forEach((track, index) => {
+                    track.track_number = index + 1;
+                    track.track_total = total;
+                    track.disc_number = 1;
+                    track.disc_total = 1;
+                });
+                this.album.disc_total = 1;
+            }
+            Alpine.store('app').toast('Треки успешно перенумерованы!', 'success');
+        },
+
+        openCoverGallery() {
+            this.showCoverGalleryModal = true;
+            this.coverSourceFilter = 'all';
+            const albumPart = this.album.album || '';
+            const artistPart = this.album.album_artist || '';
+            this.coverSearchQuery = (
+                albumPart
+                    ? `${artistPart} ${albumPart}`
+                    : this.tracks[0]?.artist
+                    ? `${this.tracks[0].artist} ${this.tracks[0].title || ''}`
+                    : ''
+            ).trim();
+            if (this.coverSearchQuery) {
+                this.searchCovers();
+            }
+        },
+
+        closeCoverGallery() {
+            this.showCoverGalleryModal = false;
+        },
+
+        async searchCovers() {
+            if (!this.coverSearchQuery || !this.coverSearchQuery.trim()) return;
+            this.isSearchingCovers = true;
+            this.coverGalleryResults = [];
+
+            try {
+                const res = await fetch(
+                    `/tags/covers/search?query=${encodeURIComponent(this.coverSearchQuery.trim())}&limit=24`
+                );
+                if (res.ok) {
+                    this.coverGalleryResults = await res.json();
+                    if (this.coverGalleryResults.length === 0) {
+                        Alpine.store('app').toast('Обложки не найдены', 'info');
+                    }
+                } else {
+                    const err = await res.json();
+                    throw new Error(err.message || 'Ошибка поиска обложек');
+                }
+            } catch (err) {
+                Alpine.store('app').toast(`Ошибка: ${err.message}`, 'error');
+            } finally {
+                this.isSearchingCovers = false;
+            }
+        },
+
+        filteredCoverResults() {
+            if (this.coverSourceFilter === 'all') {
+                return this.coverGalleryResults;
+            }
+            return this.coverGalleryResults.filter((item) => item.source === this.coverSourceFilter);
+        },
+
+        selectCover(item) {
+            if (!item || !item.cover_url) return;
+            this.coverPreviewUrl = item.cover_url;
+            this.selectedCoverUrl = item.cover_url;
+            this.coverPath = null;
+            this.coverBase64 = null;
+            this.fetchCoverBase64(item.cover_url);
+            this.closeCoverGallery();
+            Alpine.store('app').toast(
+                `Выбрана обложка (${item.source.toUpperCase()} ${item.width}x${item.height})`,
+                'success'
+            );
         },
 
         close() {

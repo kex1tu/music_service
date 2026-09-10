@@ -38,6 +38,11 @@ class AlbumTags(BaseModel):
         default=None,
         description="Относительный путь к файлу обложки",
     )
+    disc_total: int | None = Field(
+        default=None,
+        ge=1,
+        description="Всего дисков в альбоме",
+    )
 
 
 class TrackTags(BaseModel):
@@ -51,6 +56,21 @@ class TrackTags(BaseModel):
         default=1,
         ge=1,
         description="Порядковый номер дорожки на альбоме",
+    )
+    track_total: int | None = Field(
+        default=None,
+        ge=1,
+        description="Всего треков на диске (ID3v2.4 TRCK)",
+    )
+    disc_number: int = Field(
+        default=1,
+        ge=1,
+        description="Номер диска (ID3v2.4 TPOS)",
+    )
+    disc_total: int | None = Field(
+        default=None,
+        ge=1,
+        description="Всего дисков в релизе (ID3v2.4 TPOS)",
     )
     title: str = Field(
         default="",
@@ -119,6 +139,10 @@ class SaveAlbumRequest(BaseModel):
         default=None,
         description="Base64-кодированное изображение обложки (data URL или сырой base64) для загрузки из браузера",
     )
+    cover_url: str | None = Field(
+        default=None,
+        description="Внешний URL обложки из галереи для загрузки сервером",
+    )
     apply_album_to_tracks: bool = Field(
         default=True,
         description="Применить общие поля альбома к трекам перед сохранением",
@@ -135,6 +159,18 @@ class BatchSaveResponse(BaseModel):
     success: bool = Field(default=True, description="Флаг успешности операции")
     destination_dir: str = Field(..., description="Каталог размещения альбома после сохранения")
     tracks: list[TrackTags] = Field(default_factory=list, description="Список сохраненных треков")
+
+
+class CoverSearchResultItem(BaseModel):
+    """Результат поиска обложки в мультисервисной галерее."""
+
+    source: Literal["apple", "deezer", "yandex", "spotify"] = Field(..., description="Сервис-источник")
+    title: str = Field(..., description="Название альбома / релиза")
+    artist: str = Field(..., description="Исполнитель альбома")
+    cover_url: str = Field(..., description="Прямой URL обложки высокого разрешения")
+    width: int = Field(..., description="Ширина в пикселях")
+    height: int = Field(..., description="Высота в пикселях")
+    year: int | None = Field(default=None, description="Год релиза")
 
 
 class RecognizeAudioRequest(BaseModel):

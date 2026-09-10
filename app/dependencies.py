@@ -16,6 +16,8 @@ from app.services.auth_service import AuthService
 from app.services.deezer_client import DeezerClient
 from app.services.download_service import DownloadService
 from app.services.file_manager_service import FileManagerService
+from app.services.library_audit_service import LibraryAuditService
+from app.services.lyrics_service import GeniusClient, LrclibClient, LyricsService
 from app.services.organizer_service import OrganizerService
 from app.services.source_resolver import SourceResolver
 from app.services.tag_service import TagService
@@ -188,5 +190,53 @@ def get_organizer_service(
 
 
 OrganizerServiceDep = Annotated[OrganizerService, Depends(get_organizer_service)]
+
+
+def get_lrclib_client() -> LrclibClient:
+    """Провайдер клиента LRCLIB."""
+    return LrclibClient()
+
+
+def get_genius_client(settings: SettingsDep) -> GeniusClient:
+    """Провайдер клиента Genius API."""
+    return GeniusClient(api_token=settings.GENIUS_API_TOKEN)
+
+
+def get_lyrics_service(
+    music_sandbox: MusicSandboxDep,
+    tmp_sandbox: TmpSandboxDep,
+    settings: SettingsDep,
+) -> LyricsService:
+    """Провайдер сервиса управления текстами песен LyricsService."""
+    return LyricsService(
+        music_sandbox=music_sandbox,
+        tmp_sandbox=tmp_sandbox,
+        lrclib_client=get_lrclib_client(),
+        genius_client=get_genius_client(settings),
+    )
+
+
+LyricsServiceDep = Annotated[LyricsService, Depends(get_lyrics_service)]
+
+_library_audit_service: LibraryAuditService | None = None
+
+
+def get_library_audit_service(
+    music_sandbox: MusicSandboxDep,
+    tag_service: TagServiceDep,
+    lyrics_service: LyricsServiceDep,
+) -> LibraryAuditService:
+    """Провайдер синглтона сервиса аудита и глобального поиска медиатеки."""
+    global _library_audit_service
+    if _library_audit_service is None:
+        _library_audit_service = LibraryAuditService(
+            music_sandbox=music_sandbox,
+            tag_service=tag_service,
+            lyrics_service=lyrics_service,
+        )
+    return _library_audit_service
+
+
+LibraryAuditServiceDep = Annotated[LibraryAuditService, Depends(get_library_audit_service)]
 
 

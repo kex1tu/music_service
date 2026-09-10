@@ -151,4 +151,130 @@ def test_track_album_and_year_fields_in_tag_editor(client: TestClient):
     assert "Год" in html
 
 
+def test_clean_titles_dnd_renumber_and_cover_gallery_in_tag_editor(client: TestClient):
+    """Проверка наличия элементов управления для очистки названий, DND/перенумерации и галереи обложек."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+
+    # 1. Кнопки очистки названий и перенумерации треков
+    assert '@click="cleanTitles()"' in html, "cleanTitles button missing in index.html"
+    assert "Очистить названия" in html
+    assert '@click="renumberTracks()"' in html, "renumberTracks button missing in index.html"
+    assert "Перенумеровать" in html
+
+    # 2. Кнопка открытия галереи обложек и поле общего числа дисков
+    assert '@click="openCoverGallery()"' in html, "openCoverGallery button missing in index.html"
+    assert "Выбрать из галереи" in html
+    assert 'x-model="album.disc_total"' in html, "album.disc_total input missing in index.html"
+
+    # 3. Элементы таблицы треков: Drag-and-Drop, номер диска и индивидуальная очистка
+    assert '@dragstart="onDragStart($event, index)"' in html, "DND dragstart missing on track row"
+    assert '@drop="onDrop($event, index)"' in html, "DND drop missing on track row"
+    assert 'x-model="track.disc_number"' in html, "track.disc_number input missing in table"
+    assert '@click="cleanTrackTitle(track)"' in html, "cleanTrackTitle button missing in title column"
+
+    # 4. Модальное окно галереи обложек и фильтры источников
+    assert "showCoverGalleryModal" in html, "Cover gallery modal binding missing"
+    assert '@click="searchCovers()"' in html, "searchCovers button missing in modal"
+    assert "coverSourceFilter === 'all'" in html, "Source filter 'all' missing in modal"
+    assert "coverSourceFilter === 'apple'" in html, "Source filter 'apple' missing in modal"
+    assert "coverSourceFilter === 'deezer'" in html, "Source filter 'deezer' missing in modal"
+    assert "coverSourceFilter === 'yandex'" in html, "Source filter 'yandex' missing in modal"
+    assert "coverSourceFilter === 'spotify'" in html, "Source filter 'spotify' missing in modal"
+    assert '@click="selectCover(item)"' in html, "selectCover handler missing in modal"
+
+    # 5. Проверка реализации логики в tag_editor.js
+    tag_editor_js = (PROJECT_ROOT / "app" / "static" / "js" / "tag_editor.js").read_text(encoding="utf-8")
+    assert "cleanTrackTitle" in tag_editor_js
+    assert "cleanTitles" in tag_editor_js
+    assert "renumberTracks" in tag_editor_js
+    assert "onDragStart" in tag_editor_js
+    assert "onDragOver" in tag_editor_js
+    assert "onDrop" in tag_editor_js
+    assert "openCoverGallery" in tag_editor_js
+    assert "closeCoverGallery" in tag_editor_js
+    assert "searchCovers" in tag_editor_js
+    assert "selectCover" in tag_editor_js
+    assert "filteredCoverResults" in tag_editor_js
+
+
+def test_batch_downloader_ui(client: TestClient):
+    """Проверка наличия переключателя пакетного режима и поля ввода списка URL."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+
+    assert "inputMode = 'single'" in html
+    assert "inputMode = 'batch'" in html
+    assert "parsedBatchUrls.length" in html
+    assert "batchUrlsText" in html
+    assert "Список ссылок (пакетно)" in html
+
+
+def test_global_search_header_ui(client: TestClient):
+    """Проверка наличия поисковой строки в шапке с горячей клавишей Ctrl+K и секциями результатов."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+
+    assert "performSearch()" in html
+    assert "Ctrl+K" in html
+    assert "/files/search?query=" in html
+    assert "results.artists" in html
+    assert "results.albums" in html
+    assert "results.tracks" in html
+    assert "navigateToDir" in html
+
+
+def test_library_audit_tab_and_components_ui(client: TestClient):
+    """Проверка наличия вкладки Аудит медиатеки, сводки метрик, подвкладок и действий."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+
+    # Навигация и инициализация компонента
+    assert "$store.app.activeTab === 'audit'" in html
+    assert "libraryAuditComponent()" in html
+    assert "library_audit.js" in html
+
+    # Сводка метрик
+    assert "summary.total_tracks" in html
+    assert "summary.missing_lyrics_count" in html
+    assert "summary.missing_covers_count" in html
+    assert "summary.duplicates_count" in html
+
+    # Подвкладки и действия
+    assert "activeSubTab === 'lyrics'" in html
+    assert "activeSubTab === 'covers'" in html
+    assert "activeSubTab === 'duplicates'" in html
+    assert "startBatchLyricsFetch()" in html
+    assert "promptDeleteDuplicate(trk)" in html
+
+    # Проверка исходного файла library_audit.js
+    audit_js = (PROJECT_ROOT / "app" / "static" / "js" / "library_audit.js").read_text(encoding="utf-8")
+    assert "libraryAuditComponent" in audit_js
+    assert "loadSummary" in audit_js
+    assert "loadMissingLyrics" in audit_js
+    assert "loadMissingCovers" in audit_js
+    assert "loadDuplicates" in audit_js
+    assert "startBatchLyricsFetch" in audit_js
+    assert "promptDeleteDuplicate" in audit_js
+
+
+def test_floating_queue_widget_ui(client: TestClient):
+    """Проверка наличия плавающего менеджера очередей и интеграции с хранилищем."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+
+    assert "$store.app.queue.isOpen" in html
+    assert "$store.app.queue.activeCount" in html
+    assert "$store.app.queue.clearCompleted()" in html
+    assert "$store.app.queue.openJobInTagEditor" in html
+    assert "$store.app.queue.cancelJob" in html
+    assert "Очередь загрузок" in html
+
+
+
 

@@ -6,13 +6,63 @@
 
 function downloaderComponent() {
     return {
+        inputMode: 'single', // 'single' | 'batch'
         url: '',
+        batchUrlsText: '',
         source: 'auto',
         isSubmitting: false,
         job: null,
         pollInterval: null,
 
+        get parsedBatchUrls() {
+            return (this.batchUrlsText || '')
+                .split('\n')
+                .map((u) => u.trim())
+                .filter((u) => u.length > 0);
+        },
+
+        async submitBatchDownloads() {
+            const urls = this.parsedBatchUrls;
+            if (!urls.length) {
+                Alpine.store('app').toast('Введите хотя бы одну ссылку в список', 'error');
+                return;
+            }
+
+            this.isSubmitting = true;
+            try {
+                const response = await fetch('/downloads/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        urls: urls,
+                        source: this.source,
+                    }),
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.message || err.error || 'Ошибка пакетной загрузки');
+                }
+
+                const batchData = await response.json();
+                this.batchUrlsText = '';
+                Alpine.store('app').toast(`Поставлено в очередь задач: ${batchData.total_queued}`, 'success');
+                if (Alpine.store('app').queue) {
+                    Alpine.store('app').queue.isOpen = true;
+                    await Alpine.store('app').queue.fetchQueue();
+                }
+            } catch (err) {
+                Alpine.store('app').toast(err.message, 'error');
+            } finally {
+                this.isSubmitting = false;
+            }
+        },
+
         async submitDownload() {
+            if (this.inputMode === 'batch') {
+                return this.submitBatchDownloads();
+            }
+
             const cleanUrl = this.url.trim();
             if (!cleanUrl) {
                 Alpine.store('app').toast('Введите корректный URL для загрузки', 'error');

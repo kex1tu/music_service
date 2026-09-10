@@ -14,9 +14,12 @@ from fastapi import APIRouter, status
 
 from app.dependencies import CurrentUserDep, DownloadServiceDep
 from app.schemas.download import (
+    BatchDownloadResponse,
+    CreateBatchDownloadRequest,
     CreateDownloadRequest,
     DownloadJobResponse,
     DownloadTracksResponse,
+    QueueSummaryResponse,
 )
 
 logger = logging.getLogger("music_manager.routers.downloads")
@@ -40,6 +43,77 @@ async def create_download(
     logger.info("Пользователь '%s' запросил загрузку URL: %s", current_user, request.url)
     job = await download_service.create_job(url=request.url, source=request.source)
     return job.to_response()
+
+
+@router.post(
+    "/batch",
+    response_model=BatchDownloadResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Пакетное создание задач загрузки",
+    description="Принимает список URL, валидирует источники и ставит пачку задач в очередь.",
+)
+async def create_batch_downloads(
+    request: CreateBatchDownloadRequest,
+    download_service: DownloadServiceDep,
+    current_user: CurrentUserDep,
+) -> BatchDownloadResponse:
+    """Создает пачку задач загрузки и возвращает список их статусов QUEUED."""
+    logger.info(
+        "Пользователь '%s' запросил пакетную загрузку %d URL",
+        current_user,
+        len(request.urls),
+    )
+    jobs = await download_service.create_batch_jobs(
+        urls=request.urls, source=request.source
+    )
+    return BatchDownloadResponse(
+        job_ids=[j.id for j in jobs],
+        jobs=[j.to_response() for j in jobs],
+        total_queued=len(jobs),
+    )
+
+
+@router.get(
+    "",
+    response_model=list[DownloadJobResponse],
+    summary="Получение списка всех задач в очереди",
+    description="Возвращает список всех активных и завершенных задач в памяти.",
+)
+async def list_downloads(
+    download_service: DownloadServiceDep,
+    current_user: CurrentUserDep,
+) -> list[DownloadJobResponse]:
+    """Возвращает список всех задач загрузки."""
+    return download_service.get_all_jobs()
+
+
+@router.get(
+    "/queue/summary",
+    response_model=QueueSummaryResponse,
+    summary="Получение агрегированного статуса очереди",
+    description="Возвращает статистику для плавающего виджета очереди и прогресс-бара.",
+)
+async def get_queue_summary(
+    download_service: DownloadServiceDep,
+    current_user: CurrentUserDep,
+) -> QueueSummaryResponse:
+    """Возвращает сводку очереди загрузок."""
+    return download_service.get_queue_summary()
+
+
+@router.post(
+    "/queue/clear",
+    summary="Очистка завершенных и ошибочных задач из очереди",
+    description="Удаляет из очереди задачи в статусах READY и ERROR.",
+)
+async def clear_completed_queue(
+    download_service: DownloadServiceDep,
+    current_user: CurrentUserDep,
+) -> dict[str, int | str]:
+    """Очищает завершенные задачи из очереди."""
+    count = await download_service.clear_completed_jobs()
+    logger.info("Пользователь '%s' очистил %d завершенных задач", current_user, count)
+    return {"status": "cleared", "count": count}
 
 
 @router.get(

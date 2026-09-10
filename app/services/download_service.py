@@ -19,12 +19,13 @@ from typing import Any
 from mutagen.id3 import APIC, ID3, TALB, TCON, TDRC, TIT2, TPE1, TPE2, TRCK
 
 from app.config import Settings
-from app.core.exceptions import DownloadError, NotFoundError
+from app.core.exceptions import DownloadError, NotFoundError, UnsupportedSourceError
 from app.core.sandbox import PathSandbox
 from app.schemas.download import (
     DownloadJobResponse,
     DownloadTracksResponse,
     JobStatus,
+    QueueSummaryResponse,
     ResolvedTrack,
 )
 from app.services.deezer_client import DeezerClient
@@ -213,6 +214,100 @@ class DownloadService:
         # Запускаем фоновый конвейер
         asyncio.create_task(self._execute_pipeline(job_id))
         return job
+
+    async def create_batch_jobs(
+        self, urls: list[str], source: str = "auto"
+    ) -> list[DownloadJob]:
+        """Создает пакет задач загрузки для переданного списка URL.
+
+        Валидирует источники и последовательно ставит задачи в очередь.
+        """
+        cleaned_urls = [u.strip() for u in urls if u and u.strip()]
+        if not cleaned_urls:
+            raise UnsupportedSourceError("Список URL не может быть пустым")
+
+        # Предварительная валидация источников
+        if source == "auto":
+            for u in cleaned_urls:
+                self._resolver.detect_source(u)
+
+        created_jobs: list[DownloadJob] = []
+        for u in cleaned_urls:
+            job = await self.create_job(url=u, source=source)
+            created_jobs.append(job)
+
+        return created_jobs
+
+    def get_all_jobs(self) -> list[DownloadJobResponse]:
+        """Возвращает список всех задач в памяти, отсортированных от новых к старым."""
+        sorted_jobs = sorted(
+            self._jobs.values(),
+            key=lambda j: j.created_at,
+            reverse=True,
+        )
+        return [j.to_response() for j in sorted_jobs]
+
+    def get_queue_summary(self) -> QueueSummaryResponse:
+        """Возвращает агрегированную сводку состояния очереди загрузок."""
+        jobs = list(self._jobs.values())
+        if not jobs:
+            return QueueSummaryResponse()
+
+        active_jobs = 0
+        queued_jobs = 0
+        completed_jobs = 0
+        error_jobs = 0
+        total_tracks = 0
+        completed_tracks = 0
+        total_progress = 0.0
+
+        active_statuses = {
+            JobStatus.RESOLVING,
+            JobStatus.DOWNLOADING,
+            JobStatus.CONVERTING,
+            JobStatus.TAGGING,
+        }
+
+        for j in jobs:
+            if j.status in active_statuses:
+                active_jobs += 1
+            elif j.status == JobStatus.QUEUED:
+                queued_jobs += 1
+            elif j.status == JobStatus.READY:
+                completed_jobs += 1
+            elif j.status == JobStatus.ERROR:
+                error_jobs += 1
+
+            t_count = len(j.tracks)
+            total_tracks += t_count if t_count > 0 else (1 if j.status != JobStatus.ERROR else 0)
+            completed_tracks += j.completed_tracks
+            total_progress += j.progress
+
+        overall_progress = round(total_progress / len(jobs), 1)
+        overall_progress = max(0.0, min(100.0, overall_progress))
+
+        return QueueSummaryResponse(
+            active_jobs=active_jobs,
+            queued_jobs=queued_jobs,
+            completed_jobs=completed_jobs,
+            error_jobs=error_jobs,
+            total_tracks=total_tracks,
+            completed_tracks=completed_tracks,
+            overall_progress=overall_progress,
+        )
+
+    async def clear_completed_jobs(self) -> int:
+        """Удаляет завершенные (READY) и аварийные (ERROR) задачи из очереди."""
+        async with self._lock:
+            to_remove = [
+                jid
+                for jid, job in self._jobs.items()
+                if job.status in (JobStatus.READY, JobStatus.ERROR)
+            ]
+            for jid in to_remove:
+                self._jobs.pop(jid, None)
+
+        return len(to_remove)
 
     async def _execute_pipeline(self, job_id: str) -> None:
         """Основной пайплайн: разрешение -> загрузка -> конвертация -> теги -> READY."""

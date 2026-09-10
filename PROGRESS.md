@@ -1,11 +1,9 @@
 # PROGRESS.md — Матрица статусов реализации Music Downloader & Tag Manager
 
 ## Текущий статус проекта
-- **Общий прогресс:** 22 / 22 компонентов завершены (100%)
-- **Активный этап:** Все блоки (1–12), включая импорт плейлистов, альбомов и треков из Яндекс Музыки, Spotify и Apple Music с параллельным сопоставлением через AudioMatcher, полностью завершены.
-- **Результаты тестов:** 441/441 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
-
-
+- **Общий прогресс:** 25 / 25 компонентов завершены (100%)
+- **Активный этап:** Все блоки (1–15), включая пакетный режим загрузки, плавающий менеджер очередей, мгновенный глобальный поиск по медиатеке (`Ctrl+K`) и полнофункциональную вкладку «Аудит медиатеки» (автопоиск текстов, поиск дубликатов, поиск релизов без обложек), полностью реализованы и протестированы.
+- **Результаты тестов:** 472/472 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -125,6 +123,38 @@
 | **R4: Интеграция в конвейер загрузки (`SourceResolver` & DI)** | `app/services/source_resolver.py`, `app/dependencies.py`, `app/schemas/download.py`, `app/config.py`, `.env.example`, `tests/test_source_resolver.py` | **DONE** | Автоопределение источников `yandex`, `spotify`, `applemusic` в `detect_source`; расширение `ALLOWED_DOWNLOAD_DOMAINS` и схемы `CreateDownloadRequest`; параллельное сопоставление треков через `AudioMatcher` с семафором `MATCHER_CONCURRENCY`; поддержка прямого скачивания MP3 с Яндекса; изоляция сбойных треков. 3 интеграционных теста в `tests/test_source_resolver.py`. |
 | **R5: Пользовательский интерфейс и подсказки** | `app/templates/index.html` | **DONE** | Обновлен плейсхолдер и текст формы ввода URL (поддержка ссылок Яндекс Музыки, Spotify, Apple Music, Deezer, YouTube Music, SoundCloud); добавлены новые опции в селектор источника; обновлены информационные карточки поддерживаемых сервисов. |
 | **R6: Верификация, линтинг и тесты** | `tests/` | **DONE** | Все 441 тест успешно пройдены (`pytest tests/ -v`, 100% pass), линтер `ruff check` чист (0 замечаний). Полное соблюдение инвариантов Zero-Database, PathSandbox, ID3v2.4 и внешних текстов песен. |
+
+---
+
+## Блок 13: Продвинутое редактирование тегов: Очистка названий, DND/Перенумерация мультидисков (TPOS) и Галерея обложек (2026-09-10T12:55:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Очистка названий и извлечение фитов (Clean Titles & Feat Extractor)** | `app/services/tag_service.py`, `app/static/js/tag_editor.js`, `app/templates/index.html`, `tests/test_tag_service.py` | **DONE** | Реализована пакетная и индивидуальная очистка названий треков: удаление мусорных суффиксов в скобках (`[Official Video]`, `(1080p)`, `[Prod. by ...]`, `(Lyric Video)`, `[Remastered 2021]`, `[4K Visualizer]`), удаление ведущих номеров дорожек (`01. `, `01 - `), нормализация префикса артиста (`Artist - Title`). Автоматическое извлечение соисполнителей (`feat.`, `ft.`, `featuring` в скобках и без) в поле исполнителей с разделителем `\\` на фронте и `\x00` в ID3v2.4 без дублирования существующих авторов. 3 теста в `tests/test_tag_service.py`. |
+| **R2: Drag-and-Drop, умная перенумерация и поддержка мультидисков (TPOS/TRCK)** | `app/schemas/tag.py`, `app/services/tag_service.py`, `app/routers/tags.py`, `app/static/js/tag_editor.js`, `app/templates/index.html`, `tests/test_tag_service.py`, `tests/test_tags_router.py` | **DONE** | Добавлены поля `disc_number`, `disc_total`, `track_total` в схемы `TrackTags` и `AlbumTags`. Поддержка чтения и записи фреймов `TPOS` (номер диска / общее число) и `TRCK` (номер дорожки / общее число) в Mutagen ID3v2.4. Сортировка треков альбома с учетом номера диска (`(disc_number, track_number)`). Полноценный HTML5 Drag-and-Drop для ручной перестановки строк в таблице треков Tag Editor. Кнопка «Перенумеровать» с автоматическим сбросом нумерации (1..N в рамках каждого диска или глобально). Сохранение `disc_number` и `disc_total` при пакетном сохранении тегов. 4 теста в `tests/test_tag_service.py` и `tests/test_tags_router.py`. |
+| **R3: Мульти-источниковая галерея обложек (Multi-Source Cover Gallery)** | `app/schemas/tag.py`, `app/services/tag_service.py`, `app/routers/tags.py`, `app/static/js/tag_editor.js`, `app/templates/index.html`, `tests/test_tag_service.py`, `tests/test_tags_router.py` | **DONE** | Реализован поиск обложек ультравысокого разрешения через публичные API без ключей: Apple Music / iTunes (апскейл до 1400×1400), Deezer (`cover_xl` 1400×1400), Яндекс Музыка (1000×1000) и Spotify (640×640). Эндпоинт `GET /tags/covers/search` с параллельным опросом через `asyncio.gather` и защитой от таймаутов отдельных источников. Модальное окно «Галерея обложек» в UI с фильтрами по источникам (Все, Apple Music, Deezer, Яндекс Музыка, Spotify), сеткой карточек с предпросмотром разрешения и года, мгновенным выбором. Серверное скачивание обложки по `cover_url` в `PUT /tags/batch` с автодетекцией MIME и вшиванием в треки и `cover.jpg`. 4 теста в `tests/test_tag_service.py` и `tests/test_tags_router.py`. |
+| **R4: Верификация, линтинг и интеграционные тесты UI** | `tests/test_frontend.py`, `tests/` | **DONE** | Добавлен комплексный тест `test_clean_titles_dnd_renumber_and_cover_gallery_in_tag_editor` в `tests/test_frontend.py`. Все 452 теста успешно пройдены (`pytest`, 100% pass), линтер `ruff check` чист (0 замечаний). Полное соблюдение архитектурных инвариантов: Zero-Database, обязательный PathSandbox, strict ID3v2.4 с null-byte separation, no-build Alpine.js + Tailwind. |
+
+---
+
+## Блок 14: Очередь загрузок и пакетный режим (Batch Download & Queue Manager) (2026-09-10T13:00:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Схемы и бэкенд пакетной загрузки и очередей** | `app/schemas/download.py`, `app/services/download_service.py`, `app/routers/downloads.py`, `tests/test_batch_downloads.py` | **DONE** | Разработаны Pydantic-схемы `CreateBatchDownloadRequest`, `BatchDownloadResponse`, `QueueSummaryResponse`. В `DownloadService` реализованы методы `create_batch_jobs`, `get_all_jobs`, `get_queue_summary`, `clear_completed_jobs`. Добавлены эндпоинты `POST /downloads/batch`, `GET /downloads`, `GET /downloads/queue/summary`, `POST /downloads/queue/clear`. Изолированное выполнение через семафор параллелизма. 5 тестов в `tests/test_batch_downloads.py`. |
+| **R2: Пользовательский интерфейс: Пакетный ввод и плавающий менеджер очередей** | `app/templates/index.html`, `app/static/js/downloader.js`, `tests/test_frontend.py` | **DONE** | В форму загрузчика добавлен переключатель режима («Одна ссылка» / «Список ссылок (пакетно)») с многострочным полем `<textarea>` и бейджем количества обнаруженных ссылок. Создан глобальный стор очереди `Alpine.store('app').queue` с автополлингом каждые 2 сек. Разработан плавающий виджет менеджера очередей в правом нижнем углу экрана (`fixed bottom-4 right-4 z-40`), доступный на всех вкладках: свернутая плашка-кнопка с индикацией активных задач и прогресса, и разворачиваемая панель (Drawer) с управлением задачами, переходом в Tag Editor, отменой и очисткой. 2 UI-теста в `tests/test_frontend.py`. |
+
+---
+
+## Блок 15: Глобальный поиск и аудит медиатеки (Global Search & Library Audit) (2026-09-10T13:08:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Мгновенный глобальный поиск (`Ctrl+K`) и In-Memory LibraryIndex** | `app/schemas/library_audit.py`, `app/services/library_audit_service.py`, `app/routers/files.py`, `app/templates/index.html`, `tests/test_global_search.py`, `tests/test_frontend.py` | **DONE** | Разработан сервис `LibraryAuditService` с in-memory индексацией и инкрементальным кэшированием по `st_mtime` (строгий инвариант Zero-Database). Эндпоинт `GET /files/search?query=...` с фильтрацией по артистам, альбомам и трекам. В шапку сайта встроена поисковая строка с горячей клавишей `Ctrl+K`, debounce 250мс, выпадающим списком результатов по категориям и быстрым переходом в директорию трека/альбома. 5 тестов в `tests/test_global_search.py` и 1 UI-тест в `tests/test_frontend.py`. |
+| **R2: Дашборд аудита, пакетный автопоиск текстов и удаление дубликатов** | `app/schemas/library_audit.py`, `app/services/library_audit_service.py`, `app/routers/files.py`, `app/static/js/library_audit.js`, `app/templates/index.html`, `tests/test_library_audit.py`, `tests/test_frontend.py` | **DONE** | Создана новая вкладка «Аудит медиатеки» (`activeTab === 'audit'`) и Alpine-компонент `libraryAuditComponent()`. 1) Дашборд из 4 метрических карточек (всего треков/релизов, без текстов, без обложек, дубликаты). 2) Подраздел треков без текстов с кнопкой «Найти недостающие тексты для всех» (фоновый асинхронный опрос LRCLIB/Genius с ограничением частоты запросов и прогресс-баром). 3) Подраздел релизов без обложек с переходом в папку. 4) Поиск дубликатов песен (композитный нормализованный ключ + проверка длительности/размера) с безопасным удалением копий через модальное окно и `PathSandbox`. 6 тестов в `tests/test_library_audit.py` и 1 UI-тест в `tests/test_frontend.py`. |
+| **R3: Верификация, линтинг и тесты** | `tests/` | **DONE** | Все 472 теста успешно пройдены (`pytest tests/ -v`, 100% pass), линтер `ruff check app tests` чист (0 замечаний). Строгое соблюдение Zero-Database, PathSandbox, ID3v2.4 и no-build архитектуры. |
+
+
 
 
 

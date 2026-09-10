@@ -629,4 +629,141 @@ def test_deezer_album_endpoints(tags_client: TestClient, auth_tags_client: TestC
         assert details["tracks"][1]["title"] == "Aerodynamic"
 
 
+def test_search_covers_endpoint(tags_client: TestClient, auth_tags_client: TestClient):
+    """Проверка GET /tags/covers/search: 401 без авторизации и 200 с результатами."""
+    # 1. 401 Unauthorized
+    resp_unauth = tags_client.get("/tags/covers/search", params={"query": "Random Access Memories"})
+    assert resp_unauth.status_code == 401
+    assert resp_unauth.json()["error"] == "UNAUTHORIZED"
+
+    # 2. 200 OK с моком
+    from unittest.mock import AsyncMock, patch
+
+    from app.schemas.tag import CoverSearchResultItem
+
+    mock_covers = [
+        CoverSearchResultItem(
+            source="apple",
+            title="Random Access Memories",
+            artist="Daft Punk",
+            cover_url="https://is1-ssl.mzstatic.com/image/thumb/1400x1400bb.jpg",
+            width=1400,
+            height=1400,
+            year=2013,
+        )
+    ]
+
+    with patch.object(TagService, "search_covers", new=AsyncMock(return_value=mock_covers)):
+        resp = auth_tags_client.get("/tags/covers/search", params={"query": "Random Access Memories"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["source"] == "apple"
+        assert data[0]["title"] == "Random Access Memories"
+        assert data[0]["cover_url"] == "https://is1-ssl.mzstatic.com/image/thumb/1400x1400bb.jpg"
+        assert data[0]["width"] == 1400
+
+
+def test_batch_save_with_cover_url(
+    auth_tags_client: TestClient, temp_storage: dict[str, Path]
+):
+    """Проверка загрузки обложки по URL через cover_url в PUT /tags/batch."""
+    from unittest.mock import AsyncMock, patch
+
+    music_dir = temp_storage["music_dir"]
+    track_file = music_dir / "01. URLSong.mp3"
+    track_file.write_bytes(MINIMAL_MP3)
+
+    payload = {
+        "album": {
+            "album": "URLAlbum",
+            "album_artist": "URLArtist",
+            "year": 2026,
+            "genre": "Synthwave",
+        },
+        "tracks": [
+            {
+                "path": "01. URLSong.mp3",
+                "track_number": 1,
+                "title": "URLSong",
+                "artist": "URLArtist",
+            }
+        ],
+        "source_dir": "",
+        "cover_url": "https://example.com/cover.jpg",
+        "apply_album_to_tracks": True,
+        "reorganize": True,
+    }
+
+    with patch.object(TagService, "download_cover", new=AsyncMock(return_value=(DUMMY_JPEG, "image/jpeg"))):
+        resp = auth_tags_client.put("/tags/batch", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+
+        target_dir = music_dir / data["destination_dir"]
+        cover_file = target_dir / "cover.jpg"
+        assert cover_file.exists()
+        assert cover_file.read_bytes() == DUMMY_JPEG
+
+
+def test_batch_save_with_disc_numbers(
+    auth_tags_client: TestClient, temp_storage: dict[str, Path]
+):
+    """Проверка сохранения номеров дисков (disc_number, disc_total) через PUT /tags/batch."""
+    music_dir = temp_storage["music_dir"]
+    t1 = music_dir / "01. Disc1Track.mp3"
+    t2 = music_dir / "01. Disc2Track.mp3"
+    t1.write_bytes(MINIMAL_MP3)
+    t2.write_bytes(MINIMAL_MP3)
+
+    payload = {
+        "album": {
+            "album": "Double Album",
+            "album_artist": "Epic Band",
+            "disc_total": 2,
+            "year": 2024,
+        },
+        "tracks": [
+            {
+                "path": "01. Disc1Track.mp3",
+                "disc_number": 1,
+                "disc_total": 2,
+                "track_number": 1,
+                "track_total": 5,
+                "title": "Disc 1 Track 1",
+                "artist": "Epic Band",
+            },
+            {
+                "path": "01. Disc2Track.mp3",
+                "disc_number": 2,
+                "disc_total": 2,
+                "track_number": 1,
+                "track_total": 6,
+                "title": "Disc 2 Track 1",
+                "artist": "Epic Band",
+            },
+        ],
+        "source_dir": "",
+        "apply_album_to_tracks": True,
+        "reorganize": False,
+    }
+
+    resp = auth_tags_client.put("/tags/batch", json=payload)
+    assert resp.status_code == 200
+
+    svc = TagService(music_sandbox=PathSandbox(music_dir))
+    tags1 = svc.read_tags(t1, rel_path="01. Disc1Track.mp3")
+    assert tags1.disc_number == 1
+    assert tags1.disc_total == 2
+    assert tags1.track_number == 1
+    assert tags1.track_total == 5
+
+    tags2 = svc.read_tags(t2, rel_path="01. Disc2Track.mp3")
+    assert tags2.disc_number == 2
+    assert tags2.disc_total == 2
+    assert tags2.track_number == 1
+    assert tags2.track_total == 6
+
+
 

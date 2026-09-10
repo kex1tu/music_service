@@ -26,6 +26,7 @@ from app.schemas.tag import (
     AlbumDetailsResponse,
     AlbumTags,
     BatchSaveResponse,
+    CoverSearchResultItem,
     DeezerAlbumDetailsResponse,
     DeezerAlbumSearchResult,
     DeezerAlbumTrackItem,
@@ -146,8 +147,19 @@ def get_cover(
     return Response(content=cover_bytes, media_type=cover_mime)
 
 
+@router.get("/covers/search", response_model=list[CoverSearchResultItem])
+async def search_covers(
+    query: str = Query(..., min_length=1, description="Поисковый запрос (альбом или исполнитель)"),
+    limit: int = Query(default=12, ge=1, le=30),
+    _: CurrentUserDep = ...,
+    tag_service: TagServiceDep = ...,
+) -> list[CoverSearchResultItem]:
+    """Поиск обложек альбомов высокого разрешения в публичных сервисах."""
+    return await tag_service.search_covers(query=query, limit=limit)
+
+
 @router.put("/batch", response_model=BatchSaveResponse)
-def batch_save_tags(
+async def batch_save_tags(
     request: SaveAlbumRequest,
     _: CurrentUserDep,
     tag_service: TagServiceDep,
@@ -164,7 +176,7 @@ def batch_save_tags(
     Returns:
         BatchSaveResponse со статусом успешности, итоговым каталогом и списком сохраненных треков.
     """
-    # 1. Проверяем наличие файла обложки (Base64 из браузера или cover_path)
+    # 1. Проверяем наличие файла обложки (Base64 из браузера, внешний cover_url или cover_path)
     cover_bytes: bytes | None = None
     cover_mime = "image/jpeg"
     effective_cover_path = request.cover_path
@@ -189,6 +201,20 @@ def batch_save_tags(
             temp_upload_cover_abs = upload_cover_abs
         except (ValueError, OSError) as exc:
             logger.warning("Сбой декодирования загруженной обложки base64: %s", exc)
+    elif request.cover_url:
+        try:
+            dl_bytes, dl_mime = await tag_service.download_cover(request.cover_url)
+            cover_bytes = dl_bytes
+            cover_mime = dl_mime
+            ext = ".png" if cover_mime == "image/png" else ".jpg"
+            upload_cover_rel = f"tmp_downloads/uploads/{uuid.uuid4().hex}{ext}"
+            upload_cover_abs = tag_service.resolve_path(upload_cover_rel)
+            upload_cover_abs.parent.mkdir(parents=True, exist_ok=True)
+            upload_cover_abs.write_bytes(cover_bytes)
+            effective_cover_path = upload_cover_rel
+            temp_upload_cover_abs = upload_cover_abs
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Сбой скачивания выбранной обложки по URL '%s': %s", request.cover_url, exc)
     elif request.cover_path:
         cover_file = tag_service.resolve_path(request.cover_path)
         if cover_file.exists() and cover_file.is_file():
