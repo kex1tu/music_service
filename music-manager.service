@@ -8,9 +8,12 @@ User=music
 Group=music
 WorkingDirectory=/opt/music-manager
 EnvironmentFile=/opt/music-manager/.env
-ExecStart=/opt/music-manager/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8010
+ExecStart=/opt/music-manager/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8010 --timeout-graceful-shutdown 5
 Restart=on-failure
 RestartSec=5s
+TimeoutStopSec=10s
+KillSignal=SIGTERM
+KillMode=control-group
 
 # Security hardening
 NoNewPrivileges=true

@@ -719,6 +719,12 @@ class DownloadService:
                 stderr_task.cancel()
                 await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
                 raise DownloadError("Превышен таймаут загрузки аудиопотока через yt-dlp (180с)")
+            except asyncio.CancelledError:
+                proc.kill()
+                stdout_task.cancel()
+                stderr_task.cancel()
+                await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+                raise
 
             return proc.returncode, stderr.decode("utf-8", errors="replace").strip()
 
@@ -782,6 +788,9 @@ class DownloadService:
         except asyncio.TimeoutError:
             proc.kill()
             raise DownloadError("Превышен таймаут конвертации ffmpeg (300с)")
+        except asyncio.CancelledError:
+            proc.kill()
+            raise
 
         if proc.returncode != 0:
             err_msg = stderr.decode("utf-8", errors="replace").strip()

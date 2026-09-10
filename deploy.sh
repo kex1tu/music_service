@@ -208,9 +208,12 @@ Group=${MEDIA_GROUP}
 UMask=0002
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=${APP_DIR}/.env
-ExecStart=${APP_DIR}/venv/bin/uvicorn app.main:app --host ${MM_HOST} --port ${MM_PORT}
+ExecStart=${APP_DIR}/venv/bin/uvicorn app.main:app --host ${MM_HOST} --port ${MM_PORT} --timeout-graceful-shutdown 5
 Restart=on-failure
 RestartSec=5s
+TimeoutStopSec=10s
+KillSignal=SIGTERM
+KillMode=control-group
 
 # Security hardening
 NoNewPrivileges=true
