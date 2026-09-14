@@ -54,14 +54,6 @@ function libraryAuditComponent() {
                     }
                 });
             }
-
-            // Автообновление при возврате фокуса в окно браузера
-            window.addEventListener('focus', () => {
-                if (Alpine.store('app').activeTab === 'audit') {
-                    this.loadAll();
-                    this.checkLyricsProgress();
-                }
-            });
         },
 
         async loadAll(force = false) {

@@ -94,6 +94,10 @@ class LibraryAuditService:
     async def ensure_index(self, force: bool = False) -> None:
         """Выполняет инкрементальное обновление in-memory индекса медиатеки."""
         async with self._lock:
+            # Если кэш уже заполнен и не запрошен принудительный пересчет — мгновенный возврат
+            if not force and self._cache:
+                return
+
             if force:
                 self._cache.clear()
 
@@ -363,7 +367,7 @@ class LibraryAuditService:
         duplicates = await self.find_duplicates()
         duplicates_count = duplicates.total_duplicate_files
 
-        incomplete_res = await self.get_incomplete_albums()
+        incomplete_res = await self.get_incomplete_albums(auto_match=False)
         incomplete_albums_count = incomplete_res.total_incomplete_albums
 
         # Подсчет альбомов
@@ -622,7 +626,7 @@ class LibraryAuditService:
             total_duplicate_files=total_dup_files,
         )
 
-    async def get_incomplete_albums(self) -> IncompleteAlbumsResponse:
+    async def get_incomplete_albums(self, auto_match: bool = True) -> IncompleteAlbumsResponse:
         """Обнаруживает альбомы с недостающими треками на основе тегов TRCK/TPOS и непрерывности нумерации."""
         await self.ensure_index()
 
@@ -775,12 +779,23 @@ class LibraryAuditService:
 
             if is_incomplete and total_expected_tracks > total_present_tracks:
                 # Кандидат на неполный альбом.
-                # Попробуем автоматически сверить с Deezer, если клиент доступен
-                if self._deezer_client:
+                # Если релиз уже сверялся с каталогом Deezer и сохранен в кеше — используем результат
+                if album_dir in self._catalog_cache:
+                    cached_match = self._catalog_cache[album_dir]
+                    if cached_match.expected_count <= cached_match.present_count or not cached_match.missing_tracks:
+                        continue
+                    incomplete_albums.append(cached_match)
+                    total_missing_tracks_count += len(cached_match.missing_tracks)
+                    continue
+
+                # Попробуем автоматически сверить с Deezer, если клиент доступен и включен auto_match
+                if self._deezer_client and auto_match:
                     try:
-                        matched = await self.match_album_catalog(album_dir or first_t.path)
+                        matched = await asyncio.wait_for(
+                            self.match_album_catalog(album_dir or first_t.path),
+                            timeout=5.0,
+                        )
                         if matched.expected_count <= matched.present_count or not matched.missing_tracks:
-                            # В официальном каталоге Deezer все треки релиза на месте (ложный признак неполноты по тегам)
                             continue
                         incomplete_albums.append(matched)
                         total_missing_tracks_count += len(matched.missing_tracks)

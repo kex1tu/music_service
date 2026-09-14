@@ -80,10 +80,13 @@ class NativeScannerService:
             return
 
         assert proc.stdout is not None
+        assert proc.stderr is not None
+
+        stderr_task = asyncio.create_task(proc.stderr.read())
 
         try:
             while True:
-                line = await proc.stdout.readline()
+                line = await asyncio.wait_for(proc.stdout.readline(), timeout=30.0)
                 if not line:
                     break
 
@@ -96,11 +99,23 @@ class NativeScannerService:
                     yield data
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("Ошибка десериализации строки NDJSON: %s (%s)", line_clean[:100], exc)
+        except asyncio.TimeoutError:
+            logger.error("Таймаут чтения из Go-сканера (30с), завершение процесса")
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            raise
         finally:
-            # Гарантируем ожидание завершения процесса и освобождение ресурсов
-            _, stderr_rem = await proc.communicate()
-            if proc.returncode != 0:
+            if proc.returncode is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+            stderr_rem = await stderr_task
+            await proc.wait()
+            if proc.returncode != 0 and proc.returncode != -9:
                 err_msg = stderr_rem.decode("utf-8", errors="replace").strip() if stderr_rem else ""
                 logger.error("Go-сканер завершился с кодом %d: %s", proc.returncode, err_msg)
-            else:
+            elif proc.returncode == 0:
                 logger.info("Нативный Go-сканер успешно завершил индексацию медиатеки")

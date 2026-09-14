@@ -65,17 +65,7 @@ func ParseTrackFast(fullPath string, rootDir string) (TrackMeta, error) {
 			totalTagSize += 10
 		}
 
-		// Ограничиваем чтение тега 8 МБ на случай аномально больших обложек
-		readSize := tagSize
-		if readSize > 8*1024*1024 {
-			readSize = 8 * 1024 * 1024
-		}
-
-		tagData := make([]byte, readSize)
-		nRead, _ := io.ReadFull(file, tagData)
-		tagData = tagData[:nRead]
-
-		parseID3Frames(tagData, version, flags, &meta)
+		parseID3FramesStream(file, version, flags, tagSize, &meta)
 	}
 
 	// Определение длительности
@@ -103,54 +93,103 @@ func decodeSynchsafe(b []byte) int {
 	return int(b[0]&0x7F)<<21 | int(b[1]&0x7F)<<14 | int(b[2]&0x7F)<<7 | int(b[3]&0x7F)
 }
 
-func parseID3Frames(data []byte, version byte, flags byte, meta *TrackMeta) {
-	offset := 0
+func parseID3FramesStream(file *os.File, version byte, flags byte, tagSize int, meta *TrackMeta) {
+	bytesRead := 0
 
 	// Пропуск extended header при наличии
 	if (flags & 0x40) != 0 {
-		if version == 3 && len(data) >= 4 {
-			extSize := int(binary.BigEndian.Uint32(data[0:4]))
-			offset += 4 + extSize
-		} else if version == 4 && len(data) >= 4 {
-			extSize := decodeSynchsafe(data[0:4])
-			offset += extSize
+		var extHdr [4]byte
+		if _, err := io.ReadFull(file, extHdr[:]); err != nil {
+			return
+		}
+		bytesRead += 4
+		var extSize int
+		if version == 3 {
+			extSize = int(binary.BigEndian.Uint32(extHdr[:]))
+			if extSize > 0 {
+				if _, err := file.Seek(int64(extSize), io.SeekCurrent); err != nil {
+					return
+				}
+				bytesRead += extSize
+			}
+		} else if version == 4 {
+			extSize = decodeSynchsafe(extHdr[:])
+			if extSize > 4 {
+				if _, err := file.Seek(int64(extSize-4), io.SeekCurrent); err != nil {
+					return
+				}
+				bytesRead += extSize - 4
+			}
 		}
 	}
 
 	if version == 2 {
-		parseID3v22Frames(data[offset:], meta)
+		parseID3v22FramesStream(file, tagSize, bytesRead, meta)
 		return
 	}
 
 	// ID3v2.3 и ID3v2.4
-	for offset+10 <= len(data) {
-		if data[offset] == 0 {
+	for bytesRead+10 <= tagSize {
+		var hdr [10]byte
+		if _, err := io.ReadFull(file, hdr[:]); err != nil {
+			break
+		}
+		bytesRead += 10
+
+		if hdr[0] == 0 {
 			// Наткнулись на ID3 padding (нули)
 			break
 		}
 
-		frameID := string(data[offset : offset+4])
-		// Проверка валидности имени фрейма (символы A-Z, 0-9)
+		frameID := string(hdr[0:4])
 		if !isValidFrameID(frameID) {
 			break
 		}
 
 		var frameSize int
 		if version == 4 {
-			frameSize = decodeSynchsafe(data[offset+4 : offset+8])
+			frameSize = decodeSynchsafe(hdr[4:8])
 		} else {
-			frameSize = int(binary.BigEndian.Uint32(data[offset+4 : offset+8]))
+			frameSize = int(binary.BigEndian.Uint32(hdr[4:8]))
 		}
 
-		offset += 10
-		if frameSize < 0 || offset+frameSize > len(data) {
+		if frameSize <= 0 || bytesRead+frameSize > tagSize {
 			break
 		}
 
-		frameData := data[offset : offset+frameSize]
-		offset += frameSize
+		if frameID == "APIC" {
+			meta.HasCover = true
+			// Не читаем мегабайты обложки из диска — мгновенный seek вперед!
+			if _, err := file.Seek(int64(frameSize), io.SeekCurrent); err != nil {
+				break
+			}
+			bytesRead += frameSize
+			continue
+		}
 
-		applyFrame(frameID, frameData, meta)
+		if isTextFrame(frameID) && frameSize <= 65536 {
+			frameData := make([]byte, frameSize)
+			if _, err := io.ReadFull(file, frameData); err != nil {
+				break
+			}
+			bytesRead += frameSize
+			applyFrame(frameID, frameData, meta)
+		} else {
+			// Пропускаем неиспользуемые или слишком большие фреймы
+			if _, err := file.Seek(int64(frameSize), io.SeekCurrent); err != nil {
+				break
+			}
+			bytesRead += frameSize
+		}
+	}
+}
+
+func isTextFrame(id string) bool {
+	switch id {
+	case "TIT2", "TPE1", "TPE2", "TALB", "TCON", "TRCK", "TPOS", "TDRC", "TYER", "TLEN":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -164,39 +203,70 @@ func isValidFrameID(id string) bool {
 	return true
 }
 
-func parseID3v22Frames(data []byte, meta *TrackMeta) {
-	offset := 0
-	for offset+6 <= len(data) {
-		if data[offset] == 0 {
+func parseID3v22FramesStream(file *os.File, tagSize int, bytesRead int, meta *TrackMeta) {
+	for bytesRead+6 <= tagSize {
+		var hdr [6]byte
+		if _, err := io.ReadFull(file, hdr[:]); err != nil {
 			break
 		}
-		frameID := string(data[offset : offset+3])
-		frameSize := int(data[offset+3])<<16 | int(data[offset+4])<<8 | int(data[offset+5])
-		offset += 6
-		if frameSize < 0 || offset+frameSize > len(data) {
-			break
-		}
-		frameData := data[offset : offset+frameSize]
-		offset += frameSize
+		bytesRead += 6
 
-		switch frameID {
-		case "TT2":
-			meta.Title = decodeTextFrame(frameData)
-		case "TP1":
-			meta.Artist = decodeTextFrame(frameData)
-		case "TP2":
-			meta.AlbumArtist = decodeTextFrame(frameData)
-		case "TAL":
-			meta.Album = decodeTextFrame(frameData)
-		case "TCO":
-			meta.Genre = decodeTextFrame(frameData)
-		case "TRK":
-			parseTrackNumber(decodeTextFrame(frameData), meta)
-		case "TYE":
-			parseYear(decodeTextFrame(frameData), meta)
-		case "PIC":
-			meta.HasCover = true
+		if hdr[0] == 0 {
+			break
 		}
+		frameID := string(hdr[0:3])
+		frameSize := int(hdr[3])<<16 | int(hdr[4])<<8 | int(hdr[5])
+		if frameSize <= 0 || bytesRead+frameSize > tagSize {
+			break
+		}
+
+		if frameID == "PIC" {
+			meta.HasCover = true
+			if _, err := file.Seek(int64(frameSize), io.SeekCurrent); err != nil {
+				break
+			}
+			bytesRead += frameSize
+			continue
+		}
+
+		if isID3v22TextFrame(frameID) && frameSize <= 65536 {
+			frameData := make([]byte, frameSize)
+			if _, err := io.ReadFull(file, frameData); err != nil {
+				break
+			}
+			bytesRead += frameSize
+
+			switch frameID {
+			case "TT2":
+				meta.Title = decodeTextFrame(frameData)
+			case "TP1":
+				meta.Artist = decodeTextFrame(frameData)
+			case "TP2":
+				meta.AlbumArtist = decodeTextFrame(frameData)
+			case "TAL":
+				meta.Album = decodeTextFrame(frameData)
+			case "TCO":
+				meta.Genre = decodeTextFrame(frameData)
+			case "TRK":
+				parseTrackNumber(decodeTextFrame(frameData), meta)
+			case "TYE":
+				parseYear(decodeTextFrame(frameData), meta)
+			}
+		} else {
+			if _, err := file.Seek(int64(frameSize), io.SeekCurrent); err != nil {
+				break
+			}
+			bytesRead += frameSize
+		}
+	}
+}
+
+func isID3v22TextFrame(id string) bool {
+	switch id {
+	case "TT2", "TP1", "TP2", "TAL", "TCO", "TRK", "TYE":
+		return true
+	default:
+		return false
 	}
 }
 
