@@ -917,7 +917,14 @@ class DownloadService:
                 await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
                 raise
 
-            return proc.returncode, stderr.decode("utf-8", errors="replace").strip()
+            clean_stderr = stderr.decode("utf-8", errors="replace").strip()
+            lines = [
+                line.strip()
+                for line in clean_stderr.splitlines()
+                if line.strip() and not line.strip().startswith("Deprecated Feature:")
+            ]
+            meaningful_err = "\n".join(lines) if lines else clean_stderr
+            return proc.returncode, meaningful_err
 
         cookies_file = self._settings.cookies_file
         has_cookies = bool(cookies_file and cookies_file.is_file())
