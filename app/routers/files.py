@@ -18,6 +18,7 @@ from app.dependencies import (
     FileManagerServiceDep,
     LibraryAuditServiceDep,
     MusicSandboxDep,
+    OrganizerServiceDep,
 )
 from app.schemas.download import DownloadJobResponse
 from app.schemas.files import DeleteFileResponse, DirectoryListingResponse
@@ -31,6 +32,7 @@ from app.schemas.library_audit import (
     LibrarySearchResponse,
     MissingCoverItem,
     MissingLyricsItem,
+    ReorganizeLibraryResponse,
 )
 from app.schemas.tag import TrackTags
 
@@ -85,6 +87,21 @@ async def refresh_audit(
     """Сбрасывает кэш и заново индексирует коллекцию."""
     await audit_service.ensure_index(force=True)
     return await audit_service.get_summary()
+
+
+@router.post(
+    "/audit/reorganize",
+    response_model=ReorganizeLibraryResponse,
+    summary="Реорганизация медиатеки по альбомам",
+    description="Перемещает все существующие треки медиатеки в структуру Альбом/01. Трек.mp3 без папок исполнителей.",
+)
+async def reorganize_library(
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+    organizer_service: OrganizerServiceDep = ...,
+) -> ReorganizeLibraryResponse:
+    """Пакетно реорганизует существующие файлы коллекции по альбомам."""
+    return await audit_service.reorganize_library(organizer_service)
 
 
 @router.get(

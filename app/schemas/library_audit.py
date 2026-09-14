@@ -211,3 +211,14 @@ class DownloadMissingTracksRequest(BaseModel):
         description="Опциональный список номеров дорожек для выборочного скачивания",
     )
 
+
+class ReorganizeLibraryResponse(BaseModel):
+    """Результат пакетной реорганизации медиатеки по схеме Альбом/Треки.mp3."""
+
+    success: bool = Field(default=True, description="Статус успешности операции")
+    total_tracks: int = Field(default=0, description="Всего треков в медиатеке")
+    moved_tracks: int = Field(default=0, description="Количество перемещенных файлов")
+    total_albums: int = Field(default=0, description="Количество обработанных альбомов")
+    errors: list[str] = Field(default_factory=list, description="Список ошибок при обработке отдельных альбомов")
+
+

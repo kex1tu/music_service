@@ -2,8 +2,8 @@
 
 ## Текущий статус проекта
 - **Текущий статус проекта:** 100% готовность, все проверки и тесты пройдены.
-- **Активный этап:** Реорганизация структуры медиатеки: сохранение треков строго по альбомам (`MUSIC_DIR/{Album}/{TrackNumber:02d}. {Title}.mp3`) без каталогов исполнителей. Все тесты обновлены и успешно пройдены.
-- **Результаты тестов:** 548/548 passed (`pytest`), ruff linter — 0 замечаний (All checks passed!).
+- **Активный этап:** Пакетная реорганизация существующих файлов медиатеки по кнопке «Разложить по альбомам» во вкладке Аудит (`POST /files/audit/reorganize`): безопасный перенос в `MUSIC_DIR/{Album}/{TrackNumber:02d}. {Title}.mp3`, перенос обложек и текстов песен, удаление пустых каталогов исполнителей.
+- **Результаты тестов:** 550/550 passed (`pytest`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -412,6 +412,18 @@
 |---|---|---|---|
 | **R1: Обновление шаблона путей в `OrganizerService`** | `app/services/organizer_service.py` | **DONE** | 1. `compute_album_dir`: теперь возвращает строго очищенное название альбома (`clean_album`) без префикса исполнителя (`clean_artist/`) и суффикса года (` - {year}`).<br>2. `compute_target_paths`: генерирует целевые пути по новому шаблону `MUSIC_DIR/{Album}/{TrackNumber:02d}. {Title}.mp3`.<br>3. `compute_single_dir`: формирует каталог сингла по названию трека (`clean_folder`) без префикса исполнителя.<br>4. `organize_album`: ключ группировки треков альбома переведен на `__album__{effective_album.lower()}`, гарантируя объединение всех треков релиза в одной папке альбома даже при разных исполнителях треков. |
 | **R2: Обновление тестов и верификация** | `tests/test_organizer_service.py`, `tests/test_tags_router.py` | **DONE** | 1. `tests/test_organizer_service.py`: обновлены все 13 модульных тестов с проверками целевых путей, перемещения файлов, смены очередности треков (in-place swap), дедупликации и очистки пустых каталогов под новую схему `Album/01. Track.mp3`.<br>2. `tests/test_tags_router.py`: обновлены тесты `test_batch_save_from_tmp_moves_to_music_dir`, `test_batch_save_with_reorganize_true` и `test_batch_save_with_track_cover_path`.<br>3. Все 548 тестов пройдены успешно (100% pass), линтер `ruff check` чист (0 замечаний). |
+
+---
+
+## Блок 24: Пакетная реорганизация существующих треков по альбомам по кнопке во вкладке Аудит (2026-09-15T01:45:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Схема ответа и бэкенд-сервисы** | `app/schemas/library_audit.py`, `app/services/organizer_service.py`, `app/services/library_audit_service.py` | **DONE** | 1. Схема `ReorganizeLibraryResponse`: поля `success`, `total_tracks`, `moved_tracks`, `total_albums`, `errors`.<br>2. Метод `OrganizerService.cleanup_all_empty_directories()`: рекурсивная зачистка всех пустых директорий снизу вверх с защитой корня `MUSIC_DIR` и удалением служебного мусора ОС.<br>3. Метод `OrganizerService.reorganize_library(tracks)`: группировка по альбомам и синглам, автопоиск обложек в исходных каталогах, безопасное двухфазное перемещение аудиофайлов, синхронный перенос `.lrc`/`.txt` и обложек `cover.*`, очистка старых папок артистов.<br>4. Метод `LibraryAuditService.reorganize_library(organizer)`: использование кэша индекса, выполнение перемещения в потоке `asyncio.to_thread`, сброс кэша (`invalidate()`) и принудительная переиндексация (`ensure_index(force=True)`). |
+| **R2: Эндпоинт API** | `app/routers/files.py` | **DONE** | Добавлен защищенный сессией эндпоинт `POST /files/audit/reorganize` с внедрением зависимостей `LibraryAuditServiceDep` и `OrganizerServiceDep`. |
+| **R3: Пользовательский интерфейс (Frontend No-Build)** | `app/templates/index.html`, `app/static/js/library_audit.js` | **DONE** | 1. В шапку вкладки «Аудит» добавлена кнопка «Разложить по альбомам» с индикацией процесса.<br>2. Добавлено модальное окно подтверждения `$store.app.activeModal === 'reorganize_confirm'` с подробным предупреждением.<br>3. Реактивное обновление данных аудита (`loadAll(true)`) и файлового менеджера (`refresh-file-manager`) после завершения с тостом статистики. |
+| **R4: Тесты и верификация** | `tests/test_organizer_service.py`, `tests/test_library_audit.py` | **DONE** | Добавлены модульные тесты `test_reorganize_library_moves_all_tracks_and_cleans_artist_folders`, `test_reorganize_library_already_organized_is_idempotent` и интеграционный тест эндпоинта `test_audit_reorganize_endpoint`. Все 550 тестов пройдены успешно (100% pass), линтер `ruff check` чист (0 замечаний). |
+
 
 
 

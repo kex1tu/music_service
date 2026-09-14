@@ -33,6 +33,7 @@ from app.schemas.library_audit import (
     LibrarySearchResponse,
     MissingCoverItem,
     MissingLyricsItem,
+    ReorganizeLibraryResponse,
     SearchAlbumItem,
     SearchArtistItem,
     SearchTrackItem,
@@ -1068,4 +1069,26 @@ class LibraryAuditService:
         )
         self._catalog_cache[norm_album_path] = res_item
         return res_item
+
+    async def reorganize_library(self, organizer: Any) -> ReorganizeLibraryResponse:
+        """Пакетно реорганизует всю медиатеку в структуру Альбом/01. Трек.mp3.
+
+        1. Сканирует медиатеку (или берет готовый кэш индекса).
+        2. Запускает безопасную реорганизацию файлов в отдельном потоке.
+        3. Сбрасывает кэш индекса и принудительно переиндексирует новую структуру каталогов.
+        """
+        async with self._lock:
+            await self.ensure_index()
+            tracks = [item["track"] for item in self._cache.values()]
+
+            result: ReorganizeLibraryResponse = await asyncio.to_thread(
+                organizer.reorganize_library, tracks
+            )
+
+            # Сбрасываем кэш и заново индексируем коллекцию после перемещения
+            self.invalidate()
+            await self.ensure_index(force=True)
+
+            return result
+
 

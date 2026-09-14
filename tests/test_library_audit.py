@@ -700,4 +700,53 @@ async def test_incomplete_albums_single_folder_ignored(tmp_path: Path):
     assert len(res.albums) == 0
 
 
+def test_audit_reorganize_endpoint(authenticated_client: TestClient, tmp_path: Path):
+    """Проверка POST /files/audit/reorganize."""
+    from app.dependencies import get_organizer_service
+    from app.services.organizer_service import OrganizerService
+    from app.services.tag_service import TagService
+
+    sandbox = PathSandbox(tmp_path)
+    tag_svc = TagService(music_sandbox=sandbox)
+    audit_svc = LibraryAuditService(music_sandbox=sandbox, tag_service=tag_svc)
+    org_svc = OrganizerService(music_sandbox=sandbox, tag_service=tag_svc)
+
+    # Создаем фиктивный трек
+    sub = tmp_path / "OldArtist" / "OldAlbum - 2020"
+    sub.mkdir(parents=True, exist_ok=True)
+    f = sub / "01. Song.mp3"
+    f.write_bytes(b"\xff\xfb\x90\x00" + b"\x00" * 300)
+
+    audit_svc._cache = {
+        "OldArtist/OldAlbum - 2020/01. Song.mp3": {
+            "mtime": 1000.0,
+            "size": 304,
+            "track": TrackTags(
+                path="OldArtist/OldAlbum - 2020/01. Song.mp3",
+                track_number=1,
+                title="Song",
+                artist="OldArtist",
+                album="OldAlbum",
+            ),
+        }
+    }
+    audit_svc.ensure_index = AsyncMock()
+
+    authenticated_client.app.dependency_overrides[get_library_audit_service] = lambda: audit_svc
+    authenticated_client.app.dependency_overrides[get_organizer_service] = lambda: org_svc
+    try:
+        resp = authenticated_client.post("/files/audit/reorganize")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["total_tracks"] == 1
+        assert data["moved_tracks"] == 1
+        assert data["total_albums"] == 1
+        assert (tmp_path / "OldAlbum/01. Song.mp3").exists()
+    finally:
+        authenticated_client.app.dependency_overrides.pop(get_library_audit_service, None)
+        authenticated_client.app.dependency_overrides.pop(get_organizer_service, None)
+
+
+
 

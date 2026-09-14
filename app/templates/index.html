@@ -1273,15 +1273,33 @@
                         Проверка качества тегов, синхронизированных текстов (.lrc), наличия обложек и поиск дубликатов треков.
                     </p>
                 </div>
-                <button
-                    @click="loadAll()"
-                    :disabled="isLoading"
-                    class="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 text-xs font-medium rounded-lg transition flex items-center justify-center space-x-2 shrink-0 border border-gray-700/60">
-                    <svg class="w-3.5 h-3.5" :class="{'animate-spin': isLoading}" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
-                    </svg>
-                    <span>Обновить данные</span>
-                </button>
+                <div class="flex items-center space-x-3 shrink-0">
+                    <button
+                        @click="confirmReorganizeLibrary()"
+                        :disabled="isLoading || isReorganizing"
+                        class="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 hover:text-indigo-200 border border-indigo-500/40 disabled:opacity-50 text-xs font-medium rounded-lg transition flex items-center justify-center space-x-2">
+                        <template x-if="isReorganizing">
+                            <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
+                            </svg>
+                        </template>
+                        <template x-if="!isReorganizing">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                            </svg>
+                        </template>
+                        <span x-text="isReorganizing ? 'Реорганизация...' : 'Разложить по альбомам'"></span>
+                    </button>
+                    <button
+                        @click="loadAll()"
+                        :disabled="isLoading || isReorganizing"
+                        class="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 text-xs font-medium rounded-lg transition flex items-center justify-center space-x-2 border border-gray-700/60">
+                        <svg class="w-3.5 h-3.5" :class="{'animate-spin': isLoading}" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
+                        </svg>
+                        <span>Обновить данные</span>
+                    </button>
+                </div>
             </div>
 
             <!-- Сводка метрик коллекции (5 карточек) -->
@@ -3022,6 +3040,55 @@
             $store.app.toast(`Ошибка: ${e.message}`, 'error');
         }
     })"></div>
+
+    <!-- ==================== МОДАЛЬНОЕ ОКНО: ПОДТВЕРЖДЕНИЕ РЕОРГАНИЗАЦИИ ==================== -->
+    <div
+        x-show="$store.app.activeModal === 'reorganize_confirm'"
+        x-cloak
+        class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
+        <div
+            @click.outside="$store.app.activeModal = null"
+            class="bg-gray-900 border border-indigo-800/50 rounded-xl max-w-md w-full p-6 shadow-2xl animate-fade-in space-y-4">
+            <div class="flex items-center space-x-3 text-indigo-400">
+                <div class="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center">
+                    <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                    </svg>
+                </div>
+                <h3 class="text-base font-bold text-white">Реорганизация медиатеки</h3>
+            </div>
+
+            <div class="text-xs text-gray-300 leading-relaxed space-y-2">
+                <p>
+                    Все существующие треки будут перенесены в каталоги альбомов по схеме:
+                </p>
+                <div class="p-2.5 bg-gray-950 border border-gray-800 rounded font-mono text-[11px] text-indigo-300">
+                    MUSIC_DIR/{Название альбома}/01. Трек.mp3
+                </div>
+                <p class="text-gray-400">
+                    Папки исполнителей будут убраны. Тексты песен (<span class="font-mono text-gray-300">.lrc/.txt</span>) и обложки альбомов будут перенесены, а опустевшие каталоги автоматически удалены.
+                </p>
+            </div>
+
+            <div class="pt-2 flex justify-end space-x-3">
+                <button
+                    type="button"
+                    @click="$store.app.activeModal = null"
+                    class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold rounded-lg transition">
+                    Отмена
+                </button>
+                <button
+                    type="button"
+                    @click="window.dispatchEvent(new CustomEvent('confirm-reorganize-library'))"
+                    class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition shadow-lg shadow-indigo-600/30 flex items-center space-x-1.5">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/>
+                    </svg>
+                    <span>Реорганизовать</span>
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- ==================== МОДАЛЬНОЕ ОКНО 4: ВХОД (LOGIN) ==================== -->
     <div

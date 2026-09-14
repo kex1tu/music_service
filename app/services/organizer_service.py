@@ -26,6 +26,7 @@ from app.core.exceptions import (
     StorageConfigurationError,
 )
 from app.core.sandbox import PathSandbox
+from app.schemas.library_audit import ReorganizeLibraryResponse
 from app.schemas.tag import AlbumTags, TrackTags
 from app.services.tag_service import TagService
 
@@ -737,3 +738,164 @@ class OrganizerService:
                 destination_dir=destination_dir,
                 tracks=[updated_tracks_by_orig_idx[i] for i in range(len(tracks))],
             )
+
+    def cleanup_all_empty_directories(self) -> None:
+        """Рекурсивно удаляет все пустые директории внутри MUSIC_DIR снизу вверх.
+
+        Корень песочницы гарантированно защищен от удаления.
+        Служебные файлы (.DS_Store, Thumbs.db) предварительно вычищаются.
+        """
+        for root, _, _ in os.walk(self._music_sandbox.root, topdown=False):
+            current = Path(root)
+            if current == self._music_sandbox.root or not current.is_relative_to(self._music_sandbox.root):
+                continue
+            if current.exists() and current.is_dir():
+                try:
+                    with os.scandir(current) as it:
+                        entries = list(it)
+                    substantive = [
+                        e for e in entries
+                        if e.name not in (".DS_Store", "Thumbs.db", "desktop.ini")
+                        and not e.name.startswith(".stage_")
+                    ]
+                    if not substantive:
+                        for e in entries:
+                            try:
+                                p = Path(e.path)
+                                if p.is_dir():
+                                    shutil.rmtree(p, ignore_errors=True)
+                                else:
+                                    p.unlink(missing_ok=True)
+                            except OSError:
+                                pass
+                        current.rmdir()
+                        logger.info("Зачищена пустая директория библиотеки: %s", current)
+                except OSError as exc:
+                    logger.debug("Не удалось зачистить директорию %s: %s", current, exc)
+
+    def reorganize_library(self, tracks: list[TrackTags]) -> ReorganizeLibraryResponse:
+        """Пакетно реорганизует существующие треки медиатеки в структуру Альбом/01. Трек.mp3.
+
+        Перемещает треки, тексты песен (.lrc/.txt) и обложки альбомов.
+        Опустевшие папки исполнителей автоматически удаляются.
+        """
+        if not tracks:
+            return ReorganizeLibraryResponse(
+                success=True,
+                total_tracks=0,
+                moved_tracks=0,
+                total_albums=0,
+            )
+
+        album_groups: dict[str, list[TrackTags]] = {}
+        single_tracks: list[TrackTags] = []
+
+        for trk in tracks:
+            alb = (trk.album or "").strip()
+            if alb:
+                k = alb.lower()
+                album_groups.setdefault(k, []).append(trk)
+            else:
+                single_tracks.append(trk)
+
+        moved_tracks_count = 0
+        total_albums_count = 0
+        errors: list[str] = []
+
+        # 1. Обработка альбомов
+        for alb_key, grp_tracks in album_groups.items():
+            try:
+                first = grp_tracks[0]
+                primary_artist = first.album_artist or first.artist or ""
+                album_tags = AlbumTags(
+                    album=first.album,
+                    album_artist=primary_artist,
+                    year=first.year,
+                    genre=first.genre,
+                    disc_total=first.disc_total,
+                )
+
+                # Ищем обложку в каталогах исходных треков
+                found_cover_rel = None
+                src_parents: set[Path] = set()
+                for t in grp_tracks:
+                    try:
+                        p = self._resolve_source_path(t.path).parent
+                        src_parents.add(p)
+                    except (PathTraversalError, OSError):
+                        pass
+
+                for p in src_parents:
+                    for cand in ("cover.jpg", "cover.png", "cover.jpeg", "folder.jpg", "folder.png"):
+                        cand_file = p / cand
+                        if cand_file.is_file():
+                            try:
+                                found_cover_rel = str(self._music_sandbox.to_relative(cand_file))
+                                break
+                            except (PathTraversalError, ValueError):
+                                pass
+                    if found_cover_rel:
+                        break
+
+                primary_src_dir = ""
+                if src_parents:
+                    try:
+                        primary_src_dir = str(self._music_sandbox.to_relative(next(iter(src_parents))))
+                    except (PathTraversalError, ValueError):
+                        primary_src_dir = ""
+
+                res = self.organize_album(
+                    album=album_tags,
+                    tracks=grp_tracks,
+                    source_dir=primary_src_dir,
+                    cover_path=found_cover_rel,
+                    reorganize=True,
+                    group_by_album=False,
+                )
+
+                for orig_t, new_t in zip(grp_tracks, res.tracks):
+                    if orig_t.path != new_t.path:
+                        moved_tracks_count += 1
+
+                total_albums_count += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Ошибка при реорганизации альбома %s: %s", alb_key, exc)
+                errors.append(f"Альбом '{alb_key}': {exc}")
+
+        # 2. Обработка синглов
+        for st in single_tracks:
+            try:
+                st_parent = ""
+                try:
+                    p = self._resolve_source_path(st.path).parent
+                    st_parent = str(self._music_sandbox.to_relative(p))
+                except (PathTraversalError, ValueError):
+                    pass
+
+                res = self.organize_album(
+                    album=AlbumTags(album="", album_artist=""),
+                    tracks=[st],
+                    source_dir=st_parent,
+                    reorganize=True,
+                    singles_mode=True,
+                )
+
+                if res.tracks and st.path != res.tracks[0].path:
+                    moved_tracks_count += 1
+
+                total_albums_count += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Ошибка при реорганизации сингла %s: %s", st.path, exc)
+                errors.append(f"Сингл '{st.path}': {exc}")
+
+        # 3. Финальная генеральная зачистка всех оставшихся пустых каталогов
+        self.cleanup_all_empty_directories()
+
+        return ReorganizeLibraryResponse(
+            success=len(errors) == 0,
+            total_tracks=len(tracks),
+            moved_tracks=moved_tracks_count,
+            total_albums=total_albums_count,
+            errors=errors,
+        )
+

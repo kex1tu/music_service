@@ -8,6 +8,7 @@ function libraryAuditComponent() {
     return {
         activeSubTab: 'lyrics', // 'lyrics' | 'covers' | 'duplicates' | 'incomplete'
         isLoading: false,
+        isReorganizing: false,
         summary: {
             total_tracks: 0,
             total_albums: 0,
@@ -37,6 +38,11 @@ function libraryAuditComponent() {
         init() {
             this.loadAll();
             this.checkLyricsProgress();
+
+            // Слушаем событие подтверждения реорганизации
+            window.addEventListener('confirm-reorganize-library', () => {
+                this.reorganizeLibrary();
+            });
 
             // Слушаем событие обновления при переключении на вкладку или клике
             window.addEventListener('refresh-audit', (e) => {
@@ -331,6 +337,48 @@ function libraryAuditComponent() {
                 Alpine.store('app').toast('Сбой при запуске загрузки', 'error');
             } finally {
                 this.downloadingTracks[key] = false;
+            }
+        },
+
+        confirmReorganizeLibrary() {
+            Alpine.store('app').activeModal = 'reorganize_confirm';
+        },
+
+        async reorganizeLibrary() {
+            if (this.isReorganizing) return;
+            this.isReorganizing = true;
+            Alpine.store('app').activeModal = null;
+            Alpine.store('app').toast('Запущена реорганизация медиатеки по альбомам...', 'info');
+            try {
+                const res = await fetch('/files/audit/reorganize', { method: 'POST' });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.errors && data.errors.length > 0) {
+                        Alpine.store('app').toast(
+                            `Реорганизация завершена с предупреждениями: перемещено ${data.moved_tracks} треков из ${data.total_tracks}`,
+                            'warning'
+                        );
+                    } else {
+                        Alpine.store('app').toast(
+                            `Реорганизация завершена: перемещено ${data.moved_tracks} из ${data.total_tracks} треков (${data.total_albums} альбомов)`,
+                            'success'
+                        );
+                    }
+                    await this.loadAll(true);
+                    window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
+                } else {
+                    let msg = 'Ошибка при реорганизации медиатеки';
+                    try {
+                        const errData = await res.json();
+                        if (errData && errData.detail) msg = errData.detail;
+                    } catch (_) {}
+                    Alpine.store('app').toast(msg, 'error');
+                }
+            } catch (e) {
+                console.error('Ошибка реорганизации:', e);
+                Alpine.store('app').toast('Сбой сетевого запроса при реорганизации', 'error');
+            } finally {
+                this.isReorganizing = false;
             }
         },
     };

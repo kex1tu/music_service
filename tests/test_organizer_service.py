@@ -729,3 +729,109 @@ def test_organize_multiple_tmp_jobs_cleanup(
     assert not (tmp_dir / "job_beta").exists()
 
 
+def test_reorganize_library_moves_all_tracks_and_cleans_artist_folders(
+    organizer: tuple[OrganizerService, TagService, Path, Path],
+):
+    """Проверка пакетной реорганизации всей библиотеки:
+    перенос в Album/Track.mp3, перенос обложек и текстов, удаление пустых папок артистов.
+    """
+    org, _, music_dir, _ = organizer
+
+    # Альбом 1 с обложкой и текстом песни
+    dir1 = music_dir / "OldArtist1" / "Discovery - 2001"
+    dir1.mkdir(parents=True, exist_ok=True)
+    t1 = dir1 / "01. One More Time.mp3"
+    t1.write_bytes(MINIMAL_MP3)
+    lrc1 = dir1 / "01. One More Time.lrc"
+    lrc1.write_text("[00:01.00] Yeah", encoding="utf-8")
+    cov1 = dir1 / "cover.jpg"
+    cov1.write_bytes(DUMMY_JPEG)
+
+    # Альбом 2
+    dir2 = music_dir / "OldArtist2" / "Homework - 1997"
+    dir2.mkdir(parents=True, exist_ok=True)
+    t2 = dir2 / "01. Da Funk.mp3"
+    t2.write_bytes(MINIMAL_MP3)
+
+    # Сингл без альбома
+    dir3 = music_dir / "OldArtist3" / "Get Lucky - Single"
+    dir3.mkdir(parents=True, exist_ok=True)
+    t3 = dir3 / "01. Get Lucky.mp3"
+    t3.write_bytes(MINIMAL_MP3)
+
+    tracks = [
+        TrackTags(
+            path="OldArtist1/Discovery - 2001/01. One More Time.mp3",
+            track_number=1,
+            title="One More Time",
+            artist="OldArtist1",
+            album="Discovery",
+            year=2001,
+        ),
+        TrackTags(
+            path="OldArtist2/Homework - 1997/01. Da Funk.mp3",
+            track_number=1,
+            title="Da Funk",
+            artist="OldArtist2",
+            album="Homework",
+            year=1997,
+        ),
+        TrackTags(
+            path="OldArtist3/Get Lucky - Single/01. Get Lucky.mp3",
+            track_number=1,
+            title="Get Lucky",
+            artist="OldArtist3",
+            album="",
+            year=2013,
+        ),
+    ]
+
+    res = org.reorganize_library(tracks)
+
+    assert res.success is True
+    assert res.total_tracks == 3
+    assert res.moved_tracks == 3
+    assert res.total_albums == 3
+    assert len(res.errors) == 0
+
+    # Проверяем файлы в новой структуре
+    assert (music_dir / "Discovery/01. One More Time.mp3").exists()
+    assert (music_dir / "Discovery/01. One More Time.lrc").exists()
+    assert (music_dir / "Discovery/cover.jpg").exists()
+    assert (music_dir / "Discovery/cover.jpg").read_bytes() == DUMMY_JPEG
+
+    assert (music_dir / "Homework/01. Da Funk.mp3").exists()
+    assert (music_dir / "Get Lucky/01. Get Lucky.mp3").exists()
+
+    # Старые каталоги и папки артистов должны быть полностью удалены
+    assert not (music_dir / "OldArtist1").exists()
+    assert not (music_dir / "OldArtist2").exists()
+    assert not (music_dir / "OldArtist3").exists()
+
+    # Повторный вызов идемпотентен (0 перемещений)
+    updated_tracks = [
+        TrackTags(
+            path="Discovery/01. One More Time.mp3",
+            track_number=1,
+            title="One More Time",
+            album="Discovery",
+        ),
+        TrackTags(
+            path="Homework/01. Da Funk.mp3",
+            track_number=1,
+            title="Da Funk",
+            album="Homework",
+        ),
+        TrackTags(
+            path="Get Lucky/01. Get Lucky.mp3",
+            track_number=1,
+            title="Get Lucky",
+            album="",
+        ),
+    ]
+    res2 = org.reorganize_library(updated_tracks)
+    assert res2.success is True
+    assert res2.moved_tracks == 0
+
+
+
