@@ -30,12 +30,16 @@ from app.schemas.tag import (
     DeezerAlbumDetailsResponse,
     DeezerAlbumSearchResult,
     DeezerAlbumTrackItem,
+    MusicBrainzReleaseDetailsResponse,
+    MusicBrainzReleaseSearchResult,
+    MusicBrainzReleaseTrackItem,
     RecognizeAudioRequest,
     RecognizedTrackResponse,
     SaveAlbumRequest,
     TrackTags,
 )
 from app.services.deezer_client import DeezerClient
+from app.services.musicbrainz_client import MusicBrainzClient
 from app.services.recognition_service import RecognitionService
 from app.services.tag_service import TagService
 
@@ -71,6 +75,14 @@ def get_deezer_client() -> DeezerClient:
 
 
 DeezerClientDep = Annotated[DeezerClient, Depends(get_deezer_client)]
+
+
+def get_musicbrainz_client() -> MusicBrainzClient:
+    """Фабрика зависимости клиента MusicBrainzClient."""
+    return MusicBrainzClient()
+
+
+MusicBrainzClientDep = Annotated[MusicBrainzClient, Depends(get_musicbrainz_client)]
 
 
 @router.get("", response_model=AlbumDetailsResponse | TrackTags)
@@ -401,5 +413,58 @@ async def get_deezer_album_details(
         genre=genre,
         cover_url=cover_url,
         tracks=tracks_items,
+    )
+
+
+@router.get("/musicbrainz/albums", response_model=list[MusicBrainzReleaseSearchResult])
+async def search_musicbrainz_albums(
+    query: str = Query(..., description="Поисковый запрос (название релиза или артист)"),
+    _: CurrentUserDep = ...,
+    musicbrainz_client: MusicBrainzClientDep = ...,
+    limit: int = Query(default=8, ge=1, le=25),
+) -> list[MusicBrainzReleaseSearchResult]:
+    """Поиск музыкальных релизов в публичном каталоге MusicBrainz."""
+    items = await musicbrainz_client.search_releases(query=query, limit=limit)
+    return [
+        MusicBrainzReleaseSearchResult(
+            id=item["id"],
+            title=item["title"],
+            artist=item["artist"],
+            cover_url=item.get("cover_url"),
+            nb_tracks=item.get("nb_tracks", 0),
+            year=item.get("year"),
+            country=item.get("country"),
+            status=item.get("status"),
+        )
+        for item in items
+    ]
+
+
+@router.get("/musicbrainz/albums/{release_id}", response_model=MusicBrainzReleaseDetailsResponse)
+async def get_musicbrainz_release_details(
+    release_id: str,
+    _: CurrentUserDep,
+    musicbrainz_client: MusicBrainzClientDep,
+) -> MusicBrainzReleaseDetailsResponse:
+    """Получение детальных метаданных, обложки и треклиста релиза из MusicBrainz."""
+    data = await musicbrainz_client.get_release(release_id)
+    tracks = [
+        MusicBrainzReleaseTrackItem(
+            track_number=t["track_number"],
+            title=t["title"],
+            artist=t["artist"],
+            duration=t.get("duration"),
+            disc_number=t.get("disc_number", 1),
+        )
+        for t in data.get("tracks", [])
+    ]
+    return MusicBrainzReleaseDetailsResponse(
+        id=data["id"],
+        title=data["title"],
+        artist=data["artist"],
+        year=data.get("year"),
+        genre=data.get("genre"),
+        cover_url=data.get("cover_url"),
+        tracks=tracks,
     )
 

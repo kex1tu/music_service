@@ -2,8 +2,8 @@
 
 ## Текущий статус проекта
 - **Общий прогресс:** Все компоненты и стабилизационные доработки завершены (100%)
-- **Активный этап:** Исправлена пакетная загрузка (устранена ошибка «вставьте хотя бы одну ссылку» из-за object spread геттера в Alpine, добавлено автоопределение списка ссылок и кнопки вставки/очистки) и стабилизирован торрент-пайплайн aria2c (поддержка формата прогресса с сидами/отдачей/метаданными, DHT bootstrap узлы, защита от дедлока pipe stderr, поддержка ссылок .torrent и защита готовых треков от повреждения CUE-сплиттером).
-- **Результаты тестов:** 501/501 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
+- **Активный этап:** Интегрирован клиент MusicBrainz API и Cover Art Archive (строгий рейт-лимитер 1 req/s, User-Agent, поиск релизов, получение треклистов с номерами дорожек, выбор источника Deezer/MusicBrainz в редакторе тегов и галерее обложек). Исправлена пакетная загрузка и стабилизирован торрент-пайплайн aria2c.
+- **Результаты тестов:** 512/512 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -197,6 +197,19 @@
 | **R1: Исправление пакетной загрузки (Alpine object-spread & parsing)** | `app/templates/index.html`, `app/static/js/downloader.js`, `tests/test_batch_downloads.py` | **DONE** | Устранена первопричина ошибки «вставьте хотя бы одну ссылку»: замена `x-data="{ inputMode: 'single', ...downloaderComponent() }"` на `x-data="downloaderComponent()"`, устранившая преждевременное вычисление геттера `parsedBatchUrls` в пустой массив при инициализации страницы. В `downloader.js` метод `getParsedBatchUrls()` расширен поддержкой переносов строк, запятых и пробелов. Добавлена функция быстрой вставки из буфера в текстовую область `pasteBatchUrls()` и кнопка очистки. В `pasteUrl()` и `submitDownload()` внедрено автоматическое обнаружение нескольких ссылок в поле одиночного ввода с бесшовным переключением в пакетный режим. |
 | **R2: Стабилизация BitTorrent пайплайна (aria2c, DHT, regex, CUE)** | `app/services/source_resolver.py`, `app/services/torrent_service.py`, `tests/test_torrent_service.py`, `tests/test_source_resolver.py` | **DONE** | В `SourceResolver.detect_source` добавлена поддержка Magnet-ссылок без знака вопроса (`magnet:xt=`), ссылок в верхнем регистре (`MAGNET:`) и ссылок на файлы `.torrent` (включая query-параметры). В `TorrentService` обновлен `ARIA2C_PROGRESS_REGEX` для поддержки фазы метаданных (`0B/0B`), количества сидов (`SD:`) и скорости отдачи (`UL:`). В запуск `aria2c` добавлены DHT bootstrap узлы (`dht.transmissionbt.com:6881`) и надежные публичные трекеры, отключен `--check-integrity=false` для предотвращения ложных ошибок контрольной суммы на пустых директориях. Устранен потенциальный дедлок pipe `stderr` с помощью конкурентного чтения строк ошибки. В CUE-обработке добавлен `get_referenced_files` и проверка на уже разделенные треки (защита от повторного сплиттинга немонолитных раздач). |
 | **R3: Верификация, линтинг и тесты** | `tests/test_torrent_service.py`, `tests/test_batch_downloads.py`, `tests/test_source_resolver.py`, `tests/test_frontend.py` | **DONE** | Добавлены тесты парсинга строки метаданных `0B/0B`, сидов и отдачи `SD/UL`, извлечения файлов из CUE, пропуска нарезки уже разделенных альбомов, пакетной загрузки Magnet и торрентов. Все 501 тест успешно пройдены (`pytest`, 100% pass), `ruff check app tests` чист (All checks passed!). |
+
+---
+
+## Блок 20: Интеграция с MusicBrainz API и Cover Art Archive (2026-09-14T12:15:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Асинхронный клиент MusicBrainzClient** | `app/services/musicbrainz_client.py`, `app/dependencies.py` | **DONE** | Создан клиент `MusicBrainzClient`: строгий rate limiting ($\ge 1.1$ с между вызовами через `asyncio.Lock`), соответствие требованиям идентификации MusicBrainz (заголовок `User-Agent: MusicManager/1.0.0 (...)`), обработка HTTP 429/503 с `Retry-After` бэкоффом. Поиск релизов по названию/артисту (`/ws/2/release/`), детальный разбор релиза (`/ws/2/release/{mbid}?inc=...`), форматирование артистов (`format_artist_credit` с сохранением `joinphrase`), получение треклиста с порядковыми номерами и дисками, интеграция с Cover Art Archive (`https://coverartarchive.org/release/{mbid}/front-500`). Зарегистрирован синглтон `MusicBrainzClientDep` в `dependencies.py`. |
+| **R2: Схемы данных и эндпоинты роутера** | `app/schemas/tag.py`, `app/routers/tags.py` | **DONE** | В `app/schemas/tag.py` добавлены модели `MusicBrainzReleaseSearchResult`, `MusicBrainzReleaseTrackItem`, `MusicBrainzReleaseDetailsResponse`, в `CoverSearchResultItem` добавлен источник `musicbrainz`. В `app/routers/tags.py` добавлены защищенные эндпоинты `GET /tags/musicbrainz/albums` и `GET /tags/musicbrainz/albums/{release_id}`. |
+| **R3: Мультисервисный поиск обложек в TagService** | `app/services/tag_service.py` | **DONE** | В `TagService.search_covers` добавлен асинхронный метод `_search_musicbrainz_covers`, обращающийся к Cover Art Archive и включающий обложки релизов MusicBrainz в общую выдачу. |
+| **R4: Frontend интерфейс (Deezer / MusicBrainz)** | `app/templates/index.html`, `app/static/js/tag_editor.js` | **DONE** | В модальном окне автопоиска альбома добавлен селектор источника метаданных: **Deezer** / **MusicBrainz**. В галерею обложек добавлен фильтр и стилизованный бейдж **MusicBrainz (500×500)**. Логика автозаполнения в `tag_editor.js` унифицирована для обоих провайдеров. |
+| **R5: Верификация, линтинг и тесты** | `tests/test_musicbrainz_client.py`, `tests/test_tags_router.py` | **DONE** | Разработано 10 новых юнит-тестов в `test_musicbrainz_client.py` (поиск релизов, разбор метаданных треков, format_artist_credit, обработка 404/429/Retry-After, сетевые ошибки, поиск обложек). Добавлены интеграционные тесты для роутера в `test_tags_router.py`. Все 512 тестов успешно пройдены (`pytest`, 100% pass), `ruff check app tests` чист (All checks passed!). |
+
 
 
 

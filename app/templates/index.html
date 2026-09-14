@@ -1967,7 +1967,7 @@
                                     <path d="M12 3a9 9 0 0 0-9 9a9 9 0 0 0 9 9a9 9 0 0 0 9-9a9 9 0 0 0-9-9m0 16a7 7 0 0 1-7-7a7 7 0 0 1 7-7a7 7 0 0 1 7 7a7 7 0 0 1-7 7m0-10a3 3 0 0 0-3 3a3 3 0 0 0 3 3a3 3 0 0 0 3-3a3 3 0 0 0-3-3m0 4a1 1 0 0 1-1-1a1 1 0 0 1 1-1a1 1 0 0 1 1 1a1 1 0 0 1-1 1"/>
                                 </svg>
                             </div>
-                            <h3 class="text-sm font-bold text-white">Поиск альбома в Deezer</h3>
+                            <h3 class="text-sm font-bold text-white">Поиск альбома в каталоге</h3>
                         </div>
                         <button
                             type="button"
@@ -1981,6 +1981,13 @@
 
                     <!-- Поисковая строка -->
                     <div class="p-4 border-b border-gray-800 bg-gray-950 flex items-center space-x-2">
+                        <select
+                            x-model="albumMetadataSource"
+                            @change="searchDeezerAlbums()"
+                            class="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-2 text-xs text-purple-300 font-semibold focus:outline-none focus:border-purple-500 cursor-pointer">
+                            <option value="deezer">Deezer</option>
+                            <option value="musicbrainz">MusicBrainz</option>
+                        </select>
                         <input
                             type="text"
                             x-model="deezerQuery"
@@ -2137,6 +2144,13 @@
                                 class="px-2.5 py-1 rounded-md text-[11px] font-medium border transition">
                                 Spotify (640×640)
                             </button>
+                            <button
+                                type="button"
+                                @click="coverSourceFilter = 'musicbrainz'"
+                                :class="coverSourceFilter === 'musicbrainz' ? 'bg-pink-500/20 text-pink-300 border-pink-500/50' : 'bg-gray-900 text-gray-400 border-gray-800 hover:text-gray-300'"
+                                class="px-2.5 py-1 rounded-md text-[11px] font-medium border transition">
+                                MusicBrainz (500×500)
+                            </button>
                         </div>
                     </div>
 
@@ -2159,9 +2173,10 @@
                                                     'bg-red-500/80 text-white': item.source === 'apple',
                                                     'bg-purple-600/80 text-white': item.source === 'deezer',
                                                     'bg-amber-500/80 text-black font-extrabold': item.source === 'yandex',
-                                                    'bg-emerald-600/80 text-white': item.source === 'spotify'
+                                                    'bg-emerald-600/80 text-white': item.source === 'spotify',
+                                                    'bg-indigo-600/80 text-white': item.source === 'musicbrainz'
                                                 }"
-                                                x-text="item.source === 'apple' ? 'Apple Music' : (item.source === 'deezer' ? 'Deezer' : (item.source === 'yandex' ? 'Яндекс' : 'Spotify'))">
+                                                x-text="item.source === 'apple' ? 'Apple Music' : (item.source === 'deezer' ? 'Deezer' : (item.source === 'yandex' ? 'Яндекс' : (item.source === 'musicbrainz' ? 'MusicBrainz' : 'Spotify')))">
                                             </span>
                                         </div>
                                         <div class="absolute bottom-2 right-2">

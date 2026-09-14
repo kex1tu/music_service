@@ -180,7 +180,7 @@ class BatchSaveResponse(BaseModel):
 class CoverSearchResultItem(BaseModel):
     """Результат поиска обложки в мультисервисной галерее."""
 
-    source: Literal["apple", "deezer", "yandex", "spotify"] = Field(..., description="Сервис-источник")
+    source: Literal["apple", "deezer", "yandex", "spotify", "musicbrainz"] = Field(..., description="Сервис-источник")
     title: str = Field(..., description="Название альбома / релиза")
     artist: str = Field(..., description="Исполнитель альбома")
     cover_url: str = Field(..., description="Прямой URL обложки высокого разрешения")
@@ -237,3 +237,38 @@ class DeezerAlbumDetailsResponse(BaseModel):
     genre: str | None = Field(default=None, description="Основной жанр")
     cover_url: str | None = Field(default=None, description="URL обложки высокого разрешения (1000x1000)")
     tracks: list[DeezerAlbumTrackItem] = Field(default_factory=list, description="Список треков альбома")
+
+
+class MusicBrainzReleaseSearchResult(BaseModel):
+    """Элемент списка результатов поиска релизов в MusicBrainz."""
+
+    id: str = Field(..., description="MBID релиза в MusicBrainz")
+    title: str = Field(..., description="Название релиза / альбома")
+    artist: str = Field(..., description="Исполнитель альбома")
+    cover_url: str | None = Field(default=None, description="Обложка альбома из Cover Art Archive")
+    nb_tracks: int = Field(default=0, description="Количество треков")
+    year: int | None = Field(default=None, description="Год выпуска")
+    country: str | None = Field(default=None, description="Страна релиза")
+    status: str | None = Field(default=None, description="Статус релиза (Official, Bootleg и др.)")
+
+
+class MusicBrainzReleaseTrackItem(BaseModel):
+    """Метаданные дорожки альбома из MusicBrainz."""
+
+    track_number: int = Field(..., description="Порядковый номер дорожки")
+    title: str = Field(..., description="Название трека")
+    artist: str = Field(..., description="Исполнитель")
+    duration: int | None = Field(default=None, description="Длительность в секундах")
+    disc_number: int = Field(default=1, description="Номер диска / медиа-носителя")
+
+
+class MusicBrainzReleaseDetailsResponse(BaseModel):
+    """Полные метаданные релиза из MusicBrainz для автозаполнения редактора тегов."""
+
+    id: str = Field(..., description="MBID релиза в MusicBrainz")
+    title: str = Field(..., description="Название альбома")
+    artist: str = Field(..., description="Исполнитель альбома")
+    year: int | None = Field(default=None, description="Год релиза")
+    genre: str | None = Field(default=None, description="Жанр / теги через \\\\")
+    cover_url: str | None = Field(default=None, description="URL обложки из Cover Art Archive")
+    tracks: list[MusicBrainzReleaseTrackItem] = Field(default_factory=list, description="Список треков альбома")

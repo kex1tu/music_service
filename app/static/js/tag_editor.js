@@ -136,7 +136,8 @@ function tagEditorComponent() {
             this.collapsedGroups = nextCollapsed;
         },
 
-        // Deezer Album Search
+        // Album Metadata Search (Deezer / MusicBrainz)
+        albumMetadataSource: 'deezer',
         showDeezerModal: false,
         activeDeezerGroup: null,
         deezerQuery: '',
@@ -778,16 +779,22 @@ function tagEditorComponent() {
             this.isSearchingDeezer = true;
             this.deezerResults = [];
 
+            const source = this.albumMetadataSource || 'deezer';
+            const endpoint = source === 'musicbrainz'
+                ? `/tags/musicbrainz/albums?query=${encodeURIComponent(this.deezerQuery.trim())}`
+                : `/tags/deezer/albums?query=${encodeURIComponent(this.deezerQuery.trim())}`;
+            const sourceName = source === 'musicbrainz' ? 'MusicBrainz' : 'Deezer';
+
             try {
-                const res = await fetch(`/tags/deezer/albums?query=${encodeURIComponent(this.deezerQuery.trim())}`);
+                const res = await fetch(endpoint);
                 if (res.ok) {
                     this.deezerResults = await res.json();
                     if (this.deezerResults.length === 0) {
-                        Alpine.store('app').toast('Альбомы в Deezer не найдены', 'info');
+                        Alpine.store('app').toast(`Релизы в ${sourceName} не найдены`, 'info');
                     }
                 } else {
                     const err = await res.json();
-                    throw new Error(err.message || 'Ошибка поиска в Deezer');
+                    throw new Error(err.message || `Ошибка поиска в ${sourceName}`);
                 }
             } catch (err) {
                 Alpine.store('app').toast(`Ошибка: ${err.message}`, 'error');
@@ -800,8 +807,13 @@ function tagEditorComponent() {
             if (!albumId) return;
             this.isLoadingDeezerDetails = true;
 
+            const source = this.albumMetadataSource || 'deezer';
+            const endpoint = source === 'musicbrainz'
+                ? `/tags/musicbrainz/albums/${albumId}`
+                : `/tags/deezer/albums/${albumId}`;
+
             try {
-                const res = await fetch(`/tags/deezer/albums/${albumId}`);
+                const res = await fetch(endpoint);
                 if (!res.ok) {
                     const err = await res.json();
                     throw new Error(err.message || 'Не удалось загрузить данные альбома');

@@ -935,12 +935,61 @@ class TagService:
             logger.debug("Сбой поиска обложек в Spotify: %s", exc)
             return []
 
+    async def _search_musicbrainz_covers(
+        self, client: httpx.AsyncClient, query: str
+    ) -> list[CoverSearchResultItem]:
+        """Поиск обложек в MusicBrainz и Cover Art Archive."""
+        try:
+            url = "https://musicbrainz.org/ws/2/release/"
+            lucene_query = f'release:"{query}" OR artist:"{query}" OR "{query}"'
+            resp = await client.get(
+                url,
+                params={"query": lucene_query, "limit": 6, "fmt": "json"},
+                headers={"User-Agent": "MusicManager/1.0.0 ( https://github.com/kex1tu/music_service )"},
+            )
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            results: list[CoverSearchResultItem] = []
+            for r in data.get("releases", []):
+                mbid = r.get("id")
+                if not mbid:
+                    continue
+                title = r.get("title") or ""
+                artist_credit = r.get("artist-credit")
+                artist = ""
+                if isinstance(artist_credit, list):
+                    artist = "".join(
+                        it.get("name", "") + it.get("joinphrase", "")
+                        for it in artist_credit
+                        if isinstance(it, dict)
+                    ).strip()
+                date_str = r.get("date") or ""
+                m = re.match(r"^(\d{4})", str(date_str))
+                year = int(m.group(1)) if m else None
+
+                results.append(
+                    CoverSearchResultItem(
+                        source="musicbrainz",
+                        title=title,
+                        artist=artist,
+                        cover_url=f"https://coverartarchive.org/release/{mbid}/front-500",
+                        width=500,
+                        height=500,
+                        year=year,
+                    )
+                )
+            return results
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Сбой поиска обложек в MusicBrainz: %s", exc)
+            return []
+
     async def search_covers(
         self,
         query: str,
         limit: int = 12,
     ) -> list[CoverSearchResultItem]:
-        """Ищет обложки высокого разрешения в публичных сервисах (Apple Music, Deezer, Yandex, Spotify)."""
+        """Ищет обложки высокого разрешения в публичных сервисах (Apple Music, Deezer, Yandex, Spotify, MusicBrainz)."""
         clean_q = query.strip()
         if not clean_q:
             return []
@@ -967,6 +1016,7 @@ class TagService:
                 self._search_deezer_covers(client, clean_q),
                 self._search_yandex_covers(client, clean_q),
                 self._search_spotify_covers(client, clean_q),
+                self._search_musicbrainz_covers(client, clean_q),
             ]
             responses = await asyncio.gather(*tasks, return_exceptions=True)
 

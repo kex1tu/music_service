@@ -629,6 +629,83 @@ def test_deezer_album_endpoints(tags_client: TestClient, auth_tags_client: TestC
         assert details["tracks"][1]["title"] == "Aerodynamic"
 
 
+def test_musicbrainz_album_endpoints(tags_client: TestClient, auth_tags_client: TestClient):
+    """Проверка эндпоинтов поиска и деталей релиза в MusicBrainz."""
+    # 1. 401 Unauthorized
+    resp_search_unauth = tags_client.get("/tags/musicbrainz/albums", params={"query": "Discovery"})
+    assert resp_search_unauth.status_code == 401
+
+    resp_details_unauth = tags_client.get("/tags/musicbrainz/albums/mbid-discovery-123")
+    assert resp_details_unauth.status_code == 401
+
+    # 2. Поиск релизов с моком
+    from unittest.mock import AsyncMock, patch
+
+    from app.services.musicbrainz_client import MusicBrainzClient
+
+    mock_search = [
+        {
+            "id": "mbid-discovery-123",
+            "title": "Discovery",
+            "artist": "Daft Punk",
+            "year": 2001,
+            "nb_tracks": 14,
+            "country": "FR",
+            "status": "Official",
+            "cover_url": "https://coverartarchive.org/release/mbid-discovery-123/front-500",
+        }
+    ]
+
+    with patch.object(MusicBrainzClient, "search_releases", new=AsyncMock(return_value=mock_search)):
+        resp = auth_tags_client.get("/tags/musicbrainz/albums", params={"query": "Discovery"})
+        assert resp.status_code == 200
+        results = resp.json()
+        assert len(results) == 1
+        assert results[0]["id"] == "mbid-discovery-123"
+        assert results[0]["title"] == "Discovery"
+        assert results[0]["artist"] == "Daft Punk"
+        assert results[0]["country"] == "FR"
+
+    # 3. Детали релиза с моком
+    mock_release = {
+        "id": "mbid-discovery-123",
+        "title": "Discovery",
+        "artist": "Daft Punk",
+        "year": 2001,
+        "genre": "Electronic\\\\French House",
+        "cover_url": "https://coverartarchive.org/release/mbid-discovery-123/front-500",
+        "tracks": [
+            {
+                "track_number": 1,
+                "title": "One More Time",
+                "artist": "Daft Punk",
+                "duration": 320,
+                "disc_number": 1,
+            },
+            {
+                "track_number": 2,
+                "title": "Aerodynamic",
+                "artist": "Daft Punk",
+                "duration": 212,
+                "disc_number": 1,
+            },
+        ],
+    }
+
+    with patch.object(MusicBrainzClient, "get_release", new=AsyncMock(return_value=mock_release)):
+        resp = auth_tags_client.get("/tags/musicbrainz/albums/mbid-discovery-123")
+        assert resp.status_code == 200
+        details = resp.json()
+        assert details["id"] == "mbid-discovery-123"
+        assert details["title"] == "Discovery"
+        assert details["artist"] == "Daft Punk"
+        assert details["year"] == 2001
+        assert details["genre"] == "Electronic\\\\French House"
+        assert len(details["tracks"]) == 2
+        assert details["tracks"][0]["title"] == "One More Time"
+        assert details["tracks"][1]["title"] == "Aerodynamic"
+
+
 def test_search_covers_endpoint(tags_client: TestClient, auth_tags_client: TestClient):
     """Проверка GET /tags/covers/search: 401 без авторизации и 200 с результатами."""
     # 1. 401 Unauthorized
