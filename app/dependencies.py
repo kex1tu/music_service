@@ -243,6 +243,7 @@ def get_library_audit_service(
     music_sandbox: MusicSandboxDep,
     tag_service: TagServiceDep,
     lyrics_service: LyricsServiceDep,
+    deezer_client: DeezerClientDep,
 ) -> LibraryAuditService:
     """Провайдер синглтона сервиса аудита и глобального поиска медиатеки."""
     global _library_audit_service
@@ -251,6 +252,7 @@ def get_library_audit_service(
             music_sandbox=music_sandbox,
             tag_service=tag_service,
             lyrics_service=lyrics_service,
+            deezer_client=deezer_client,
         )
     return _library_audit_service
 

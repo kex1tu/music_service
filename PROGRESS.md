@@ -2,8 +2,8 @@
 
 ## Текущий статус проекта
 - **Общий прогресс:** Все компоненты и оптимизационные доработки завершены (100%)
-- **Активный этап:** Реализовано автоматическое извлечение и мгновенное предзаполнение полных официальных метаданных релизов Deezer в редакторе тегов (альбом, исполнитель альбома, год, жанр, номер и общее количество треков, номер и общее количество дисков) как для одиночных треков, так и для альбомов, плейлистов и дискографий, а также корректная запись фреймов `TRCK` (`X/Y`) и `TPOS` (`X/Y`) в стандарте ID3v2.4 через `mutagen`.
-- **Результаты тестов:** 532/532 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
+- **Активный этап:** Реализована подсистема аудита целостности релизов медиатеки (Incomplete Albums Audit & One-Click Backfill): офлайн-детекция неполных альбомов по ID3v2.4 тегам TRCK/TPOS и разрывам нумерации, онлайн-сверка состава треков с официальным каталогом Deezer API, 5-я карточка дашборда и вкладка аудита с аккордеоном треклиста, а также фоновая дозагрузка недостающих треков в один клик.
+- **Результаты тестов:** 535/535 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -287,6 +287,19 @@
 | **R2: Запись тегов TRCK и TPOS в ID3v2.4 и API задач** | `app/services/download_service.py`, `app/schemas/download.py` | **DONE** | 1) В `_write_draft_tags` добавлен импорт `TPOS` из mutagen. Тег `TRCK` записывается в формате `f"{track_number}/{track_total}"`, а фрейм `TPOS` — в формате `f"{disc_number}/{disc_total}"`. 2) В схему `DownloadTracksResponse` и метод `get_job_tracks()` добавлены поля `disc_total` и `track_total`. |
 | **R3: Предзаполнение полей в интерфейсе Tag Editor** | `app/templates/index.html`, `app/static/js/downloader.js`, `app/static/js/tag_editor.js` | **DONE** | 1) В `downloader.js` и `index.html` при открытии задачи (`openTagEditorForJob` / `openJobInTagEditor` / `openAllReadyJobsInTagEditor`) поля `disc_total`, `track_total`, `disc_number`, `genre`, `year`, `album_artist` передаются в объект `album` и каждый трек. 2) В `tag_editor.js`: метод `loadData()` сохраняет `disc_total` и `track_total` в объекте `album`, настраивает fallback для треков, а `buildReleasesFromTracks()` устанавливает `group.discTotal`, `group.genre`, `group.year` и дозаполняет их из треков группы. Все поля релиза Deezer мгновенно видны при открытии редактора. |
 | **R4: Верификация, линтинг и тесты** | `tests/test_source_resolver.py`, `tests/test_download_service.py`, `tests/test_frontend.py` | **DONE** | Добавлены тесты `test_resolve_deezer_track_full_metadata`, `test_resolve_deezer_album_multi_disc_metadata`, `test_write_draft_tags_with_totals_and_disc`, `test_tag_editor_and_downloader_disc_and_track_total_fields`. Все 532 теста успешно пройдены (`pytest`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). |
+
+---
+
+## Блок 28: Аудит неполных релизов и дозагрузка недостающих треков (Incomplete Albums Audit & One-Click Backfill) (2026-09-14T17:00:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Схемы данных аудита неполных релизов** | `app/schemas/library_audit.py` | **DONE** | Добавлены Pydantic-модели `IncompleteTrackInfo` (track_number, disc_number, title, duration, is_present, local_path, deezer_id, deezer_url), `IncompleteAlbumItem` (path, album, artist, year, has_cover, cover_url, present_count, expected_count, missing_track_numbers, missing_tracks, all_tracks, is_catalog_matched, deezer_album_id), `IncompleteAlbumsResponse` и `DownloadMissingTracksRequest`. В схему `AuditSummaryResponse` добавлено поле `incomplete_albums_count`. |
+| **R2: Офлайн-детекция и онлайн-сверка в LibraryAuditService** | `app/services/library_audit_service.py`, `app/dependencies.py` | **DONE** | Внедрен `DeezerClient` в `LibraryAuditService`. Реализован быстрый офлайн-метод `get_incomplete_albums()` для детекции неполных альбомов по ID3v2.4 тегам `TRCK`/`TPOS` и числовым разрывам нумерации дорожек по каждому диску. В `get_summary()` интегрирован расчет `incomplete_albums_count`. Реализован метод `match_album_catalog()` для сверки локальных треков с официальным треклистом Deezer API по позициям дорожек и нечетким названиям с получением прямых URL треков. |
+| **R3: Маршруты API аудита и дозагрузки треков** | `app/routers/files.py` | **DONE** | Реализованы защищенные эндпоинты `GET /files/audit/incomplete-albums` (список неполных релизов коллекции), `GET /files/audit/incomplete-albums/catalog-match` (сопоставление треклиста альбома с Deezer) и `POST /files/audit/incomplete-albums/download-missing` (пакетное или поштучное создание задач в `DownloadService` для недостающих треков релиза). |
+| **R4: Frontend интерфейс (5-я карточка, вкладка и аккордеон треклиста)** | `app/static/js/library_audit.js`, `app/templates/index.html` | **DONE** | В `library_audit.js` добавлены методы `loadIncompleteAlbums()`, `toggleAlbumExpand()`, `matchCatalog()` и `downloadMissing()`. В `index.html` добавлена 5-я карточка метрик на дашборде аудита, кнопка подраздела «Неполные релизы» в таб-баре, карточки неполных релизов с прогресс-барами полноты, бейджами пропущенных номеров дорожек, аккордеоном сверки треклиста и кнопками мгновенной догрузки. |
+| **R5: Верификация, линтинг и тесты** | `tests/test_library_audit.py`, `tests/test_frontend.py` | **DONE** | Добавлены модульные тесты `test_incomplete_albums_detection`, интеграционные тесты эндпоинтов каталожной сверки и догрузки `test_match_album_catalog_and_download_endpoint`, а также UI-тест `test_incomplete_albums_audit_ui`. Все 535 тестов успешно пройдены (`pytest`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). |
+
 
 
 

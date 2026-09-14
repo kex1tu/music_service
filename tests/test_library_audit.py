@@ -175,3 +175,239 @@ def test_audit_batch_lyrics_fetch(authenticated_client: TestClient, populated_au
         assert "is_running" in check_resp.json()
     finally:
         authenticated_client.app.dependency_overrides.pop(get_library_audit_service, None)
+
+
+@pytest.mark.asyncio
+async def test_incomplete_albums_detection(tmp_path: Path):
+    """Проверка обнаружения неполных альбомов (по track_total и по разрывам нумерации)."""
+    from app.core.sandbox import PathSandbox
+    from app.services.tag_service import TagService
+
+    sandbox = PathSandbox(tmp_path)
+    tag_svc = TagService(music_sandbox=sandbox)
+    audit_svc = LibraryAuditService(music_sandbox=sandbox, tag_service=tag_svc)
+
+    # 1. Альбом с явным TRCK=14, но только 13 треками (пропущен трек 8)
+    cache = {}
+    for i in range(1, 15):
+        if i == 8:
+            continue  # Пропускаем трек 8
+        cache[f"Kendrick Lamar/DAMN/{i:02d}. Track.mp3"] = {
+            "mtime": 1000.0,
+            "size": 5000000,
+            "track": TrackTags(
+                path=f"Kendrick Lamar/DAMN/{i:02d}. Track.mp3",
+                track_number=i,
+                track_total=14,
+                title=f"Track {i}",
+                artist="Kendrick Lamar",
+                album="DAMN.",
+                album_artist="Kendrick Lamar",
+                duration=180,
+            ),
+        }
+
+    # 2. Альбом без track_total, но с разрывом [1, 2, 4] (пропущен трек 3)
+    for i in [1, 2, 4]:
+        cache[f"Radiohead/In Rainbows/{i:02d}. Song.mp3"] = {
+            "mtime": 1000.0,
+            "size": 5000000,
+            "track": TrackTags(
+                path=f"Radiohead/In Rainbows/{i:02d}. Song.mp3",
+                track_number=i,
+                track_total=None,
+                title=f"Song {i}",
+                artist="Radiohead",
+                album="In Rainbows",
+                album_artist="Radiohead",
+                duration=200,
+            ),
+        }
+
+    # 3. Полный сингл (1 трек, track_number=1, без track_total) — НЕ должен считаться неполным
+    cache["Singles/Artist - Hit.mp3"] = {
+        "mtime": 1000.0,
+        "size": 4000000,
+        "track": TrackTags(
+            path="Singles/Artist - Hit.mp3",
+            track_number=1,
+            track_total=None,
+            title="Hit",
+            artist="Artist",
+            album="Singles",
+            album_artist="Artist",
+            duration=150,
+        ),
+    }
+
+    # 4. Полный альбом (3 трека из 3, track_total=3) — НЕ должен считаться неполным
+    for i in [1, 2, 3]:
+        cache[f"Artist/Complete EP/{i:02d}. Song.mp3"] = {
+            "mtime": 1000.0,
+            "size": 4000000,
+            "track": TrackTags(
+                path=f"Artist/Complete EP/{i:02d}. Song.mp3",
+                track_number=i,
+                track_total=3,
+                title=f"Song {i}",
+                artist="Artist",
+                album="Complete EP",
+                album_artist="Artist",
+                duration=150,
+            ),
+        }
+
+    audit_svc._cache = cache
+    audit_svc.ensure_index = AsyncMock()
+
+    result = await audit_svc.get_incomplete_albums()
+    assert result.total_incomplete_albums == 2
+    assert result.total_missing_tracks == 2
+
+    # Проверяем альбом Kendrick Lamar / DAMN.
+    damn_album = next((a for a in result.albums if a.album == "DAMN."), None)
+    assert damn_album is not None
+    assert damn_album.present_count == 13
+    assert damn_album.expected_count == 14
+    assert damn_album.missing_track_numbers == [8]
+    assert len(damn_album.missing_tracks) == 1
+    assert damn_album.missing_tracks[0].track_number == 8
+
+    # Проверяем альбом Radiohead / In Rainbows
+    rh_album = next((a for a in result.albums if a.album == "In Rainbows"), None)
+    assert rh_album is not None
+    assert rh_album.present_count == 3
+    assert rh_album.expected_count == 4
+    assert rh_album.missing_track_numbers == [3]
+
+
+@pytest.mark.asyncio
+async def test_match_album_catalog_and_download_endpoint(
+    authenticated_client: TestClient,
+    tmp_path: Path,
+):
+    """Проверка сверки неполного альбома с каталогом Deezer и эндпоинта дозагрузки."""
+    from app.core.sandbox import PathSandbox
+    from app.dependencies import get_download_service, get_library_audit_service
+    from app.schemas.download import JobStatus
+    from app.services.download_service import DownloadJob
+    from app.services.tag_service import TagService
+
+    sandbox = PathSandbox(tmp_path)
+    album_dir = tmp_path / "Kendrick Lamar" / "DAMN"
+    album_dir.mkdir(parents=True, exist_ok=True)
+
+    tag_svc = TagService(music_sandbox=sandbox)
+    mock_deezer = MagicMock()
+
+    mock_deezer.search_albums = AsyncMock(
+        return_value=[
+            {
+                "id": 302127,
+                "title": "DAMN.",
+                "artist": {"name": "Kendrick Lamar"},
+            }
+        ]
+    )
+    mock_deezer.get_album = AsyncMock(
+        return_value={
+            "id": 302127,
+            "title": "DAMN.",
+            "artist": {"name": "Kendrick Lamar"},
+            "nb_tracks": 2,
+            "tracks": {
+                "data": [
+                    {
+                        "id": 361204701,
+                        "title": "BLOOD.",
+                        "track_position": 1,
+                        "disk_number": 1,
+                        "duration": 118,
+                    },
+                    {
+                        "id": 361204781,
+                        "title": "PRIDE.",
+                        "track_position": 2,
+                        "disk_number": 1,
+                        "duration": 275,
+                    },
+                ]
+            },
+        }
+    )
+
+    audit_svc = LibraryAuditService(
+        music_sandbox=sandbox,
+        tag_service=tag_svc,
+        deezer_client=mock_deezer,
+    )
+    # В медиатеке присутствует только трек 1 (BLOOD.)
+    audit_svc._cache = {
+        "Kendrick Lamar/DAMN/01 - BLOOD..mp3": {
+            "mtime": 1000.0,
+            "size": 3000000,
+            "track": TrackTags(
+                path="Kendrick Lamar/DAMN/01 - BLOOD..mp3",
+                track_number=1,
+                track_total=2,
+                title="BLOOD.",
+                artist="Kendrick Lamar",
+                album="DAMN.",
+                album_artist="Kendrick Lamar",
+                duration=118,
+            ),
+        }
+    }
+    audit_svc.ensure_index = AsyncMock()
+
+    # Мокаем DownloadService
+    mock_download_service = MagicMock()
+    mock_job = DownloadJob(
+        job_id="job123",
+        url="https://www.deezer.com/track/361204781",
+        source="deezer",
+    )
+    mock_job.status = JobStatus.QUEUED
+    mock_download_service.create_job = AsyncMock(return_value=mock_job)
+
+    authenticated_client.app.dependency_overrides[get_library_audit_service] = lambda: audit_svc
+    authenticated_client.app.dependency_overrides[get_download_service] = lambda: mock_download_service
+    try:
+        # 1. Запрос списка неполных релизов
+        resp = authenticated_client.get("/files/audit/incomplete-albums")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_incomplete_albums"] == 1
+        assert data["albums"][0]["missing_track_numbers"] == [2]
+
+        # 2. Запрос сверки с Deezer
+        match_resp = authenticated_client.get(
+            "/files/audit/incomplete-albums/catalog-match",
+            params={"path": "Kendrick Lamar/DAMN"},
+        )
+        assert match_resp.status_code == 200
+        match_data = match_resp.json()
+        assert match_data["is_catalog_matched"] is True
+        assert match_data["deezer_album_id"] == "302127"
+        assert len(match_data["missing_tracks"]) == 1
+        missing_t = match_data["missing_tracks"][0]
+        assert missing_t["title"] == "PRIDE."
+        assert missing_t["deezer_url"] == "https://www.deezer.com/track/361204781"
+
+        # 3. Запрос на дозагрузку недостающих треков
+        dl_resp = authenticated_client.post(
+            "/files/audit/incomplete-albums/download-missing",
+            json={"path": "Kendrick Lamar/DAMN"},
+        )
+        assert dl_resp.status_code == 200
+        jobs = dl_resp.json()
+        assert len(jobs) == 1
+        assert jobs[0]["id"] == "job123"
+        mock_download_service.create_job.assert_called_once_with(
+            url="https://www.deezer.com/track/361204781",
+            source="auto",
+        )
+    finally:
+        authenticated_client.app.dependency_overrides.pop(get_library_audit_service, None)
+        authenticated_client.app.dependency_overrides.pop(get_download_service, None)
+

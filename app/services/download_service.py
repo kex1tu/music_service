@@ -102,6 +102,24 @@ def is_drm_protected_error(err_msg: str) -> bool:
     return "drm protected" in msg or "drm-protected" in msg or bool(re.search(r"\bdrm\b", msg))
 
 
+def is_bot_or_unplayable_error(err_msg: str) -> bool:
+    """Определяет, вызван ли сбой загрузки антибот-защитой или блокировкой плеера YouTube."""
+    if not err_msg:
+        return False
+    msg = err_msg.lower()
+    return any(
+        pattern in msg
+        for pattern in (
+            "the page needs to be reloaded",
+            "http error 403",
+            "403: forbidden",
+            "unplayable",
+            "bot detection",
+            "not a bot",
+        )
+    )
+
+
 class DownloadService:
     """Сервис оркестрации задач загрузки аудио."""
 
@@ -109,6 +127,7 @@ class DownloadService:
     ANSI_ESCAPE_REGEX = ANSI_ESCAPE_REGEX
     is_age_restricted_error = staticmethod(is_age_restricted_error)
     is_drm_protected_error = staticmethod(is_drm_protected_error)
+    is_bot_or_unplayable_error = staticmethod(is_bot_or_unplayable_error)
 
     @staticmethod
     async def _ensure_jpeg_cover(image_bytes: bytes) -> bytes:
@@ -581,6 +600,8 @@ class DownloadService:
                                 reason = "DRM защита"
                             elif is_age_restricted_error(err_str):
                                 reason = "возрастное ограничение"
+                            elif is_bot_or_unplayable_error(err_str):
+                                reason = "антибот YouTube"
                             elif any(kw in err_str.lower() for kw in ("unavailable", "private", "not available", "deleted")):
                                 reason = "недоступен"
                             elif "copyright" in err_str.lower() or "blocked" in err_str.lower():

@@ -14,14 +14,20 @@ from fastapi import APIRouter, Query
 
 from app.dependencies import (
     CurrentUserDep,
+    DownloadServiceDep,
     FileManagerServiceDep,
     LibraryAuditServiceDep,
+    MusicSandboxDep,
 )
+from app.schemas.download import DownloadJobResponse
 from app.schemas.files import DeleteFileResponse, DirectoryListingResponse
 from app.schemas.library_audit import (
     AuditSummaryResponse,
     BatchLyricsProgressResponse,
+    DownloadMissingTracksRequest,
     DuplicatesResponse,
+    IncompleteAlbumItem,
+    IncompleteAlbumsResponse,
     LibrarySearchResponse,
     MissingCoverItem,
     MissingLyricsItem,
@@ -131,6 +137,85 @@ async def get_library_duplicates(
 ) -> DuplicatesResponse:
     """Возвращает группы найденных дубликатов."""
     return await audit_service.find_duplicates()
+
+
+@router.get(
+    "/audit/incomplete-albums",
+    response_model=IncompleteAlbumsResponse,
+    summary="Обнаружение неполных альбомов в медиатеке",
+    description="Находит альбомы, в которых не хватает треков по тегам TRCK/TPOS или нарушена числовая последовательность.",
+)
+async def get_incomplete_albums(
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> IncompleteAlbumsResponse:
+    """Возвращает список неполных альбомов коллекции."""
+    return await audit_service.get_incomplete_albums()
+
+
+@router.get(
+    "/audit/incomplete-albums/catalog-match",
+    response_model=IncompleteAlbumItem,
+    summary="Сверка состава треков альбома с каталогом Deezer",
+    description="Сопоставляет треклист альбома со студийным релизом в Deezer и возвращает точные данные отсутствующих треков.",
+)
+async def match_incomplete_album_catalog(
+    path: str = Query(..., description="Относительный путь к каталогу альбома"),
+    deezer_album_id: str | None = Query(default=None, description="Опциональный ID альбома в Deezer"),
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> IncompleteAlbumItem:
+    """Выполняет каталожную сверку релиза с Deezer."""
+    return await audit_service.match_album_catalog(album_path=path, deezer_album_id=deezer_album_id)
+
+
+@router.post(
+    "/audit/incomplete-albums/download-missing",
+    response_model=list[DownloadJobResponse],
+    summary="Дозагрузка недостающих треков релиза",
+    description="Создает задачи скачивания для пропущенных треков альбома и помещает их в очередь загрузок.",
+)
+async def download_missing_album_tracks(
+    request: DownloadMissingTracksRequest,
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+    download_service: DownloadServiceDep = ...,
+    music_sandbox: MusicSandboxDep = ...,
+) -> list[DownloadJobResponse]:
+    """Запускает скачивание недостающих треков альбома."""
+    music_sandbox.resolve(request.path, allow_root=True)
+
+    urls: list[str] = []
+    if request.track_urls:
+        urls = [u.strip() for u in request.track_urls if u and u.strip()]
+    elif request.track_ids:
+        urls = [
+            f"https://www.deezer.com/track/{tid.strip()}"
+            for tid in request.track_ids
+            if tid and tid.strip()
+        ]
+    else:
+        matched = await audit_service.match_album_catalog(album_path=request.path)
+        urls = [t.deezer_url for t in matched.missing_tracks if t.deezer_url]
+        if not urls:
+            for t in matched.missing_tracks:
+                if t.title:
+                    clean_query = f"{matched.artist} - {t.title}".strip(" -")
+                    if clean_query:
+                        urls.append(f"ytsearch:{clean_query}")
+
+    if not urls:
+        return []
+
+    created_jobs = []
+    for u in urls:
+        try:
+            job = await download_service.create_job(url=u, source="auto")
+            created_jobs.append(job.to_response())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Не удалось создать задачу загрузки для %s: %s", u, exc)
+
+    return created_jobs
 
 
 @router.get(

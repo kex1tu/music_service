@@ -1284,8 +1284,8 @@
                 </button>
             </div>
 
-            <!-- Сводка метрик коллекции (4 карточки) -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <!-- Сводка метрик коллекции (5 карточек) -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                 <!-- Карточка 1: Всего треков -->
                 <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
                     <div class="flex items-center justify-between">
@@ -1358,10 +1358,29 @@
                         <span class="text-xs text-gray-500">копий файлов</span>
                     </div>
                 </div>
+
+                <!-- Карточка 5: Неполные релизы -->
+                <div
+                    @click="activeSubTab = 'incomplete'"
+                    class="bg-gray-900 border border-gray-800 rounded-xl p-5 cursor-pointer hover:border-sky-500/50 transition"
+                    :class="{'ring-1 ring-sky-500/50': activeSubTab === 'incomplete'}">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-sky-400 uppercase tracking-wider">Неполные релизы</span>
+                        <span class="w-8 h-8 rounded-lg bg-sky-500/10 text-sky-400 flex items-center justify-center">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z"/>
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="mt-4 flex items-baseline space-x-2">
+                        <span class="text-2xl font-bold text-sky-300 font-mono" x-text="incompleteAlbums.length || summary.incomplete_albums_count"></span>
+                        <span class="text-xs text-gray-500">альбомов</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Вкладки подразделов аудита -->
-            <div class="flex space-x-2 border-b border-gray-800 pb-2">
+            <div class="flex flex-wrap gap-2 border-b border-gray-800 pb-2">
                 <button
                     @click="activeSubTab = 'lyrics'"
                     :class="activeSubTab === 'lyrics' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
@@ -1382,6 +1401,13 @@
                     class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
                     <span>Дубликаты песен</span>
                     <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="duplicatesData.groups ? duplicatesData.groups.length : 0"></span>
+                </button>
+                <button
+                    @click="activeSubTab = 'incomplete'"
+                    :class="activeSubTab === 'incomplete' ? 'bg-sky-600/20 text-sky-300 border border-sky-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
+                    class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
+                    <span>Неполные релизы</span>
+                    <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="incompleteAlbums.length"></span>
                 </button>
             </div>
 
@@ -1597,6 +1623,185 @@
                                             </div>
                                         </div>
                                     </template>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+            </div>
+
+            <!-- СЕКЦИЯ 4: Неполные релизы -->
+            <div x-show="activeSubTab === 'incomplete'" class="space-y-4">
+                <template x-if="!incompleteLoading && incompleteAlbums.length === 0">
+                    <div class="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-500 text-sm">
+                        Отлично! Все альбомы в медиатеке укомплектованы, недостающих треков не обнаружено.
+                    </div>
+                </template>
+
+                <template x-if="incompleteLoading">
+                    <div class="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-400 text-sm flex items-center justify-center space-x-2">
+                        <svg class="w-4 h-4 animate-spin text-sky-400" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
+                        </svg>
+                        <span>Проверка целостности релизов...</span>
+                    </div>
+                </template>
+
+                <template x-if="!incompleteLoading && incompleteAlbums.length > 0">
+                    <div class="space-y-4">
+                        <template x-for="alb in incompleteAlbums" :key="alb.path">
+                            <div class="bg-gray-900 border border-sky-900/40 rounded-xl p-5 shadow-xl space-y-4 transition hover:border-sky-700/50">
+                                <!-- Шапка релиза -->
+                                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
+                                    <div class="flex items-center space-x-4 min-w-0">
+                                        <!-- Обложка -->
+                                        <div class="w-14 h-14 rounded-lg bg-gray-800 flex items-center justify-center shrink-0 overflow-hidden border border-gray-700/60 shadow">
+                                            <template x-if="alb.cover_url">
+                                                <img :src="alb.cover_url" class="w-full h-full object-cover" alt="Cover" />
+                                            </template>
+                                            <template x-if="!alb.cover_url">
+                                                <svg class="w-7 h-7 text-sky-400/60" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z"/>
+                                                </svg>
+                                            </template>
+                                        </div>
+
+                                        <div class="min-w-0">
+                                            <div class="flex items-center space-x-2">
+                                                <h4 class="text-sm font-bold text-white truncate" x-text="alb.album" :title="alb.album"></h4>
+                                                <template x-if="alb.year">
+                                                    <span class="text-[11px] text-gray-400 font-mono" x-text="`(${alb.year})`"></span>
+                                                </template>
+                                            </div>
+                                            <p class="text-xs text-gray-300 truncate" x-text="alb.artist" :title="alb.artist"></p>
+                                            <p class="text-[11px] text-gray-500 font-mono truncate mt-0.5" x-text="alb.path" :title="alb.path"></p>
+                                        </div>
+                                    </div>
+
+                                    <!-- Кнопки действий -->
+                                    <div class="flex items-center space-x-2 shrink-0 self-end sm:self-center">
+                                        <!-- Кнопка Скачать все недостающие -->
+                                        <button
+                                            @click="downloadMissing(alb)"
+                                            :disabled="downloadingTracks[alb.path]"
+                                            class="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 shadow">
+                                            <svg class="w-3.5 h-3.5" :class="{'animate-spin': downloadingTracks[alb.path]}" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M12 16l-5-5h3V4h4v7h3l-5 5zm9-4v7H3v-7H1v7a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2v-7h-2z"/>
+                                            </svg>
+                                            <span x-text="downloadingTracks[alb.path] ? 'Отправка...' : `Скачать недостающие (${alb.expected_count - alb.present_count})`"></span>
+                                        </button>
+
+                                        <!-- Кнопка разворачивания треклиста -->
+                                        <button
+                                            @click="toggleAlbumExpand(alb)"
+                                            class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-lg text-xs font-medium transition flex items-center space-x-1 border border-gray-700">
+                                            <span x-text="expandedAlbums[alb.path] ? 'Скрыть треклист' : 'Сверить с Deezer'"></span>
+                                            <svg class="w-3.5 h-3.5 transition-transform duration-200" :class="{'rotate-180': expandedAlbums[alb.path]}" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6l-6-6z"/>
+                                            </svg>
+                                        </button>
+
+                                        <!-- Кнопка открыть папку -->
+                                        <button
+                                            @click="openDirectory(alb.path)"
+                                            title="Открыть папку"
+                                            class="p-1.5 hover:bg-gray-800 text-gray-400 hover:text-white rounded-lg transition border border-transparent hover:border-gray-700">
+                                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M4 20q-.825 0-1.412-.587T2 18V6q0-.825.588-1.412T4 4h5.175q.4 0 .763.15t.637.425L12 6h8q.825 0 1.413.588T22 8v10q0 .825-.587 1.413T20 20zm0-2h16V8h-8.825l-2-2H4zm0 0V6z"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Прогресс заполненности и бейдж недостающих -->
+                                <div class="space-y-1.5">
+                                    <div class="flex items-center justify-between text-xs">
+                                        <span class="text-gray-300 font-medium flex items-center space-x-2">
+                                            <span>Полнота релиза:</span>
+                                            <strong class="text-white font-mono" x-text="`${alb.present_count} из ${alb.expected_count} треков`"></strong>
+                                            <span class="text-sky-400 font-mono text-[11px]" x-text="`(${Math.round(alb.present_count / (alb.expected_count || 1) * 100)}%)`"></span>
+                                        </span>
+                                        <div class="text-[11px] text-amber-400 font-medium">
+                                            <span>Отсутствуют: </span>
+                                            <strong class="font-mono" x-text="alb.missing_track_numbers.map(n => '#' + n).join(', ')"></strong>
+                                        </div>
+                                    </div>
+                                    <div class="w-full bg-gray-950 rounded-full h-2 overflow-hidden border border-gray-800">
+                                        <div class="bg-gradient-to-r from-sky-500 to-indigo-500 h-2 rounded-full transition-all duration-300"
+                                            :style="`width: ${Math.round(alb.present_count / (alb.expected_count || 1) * 100)}%`"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Развернутый аккордеон треклиста -->
+                                <div x-show="expandedAlbums[alb.path]" class="mt-4 pt-3 border-t border-gray-800 space-y-3 animate-fade-in">
+                                    <div class="flex items-center justify-between">
+                                        <h5 class="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center space-x-2">
+                                            <span>Треклист релиза</span>
+                                            <template x-if="alb.is_catalog_matched">
+                                                <span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 font-mono">
+                                                    Сверено с каталогом Deezer
+                                                </span>
+                                            </template>
+                                            <template x-if="catalogMatchLoading[alb.path]">
+                                                <span class="text-[10px] text-sky-400 flex items-center space-x-1 font-mono">
+                                                    <svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="currentColor"><path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/></svg>
+                                                    <span>Запрос каталога Deezer...</span>
+                                                </span>
+                                            </template>
+                                        </h5>
+                                    </div>
+
+                                    <!-- Таблица треков релиза -->
+                                    <div class="bg-gray-950/80 rounded-lg border border-gray-800/80 overflow-hidden">
+                                        <table class="w-full text-left text-xs border-collapse">
+                                            <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider font-semibold border-b border-gray-800 text-[11px]">
+                                                <tr>
+                                                    <th class="p-2.5 w-12 text-center">#</th>
+                                                    <th class="p-2.5">Название трека</th>
+                                                    <th class="p-2.5 w-24 text-center">Статус</th>
+                                                    <th class="p-2.5 w-28 text-right">Действие</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="divide-y divide-gray-800/40">
+                                                <template x-for="t in (alb.all_tracks && alb.all_tracks.length ? alb.all_tracks : alb.missing_tracks)" :key="`${alb.path}_${t.disc_number}_${t.track_number}`">
+                                                    <tr class="hover:bg-gray-800/30 transition">
+                                                        <td class="p-2.5 text-center font-mono text-gray-400" x-text="t.disc_number > 1 ? `${t.disc_number}-${t.track_number}` : t.track_number"></td>
+                                                        <td class="p-2.5">
+                                                            <div class="font-medium text-white truncate max-w-sm" x-text="t.title || `Трек #${t.track_number}`"></div>
+                                                            <template x-if="t.duration">
+                                                                <div class="text-[10px] text-gray-500 font-mono" x-text="`${Math.floor(t.duration / 60)}:${String(Math.floor(t.duration % 60)).padStart(2, '0')}`"></div>
+                                                            </template>
+                                                        </td>
+                                                        <td class="p-2.5 text-center">
+                                                            <template x-if="t.is_present">
+                                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                                                    В медиатеке
+                                                                </span>
+                                                            </template>
+                                                            <template x-if="!t.is_present">
+                                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-red-500/10 text-red-400 border border-red-500/20">
+                                                                    Отсутствует
+                                                                </span>
+                                                            </template>
+                                                        </td>
+                                                        <td class="p-2.5 text-right">
+                                                            <template x-if="!t.is_present">
+                                                                <button
+                                                                    @click="downloadMissing(alb, t.deezer_url)"
+                                                                    :disabled="downloadingTracks[`${alb.path}:::${t.deezer_url}`]"
+                                                                    class="px-2.5 py-1 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 rounded text-[11px] font-medium transition inline-flex items-center space-x-1">
+                                                                    <svg class="w-3 h-3" :class="{'animate-spin': downloadingTracks[`${alb.path}:::${t.deezer_url}`]}" viewBox="0 0 24 24" fill="currentColor">
+                                                                        <path d="M12 16l-5-5h3V4h4v7h3l-5 5zm9-4v7H3v-7H1v7a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2v-7h-2z"/>
+                                                                    </svg>
+                                                                    <span>Скачать</span>
+                                                                </button>
+                                                            </template>
+                                                        </td>
+                                                    </tr>
+                                                </template>
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
                             </div>
                         </template>

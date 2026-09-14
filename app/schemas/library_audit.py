@@ -62,6 +62,7 @@ class AuditSummaryResponse(BaseModel):
     missing_lyrics_count: int = Field(default=0, description="Количество треков без внешних файлов текстов")
     missing_covers_count: int = Field(default=0, description="Количество альбомов/треков без обложек")
     duplicates_count: int = Field(default=0, description="Количество потенциальных дубликатов")
+    incomplete_albums_count: int = Field(default=0, description="Количество неполных альбомов в медиатеке")
 
 
 class MissingLyricsItem(BaseModel):
@@ -123,3 +124,81 @@ class BatchLyricsProgressResponse(BaseModel):
     found: int = Field(default=0, description="Успешно найдено и сохранено текстов")
     failed: int = Field(default=0, description="Не найдено текстов или ошибка")
     current_track: str = Field(default="", description="Название текущего обрабатываемого трека")
+
+
+class IncompleteTrackInfo(BaseModel):
+    """Информация о треке релиза при аудите целостности альбома."""
+
+    track_number: int = Field(default=1, description="Номер дорожки")
+    disc_number: int = Field(default=1, description="Номер диска")
+    title: str = Field(default="", description="Название трека")
+    duration: int | None = Field(default=None, description="Длительность трека в секундах")
+    is_present: bool = Field(default=False, description="Присутствует ли трек в медиатеке")
+    local_path: str | None = Field(
+        default=None,
+        description="Относительный путь к локальному файлу, если трек присутствует",
+    )
+    deezer_id: str | None = Field(default=None, description="ID трека в каталоге Deezer")
+    deezer_url: str | None = Field(default=None, description="Прямой URL трека в Deezer")
+
+
+class IncompleteAlbumItem(BaseModel):
+    """Релиз с отсутствующими или неполными треками."""
+
+    path: str = Field(..., description="Относительный путь к каталогу альбома в медиатеке")
+    album: str = Field(default="", description="Название альбома")
+    artist: str = Field(default="", description="Исполнитель альбома")
+    year: int | None = Field(default=None, description="Год выпуска")
+    has_cover: bool = Field(default=False, description="Наличие обложки альбома")
+    cover_url: str | None = Field(default=None, description="URL обложки альбома")
+    present_count: int = Field(default=0, description="Количество треков на диске")
+    expected_count: int = Field(default=0, description="Ожидаемое общее количество треков")
+    missing_track_numbers: list[int] = Field(
+        default_factory=list,
+        description="Список номеров отсутствующих дорожек",
+    )
+    missing_tracks: list[IncompleteTrackInfo] = Field(
+        default_factory=list,
+        description="Список отсутствующих треков",
+    )
+    all_tracks: list[IncompleteTrackInfo] = Field(
+        default_factory=list,
+        description="Полный треклист релиза (при наличии каталожной сверки)",
+    )
+    is_catalog_matched: bool = Field(
+        default=False,
+        description="Флаг успешной сверки с каталогом Deezer",
+    )
+    deezer_album_id: str | None = Field(default=None, description="ID альбома в Deezer")
+
+
+class IncompleteAlbumsResponse(BaseModel):
+    """Результат аудита целостности альбомов медиатеки."""
+
+    albums: list[IncompleteAlbumItem] = Field(
+        default_factory=list,
+        description="Список обнаруженных неполных альбомов",
+    )
+    total_incomplete_albums: int = Field(
+        default=0,
+        description="Общее количество неполных альбомов",
+    )
+    total_missing_tracks: int = Field(
+        default=0,
+        description="Общее число недостающих треков во всех неполных альбомах",
+    )
+
+
+class DownloadMissingTracksRequest(BaseModel):
+    """Запрос на дозагрузку недостающих треков релиза."""
+
+    path: str = Field(..., description="Относительный путь к каталогу альбома в медиатеке")
+    track_urls: list[str] | None = Field(
+        default=None,
+        description="Опциональный список прямых URL треков Deezer для скачивания",
+    )
+    track_ids: list[str] | None = Field(
+        default=None,
+        description="Опциональный список идентификаторов треков Deezer",
+    )
+

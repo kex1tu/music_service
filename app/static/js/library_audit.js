@@ -6,7 +6,7 @@
 
 function libraryAuditComponent() {
     return {
-        activeSubTab: 'lyrics', // 'lyrics' | 'covers' | 'duplicates'
+        activeSubTab: 'lyrics', // 'lyrics' | 'covers' | 'duplicates' | 'incomplete'
         isLoading: false,
         summary: {
             total_tracks: 0,
@@ -14,10 +14,16 @@ function libraryAuditComponent() {
             missing_lyrics_count: 0,
             missing_covers_count: 0,
             duplicates_count: 0,
+            incomplete_albums_count: 0,
         },
         missingLyrics: [],
         missingCovers: [],
         duplicatesData: { groups: [], total_duplicate_files: 0 },
+        incompleteAlbums: [],
+        incompleteLoading: false,
+        expandedAlbums: {},
+        catalogMatchLoading: {},
+        downloadingTracks: {},
         lyricsProgress: {
             is_running: false,
             total: 0,
@@ -57,6 +63,7 @@ function libraryAuditComponent() {
                     this.loadMissingLyrics(),
                     this.loadMissingCovers(),
                     this.loadDuplicates(),
+                    this.loadIncompleteAlbums(),
                 ]);
             } finally {
                 this.isLoading = false;
@@ -182,5 +189,86 @@ function libraryAuditComponent() {
             };
             Alpine.store('app').activeModal = 'delete_confirm';
         },
+
+        async loadIncompleteAlbums() {
+            this.incompleteLoading = true;
+            try {
+                const res = await fetch('/files/audit/incomplete-albums');
+                if (res.ok) {
+                    const data = await res.json();
+                    this.incompleteAlbums = data.albums || [];
+                }
+            } catch (e) {
+                console.error('Ошибка загрузки неполных релизов:', e);
+            } finally {
+                this.incompleteLoading = false;
+            }
+        },
+
+        async toggleAlbumExpand(album) {
+            const path = album.path;
+            this.expandedAlbums[path] = !this.expandedAlbums[path];
+            if (this.expandedAlbums[path] && !album.is_catalog_matched && !this.catalogMatchLoading[path]) {
+                await this.matchCatalog(album);
+            }
+        },
+
+        async matchCatalog(album) {
+            const path = album.path;
+            this.catalogMatchLoading[path] = true;
+            try {
+                const url = `/files/audit/incomplete-albums/catalog-match?path=${encodeURIComponent(path)}`;
+                const res = await fetch(url);
+                if (res.ok) {
+                    const matched = await res.json();
+                    const idx = this.incompleteAlbums.findIndex(a => a.path === path);
+                    if (idx !== -1) {
+                        this.incompleteAlbums[idx] = matched;
+                    }
+                } else {
+                    Alpine.store('app').toast('Не удалось найти треклист альбома в Deezer', 'warning');
+                }
+            } catch (e) {
+                console.error('Ошибка сверки релиза с Deezer:', e);
+                Alpine.store('app').toast('Ошибка при сверке с Deezer', 'error');
+            } finally {
+                this.catalogMatchLoading[path] = false;
+            }
+        },
+
+        async downloadMissing(album, trackUrl = null) {
+            const key = trackUrl ? `${album.path}:::${trackUrl}` : album.path;
+            this.downloadingTracks[key] = true;
+            try {
+                const payload = {
+                    path: album.path,
+                    track_urls: trackUrl ? [trackUrl] : null,
+                };
+                const res = await fetch('/files/audit/incomplete-albums/download-missing', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (res.ok) {
+                    const jobs = await res.json();
+                    if (jobs && jobs.length > 0) {
+                        Alpine.store('app').toast(`Поставлено в очередь загрузок: ${jobs.length}`, 'success');
+                        if (Alpine.store('app').queue && Alpine.store('app').queue.fetchQueue) {
+                            await Alpine.store('app').queue.fetchQueue();
+                        }
+                    } else {
+                        Alpine.store('app').toast('Не найдено ссылок для скачивания недостающих треков', 'warning');
+                    }
+                } else {
+                    Alpine.store('app').toast('Ошибка отправки запроса на скачивание', 'error');
+                }
+            } catch (e) {
+                console.error('Ошибка дозагрузки треков:', e);
+                Alpine.store('app').toast('Сбой при запуске загрузки', 'error');
+            } finally {
+                this.downloadingTracks[key] = false;
+            }
+        },
     };
 }
+

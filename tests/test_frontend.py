@@ -398,6 +398,40 @@ def test_tag_editor_and_downloader_disc_and_track_total_fields():
     assert "group.discTotal" in tag_editor_js
 
 
+def test_incomplete_albums_audit_ui(client: TestClient):
+    """Проверка наличия компонентов аудита неполных релизов в index.html и library_audit.js."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+
+    # 1. 5-я карточка метрик на дашборде аудита
+    assert "Неполные релизы" in html
+    assert "summary.incomplete_albums_count" in html
+    assert "activeSubTab = 'incomplete'" in html
+
+    # 2. Вкладка неполных релизов в таб-баре
+    assert "incompleteAlbums.length" in html
+
+    # 3. Секция отображения неполных релизов
+    assert "activeSubTab === 'incomplete'" in html
+    assert "downloadMissing(alb)" in html
+    assert "toggleAlbumExpand(alb)" in html
+    assert "alb.missing_track_numbers" in html
+    assert "Полнота релиза:" in html
+
+    # 4. Проверка методов в library_audit.js
+    audit_js = (PROJECT_ROOT / "app" / "static" / "js" / "library_audit.js").read_text(encoding="utf-8")
+    assert "incompleteAlbums:" in audit_js
+    assert "loadIncompleteAlbums()" in audit_js
+    assert "toggleAlbumExpand(album)" in audit_js
+    assert "matchCatalog(album)" in audit_js
+    assert "downloadMissing(album, trackUrl = null)" in audit_js
+    assert "/files/audit/incomplete-albums" in audit_js
+    assert "/files/audit/incomplete-albums/catalog-match" in audit_js
+    assert "/files/audit/incomplete-albums/download-missing" in audit_js
+
+
+
 
 
 

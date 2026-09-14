@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.core.exceptions import NotFoundError
 from app.core.sandbox import PathSandbox
 from app.schemas.library_audit import (
     AuditSummaryResponse,
@@ -25,6 +26,9 @@ from app.schemas.library_audit import (
     DuplicateGroupItem,
     DuplicatesResponse,
     DuplicateTrackItem,
+    IncompleteAlbumItem,
+    IncompleteAlbumsResponse,
+    IncompleteTrackInfo,
     LibrarySearchResponse,
     MissingCoverItem,
     MissingLyricsItem,
@@ -33,6 +37,7 @@ from app.schemas.library_audit import (
     SearchTrackItem,
 )
 from app.schemas.tag import TrackTags
+from app.services.deezer_client import DeezerClient
 from app.services.lyrics_service import LyricsService
 from app.services.tag_service import TagService
 
@@ -62,10 +67,12 @@ class LibraryAuditService:
         music_sandbox: PathSandbox,
         tag_service: TagService,
         lyrics_service: LyricsService | None = None,
+        deezer_client: DeezerClient | None = None,
     ) -> None:
         self._music_sandbox = music_sandbox
         self._tag_service = tag_service
         self._lyrics_service = lyrics_service
+        self._deezer_client = deezer_client
         self._lock = asyncio.Lock()
         # Кеш треков: rel_path -> dict(mtime=float, size=int, track=TrackTags)
         self._cache: dict[str, dict[str, Any]] = {}
@@ -265,6 +272,9 @@ class LibraryAuditService:
         duplicates = await self.find_duplicates()
         duplicates_count = duplicates.total_duplicate_files
 
+        incomplete_res = await self.get_incomplete_albums()
+        incomplete_albums_count = incomplete_res.total_incomplete_albums
+
         # Подсчет альбомов
         album_paths = {
             str(Path(item["track"].path).parent).replace("\\", "/")
@@ -280,6 +290,7 @@ class LibraryAuditService:
             missing_lyrics_count=missing_lyrics_count,
             missing_covers_count=missing_covers_count,
             duplicates_count=duplicates_count,
+            incomplete_albums_count=incomplete_albums_count,
         )
 
     async def get_missing_lyrics(self) -> list[MissingLyricsItem]:
@@ -519,3 +530,331 @@ class LibraryAuditService:
             groups=duplicate_groups,
             total_duplicate_files=total_dup_files,
         )
+
+    async def get_incomplete_albums(self) -> IncompleteAlbumsResponse:
+        """Обнаруживает альбомы с недостающими треками на основе тегов TRCK/TPOS и непрерывности нумерации."""
+        await self.ensure_index()
+
+        albums_dict: dict[str, list[TrackTags]] = {}
+        for item in self._cache.values():
+            t: TrackTags = item["track"]
+            p = Path(t.path).parent
+            # Если трек лежит в поддиректории CD1, CD2, Disc 1 - группируем с родительским каталогом альбома
+            if p.name.lower().startswith(("cd", "disc", "диск")) and str(p.parent) != ".":
+                p = p.parent
+            album_dir = str(p).replace("\\", "/")
+            if album_dir == ".":
+                album_dir = ""
+            albums_dict.setdefault(album_dir, []).append(t)
+
+        incomplete_albums: list[IncompleteAlbumItem] = []
+        total_missing_tracks_count = 0
+
+        for album_dir, tracks in albums_dict.items():
+            if not tracks:
+                continue
+
+            first_t = tracks[0]
+            album_name = next(
+                (t.album for t in tracks if t.album),
+                (Path(album_dir).name if album_dir else first_t.title) or "Альбом",
+            )
+            artist_name = next(
+                (t.album_artist or t.artist for t in tracks if (t.album_artist or t.artist)),
+                "Неизвестный исполнитель",
+            )
+            year = next((t.year for t in tracks if t.year), None)
+
+            # Проверка наличия обложки
+            has_cover = any(t.has_cover for t in tracks)
+            if not has_cover and album_dir:
+                try:
+                    dir_path = self._music_sandbox.resolve(album_dir, allow_root=True)
+                    for c_name in ("cover.jpg", "cover.png", "cover.jpeg", "folder.jpg", "folder.png"):
+                        if (dir_path / c_name).exists():
+                            has_cover = True
+                            break
+                except (OSError, ValueError):
+                    pass
+
+            # Группируем треки по номерам дисков (disc_number)
+            discs: dict[int, list[TrackTags]] = {}
+            for t in tracks:
+                d_num = t.disc_number if t.disc_number and t.disc_number > 0 else 1
+                discs.setdefault(d_num, []).append(t)
+
+            disc_totals = [t.disc_total for t in tracks if t.disc_total and t.disc_total > 0]
+            max_disc_total = max(disc_totals) if disc_totals else max(discs.keys())
+
+            is_incomplete = False
+            missing_tracks: list[IncompleteTrackInfo] = []
+            missing_numbers: list[int] = []
+            all_tracks: list[IncompleteTrackInfo] = []
+            total_expected_tracks = 0
+            total_present_tracks = len(tracks)
+
+            # Проверяем каждый диск релиза
+            for disc_num in sorted(range(1, max(max_disc_total, max(discs.keys())) + 1)):
+                disc_tracks = discs.get(disc_num, [])
+                track_map: dict[int, TrackTags] = {}
+                for t in disc_tracks:
+                    if t.track_number and t.track_number > 0:
+                        track_map[t.track_number] = t
+
+                track_totals = [t.track_total for t in disc_tracks if t.track_total and t.track_total > 0]
+                max_track_total = max(track_totals) if track_totals else None
+                max_track_num = max(track_map.keys()) if track_map else 0
+
+                # Определение ожидаемого количества треков:
+                # 1) Если задан track_total в тегах TRCK -> используем его.
+                # 2) Иначе, если max_track_num > len(track_map) и (len(track_map) >= 2 or max_track_num > 1) -> разрыв.
+                # 3) Иначе диск считается цельным.
+                if max_track_total is not None and max_track_total > len(track_map):
+                    disc_expected = max_track_total
+                elif max_track_num > len(track_map) and (len(track_map) >= 2 or max_track_num > 1):
+                    disc_expected = max_track_num
+                else:
+                    disc_expected = len(track_map) if track_map else len(disc_tracks)
+
+                total_expected_tracks += disc_expected
+
+                for pos in range(1, disc_expected + 1):
+                    if pos in track_map:
+                        loc_t = track_map[pos]
+                        all_tracks.append(
+                            IncompleteTrackInfo(
+                                track_number=pos,
+                                disc_number=disc_num,
+                                title=loc_t.title or Path(loc_t.path).stem,
+                                duration=loc_t.duration,
+                                is_present=True,
+                                local_path=loc_t.path,
+                            )
+                        )
+                    else:
+                        is_incomplete = True
+                        missing_numbers.append(pos)
+                        missing_trk = IncompleteTrackInfo(
+                            track_number=pos,
+                            disc_number=disc_num,
+                            title=f"Трек {pos}",
+                            is_present=False,
+                            local_path=None,
+                        )
+                        missing_tracks.append(missing_trk)
+                        all_tracks.append(missing_trk)
+
+            if is_incomplete and total_expected_tracks > total_present_tracks:
+                incomplete_albums.append(
+                    IncompleteAlbumItem(
+                        path=album_dir or first_t.path,
+                        album=album_name,
+                        artist=artist_name,
+                        year=year,
+                        has_cover=has_cover,
+                        present_count=total_present_tracks,
+                        expected_count=total_expected_tracks,
+                        missing_track_numbers=missing_numbers,
+                        missing_tracks=missing_tracks,
+                        all_tracks=all_tracks,
+                        is_catalog_matched=False,
+                    )
+                )
+                total_missing_tracks_count += len(missing_tracks)
+
+        incomplete_albums.sort(key=lambda x: (x.artist.lower(), x.album.lower()))
+
+        return IncompleteAlbumsResponse(
+            albums=incomplete_albums,
+            total_incomplete_albums=len(incomplete_albums),
+            total_missing_tracks=total_missing_tracks_count,
+        )
+
+    async def match_album_catalog(
+        self,
+        album_path: str,
+        deezer_album_id: str | None = None,
+    ) -> IncompleteAlbumItem:
+        """Сверяет состав треков альбома с официальным каталогом Deezer."""
+        await self.ensure_index()
+
+        dir_path = self._music_sandbox.resolve(album_path, allow_root=True)
+        if not dir_path.exists():
+            raise NotFoundError(f"Каталог или трек не найден: {album_path}")
+
+        # Нормализуем относительный путь
+        norm_album_path = str(self._music_sandbox.to_relative(dir_path)).replace("\\", "/")
+        if norm_album_path == ".":
+            norm_album_path = ""
+
+        local_tracks: list[TrackTags] = []
+        for item in self._cache.values():
+            t: TrackTags = item["track"]
+            t_dir = str(Path(t.path).parent).replace("\\", "/")
+            if t_dir == ".":
+                t_dir = ""
+            if t_dir == norm_album_path or t_dir.startswith(f"{norm_album_path}/"):
+                local_tracks.append(t)
+
+        if not local_tracks and dir_path.is_dir():
+            for f in dir_path.glob("*.mp3"):
+                try:
+                    rel = str(self._music_sandbox.to_relative(f)).replace("\\", "/")
+                    local_tracks.append(self._tag_service.read_tags(f, rel_path=rel))
+                except (OSError, ValueError, TypeError) as exc:
+                    logger.debug("Ошибка чтения тегов при сканировании каталога %s: %s", f, exc)
+
+        album_name = next(
+            (t.album for t in local_tracks if t.album),
+            dir_path.name if norm_album_path else "Альбом",
+        )
+        artist_name = next(
+            (t.album_artist or t.artist for t in local_tracks if (t.album_artist or t.artist)),
+            "",
+        )
+        year = next((t.year for t in local_tracks if t.year), None)
+        has_cover = any(t.has_cover for t in local_tracks)
+
+        # Если клиента Deezer нет — возвращаем локальный расчет
+        if not self._deezer_client:
+            offline_res = await self.get_incomplete_albums()
+            for alb in offline_res.albums:
+                if alb.path == norm_album_path:
+                    return alb
+            return IncompleteAlbumItem(
+                path=norm_album_path,
+                album=album_name,
+                artist=artist_name,
+                year=year,
+                has_cover=has_cover,
+                present_count=len(local_tracks),
+                expected_count=len(local_tracks),
+            )
+
+        album_data: dict[str, Any] | None = None
+        if deezer_album_id:
+            try:
+                album_data = await self._deezer_client.get_album(deezer_album_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Не удалось получить альбом Deezer по ID %s: %s", deezer_album_id, exc)
+
+        if not album_data:
+            q = f"{artist_name} {album_name}".strip()
+            if q:
+                try:
+                    candidates = await self._deezer_client.search_albums(q, limit=5)
+                    if candidates:
+                        best_candidate = candidates[0]
+                        clean_target_alb = normalize_clean_string(album_name)
+                        clean_target_art = normalize_clean_string(artist_name)
+
+                        for cand in candidates:
+                            c_title = normalize_clean_string(cand.get("title", ""))
+                            c_art = normalize_clean_string(cand.get("artist", {}).get("name", ""))
+                            if c_title == clean_target_alb and (
+                                not clean_target_art
+                                or clean_target_art in c_art
+                                or c_art in clean_target_art
+                            ):
+                                best_candidate = cand
+                                break
+
+                        cand_id = str(best_candidate.get("id"))
+                        album_data = await self._deezer_client.get_album(cand_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Сбой поиска альбома в Deezer (%s): %s", q, exc)
+
+        if not album_data:
+            offline_res = await self.get_incomplete_albums()
+            for alb in offline_res.albums:
+                if alb.path == norm_album_path:
+                    return alb
+            return IncompleteAlbumItem(
+                path=norm_album_path,
+                album=album_name,
+                artist=artist_name,
+                year=year,
+                has_cover=has_cover,
+                present_count=len(local_tracks),
+                expected_count=len(local_tracks),
+            )
+
+        deezer_tracks = album_data.get("tracks", {}).get("data", [])
+        cover_url = DeezerClient.extract_best_cover_url(album_data)
+        deezer_artist = album_data.get("artist", {}).get("name", artist_name)
+        deezer_title = album_data.get("title", album_name)
+        deezer_id = str(album_data.get("id", ""))
+
+        all_matched_tracks: list[IncompleteTrackInfo] = []
+        missing_tracks: list[IncompleteTrackInfo] = []
+        missing_numbers: list[int] = []
+        present_count = 0
+
+        for dz_t in deezer_tracks:
+            dz_pos = dz_t.get("track_position", 1)
+            dz_disc = dz_t.get("disk_number", 1)
+            dz_title = dz_t.get("title", "")
+            dz_dur = dz_t.get("duration")
+            dz_tid = str(dz_t.get("id", ""))
+            dz_url = f"https://www.deezer.com/track/{dz_tid}" if dz_tid else None
+
+            clean_dz_title = normalize_clean_string(dz_title)
+            matched_loc: TrackTags | None = None
+
+            for loc in local_tracks:
+                loc_disc = loc.disc_number if loc.disc_number and loc.disc_number > 0 else 1
+                if loc_disc == dz_disc and loc.track_number == dz_pos:
+                    matched_loc = loc
+                    break
+
+            if not matched_loc:
+                for loc in local_tracks:
+                    if loc.title and normalize_clean_string(loc.title) == clean_dz_title:
+                        matched_loc = loc
+                        break
+
+            if matched_loc:
+                present_count += 1
+                all_matched_tracks.append(
+                    IncompleteTrackInfo(
+                        track_number=dz_pos,
+                        disc_number=dz_disc,
+                        title=dz_title,
+                        duration=dz_dur or matched_loc.duration,
+                        is_present=True,
+                        local_path=matched_loc.path,
+                        deezer_id=dz_tid,
+                        deezer_url=dz_url,
+                    )
+                )
+            else:
+                missing_numbers.append(dz_pos)
+                trk_info = IncompleteTrackInfo(
+                    track_number=dz_pos,
+                    disc_number=dz_disc,
+                    title=dz_title,
+                    duration=dz_dur,
+                    is_present=False,
+                    local_path=None,
+                    deezer_id=dz_tid,
+                    deezer_url=dz_url,
+                )
+                missing_tracks.append(trk_info)
+                all_matched_tracks.append(trk_info)
+
+        return IncompleteAlbumItem(
+            path=norm_album_path,
+            album=deezer_title or album_name,
+            artist=deezer_artist or artist_name,
+            year=year,
+            has_cover=has_cover or bool(cover_url),
+            cover_url=cover_url,
+            present_count=present_count,
+            expected_count=len(deezer_tracks),
+            missing_track_numbers=missing_numbers,
+            missing_tracks=missing_tracks,
+            all_tracks=all_matched_tracks,
+            is_catalog_matched=True,
+            deezer_album_id=deezer_id,
+        )
+
