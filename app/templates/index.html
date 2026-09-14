@@ -2483,7 +2483,7 @@
                                                     class="text-gray-600 hover:text-red-400 p-1 rounded transition"
                                                     title="Исключить трек из списка">
                                                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                                                        <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
+                                                        <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q-.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
                                                     </svg>
                                                 </button>
                                             </td>
@@ -2520,25 +2520,18 @@
                             @click="closeDeezerSearch()"
                             class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 transition">
                             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
+                                <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q-.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
                             </svg>
                         </button>
                     </div>
 
                     <!-- Поисковая строка -->
                     <div class="p-4 border-b border-gray-800 bg-gray-950 flex items-center space-x-2">
-                        <select
-                            x-model="albumMetadataSource"
-                            @change="searchDeezerAlbums()"
-                            class="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-2 text-xs text-purple-300 font-semibold focus:outline-none focus:border-purple-500 cursor-pointer">
-                            <option value="deezer">Deezer</option>
-                            <option value="musicbrainz">MusicBrainz</option>
-                        </select>
                         <input
                             type="text"
                             x-model="deezerQuery"
                             @keydown.enter="searchDeezerAlbums()"
-                            placeholder="Введите название альбома или артиста..."
+                            placeholder="Введите название альбома или артиста (Deezer)..."
                             class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500">
                         <button
                             type="button"
@@ -2568,27 +2561,32 @@
                             <div class="flex items-center justify-between p-3 rounded-xl bg-gray-950/60 border border-gray-800 hover:border-purple-500/50 hover:bg-gray-800/40 transition">
                                 <div class="flex items-center space-x-3 min-w-0">
                                     <template x-if="item.cover_url">
-                                        <img :src="item.cover_url" class="w-12 h-12 rounded-lg object-cover bg-gray-900 border border-gray-800 flex-shrink-0">
+                                        <img :src="item.cover_url" alt="Cover" class="w-12 h-12 rounded-lg object-cover bg-gray-900 shrink-0 border border-gray-800">
                                     </template>
                                     <template x-if="!item.cover_url">
-                                        <div class="w-12 h-12 rounded-lg bg-gray-900 border border-gray-800 flex items-center justify-center text-gray-700 flex-shrink-0">
+                                        <div class="w-12 h-12 rounded-lg bg-gray-900 border border-gray-800 flex items-center justify-center text-gray-600 shrink-0">
                                             <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
-                                                <path d="M12 3a9 9 0 0 0-9 9a9 9 0 0 0 9 9a9 9 0 0 0 9-9a9 9 0 0 0-9-9m0 16a7 7 0 0 1-7-7a7 7 0 0 1 7-7a7 7 0 0 1 7 7a7 7 0 0 1-7 7m0-10a3 3 0 0 0-3 3a3 3 0 0 0 3 3a3 3 0 0 0 3-3a3 3 0 0 0-3-3m0 4a1 1 0 0 1-1-1a1 1 0 0 1 1-1a1 1 0 0 1 1 1a1 1 0 0 1-1 1"/>
+                                                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3h-6z"/>
                                             </svg>
                                         </div>
                                     </template>
                                     <div class="min-w-0">
                                         <h4 class="text-xs font-bold text-white truncate" x-text="item.title"></h4>
                                         <p class="text-[11px] text-gray-400 truncate" x-text="item.artist"></p>
-                                        <p class="text-[10px] text-gray-500" x-text="`${item.nb_tracks} треков`"></p>
+                                        <div class="flex items-center space-x-2 text-[10px] text-gray-500 mt-0.5">
+                                            <span x-text="`${item.nb_tracks || 0} треков`"></span>
+                                            <template x-if="item.year">
+                                                <span x-text="`• ${item.year}`"></span>
+                                            </template>
+                                        </div>
                                     </div>
                                 </div>
                                 <button
                                     type="button"
                                     @click="applyDeezerAlbum(item.id)"
                                     :disabled="isLoadingDeezerDetails"
-                                    class="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 border border-purple-500/30 text-xs font-semibold rounded-lg transition flex-shrink-0">
-                                    <span>Выбрать</span>
+                                    class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg transition disabled:opacity-50 shrink-0">
+                                    <span x-text="isLoadingDeezerDetails ? 'Применение...' : 'Применить'"></span>
                                 </button>
                             </div>
                         </template>
@@ -2596,49 +2594,52 @@
                 </div>
             </div>
 
-            <!-- Всплывающее окно: Мультисервисная галерея обложек -->
+            <!-- МОДАЛЬНОЕ ОКНО МУЛЬТИСЕРВИСНОГО ПОИСКА ОБЛОЖКИ (APPLE / DEEZER / YANDEX / SPOTIFY) -->
             <div
                 x-show="showCoverGalleryModal"
                 x-cloak
-                class="fixed inset-0 z-[65] flex items-center justify-center modal-backdrop p-4"
+                class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
                 @keydown.escape.window="closeCoverGallery()">
                 <div
                     @click.outside="closeCoverGallery()"
-                    class="bg-gray-900 border border-gray-700 rounded-2xl max-w-4xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-fade-in">
-                    <!-- Заголовок -->
-                    <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-950/60">
-                        <div class="flex items-center space-x-2">
-                            <div class="w-7 h-7 rounded-lg bg-pink-500/10 text-pink-400 flex items-center justify-center">
-                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                                    <path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h14q.825 0 1.413.588T21 5v14q0 .825-.587 1.413T19 21zm0-2h14V5H5zm0 0V5zm2-2h10q.3 0 .45-.275t-.05-.525l-2.75-3.675q-.15-.2-.4-.2t-.4.2L11.25 16L9.4 13.525q-.15-.2-.4-.2t-.4.2l-2 2.675q-.2.25-.05.525T7 17"/>
+                    class="bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-fade-in">
+                    <!-- Шапка модального окна -->
+                    <div class="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-950">
+                        <div class="flex items-center space-x-2.5">
+                            <div class="w-8 h-8 rounded-lg bg-pink-500/10 text-pink-400 flex items-center justify-center">
+                                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M4 18q-.825 0-1.412-.587T2 16V4q0-.825.588-1.412T4 2h12q.825 0 1.413.588T18 4v12q0 .825-.587 1.413T16 18zm16 4q-.825 0-1.412-.587T18 20V7q0-.425.288-.712T19 6t.713.288T20 7v13h-13q-.425 0-.712-.288T6 19t.288-.712T7 18h13zM6 14h8l-2.6-3.5L9.5 13l-1.4-1.85z"/>
                                 </svg>
                             </div>
-                            <h3 class="text-sm font-bold text-white">Мультисервисная галерея обложек</h3>
+                            <div>
+                                <h3 class="text-sm font-bold text-white">Поиск обложки высокого разрешения</h3>
+                                <p class="text-[11px] text-gray-400">Мультисервисный поиск: Apple Music (1400×1400), Deezer (1400×1400), Яндекс (1000×1000), Spotify</p>
+                            </div>
                         </div>
                         <button
                             type="button"
                             @click="closeCoverGallery()"
                             class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 transition">
                             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
+                                <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q-.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
                             </svg>
                         </button>
                     </div>
 
-                    <!-- Поисковая строка и фильтры -->
-                    <div class="p-4 border-b border-gray-800 bg-gray-950 space-y-3">
-                        <div class="flex items-center space-x-2">
+                    <!-- Панель поиска и фильтров -->
+                    <div class="p-4 border-b border-gray-800 bg-gray-950/70 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                        <div class="flex-1 flex items-center space-x-2">
                             <input
                                 type="text"
                                 x-model="coverSearchQuery"
                                 @keydown.enter="searchCovers()"
-                                placeholder="Поиск обложек (альбом или артист)..."
+                                placeholder="Поиск по исполнителю, альбому или названию релиза..."
                                 class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-pink-500">
                             <button
                                 type="button"
                                 @click="searchCovers()"
                                 :disabled="isSearchingCovers || !coverSearchQuery.trim()"
-                                class="px-4 py-2 bg-pink-600 hover:bg-pink-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition flex items-center space-x-1.5 shadow-sm">
+                                class="px-4 py-2 bg-pink-600 hover:bg-pink-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition flex items-center space-x-1.5 shrink-0">
                                 <template x-if="isSearchingCovers">
                                     <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
                                         <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
@@ -2652,9 +2653,9 @@
                                 <span>Найти</span>
                             </button>
                         </div>
-                        <!-- Фильтры по источнику -->
-                        <div class="flex items-center space-x-1.5 flex-wrap gap-y-1">
-                            <span class="text-[11px] text-gray-500 mr-1">Источник:</span>
+
+                        <!-- Фильтры по источникам -->
+                        <div class="flex items-center space-x-1.5 overflow-x-auto pb-1 sm:pb-0">
                             <button
                                 type="button"
                                 @click="coverSourceFilter = 'all'"
@@ -2690,13 +2691,6 @@
                                 class="px-2.5 py-1 rounded-md text-[11px] font-medium border transition">
                                 Spotify (640×640)
                             </button>
-                            <button
-                                type="button"
-                                @click="coverSourceFilter = 'musicbrainz'"
-                                :class="coverSourceFilter === 'musicbrainz' ? 'bg-pink-500/20 text-pink-300 border-pink-500/50' : 'bg-gray-900 text-gray-400 border-gray-800 hover:text-gray-300'"
-                                class="px-2.5 py-1 rounded-md text-[11px] font-medium border transition">
-                                MusicBrainz (500×500)
-                            </button>
                         </div>
                     </div>
 
@@ -2719,10 +2713,9 @@
                                                     'bg-red-500/80 text-white': item.source === 'apple',
                                                     'bg-purple-600/80 text-white': item.source === 'deezer',
                                                     'bg-amber-500/80 text-black font-extrabold': item.source === 'yandex',
-                                                    'bg-emerald-600/80 text-white': item.source === 'spotify',
-                                                    'bg-indigo-600/80 text-white': item.source === 'musicbrainz'
+                                                    'bg-emerald-600/80 text-white': item.source === 'spotify'
                                                 }"
-                                                x-text="item.source === 'apple' ? 'Apple Music' : (item.source === 'deezer' ? 'Deezer' : (item.source === 'yandex' ? 'Яндекс' : (item.source === 'musicbrainz' ? 'MusicBrainz' : 'Spotify')))">
+                                                x-text="item.source === 'apple' ? 'Apple Music' : (item.source === 'deezer' ? 'Deezer' : (item.source === 'yandex' ? 'Яндекс' : 'Spotify'))">
                                             </span>
                                         </div>
                                         <div class="absolute bottom-2 right-2">

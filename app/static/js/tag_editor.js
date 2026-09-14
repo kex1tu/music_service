@@ -149,8 +149,7 @@ function tagEditorComponent() {
             this.collapsedGroups = nextCollapsed;
         },
 
-        // Album Metadata Search (Deezer / MusicBrainz)
-        albumMetadataSource: 'deezer',
+        // Album Metadata Search (Deezer)
         showDeezerModal: false,
         activeDeezerGroup: null,
         deezerQuery: '',
@@ -809,22 +808,18 @@ function tagEditorComponent() {
             this.isSearchingDeezer = true;
             this.deezerResults = [];
 
-            const source = this.albumMetadataSource || 'deezer';
-            const endpoint = source === 'musicbrainz'
-                ? `/tags/musicbrainz/albums?query=${encodeURIComponent(this.deezerQuery.trim())}`
-                : `/tags/deezer/albums?query=${encodeURIComponent(this.deezerQuery.trim())}`;
-            const sourceName = source === 'musicbrainz' ? 'MusicBrainz' : 'Deezer';
+            const endpoint = `/tags/deezer/albums?query=${encodeURIComponent(this.deezerQuery.trim())}`;
 
             try {
                 const res = await fetch(endpoint);
                 if (res.ok) {
                     this.deezerResults = await res.json();
                     if (this.deezerResults.length === 0) {
-                        Alpine.store('app').toast(`Релизы в ${sourceName} не найдены`, 'info');
+                        Alpine.store('app').toast('Релизы в Deezer не найдены', 'info');
                     }
                 } else {
                     const err = await res.json();
-                    throw new Error(err.message || `Ошибка поиска в ${sourceName}`);
+                    throw new Error(err.message || 'Ошибка поиска в Deezer');
                 }
             } catch (err) {
                 Alpine.store('app').toast(`Ошибка: ${err.message}`, 'error');
@@ -837,10 +832,7 @@ function tagEditorComponent() {
             if (!albumId) return;
             this.isLoadingDeezerDetails = true;
 
-            const source = this.albumMetadataSource || 'deezer';
-            const endpoint = source === 'musicbrainz'
-                ? `/tags/musicbrainz/albums/${albumId}`
-                : `/tags/deezer/albums/${albumId}`;
+            const endpoint = `/tags/deezer/albums/${albumId}`;
 
             try {
                 const res = await fetch(endpoint);

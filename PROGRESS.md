@@ -1,9 +1,9 @@
 # PROGRESS.md — Матрица статусов реализации Music Downloader & Tag Manager
 
 ## Текущий статус проекта
-- **Общий прогресс:** Все компоненты и оптимизационные доработки завершены (100%)
-- **Активный этап:** Реализована автоматическая каталожная сверка неполных релизов с Deezer, постоянное кэширование укомплектованных релизов и мгновенная дозагрузка недостающих треков.
-- **Результаты тестов:** 542/542 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
+- **Текущий статус проекта:** 100% готовность, все проверки и тесты пройдены.
+- **Активный этап:** Полное удаление интеграции с MusicBrainz, упрощение и оптимизация поиска релизов и обложек (Deezer, Apple Music, Яндекс Музыка, Spotify).
+- **Результаты тестов:** 531/531 passed (`pytest`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -348,6 +348,17 @@
 | **R2: Игнорирование одиночных синглов в неполных альбомах** | `app/services/library_audit_service.py`, `tests/test_library_audit.py` | **DONE** | Папки синглов с 1 треком (где имя каталога или тег альбома содержит `- Single`, `[Single]`, `сингл`) больше не расцениваются как неполные альбомы, даже если трек имел порядковый номер сборника (например, 13/20). |
 | **R3: Предзаполнение Deezer URL для мгновенной дозагрузки** | `app/services/library_audit_service.py`, `app/static/js/library_audit.js` | **DONE** | При обнаружении действительно неполных релизов (например, `The Death of Slim Shady` без трека 2 «Habits», `Curtain Call 2` с 4 из 25 треков) они сразу поставляются на фронтенд со статусом `is_catalog_matched: true` и готовыми `deezer_url`. Кнопка «Скачать недостающие» мгновенно ставит недостающие треки в очередь загрузок без необходимости ручной сверки. |
 | **R4: Тесты и деплой на сервер** | `tests/test_library_audit.py` | **DONE** | Добавлены модульные тесты `test_incomplete_albums_auto_match_deezer_filters_false_positives` и `test_incomplete_albums_single_folder_ignored`. Все 542 теста успешно пройдены (`pytest tests/`, 100% pass), линтер `ruff` чист. Изменения закоммичены, запушены в репозиторий и развернуты на боевом сервере `nl_vpn` с перезапуском `music-manager.service`. |
+
+---
+
+## Блок 18: Полное удаление интеграции с MusicBrainz (2026-09-14T20:17:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Очистка бэкенда и эндпоинтов** | `app/services/musicbrainz_client.py`, `app/dependencies.py`, `app/routers/tags.py`, `app/schemas/tag.py`, `app/services/tag_service.py` | **DONE** | Полностью удален сервис `MusicBrainzClient` и файл `app/services/musicbrainz_client.py`. Удалена зависимость `MusicBrainzClientDep` и эндпоинты `/tags/musicbrainz/albums` и `/tags/musicbrainz/albums/{release_id}`. Из схемы `CoverSearchResultItem` и сервиса `TagService.search_covers` исключен источник `musicbrainz`. |
+| **R2: Очистка фронтенда** | `app/templates/index.html`, `app/static/js/tag_editor.js` | **DONE** | Удален переключатель источников метаданных (`metadataSource`) в редакторе тегов, поиск релизов переведен на прямой опрос Deezer (`searchDeezerAlbums`), в галерее обложек оставлены 4 проверенных источника (Apple Music, Deezer, Яндекс Музыка, Spotify). |
+| **R3: Актуализация тестов и верификация** | `tests/test_musicbrainz_client.py`, `tests/test_tags_router.py`, `tests/test_frontend.py` | **DONE** | Удален устаревший тестовый файл `tests/test_musicbrainz_client.py` и тест `test_musicbrainz_album_endpoints`. Все 531 тест успешно пройдены (`pytest`, 100% pass), линтер `ruff check app tests` без единого замечания. |
+
 
 
 

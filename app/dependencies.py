@@ -18,7 +18,6 @@ from app.services.download_service import DownloadService
 from app.services.file_manager_service import FileManagerService
 from app.services.library_audit_service import LibraryAuditService
 from app.services.lyrics_service import GeniusClient, LrclibClient, LyricsService
-from app.services.musicbrainz_client import MusicBrainzClient
 from app.services.organizer_service import OrganizerService
 from app.services.source_resolver import SourceResolver
 from app.services.tag_service import TagService
@@ -100,7 +99,6 @@ TmpSandboxDep = Annotated[PathSandbox, Depends(get_tmp_sandbox)]
 
 
 _deezer_client: DeezerClient | None = None
-_musicbrainz_client: MusicBrainzClient | None = None
 _source_resolver: SourceResolver | None = None
 _download_service: DownloadService | None = None
 
@@ -114,17 +112,6 @@ def get_deezer_client() -> DeezerClient:
 
 
 DeezerClientDep = Annotated[DeezerClient, Depends(get_deezer_client)]
-
-
-def get_musicbrainz_client() -> MusicBrainzClient:
-    """Провайдер синглтона MusicBrainzClient."""
-    global _musicbrainz_client
-    if _musicbrainz_client is None:
-        _musicbrainz_client = MusicBrainzClient()
-    return _musicbrainz_client
-
-
-MusicBrainzClientDep = Annotated[MusicBrainzClient, Depends(get_musicbrainz_client)]
 
 
 def get_source_resolver(
