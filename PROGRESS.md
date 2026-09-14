@@ -2,7 +2,7 @@
 
 ## Текущий статус проекта
 - **Текущий статус проекта:** 100% готовность, все проверки и тесты пройдены.
-- **Активный этап:** Оптимизация аудита медиатеки (`music-scanner` + `LibraryAuditService`): потоковое чтение тегов ID3 с мгновенным пропуском тяжелых графических блоков (`APIC`/`PIC`) без чтения мегабайтов в память (сокращение дискового I/O с 2.3 ГБ до 4.5 МБ на 2250 треков), устранение дедлоков IPC по `stderr`, кэширование индекса при параллельных запросах в `ensure_index()` и асинхронный таймаут для каталожной сверки. Время аудита на сервере `nl_music` снижено с бесконечного зависания до ~0.5 секунды. Изменения задеплоены на `nl_music` и `nl_vpn`.
+- **Активный этап:** Реорганизация структуры медиатеки: сохранение треков строго по альбомам (`MUSIC_DIR/{Album}/{TrackNumber:02d}. {Title}.mp3`) без каталогов исполнителей. Все тесты обновлены и успешно пройдены.
 - **Результаты тестов:** 548/548 passed (`pytest`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
@@ -403,6 +403,16 @@
 | **R3: Поддержка в нативном Go CLI-сканере (`music-scanner`)** | `tools/music-scanner/id3/models.go`, `tools/music-scanner/id3/parser.go`, `app/services/library_audit_service.py` | **DONE** | 1. В Go-модель `TrackMeta` добавлено поле `Genre string` (`json:"genre"`).<br>2. В `parser.go` добавлен парсинг ID3v2.2 фрейма `TCO` и ID3v2.3/2.4 `TCON`.<br>3. `LibraryAuditService._ensure_index_native` передает `genre=item.get("genre")` в `TrackTags`, где поле автоматически нормализуется Pydantic.<br>4. Бинарник `bin/music-scanner` скомпилирован заново (`CGO_ENABLED=0`, `-ldflags="-s -w"`). |
 | **R4: Редактор тегов на фронтенде (UI)** | `app/static/js/tag_editor.js`, `app/templates/index.html` | **DONE** | 1. В компонент `tagEditorComponent` добавлен метод `formatGenres(raw)`.<br>2. Интеграция в `buildReleasesFromTracks`, `openTagEditor`, `applyGroupToTracks`, `saveAlbum`, `recognizeTrack`, `recognizeAllTracks` и `applyDeezerAlbum`.<br>3. Поле ввода жанров в шаблоне карточки релиза (`index.html`) оснащено слушателями `@blur` и `@change` (`group.genre = formatGenres(group.genre)`), что сразу разделяет введенные жанры через `\\` и нормализует `Hip-Hop` прямо при редактировании в браузере. |
 | **R5: Тесты и верификация** | `tests/test_tag_service.py`, `tests/test_tags_router.py` | **DONE** | Добавлены тесты `test_genre_formatting_and_hip_hop_normalization` и `test_genre_schema_validation_and_id3_roundtrip`. Обновлена проверка нормализации Deezer в `test_tags_router.py`. Все 548 тестов пройдены успешно (100% pass), линтер `ruff check` чист (0 замечаний). |
+ 
+---
+ 
+## Блок 23: Сохранение треков строго по альбомам (`Альбом/Треки.mp3`) без каталогов исполнителей (2026-09-15T01:30:00Z)
+ 
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Обновление шаблона путей в `OrganizerService`** | `app/services/organizer_service.py` | **DONE** | 1. `compute_album_dir`: теперь возвращает строго очищенное название альбома (`clean_album`) без префикса исполнителя (`clean_artist/`) и суффикса года (` - {year}`).<br>2. `compute_target_paths`: генерирует целевые пути по новому шаблону `MUSIC_DIR/{Album}/{TrackNumber:02d}. {Title}.mp3`.<br>3. `compute_single_dir`: формирует каталог сингла по названию трека (`clean_folder`) без префикса исполнителя.<br>4. `organize_album`: ключ группировки треков альбома переведен на `__album__{effective_album.lower()}`, гарантируя объединение всех треков релиза в одной папке альбома даже при разных исполнителях треков. |
+| **R2: Обновление тестов и верификация** | `tests/test_organizer_service.py`, `tests/test_tags_router.py` | **DONE** | 1. `tests/test_organizer_service.py`: обновлены все 13 модульных тестов с проверками целевых путей, перемещения файлов, смены очередности треков (in-place swap), дедупликации и очистки пустых каталогов под новую схему `Album/01. Track.mp3`.<br>2. `tests/test_tags_router.py`: обновлены тесты `test_batch_save_from_tmp_moves_to_music_dir`, `test_batch_save_with_reorganize_true` и `test_batch_save_with_track_cover_path`.<br>3. Все 548 тестов пройдены успешно (100% pass), линтер `ruff check` чист (0 замечаний). |
+
 
 
 

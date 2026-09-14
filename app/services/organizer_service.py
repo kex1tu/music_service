@@ -3,7 +3,7 @@
 Перемещает аудиофайлы, ассоциированные тексты песен (.lrc/.txt) и обложки
 из временного буфера загрузок (TMP_DIR) в постоянную медиатеку (MUSIC_DIR),
 а также реорганизует существующие треки при изменении тегов согласно строгому шаблону:
-MUSIC_DIR/{AlbumArtist}/{Album} - {Year}/{TrackNumber:02d}. {Title}.mp3
+MUSIC_DIR/{Album}/{TrackNumber:02d}. {Title}.mp3
 
 Все имена файлов и папок санитизируются через PathSandbox.validate_filename().
 Опустевшие директории после переноса автоматически удаляются.
@@ -117,26 +117,9 @@ class OrganizerService:
     ) -> str:
         """Вычисляет канонический относительный путь каталога альбома внутри MUSIC_DIR.
 
-        Шаблон: {AlbumArtist}/{Album} - {Year}
-        Обеспечивает единый каталог для всех треков альбома (включая компиляции/сборники).
+        Шаблон: {Album}
+        Обеспечивает единый каталог для всех треков альбома: Альбом/01. Трек.mp3 (без исполнителя в пути).
         """
-        # 1. Исполнитель альбома (AlbumArtist)
-        artist_raw = album.album_artist
-        if not artist_raw and tracks:
-            # Проверяем единообразие исполнителей среди треков альбома
-            artists = {t.album_artist or t.artist for t in tracks if (t.album_artist or t.artist)}
-            if len(artists) == 1:
-                artist_raw = next(iter(artists))
-            elif len(artists) > 1:
-                artist_raw = "Various Artists"
-            else:
-                artist_raw = "Unknown Artist"
-        elif not artist_raw:
-            artist_raw = "Unknown Artist"
-
-        clean_artist = self.sanitize_component(artist_raw, fallback="Unknown Artist")
-
-        # 2. Название альбома (Album)
         album_raw = album.album
         if not album_raw and tracks:
             albums = {t.album for t in tracks if t.album}
@@ -148,25 +131,7 @@ class OrganizerService:
             album_raw = "Unknown Album"
 
         clean_album = self.sanitize_component(album_raw, fallback="Unknown Album")
-
-        # 3. Год выпуска (Year)
-        year_val = album.year
-        if not year_val and tracks:
-            years = {t.year for t in tracks if t.year}
-            if len(years) == 1:
-                year_val = next(iter(years))
-
-        if year_val and 1000 <= year_val <= 2999:
-            # Проверяем, не содержит ли название альбома уже этот год в конце
-            if clean_album.endswith(f" - {year_val}"):
-                album_folder_name = clean_album
-            else:
-                album_folder_name = f"{clean_album} - {year_val}"
-        else:
-            album_folder_name = clean_album
-
-        clean_album_folder = self.sanitize_component(album_folder_name, fallback=clean_album)
-        return f"{clean_artist}/{clean_album_folder}"
+        return clean_album
 
     def compute_target_paths(
         self,
@@ -176,7 +141,7 @@ class OrganizerService:
         """Вычисляет целевые относительные пути альбома и файла трека внутри MUSIC_DIR.
 
         Шаблон:
-        {AlbumArtist}/{Album} - {Year}/{TrackNumber:02d}. {Title}.mp3
+        {Album}/{TrackNumber:02d}. {Title}.mp3
 
         Args:
             album: Метаданные альбома.
@@ -209,21 +174,11 @@ class OrganizerService:
     ) -> str:
         """Вычисляет канонический относительный путь каталога сингла внутри MUSIC_DIR.
 
-        Шаблон: {Artist}/{Title} - Single ({Year}) или {Artist}/{Title} - Single
+        Шаблон: {Title} (или {Album} если название трека пустое)
         """
-        artist_raw = track.album_artist or track.artist or default_artist or "Unknown Artist"
-        clean_artist = self.sanitize_component(artist_raw, fallback="Unknown Artist")
-
-        title_raw = track.title or (Path(track.path).stem if track.path else "Track")
-        clean_title = self.sanitize_component(title_raw, fallback="Track")
-
-        if track.year and 1000 <= track.year <= 2999:
-            folder_name = f"{clean_title} - Single ({track.year})"
-        else:
-            folder_name = f"{clean_title} - Single"
-
-        clean_folder = self.sanitize_component(folder_name, fallback=folder_name)
-        return f"{clean_artist}/{clean_folder}"
+        folder_raw = track.title or track.album or (Path(track.path).stem if track.path else "Single")
+        clean_folder = self.sanitize_component(folder_raw, fallback="Single")
+        return clean_folder
 
     def _resolve_source_path(self, rel_path: str) -> Path:
         """Разрешает исходный относительный путь через TagService или подходящую песочницу."""
@@ -417,7 +372,7 @@ class OrganizerService:
                     }
                 else:
                     effective_artist = (track.album_artist or album.album_artist or "").strip()
-                    key = f"__album__{effective_artist.lower()}__{effective_album.lower()}"
+                    key = f"__album__{effective_album.lower()}"
                     if key not in groups:
                         groups[key] = {
                             "key": key,

@@ -400,15 +400,15 @@ def test_batch_save_from_tmp_moves_to_music_dir(
     assert resp.status_code == 200
     data = resp.json()
     assert data["success"] is True
-    expected_album_dir = "Daft Punk/Discovery - 2001"
+    expected_album_dir = "Discovery"
     assert data["destination_dir"] == expected_album_dir
     assert len(data["tracks"]) == 1
     assert data["tracks"][0]["path"] == f"{expected_album_dir}/01. One More Time.mp3"
 
     # Файлы должны переместиться в MUSIC_DIR
-    final_mp3 = music_dir / "Daft Punk" / "Discovery - 2001" / "01. One More Time.mp3"
-    final_lrc = music_dir / "Daft Punk" / "Discovery - 2001" / "01. One More Time.lrc"
-    final_cover = music_dir / "Daft Punk" / "Discovery - 2001" / "cover.jpg"
+    final_mp3 = music_dir / "Discovery" / "01. One More Time.mp3"
+    final_lrc = music_dir / "Discovery" / "01. One More Time.lrc"
+    final_cover = music_dir / "Discovery" / "cover.jpg"
 
     assert final_mp3.exists()
     assert final_lrc.exists()
@@ -453,12 +453,12 @@ def test_batch_save_with_reorganize_true(
     assert resp.status_code == 200
     data = resp.json()
     assert data["success"] is True
-    expected_dir = "NewBand/NewRecord - 2025"
+    expected_dir = "NewRecord"
     assert data["destination_dir"] == expected_dir
     assert data["tracks"][0]["path"] == f"{expected_dir}/03. Renamed Track.mp3"
 
     # Файл должен переместиться
-    new_file = music_dir / "NewBand" / "NewRecord - 2025" / "03. Renamed Track.mp3"
+    new_file = music_dir / "NewRecord" / "03. Renamed Track.mp3"
     assert new_file.exists()
 
     # Старые пустые директории должны быть удалены
@@ -957,8 +957,8 @@ def test_batch_save_with_track_cover_path(
 
     svc = TagService(music_sandbox=PathSandbox(music_dir))
 
-    t1_abs = music_dir / "Artist One/Album One - 2023/01. Song A.mp3"
-    t2_abs = music_dir / "Artist Two/Album Two - 2024/01. Song B.mp3"
+    t1_abs = music_dir / "Album One" / "01. Song A.mp3"
+    t2_abs = music_dir / "Album Two" / "01. Song B.mp3"
 
     assert t1_abs.exists()
     assert t2_abs.exists()

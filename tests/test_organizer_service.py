@@ -53,7 +53,7 @@ def test_sanitize_component(organizer: tuple[OrganizerService, TagService, Path,
 
 def test_compute_target_paths(organizer: tuple[OrganizerService, TagService, Path, Path]):
     """Проверка генерации пути по строгому ТЗ шаблону:
-    MUSIC_DIR/{AlbumArtist}/{Album} - {Year}/{TrackNumber:02d}. {Title}.mp3
+    MUSIC_DIR/{Album}/{TrackNumber:02d}. {Title}.mp3
     """
     org, _, _, _ = organizer
 
@@ -70,20 +70,20 @@ def test_compute_target_paths(organizer: tuple[OrganizerService, TagService, Pat
     )
 
     album_dir, track_path = org.compute_target_paths(album, track)
-    assert album_dir == "Daft Punk/Discovery - 2001"
-    assert track_path == "Daft Punk/Discovery - 2001/01. One More Time.mp3"
+    assert album_dir == "Discovery"
+    assert track_path == "Discovery/01. One More Time.mp3"
 
     # Без года
     album_no_year = AlbumTags(album_artist="Modjo", album="Modjo", year=None)
     track2 = TrackTags(path="dummy.mp3", track_number=5, title="Lady")
     album_dir2, track_path2 = org.compute_target_paths(album_no_year, track2)
-    assert album_dir2 == "Modjo/Modjo"
-    assert track_path2 == "Modjo/Modjo/05. Lady.mp3"
+    assert album_dir2 == "Modjo"
+    assert track_path2 == "Modjo/05. Lady.mp3"
 
     # Альбом уже содержит год в конце названия
     album_with_year = AlbumTags(album_artist="Artist", album="Album - 2020", year=2020)
     album_dir3, _ = org.compute_target_paths(album_with_year, track2)
-    assert album_dir3 == "Artist/Album - 2020"
+    assert album_dir3 == "Album - 2020"
 
 
 def test_move_from_tmp_to_music_dir(
@@ -125,7 +125,7 @@ def test_move_from_tmp_to_music_dir(
         cover_path=f"{job_id}/cover.jpg",
     )
 
-    expected_album_dir = "Kavinsky/OutRun - 2013"
+    expected_album_dir = "OutRun"
     expected_track_rel = f"{expected_album_dir}/01. Nightcall.mp3"
 
     assert result.destination_dir == expected_album_dir
@@ -133,9 +133,9 @@ def test_move_from_tmp_to_music_dir(
     assert result.tracks[0].path == expected_track_rel
 
     # Проверяем файлы на диске в MUSIC_DIR
-    final_mp3 = music_dir / "Kavinsky" / "OutRun - 2013" / "01. Nightcall.mp3"
-    final_lrc = music_dir / "Kavinsky" / "OutRun - 2013" / "01. Nightcall.lrc"
-    final_cover = music_dir / "Kavinsky" / "OutRun - 2013" / "cover.jpg"
+    final_mp3 = music_dir / "OutRun" / "01. Nightcall.mp3"
+    final_lrc = music_dir / "OutRun" / "01. Nightcall.lrc"
+    final_cover = music_dir / "OutRun" / "cover.jpg"
 
     assert final_mp3.exists()
     assert final_lrc.exists()
@@ -191,13 +191,13 @@ def test_reorganize_existing_library_tracks_and_cleanup(
         reorganize=True,
     )
 
-    new_album_dir = "NewArtist/NewAlbum - 2024"
+    new_album_dir = "NewAlbum"
     new_track_rel = f"{new_album_dir}/02. RenamedSong.mp3"
     assert res_reorg.destination_dir == new_album_dir
     assert res_reorg.tracks[0].path == new_track_rel
 
-    new_mp3 = music_dir / "NewArtist" / "NewAlbum - 2024" / "02. RenamedSong.mp3"
-    new_txt = music_dir / "NewArtist" / "NewAlbum - 2024" / "02. RenamedSong.txt"
+    new_mp3 = music_dir / "NewAlbum" / "02. RenamedSong.mp3"
+    new_txt = music_dir / "NewAlbum" / "02. RenamedSong.txt"
     assert new_mp3.exists()
     assert new_txt.exists()
 
@@ -224,7 +224,7 @@ def test_track_swap_in_place_no_data_loss(
     """Защита от потери данных: перестановка номеров треков местами в рамках одного альбома."""
     org, _, music_dir, _ = organizer
 
-    album_dir = music_dir / "Artist" / "Album - 2020"
+    album_dir = music_dir / "Album"
     album_dir.mkdir(parents=True, exist_ok=True)
     t1 = album_dir / "01. Song A.mp3"
     t2 = album_dir / "02. Song B.mp3"
@@ -234,13 +234,13 @@ def test_track_swap_in_place_no_data_loss(
     # Меняем треки местами: Track 1 становится номером 2 с названием Song B, Track 2 - номером 1 с Song A
     album = AlbumTags(album_artist="Artist", album="Album", year=2020)
     track1 = TrackTags(
-        path="Artist/Album - 2020/01. Song A.mp3",
+        path="Album/01. Song A.mp3",
         track_number=2,
         title="Song B",
         artist="Artist",
     )
     track2 = TrackTags(
-        path="Artist/Album - 2020/02. Song B.mp3",
+        path="Album/02. Song B.mp3",
         track_number=1,
         title="Song A",
         artist="Artist",
@@ -249,13 +249,13 @@ def test_track_swap_in_place_no_data_loss(
     result = org.organize_album(
         album=album,
         tracks=[track1, track2],
-        source_dir="Artist/Album - 2020",
+        source_dir="Album",
         reorganize=True,
     )
 
     assert len(result.tracks) == 2
-    final_01 = music_dir / "Artist" / "Album - 2020" / "01. Song A.mp3"
-    final_02 = music_dir / "Artist" / "Album - 2020" / "02. Song B.mp3"
+    final_01 = music_dir / "Album" / "01. Song A.mp3"
+    final_02 = music_dir / "Album" / "02. Song B.mp3"
 
     assert final_01.exists()
     assert final_02.exists()
@@ -292,13 +292,13 @@ def test_reorganize_library_with_cover_cleans_up_old_dir(
         reorganize=True,
     )
 
-    assert res.destination_dir == "NewArtist/NewAlbum - 2024"
+    assert res.destination_dir == "NewAlbum"
     # Старый каталог и его родитель должны быть полностью удалены
     assert not old_album_dir.exists()
     assert not (music_dir / "OldArtist").exists()
 
     # Новый каталог должен содержать перенесенные трек и обложку
-    new_dir = music_dir / "NewArtist" / "NewAlbum - 2024"
+    new_dir = music_dir / "NewAlbum"
     assert (new_dir / "01. Song.mp3").exists()
     assert (new_dir / "cover.jpg").exists()
     assert (new_dir / "cover.jpg").read_bytes() == DUMMY_JPEG
@@ -321,7 +321,7 @@ def test_compilation_album_tracks_stay_in_single_directory(
 
     res = org.organize_album(album=album, tracks=[tr1, tr2], source_dir="Drafts", reorganize=True)
 
-    expected_dir = "Various Artists/Greatest Hits 2024 - 2024"
+    expected_dir = "Greatest Hits 2024"
     assert res.destination_dir == expected_dir
     assert res.tracks[0].path == f"{expected_dir}/01. Song 1.mp3"
     assert res.tracks[1].path == f"{expected_dir}/02. Song 2.mp3"
@@ -364,7 +364,7 @@ def test_organize_preserves_preexisting_unrelated_file_on_disk(
     org, _, music_dir, tmp_dir = organizer
 
     # Создаем существующий трек в целевом альбоме медиатеки
-    album_dir = music_dir / "Artist" / "Album - 2020"
+    album_dir = music_dir / "Album"
     album_dir.mkdir(parents=True, exist_ok=True)
     existing_file = album_dir / "01. Intro.mp3"
     existing_file.write_bytes(b"EXISTING_TRACK_DATA")
@@ -390,7 +390,7 @@ def test_organize_preserves_preexisting_unrelated_file_on_disk(
     assert existing_file.read_bytes() == b"EXISTING_TRACK_DATA"
 
     # Новый трек должен получить уникальное имя (2)
-    expected_new_path = "Artist/Album - 2020/01. Intro (2).mp3"
+    expected_new_path = "Album/01. Intro (2).mp3"
     assert len(res.tracks) == 1
     assert res.tracks[0].path == expected_new_path
     new_final_file = music_dir / expected_new_path
@@ -435,17 +435,17 @@ def test_organize_handles_case_only_rename(
     """Проверка переименования регистра имени файла через промежуточный стейджинг."""
     org, _, music_dir, _ = organizer
 
-    album_dir = music_dir / "Artist" / "Album"
+    album_dir = music_dir / "Album"
     album_dir.mkdir(parents=True, exist_ok=True)
     track_file = album_dir / "01. song.mp3"
     track_file.write_bytes(MINIMAL_MP3)
 
     album = AlbumTags(album_artist="Artist", album="Album")
-    track = TrackTags(path="Artist/Album/01. song.mp3", track_number=1, title="Song", artist="Artist")
+    track = TrackTags(path="Album/01. song.mp3", track_number=1, title="Song", artist="Artist")
 
-    res = org.organize_album(album=album, tracks=[track], source_dir="Artist/Album", reorganize=True)
+    res = org.organize_album(album=album, tracks=[track], source_dir="Album", reorganize=True)
 
-    expected_rel = "Artist/Album/01. Song.mp3"
+    expected_rel = "Album/01. Song.mp3"
     assert res.tracks[0].path == expected_rel
     assert (music_dir / expected_rel).exists()
 
@@ -509,19 +509,19 @@ def test_concurrent_album_reorganization_serialized(
 
 
 def test_compute_single_dir(organizer: tuple[OrganizerService, TagService, Path, Path]):
-    """Проверка генерации пути для синглов: {Artist}/{Title} - Single ({Year})."""
+    """Проверка генерации пути для синглов: {Title}."""
     org, _, _, _ = organizer
 
     track = TrackTags(path="dummy.mp3", track_number=1, title="Solo Hit", artist="Avicii", year=2013)
-    assert org.compute_single_dir(track, default_artist="Various Artists") == "Avicii/Solo Hit - Single (2013)"
+    assert org.compute_single_dir(track, default_artist="Various Artists") == "Solo Hit"
 
     # Без года
     track_no_year = TrackTags(path="dummy.mp3", track_number=1, title="Solo Hit", artist="Avicii", year=None)
-    assert org.compute_single_dir(track_no_year, default_artist="Various Artists") == "Avicii/Solo Hit - Single"
+    assert org.compute_single_dir(track_no_year, default_artist="Various Artists") == "Solo Hit"
 
-    # Fallback на default_artist при отсутствии артиста в треке
+    # При отсутствии исполнителя
     track_no_artist = TrackTags(path="dummy.mp3", track_number=1, title="No Artist Hit", year=2020)
-    assert org.compute_single_dir(track_no_artist, default_artist="Fallback Artist") == "Fallback Artist/No Artist Hit - Single (2020)"
+    assert org.compute_single_dir(track_no_artist, default_artist="Fallback Artist") == "No Artist Hit"
 
 
 def test_organize_multi_release_with_group_by_album(
@@ -582,17 +582,17 @@ def test_organize_multi_release_with_group_by_album(
         singles_mode=False,
     )
 
-    # Проверяем, что первый трек попал в Daft Punk/Discovery - 2001
-    assert res.tracks[0].path == "Daft Punk/Discovery - 2001/01. One More Time.mp3"
+    # Проверяем, что первый трек попал в Discovery
+    assert res.tracks[0].path == "Discovery/01. One More Time.mp3"
     assert (music_dir / res.tracks[0].path).exists()
-    assert (music_dir / "Daft Punk/Discovery - 2001/cover.jpg").exists()
+    assert (music_dir / "Discovery/cover.jpg").exists()
 
-    # Второй трек попал в Daft Punk/Homework - 1997
-    assert res.tracks[1].path == "Daft Punk/Homework - 1997/01. Da Funk.mp3"
+    # Второй трек попал в Homework
+    assert res.tracks[1].path == "Homework/01. Da Funk.mp3"
     assert (music_dir / res.tracks[1].path).exists()
 
-    # Третий трек (сингл без альбома) попал в Daft Punk/Get Lucky - Single (2013)/01. Get Lucky.mp3
-    assert res.tracks[2].path == "Daft Punk/Get Lucky - Single (2013)/01. Get Lucky.mp3"
+    # Третий трек (сингл без альбома) попал в Get Lucky/01. Get Lucky.mp3
+    assert res.tracks[2].path == "Get Lucky/01. Get Lucky.mp3"
     assert (music_dir / res.tracks[2].path).exists()
 
 
@@ -629,7 +629,7 @@ def test_organize_with_singles_mode(
         singles_mode=True,
     )
 
-    assert res.tracks[0].path == "M83/Midnight City - Single (2011)/01. Midnight City.mp3"
+    assert res.tracks[0].path == "Midnight City/01. Midnight City.mp3"
     assert (music_dir / res.tracks[0].path).exists()
 
 
@@ -670,7 +670,7 @@ def test_organize_with_individual_track_covers_data(
         group_by_album=True,
     )
 
-    album_cover_path = music_dir / "Custom Artist/Custom Album - 2022/cover.jpg"
+    album_cover_path = music_dir / "Custom Album/cover.jpg"
     assert album_cover_path.exists()
     assert album_cover_path.read_bytes() == custom_cover
 
@@ -721,8 +721,8 @@ def test_organize_multiple_tmp_jobs_cleanup(
     )
 
     assert len(res.tracks) == 2
-    assert (music_dir / "Alpha Artist/Alpha Album - 2021/01. Alpha Track.mp3").exists()
-    assert (music_dir / "Beta Artist/Beta Album - 2022/01. Beta Track.mp3").exists()
+    assert (music_dir / "Alpha Album/01. Alpha Track.mp3").exists()
+    assert (music_dir / "Beta Album/01. Beta Track.mp3").exists()
 
     # Оба временных каталога задач должны быть зачищены
     assert not (tmp_dir / "job_alpha").exists()
