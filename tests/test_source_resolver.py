@@ -31,6 +31,11 @@ def test_detect_source_whitelist():
     assert resolver.detect_source("spotify.link/xyz123") == "spotify"
     assert resolver.detect_source("https://music.apple.com/us/album/discovery/697194953") == "applemusic"
     assert resolver.detect_source("magnet:?xt=urn:btih:d2474e86c95b19b8bcfdb92bc12c9d44667cfa36") == "torrent"
+    assert resolver.detect_source("MAGNET:?xt=urn:btih:d2474e86c95b19b8bcfdb92bc12c9d44667cfa36") == "torrent"
+    assert resolver.detect_source("magnet:xt=urn:btih:d2474e86c95b19b8bcfdb92bc12c9d44667cfa36") == "torrent"
+    assert resolver.detect_source("https://example-tracker.org/download/release.torrent") == "torrent"
+    assert resolver.detect_source("https://example-tracker.org/download.php?id=123&name=release.torrent") == "torrent"
+    assert resolver.detect_source("/tmp/music_uploads/_torrents/123/album.torrent") == "torrent"
 
     # Запрещенные домены
     with pytest.raises(UnsupportedSourceError):

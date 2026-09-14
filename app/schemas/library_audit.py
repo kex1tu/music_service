@@ -72,6 +72,7 @@ class MissingLyricsItem(BaseModel):
     artist: str = Field(..., description="Исполнитель трека")
     album: str = Field(default="", description="Альбом")
     album_artist: str = Field(default="", description="Исполнитель альбома")
+    directory: str = Field(default="", description="Относительный путь к папке трека")
 
 
 class MissingCoverItem(BaseModel):

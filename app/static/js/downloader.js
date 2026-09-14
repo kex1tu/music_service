@@ -23,7 +23,14 @@ function downloaderComponent() {
                 if (navigator.clipboard && navigator.clipboard.readText) {
                     const text = await navigator.clipboard.readText();
                     if (text) {
-                        this.url = text.trim();
+                        const trimmed = text.trim();
+                        if (trimmed.includes('\n') || trimmed.split(/https?:\/\/|magnet:/i).length > 2) {
+                            this.inputMode = 'batch';
+                            this.batchUrlsText = trimmed;
+                            Alpine.store('app').toast('Обнаружено несколько ссылок: включен пакетный режим', 'info');
+                        } else {
+                            this.url = trimmed;
+                        }
                     }
                 }
             } catch (err) {
@@ -31,26 +38,62 @@ function downloaderComponent() {
             }
         },
 
-        get parsedBatchUrls() {
-            return (this.batchUrlsText || '')
-                .split('\n')
-                .map((u) => u.trim())
-                .filter((u) => u.length > 0);
+        async pasteBatchUrls() {
+            try {
+                if (navigator.clipboard && navigator.clipboard.readText) {
+                    const text = await navigator.clipboard.readText();
+                    if (text) {
+                        const trimmed = text.trim();
+                        if (this.batchUrlsText && this.batchUrlsText.trim()) {
+                            this.batchUrlsText += '\n' + trimmed;
+                        } else {
+                            this.batchUrlsText = trimmed;
+                        }
+                        Alpine.store('app').toast('Ссылки вставлены из буфера обмена', 'info');
+                    }
+                }
+            } catch (err) {
+                Alpine.store('app').toast('Не удалось получить текст из буфера обмена', 'error');
+            }
         },
 
         getParsedBatchUrls() {
-            return this.parsedBatchUrls;
+            const raw = (this.batchUrlsText || '').trim();
+            if (!raw) return [];
+
+            const lines = raw.split(/[\r\n]+/);
+            const urls = [];
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+
+                // Если в одной строке несколько URL через пробел или запятую
+                const tokens = trimmed.split(/[\s,]+/);
+                if (
+                    tokens.length > 1 &&
+                    tokens.every((t) => /^https?:\/\//i.test(t) || /^magnet:/i.test(t) || t.includes('.'))
+                ) {
+                    urls.push(...tokens);
+                } else {
+                    urls.push(trimmed);
+                }
+            }
+            return urls.filter((u) => u.length > 0);
+        },
+
+        get parsedBatchUrls() {
+            return this.getParsedBatchUrls();
         },
 
         async submitBatchDownloads() {
-            const rawUrls = this.parsedBatchUrls;
+            const rawUrls = this.getParsedBatchUrls();
             if (!rawUrls.length) {
                 Alpine.store('app').toast('Введите хотя бы одну ссылку в список', 'error');
                 return;
             }
 
             const urls = rawUrls.map((u) =>
-                !/^https?:\/\//i.test(u) && !/^magnet:\?/i.test(u) && u.includes('.') ? 'https://' + u : u
+                !/^https?:\/\//i.test(u) && !/^magnet:/i.test(u) && u.includes('.') ? 'https://' + u : u
             );
 
             this.isSubmitting = true;
@@ -94,7 +137,15 @@ function downloaderComponent() {
                 return;
             }
 
-            if (!/^https?:\/\//i.test(cleanUrl) && !/^magnet:\?/i.test(cleanUrl) && cleanUrl.includes('.')) {
+            // Автоматическое переключение в пакетный режим, если введено несколько строк или ссылок
+            if (cleanUrl.includes('\n') || cleanUrl.split(/https?:\/\/|magnet:/i).length > 2) {
+                this.batchUrlsText = cleanUrl;
+                this.url = '';
+                this.inputMode = 'batch';
+                return this.submitBatchDownloads();
+            }
+
+            if (!/^https?:\/\//i.test(cleanUrl) && !/^magnet:/i.test(cleanUrl) && cleanUrl.includes('.')) {
                 cleanUrl = 'https://' + cleanUrl;
             }
 

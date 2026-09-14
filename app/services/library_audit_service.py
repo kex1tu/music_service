@@ -290,6 +290,8 @@ class LibraryAuditService:
         for item in self._cache.values():
             t: TrackTags = item["track"]
             if t.lyrics_status == "none":
+                parent_dir = str(Path(t.path).parent).replace("\\", "/")
+                directory = "" if parent_dir == "." else parent_dir
                 missing.append(
                     MissingLyricsItem(
                         path=t.path,
@@ -297,6 +299,7 @@ class LibraryAuditService:
                         artist=t.artist or "Неизвестный исполнитель",
                         album=t.album or "",
                         album_artist=t.album_artist or "",
+                        directory=directory,
                     )
                 )
 
@@ -311,17 +314,22 @@ class LibraryAuditService:
             return BatchLyricsProgressResponse(is_running=False)
 
         # Синхронно берем список из текущего кеша
-        missing_tracks = [
-            MissingLyricsItem(
-                path=item["track"].path,
-                title=item["track"].title or Path(item["track"].path).stem,
-                artist=item["track"].artist or "",
-                album=item["track"].album or "",
-                album_artist=item["track"].album_artist or "",
-            )
-            for item in self._cache.values()
-            if item["track"].lyrics_status == "none"
-        ]
+        missing_tracks: list[MissingLyricsItem] = []
+        for item in self._cache.values():
+            if item["track"].lyrics_status == "none":
+                t = item["track"]
+                parent_dir = str(Path(t.path).parent).replace("\\", "/")
+                directory = "" if parent_dir == "." else parent_dir
+                missing_tracks.append(
+                    MissingLyricsItem(
+                        path=t.path,
+                        title=t.title or Path(t.path).stem,
+                        artist=t.artist or "",
+                        album=t.album or "",
+                        album_artist=t.album_artist or "",
+                        directory=directory,
+                    )
+                )
 
         if not missing_tracks:
             return BatchLyricsProgressResponse(is_running=False, total=0)

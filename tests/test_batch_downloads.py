@@ -165,3 +165,32 @@ def test_batch_semaphore_concurrency(mock_subproc, authenticated_client: TestCli
 
     # Проверяем, что значение семафора соответствует настройке MAX_CONCURRENT_DOWNLOADS
     assert svc._semaphore._value <= settings.MAX_CONCURRENT_DOWNLOADS
+
+
+def test_batch_downloads_with_magnet_and_torrents(authenticated_client: TestClient):
+    """Проверка успешной постановки в очередь списка со ссылками на Magnet и Deezer."""
+    with patch.object(DownloadService, "_execute_pipeline", new=AsyncMock()):
+        resp = authenticated_client.post(
+            "/downloads/batch",
+            json={
+                "urls": [
+                    "https://www.deezer.com/album/200",
+                    "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567",
+                    "magnet:xt=urn:btih:fedcba9876543210fedcba9876543210fedcba98",
+                    "https://trackers.org/album.torrent",
+                ],
+                "source": "auto",
+            },
+        )
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["total_queued"] == 4
+        assert len(data["job_ids"]) == 4
+        assert len(data["jobs"]) == 4
+        # Проверяем источники созданных задач
+        jobs = data["jobs"]
+        assert jobs[0]["source"] == "deezer"
+        assert jobs[1]["source"] == "torrent"
+        assert jobs[2]["source"] == "torrent"
+        assert jobs[3]["source"] == "torrent"
+

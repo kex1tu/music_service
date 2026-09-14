@@ -456,11 +456,11 @@
     <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
 
         <!-- ==================== ВКЛАДКА 1: ЗАГРУЗЧИК ==================== -->
-        <section x-show="$store.app.activeTab === 'downloader'" x-data="{ inputMode: 'single', ...(typeof downloaderComponent === 'function' ? downloaderComponent() : {}) }" class="space-y-6 animate-fade-in">
+        <section x-show="$store.app.activeTab === 'downloader'" x-data="downloaderComponent()" class="space-y-6 animate-fade-in">
             <!-- Карточка формы загрузки -->
             <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl"
-                 @drop="if (typeof handleTorrentDrop === 'function') handleTorrentDrop($event)"
-                 @dragover="if (typeof handleTorrentDragOver === 'function') handleTorrentDragOver($event)">
+                 @drop="handleTorrentDrop($event)"
+                 @dragover="handleTorrentDragOver($event)">
                 <h2 class="text-lg font-semibold text-white mb-2">Загрузка музыки</h2>
                 <p class="text-sm text-gray-400 mb-6">
                     Вставьте ссылку на трек, альбом или плейлист (Яндекс Музыка, Spotify, Apple Music, Deezer, YouTube, SoundCloud), либо Magnet-ссылку или .torrent файл.
@@ -472,7 +472,7 @@
                         <div class="flex items-center space-x-2">
                             <button
                                 type="button"
-                                @click="inputMode = 'single'; if (typeof setMode === 'function') setMode('single')"
+                                @click="inputMode = 'single'; setMode('single')"
                                 :class="inputMode !== 'batch' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40' : 'text-gray-400 hover:text-gray-200 border-transparent'"
                                 class="px-3 py-1.5 rounded-md text-xs font-medium border transition flex items-center space-x-1.5">
                                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
@@ -482,14 +482,14 @@
                             </button>
                             <button
                                 type="button"
-                                @click="inputMode = 'batch'; if (typeof setMode === 'function') setMode('batch')"
+                                @click="inputMode = 'batch'; setMode('batch')"
                                 :class="inputMode === 'batch' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40' : 'text-gray-400 hover:text-gray-200 border-transparent'"
                                 class="px-3 py-1.5 rounded-md text-xs font-medium border transition flex items-center space-x-1.5">
                                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M4 18q-.825 0-1.412-.587T2 16V4q0-.825.588-1.412T4 2h12q.825 0 1.413.588T18 4v12q0 .825-.587 1.413T16 18zm16 4q-.825 0-1.412-.587T18 20V7q0-.425.288-.712T19 6t.713.288T20 7v13h-13q-.425 0-.712-.288T6 19t.288-.712T7 18h13z"/>
                                 </svg>
                                 <span>Список ссылок (пакетно)</span>
-                                <template x-if="parsedBatchUrls && parsedBatchUrls.length > 0">
+                                <template x-if="getParsedBatchUrls().length > 0">
                                     <span class="px-1.5 py-0.2 bg-emerald-500 text-gray-950 rounded-full text-[10px] font-bold" x-text="parsedBatchUrls.length"></span>
                                 </template>
                             </button>
@@ -501,7 +501,7 @@
                                 <path d="M11 16V7.85l-2.6 2.6L7 9l5-5l5 5l-1.4 1.45l-2.6-2.6V16zm-7 4q-.825 0-1.412-.587T2 18v-3h2v3h16v-3h2v3q0 .825-.587 1.413T20 20z"/>
                             </svg>
                             <span>Загрузить .torrent</span>
-                            <input type="file" accept=".torrent" @change="if (typeof uploadTorrentFile === 'function') uploadTorrentFile($event)" class="hidden">
+                            <input type="file" accept=".torrent" @change="uploadTorrentFile($event)" class="hidden">
                         </label>
                     </div>
 
@@ -541,12 +541,31 @@
                         </div>
 
                         <!-- Поле ввода списка URL (пакетный режим) -->
-                        <div x-show="inputMode === 'batch'" class="flex-1">
+                        <div x-show="inputMode === 'batch'" class="flex-1 relative">
                             <textarea
                                 x-model="batchUrlsText"
                                 rows="3"
                                 placeholder="Вставьте по одной ссылке на строку (от 1 до 20):&#10;https://music.yandex.ru/album/...&#10;https://open.spotify.com/album/...&#10;magnet:?xt=urn:btih:..."
-                                class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition text-xs font-mono"></textarea>
+                                class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 pr-24 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition text-xs font-mono"></textarea>
+                            <div class="absolute top-2 right-2 flex items-center space-x-1.5">
+                                <button
+                                    type="button"
+                                    x-show="batchUrlsText"
+                                    @click="batchUrlsText = ''"
+                                    class="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition"
+                                    title="Очистить список">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="m12 13.4l2.9 2.9q.275.275.7.275t.7-.275t.275-.7t-.275-.7L13.4 12l2.9-2.9q.275-.275.275-.7t-.275-.7t-.7-.275t-.7.275L12 10.6L9.1 7.7q-.275-.275-.7-.275t-.7.275t-.275.7t.275.7l2.9 2.9l-2.9 2.9q-.275.275-.275.7t.275.7t.7.275t.7-.275zm0 8.6q-2.075 0-3.9-.788t-3.175-2.137T2.788 15.9T2 12t.788-3.9t2.137-3.175T8.1 2.788T12 2t3.9.788t3.175 2.137T21.213 8.1T22 12t-.788 3.9t-2.137 3.175t-3.175 2.138T12 22"/>
+                                    </svg>
+                                </button>
+                                <button
+                                    type="button"
+                                    @click="pasteBatchUrls()"
+                                    class="px-2 py-1 rounded text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white transition flex items-center space-x-1"
+                                    title="Вставить из буфера">
+                                    <span>Вставить</span>
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Выбор источника -->

@@ -325,3 +325,82 @@ async def test_torrent_download_size_limit_exceeded(tmp_path: Path):
             output_dir=tmp_path / "download",
         )
     proc_mock.terminate.assert_called_once()
+
+
+def test_aria2c_progress_regex_metadata_phase():
+    """Тестирование парсинга вывода aria2c на этапе загрузки Magnet-метаданных (без процентов)."""
+    line = "[#b88b8b 0B/0B CN:20 SD:0 DL:0B]"
+    match = ARIA2C_PROGRESS_REGEX.search(line)
+    assert match is not None
+    assert match.group("dl_size") == "0B"
+    assert match.group("total_size") == "0B"
+    assert match.group("percent") is None
+    assert match.group("connections") == "20"
+    assert match.group("speed") == "0B"
+
+
+def test_aria2c_progress_regex_with_sd_ul():
+    """Тестирование парсинга вывода aria2c с полями SD (сиды) и UL (отдача)."""
+    line = "[#e97d07 100MiB/2.5GiB(4%) CN:12 SD:3 DL:4.5MiB UL:50KiB ETA:8m]"
+    match = ARIA2C_PROGRESS_REGEX.search(line)
+    assert match is not None
+    assert match.group("dl_size") == "100MiB"
+    assert match.group("total_size") == "2.5GiB"
+    assert match.group("percent") == "4"
+    assert match.group("connections") == "12"
+    assert match.group("speed") == "4.5MiB"
+    assert match.group("eta") == "8m"
+
+
+def test_cue_parser_get_referenced_files(tmp_path: Path):
+    """Тестирование извлечения имен файлов из CUE-листа."""
+    cue_content = """
+    PERFORMER "Artist"
+    TITLE "Album"
+    FILE "CDImage.flac" WAVE
+      TRACK 01 AUDIO
+        TITLE "Track 1"
+        INDEX 01 00:00:00
+    """
+    cue_file = tmp_path / "test.cue"
+    cue_file.write_text(cue_content, encoding="utf-8")
+    ref_files = CueSheetParser.get_referenced_files(cue_file)
+    assert ref_files == ["CDImage.flac"]
+
+
+@pytest.mark.asyncio
+async def test_inspect_and_prepare_skips_already_split_album(tmp_path: Path):
+    """Тестирование пропуска нарезки, если директория уже содержит нарезанные треки."""
+    settings = Settings(
+        MUSIC_DIR=tmp_path / "music",
+        SECRET_KEY="test_secret_key_long_enough_16",
+        ADMIN_PASSWORD_HASH="$2b$12$e867abcdefghijklmnopqrstuvwxyz0123456789",
+    )
+    svc = TorrentService(settings)
+
+    download_dir = tmp_path / "album_folder"
+    download_dir.mkdir()
+
+    # Создаем 2 трека и CUE-лист на 2 трека
+    (download_dir / "01. Track 1.flac").write_bytes(b"FLAC1")
+    (download_dir / "02. Track 2.flac").write_bytes(b"FLAC2")
+
+    cue_content = """
+    PERFORMER "Artist"
+    TITLE "Album"
+    FILE "CDImage.flac" WAVE
+      TRACK 01 AUDIO
+        TITLE "Track 1"
+        INDEX 01 00:00:00
+      TRACK 02 AUDIO
+        TITLE "Track 2"
+        INDEX 01 03:00:00
+    """
+    (download_dir / "album.cue").write_text(cue_content, encoding="utf-8")
+
+    with patch.object(CueSheetParser, "split_audio", AsyncMock()) as mock_split:
+        _album_meta, tracks = await svc.inspect_and_prepare(download_dir)
+        # split_audio НЕ должен вызываться, так как файлы уже разделены
+        mock_split.assert_not_called()
+        assert len(tracks) == 2
+

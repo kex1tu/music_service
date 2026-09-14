@@ -542,9 +542,17 @@ class SourceResolver:
         Raises:
             UnsupportedSourceError: Если домен не входит в список разрешенных.
         """
-        # Торрент-источники не имеют HTTP-домена — проверяем протокол magnet
+        # Торрент-источники: проверяем протокол magnet или путь/URL к файлу .torrent
         url_clean = url.strip()
-        if url_clean.startswith("magnet:?"):
+        url_lower = url_clean.lower()
+        if url_lower.startswith("magnet:"):
+            return "torrent"
+
+        if (
+            url_lower.endswith(".torrent")
+            or ".torrent?" in url_lower
+            or "/_torrents/" in url_clean
+        ):
             return "torrent"
 
         if not re.match(r"^https?://", url_clean, re.IGNORECASE):

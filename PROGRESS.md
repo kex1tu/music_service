@@ -1,9 +1,9 @@
 # PROGRESS.md — Матрица статусов реализации Music Downloader & Tag Manager
 
 ## Текущий статус проекта
-- **Общий прогресс:** 28 / 28 компонентов завершены (100%)
-- **Активный этап:** Все блоки (1–18), включая загрузку музыки с торрентов (BitTorrent / Magnet / .torrent через aria2c), CUE-сплиттинг, извлечение Vorbis/ID3 тегов и конвертацию в MP3 320k CBR, полностью реализованы и протестированы.
-- **Результаты тестов:** 496/496 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
+- **Общий прогресс:** Все компоненты и стабилизационные доработки завершены (100%)
+- **Активный этап:** Исправлена пакетная загрузка (устранена ошибка «вставьте хотя бы одну ссылку» из-за object spread геттера в Alpine, добавлено автоопределение списка ссылок и кнопки вставки/очистки) и стабилизирован торрент-пайплайн aria2c (поддержка формата прогресса с сидами/отдачей/метаданными, DHT bootstrap узлы, защита от дедлока pipe stderr, поддержка ссылок .torrent и защита готовых треков от повреждения CUE-сплиттером).
+- **Результаты тестов:** 501/501 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -187,6 +187,16 @@
 | **R3: Интеграция в DownloadService и API роутер** | `app/services/download_service.py`, `app/dependencies.py`, `app/routers/downloads.py` | **DONE** | Внедрен `_execute_torrent_pipeline` в `DownloadService`: скачивание раздачи через `aria2c` (0..70%), анализ содержимого и CUE-сплиттинг (70..75%), конвертация в эталонный MP3 320 kbps CBR через `ffmpeg` (75..95%), запись ID3v2.4 тегов через `mutagen` (95..100%), статус `READY`. `TorrentService` подключен в DI `get_download_service`. В роутере добавлен эндпоинт `POST /downloads/torrent` для multipart/form-data загрузки файлов `.torrent` с валидацией расширения. |
 | **R4: Пользовательский интерфейс (Frontend no-build)** | `app/templates/index.html`, `app/static/js/downloader.js` | **DONE** | В карточку Загрузчика добавлена кнопка и drag-and-drop область «Загрузить .torrent» (`uploadTorrentFile`, `handleTorrentDrop`, `handleTorrentDragOver`). В выпадающий список источников добавлен вариант «Торрент / Magnet». В `downloader.js` устранено искажение Magnet-ссылок в одиночном и пакетном режимах (защита от принудительного добавления `https://`). Живое отображение скорости и пиров торрента в строке шага задачи. |
 | **R5: Верификация, линтинг и тесты** | `tests/test_torrent_service.py`, `tests/test_downloads_router.py`, `tests/test_download_service.py`, `tests/test_source_resolver.py` | **DONE** | Разработано 13 новых юнит-тестов в `test_torrent_service.py` (парсинг regex, размер в байтах, CUE UTF-8 / Windows-1251, ffmpeg сплит, фильтрация файлов, mutagen теги, mock aria2c, таймауты, лимит размера). 3 новых теста в `test_downloads_router.py` (magnet link, .torrent upload, 400 на невалидный файл). 2 новых теста в `test_download_service.py` (torrent pipeline success, disabled error). 1 новый ассерт в `test_source_resolver.py`. Все 496 тестов пройдены (`pytest`, 100% pass), `ruff check app tests` чист (All checks passed!). |
+
+---
+
+## Блок 19: Исправление пакетной загрузки и стабилизация торрент-загрузчика (2026-09-14T12:00:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Исправление пакетной загрузки (Alpine object-spread & parsing)** | `app/templates/index.html`, `app/static/js/downloader.js`, `tests/test_batch_downloads.py` | **DONE** | Устранена первопричина ошибки «вставьте хотя бы одну ссылку»: замена `x-data="{ inputMode: 'single', ...downloaderComponent() }"` на `x-data="downloaderComponent()"`, устранившая преждевременное вычисление геттера `parsedBatchUrls` в пустой массив при инициализации страницы. В `downloader.js` метод `getParsedBatchUrls()` расширен поддержкой переносов строк, запятых и пробелов. Добавлена функция быстрой вставки из буфера в текстовую область `pasteBatchUrls()` и кнопка очистки. В `pasteUrl()` и `submitDownload()` внедрено автоматическое обнаружение нескольких ссылок в поле одиночного ввода с бесшовным переключением в пакетный режим. |
+| **R2: Стабилизация BitTorrent пайплайна (aria2c, DHT, regex, CUE)** | `app/services/source_resolver.py`, `app/services/torrent_service.py`, `tests/test_torrent_service.py`, `tests/test_source_resolver.py` | **DONE** | В `SourceResolver.detect_source` добавлена поддержка Magnet-ссылок без знака вопроса (`magnet:xt=`), ссылок в верхнем регистре (`MAGNET:`) и ссылок на файлы `.torrent` (включая query-параметры). В `TorrentService` обновлен `ARIA2C_PROGRESS_REGEX` для поддержки фазы метаданных (`0B/0B`), количества сидов (`SD:`) и скорости отдачи (`UL:`). В запуск `aria2c` добавлены DHT bootstrap узлы (`dht.transmissionbt.com:6881`) и надежные публичные трекеры, отключен `--check-integrity=false` для предотвращения ложных ошибок контрольной суммы на пустых директориях. Устранен потенциальный дедлок pipe `stderr` с помощью конкурентного чтения строк ошибки. В CUE-обработке добавлен `get_referenced_files` и проверка на уже разделенные треки (защита от повторного сплиттинга немонолитных раздач). |
+| **R3: Верификация, линтинг и тесты** | `tests/test_torrent_service.py`, `tests/test_batch_downloads.py`, `tests/test_source_resolver.py`, `tests/test_frontend.py` | **DONE** | Добавлены тесты парсинга строки метаданных `0B/0B`, сидов и отдачи `SD/UL`, извлечения файлов из CUE, пропуска нарезки уже разделенных альбомов, пакетной загрузки Magnet и торрентов. Все 501 тест успешно пройдены (`pytest`, 100% pass), `ruff check app tests` чист (All checks passed!). |
 
 
 

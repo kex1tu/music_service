@@ -29,16 +29,33 @@ from app.schemas.download import ResolvedTrack
 logger = logging.getLogger("music_manager.torrent")
 
 # Регулярное выражение для парсинга строки прогресса aria2c:
-# [#abc123 45MiB/1.2GiB(3%) CN:12 DL:5.2MiB ETA:3m2s]
+# Поддерживает фазу метаданных ([#abc123 0B/0B CN:20 SD:0 DL:0B]),
+# фазу загрузки ([#abc123 45MiB/1.2GiB(3%) CN:12 SD:3 DL:5.2MiB UL:10KiB ETA:3m2s]),
+# и завершение ([#abc123 100MiB/100MiB(100%) CN:0 DL:0B]).
 ARIA2C_PROGRESS_REGEX = re.compile(
     r"\[#\w+\s+"
     r"(?P<dl_size>[0-9.]+[\w]+)/(?P<total_size>[0-9.]+[\w]+)"
-    r"\((?P<percent>\d+)%\)"
+    r"(?:\((?P<percent>\d+)%\))?"
     r"\s+CN:(?P<connections>\d+)"
+    r"(?:\s+SD:\d+)?"
     r"\s+DL:(?P<speed>[0-9.]+[\w/]+)"
+    r"(?:\s+UL:[0-9.]+[\w/]+)?"
     r"(?:\s+ETA:(?P<eta>[\w\d]+))?"
     r"\]"
 )
+
+# Надежные публичные BitTorrent-трекеры для анонсирования Magnet-ссылок
+DEFAULT_PUBLIC_TRACKERS: str = (
+    "udp://tracker.opentrackr.org:1337/announce,"
+    "udp://open.tracker.cl:1337/announce,"
+    "udp://9.rarbg.to:2920/announce,"
+    "udp://tracker.openbittorrent.com:6969/announce,"
+    "http://tracker.openbittorrent.com:80/announce,"
+    "udp://opentracker.i2p.rocks:6969/announce"
+)
+
+# Точка входа для bootstrap узлов сети DHT
+DEFAULT_DHT_BOOTSTRAP_NODES: str = "dht.transmissionbt.com:6881"
 
 # Белый список аудио-расширений для фильтрации файлов раздачи
 AUDIO_EXTENSIONS: frozenset[str] = frozenset({
@@ -174,6 +191,32 @@ class CueSheetParser:
                 track.title = f"Track {track.number:02d}"
 
         return tracks
+
+    @staticmethod
+    def get_referenced_files(cue_path: Path) -> list[str]:
+        """Возвращает список имен файлов, указанных в директивах FILE ... WAVE/FLAC/MP3."""
+        content = ""
+        for encoding in ("utf-8-sig", "utf-8", "windows-1251", "latin-1"):
+            try:
+                content = cue_path.read_text(encoding=encoding)
+                break
+            except (UnicodeDecodeError, ValueError):
+                continue
+        if not content:
+            return []
+
+        files: list[str] = []
+        for line in content.splitlines():
+            line = line.strip()
+            if line.upper().startswith("FILE"):
+                match = re.search(r'FILE\s+"([^"]+)"', line, re.IGNORECASE)
+                if match:
+                    files.append(match.group(1))
+                else:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        files.append(parts[1].strip('"'))
+        return files
 
     @staticmethod
     async def split_audio(
@@ -360,11 +403,31 @@ class TorrentService:
         port_end = min(port_start + 118, 65535)
         max_size_bytes = self._settings.TORRENT_MAX_SIZE_GB * 1024 ** 3
 
+        target = magnet_or_torrent_path.strip()
+
+        # Если передан HTTP(S) URL файла .torrent, скачиваем его во временный файл
+        if target.lower().startswith("http://") or target.lower().startswith("https://"):
+            import httpx
+
+            output_dir.mkdir(parents=True, exist_ok=True)
+            torrent_tmp = output_dir / "_remote.torrent"
+            try:
+                async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+                    resp = await client.get(target)
+                    resp.raise_for_status()
+                    torrent_tmp.write_bytes(resp.content)
+                target = str(torrent_tmp)
+            except Exception as exc:
+                raise TorrentError(f"Не удалось загрузить .torrent файл по ссылке: {exc}") from exc
+
         cmd: list[str] = [
             aria2c_bin,
             "--enable-dht=true",
             "--bt-enable-lpd=true",
             "--enable-peer-exchange=true",
+            f"--dht-entry-point={DEFAULT_DHT_BOOTSTRAP_NODES}",
+            f"--dht-entry-point6={DEFAULT_DHT_BOOTSTRAP_NODES}",
+            f"--bt-tracker={DEFAULT_PUBLIC_TRACKERS}",
             f"--seed-time={self._settings.TORRENT_SEED_TIME}",
             "--summary-interval=1",
             f"--listen-port={port_start}-{port_end}",
@@ -375,15 +438,15 @@ class TorrentService:
             f"--bt-max-peers={self._settings.TORRENT_MAX_PEERS}",
             "--bt-save-metadata=false",
             "--file-allocation=none",
-            "--check-integrity=true",
+            "--check-integrity=false",
             "--auto-file-renaming=true",
             "--console-log-level=notice",
         ]
 
-        if magnet_or_torrent_path.startswith("magnet:"):
-            cmd.append(magnet_or_torrent_path)
+        if target.lower().startswith("magnet:"):
+            cmd.append(target)
         else:
-            cmd.extend(["--torrent-file", magnet_or_torrent_path])
+            cmd.extend(["--torrent-file", target])
 
         logger.info("Запуск aria2c для загрузки торрента в %s", output_dir)
         logger.debug("Команда aria2c: %s", " ".join(cmd))
@@ -395,6 +458,22 @@ class TorrentService:
         )
 
         size_exceeded = False
+        stderr_lines: list[str] = []
+
+        async def _read_stderr() -> None:
+            if proc.stderr is None:
+                return
+            if not isinstance(proc.stderr, asyncio.StreamReader) and not asyncio.iscoroutinefunction(
+                getattr(proc.stderr, "readline", None)
+            ):
+                return
+            while True:
+                line = await proc.stderr.readline()
+                if not line:
+                    break
+                s = line.decode("utf-8", errors="replace").strip() if isinstance(line, bytes) else str(line).strip()
+                if s:
+                    stderr_lines.append(s)
 
         async def _read_stdout() -> None:
             nonlocal size_exceeded
@@ -420,15 +499,20 @@ class TorrentService:
                         return
 
                     if on_progress:
-                        percent = int(match.group("percent"))
+                        pct_val = match.group("percent")
+                        percent = int(pct_val) if pct_val is not None else 0
                         speed = match.group("speed")
                         peers = match.group("connections")
                         eta = match.group("eta") or ""
                         on_progress(percent, speed, peers, eta)
 
+        gather_tasks = [_read_stdout(), proc.wait()]
+        if proc.stderr is not None:
+            gather_tasks.append(_read_stderr())
+
         try:
             await asyncio.wait_for(
-                asyncio.gather(_read_stdout(), proc.wait()),
+                asyncio.gather(*gather_tasks),
                 timeout=float(self._settings.TORRENT_TIMEOUT * 10),  # Общий таймаут на загрузку
             )
         except asyncio.TimeoutError:
@@ -441,7 +525,11 @@ class TorrentService:
             )
 
         if proc.returncode not in (0, None):
-            raise TorrentError(f"aria2c завершился с кодом {proc.returncode}")
+            tail_err = " | ".join(stderr_lines[-3:]) if stderr_lines else ""
+            err_msg = f"aria2c завершился с кодом {proc.returncode}"
+            if tail_err:
+                err_msg += f": {tail_err}"
+            raise TorrentError(err_msg)
 
     async def inspect_and_prepare(
         self,
@@ -465,7 +553,7 @@ class TorrentService:
             if not cue_tracks:
                 continue
 
-            # Находим аудиофайл, соответствующий CUE (в той же директории)
+            # Находим аудиофайлы в той же директории
             cue_dir_audio = [
                 f for f in audio_files
                 if f.parent == cue_path.parent
@@ -473,9 +561,37 @@ class TorrentService:
             if not cue_dir_audio:
                 continue
 
-            # Для монолитных рипов: обычно один файл с CUE
-            # Выбираем самый большой файл в директории CUE как основной
-            target_audio = max(cue_dir_audio, key=lambda p: p.stat().st_size)
+            # Если в каталоге уже несколько отдельных аудиофайлов (не меньше количества треков в CUE),
+            # значит раздача уже разбита по трекам, повторная нарезка не требуется!
+            if len(cue_dir_audio) > 1 and len(cue_dir_audio) >= len(cue_tracks):
+                logger.info(
+                    "Директория %s уже содержит %d треков (в CUE %d), повторная нарезка пропущена",
+                    cue_path.parent.name, len(cue_dir_audio), len(cue_tracks),
+                )
+                continue
+
+            # Проверяем, указан ли конкретный файл в CUE
+            ref_files = CueSheetParser.get_referenced_files(cue_path)
+            target_audio: Path | None = None
+            if ref_files:
+                for rf in ref_files:
+                    candidate = cue_path.parent / rf
+                    if candidate.exists():
+                        target_audio = candidate
+                        break
+                    for f in cue_dir_audio:
+                        if f.name.lower() == rf.lower():
+                            target_audio = f
+                            break
+
+            if target_audio is None and len(cue_dir_audio) == 1:
+                target_audio = cue_dir_audio[0]
+            elif target_audio is None and cue_dir_audio:
+                target_audio = max(cue_dir_audio, key=lambda p: p.stat().st_size)
+
+            if target_audio is None:
+                continue
+
             logger.info(
                 "Нарезка %s по CUE-листу %s (%d треков)",
                 target_audio.name, cue_path.name, len(cue_tracks),
