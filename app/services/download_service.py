@@ -368,51 +368,16 @@ class DownloadService:
                         logger.warning("Не удалось скачать обложку альбома (%s): %s", cover_url, exc)
                         cover_file = None
 
-                # 2. Обработка треков по очереди (пропорциональное бюджетирование 10-100%)
+                # 2. Обработка треков релиза (параллельно через TRACK_DOWNLOAD_CONCURRENCY)
                 total = len(tracks)
-                track_weight = 90.0 / total
+                concurrency = max(1, min(self._settings.TRACK_DOWNLOAD_CONCURRENCY, 10))
+                semaphore = asyncio.Semaphore(concurrency)
+                lock = asyncio.Lock()
+
+                # Предварительно разрешаем имена и целевые пути файлов без гонок
                 used_filenames: set[str] = set()
-
+                track_target_paths: dict[int, Path] = {}
                 for idx, track in enumerate(tracks, start=1):
-                    i = idx - 1
-                    track_base = 10.0 + i * track_weight
-                    completed_tracks = i
-
-                    if track.status == "error" or not track.audio_source_url:
-                        logger.warning(
-                            "Пропуск трека %d/%d (%s): статус '%s', ошибка '%s'",
-                            idx,
-                            total,
-                            track.title,
-                            track.status,
-                            track.error,
-                        )
-                        job.progress = min(100.0, max(job.progress, round(track_base + track_weight, 1)))
-                        job.current_step = f"Пропуск трека {idx}/{total}: {track.title} (ошибка)"
-                        job.updated_at = datetime.now(timezone.utc)
-                        continue
-
-                    def on_track_progress(
-                        p: float,
-                        base: float = track_base,
-                        track_num: int = idx,
-                        track_title: str = track.title,
-                        completed_cnt: int = completed_tracks,
-                    ) -> None:
-                        job.status = JobStatus.DOWNLOADING
-                        dl_fraction = min(max(p / 100.0, 0.0), 1.0)
-                        new_progress = 10.0 + ((completed_cnt + dl_fraction * 0.70) / total) * 90.0
-                        job.progress = min(100.0, max(job.progress, round(new_progress, 1)))
-                        job.current_step = f"Загрузка трека {track_num}/{total}: {track_title} ({p:.0f}%)"
-                        job.updated_at = datetime.now(timezone.utc)
-
-                    # 2a. Скачивание аудиопотока через yt-dlp
-                    job.status = JobStatus.DOWNLOADING
-                    job.current_step = f"Загрузка трека {idx}/{total}: {track.title} (0%)"
-                    new_progress = 10.0 + ((completed_tracks + 0.0) / total) * 90.0
-                    job.progress = min(100.0, max(job.progress, round(new_progress, 1)))
-                    job.updated_at = datetime.now(timezone.utc)
-
                     clean_title = (
                         re.sub(r'[\x00-\x1f/\\:*?"<>|%]', "_", (track.title or "").strip()).strip(". ")
                         or f"Track_{idx}"
@@ -431,172 +396,214 @@ class DownloadService:
                         clean_filename = f"{track.track_number:02d}. {clean_title} ({dup_idx}).mp3"
 
                     used_filenames.add(clean_filename)
-                    mp3_path = self._sandbox.resolve(f"{job.id}/converted/{clean_filename}")
+                    track_target_paths[idx] = self._sandbox.resolve(f"{job.id}/converted/{clean_filename}")
+
+                track_progresses: dict[int, float] = {idx: 0.0 for idx in range(1, total + 1)}
+
+                def update_job_progress(t_idx: int, fraction: float, step_desc: str | None = None) -> None:
+                    track_progresses[t_idx] = min(max(fraction, 0.0), 1.0)
+                    total_fraction = sum(track_progresses.values()) / total
+                    new_progress = 10.0 + total_fraction * 90.0
+                    job.progress = min(100.0, max(job.progress, round(new_progress, 1)))
+                    if step_desc:
+                        job.current_step = step_desc
+                    job.updated_at = datetime.now(timezone.utc)
+
+                async def _process_single_track(idx: int, track: ResolvedTrack) -> None:
+                    nonlocal cover_file
+                    if track.status == "error" or not track.audio_source_url:
+                        logger.warning(
+                            "Пропуск трека %d/%d (%s): статус '%s', ошибка '%s'",
+                            idx,
+                            total,
+                            track.title,
+                            track.status,
+                            track.error,
+                        )
+                        update_job_progress(idx, 1.0, f"Пропуск трека {idx}/{total}: {track.title} (ошибка)")
+                        return
+
+                    mp3_path = track_target_paths[idx]
                     raw_template = raw_dir / f"{idx:02d}.%(ext)s"
                     track_cover_file: Path | None = None
                     raw_audio_path: Path | None = None
 
-                    try:
+                    def on_track_progress(p: float) -> None:
+                        job.status = JobStatus.DOWNLOADING
+                        update_job_progress(
+                            idx,
+                            (p / 100.0) * 0.70,
+                            f"Загрузка трека {idx}/{total}: {track.title} ({p:.0f}%)",
+                        )
+
+                    async with semaphore:
                         try:
-                            raw_audio_path = await self._download_raw_stream(
-                                source_url=track.audio_source_url,
-                                output_template=raw_template,
-                                raw_dir=raw_dir,
-                                track_idx=idx,
-                                on_progress=on_track_progress,
-                            )
-                        except TypeError:
-                            # Обратная совместимость для тестовых моков с 4 аргументами
-                            raw_audio_path = await self._download_raw_stream(
-                                source_url=track.audio_source_url,
-                                output_template=raw_template,
-                                raw_dir=raw_dir,
-                                track_idx=idx,
-                            )
+                            # 2a. Скачивание аудиопотока через yt-dlp
+                            job.status = JobStatus.DOWNLOADING
+                            update_job_progress(idx, 0.0, f"Загрузка трека {idx}/{total}: {track.title} (0%)")
 
-                        # 2b. Конвертация в эталонный MP3 через ffmpeg (20% веса трека)
-                        job.status = JobStatus.CONVERTING
-                        conv_progress = 10.0 + ((completed_tracks + 0.70) / total) * 90.0
-                        job.progress = min(100.0, max(job.progress, round(conv_progress, 1)))
-                        job.current_step = f"Конвертация трека {idx}/{total}: {track.title} в MP3 320k"
-                        job.updated_at = datetime.now(timezone.utc)
-
-                        await self._transcode_to_mp3(
-                            input_raw=raw_audio_path,
-                            output_mp3=mp3_path,
-                        )
-
-                        # 2c. Запись черновых ID3v2.4 тегов через mutagen (10% веса трека)
-                        job.status = JobStatus.TAGGING
-                        tag_progress = 10.0 + ((completed_tracks + 0.90) / total) * 90.0
-                        job.progress = min(100.0, max(job.progress, round(tag_progress, 1)))
-                        job.current_step = f"Запись ID3v2.4 тегов {idx}/{total}: {track.title}"
-                        job.updated_at = datetime.now(timezone.utc)
-
-                        # Скачиваем индивидуальную обложку трека или используем обложку альбома/плейлиста как fallback
-                        track_cover_file: Path | None = None
-                        if track.cover_url and (
-                            cover_file is None
-                            or not cover_file.exists()
-                            or cover_file.stat().st_size == 0
-                            or not cover_url
-                            or track.cover_url != cover_url
-                        ):
                             try:
-                                track_cover_bytes = await self._deezer.download_cover_bytes(track.cover_url)
-                                if track_cover_bytes:
-                                    track_cover_bytes = await self._ensure_jpeg_cover(track_cover_bytes)
-                                    ext = (
-                                        ".png"
-                                        if (track_cover_bytes.startswith(b"\x89PNG") or ".png" in track.cover_url.lower())
-                                        else ".jpg"
-                                    )
-                                    t_cover_path = self._sandbox.resolve(f"{job.id}/raw/cover_{idx}{ext}")
-                                    t_cover_path.write_bytes(track_cover_bytes)
-                                    track_cover_file = t_cover_path
-                            except Exception as exc:  # noqa: BLE001
-                                logger.warning(
-                                    "Не удалось скачать обложку трека %d (%s): %s",
-                                    idx,
-                                    track.cover_url,
-                                    exc,
+                                raw_audio_path = await self._download_raw_stream(
+                                    source_url=track.audio_source_url,
+                                    output_template=raw_template,
+                                    raw_dir=raw_dir,
+                                    track_idx=idx,
+                                    on_progress=on_track_progress,
                                 )
-                                track_cover_file = None
+                            except TypeError:
+                                # Обратная совместимость для тестовых моков с 4 аргументами
+                                raw_audio_path = await self._download_raw_stream(
+                                    source_url=track.audio_source_url,
+                                    output_template=raw_template,
+                                    raw_dir=raw_dir,
+                                    track_idx=idx,
+                                )
 
-                        effective_cover_file = track_cover_file or cover_file
+                            # 2b. Конвертация в эталонный MP3 через ffmpeg (20% веса трека)
+                            job.status = JobStatus.CONVERTING
+                            update_job_progress(
+                                idx, 0.75, f"Конвертация трека {idx}/{total}: {track.title} в MP3 320k"
+                            )
 
-                        # Если общая обложка задачи еще не была сохранена, сохраняем первую полученную
-                        if (
-                            (not cover_file or not cover_file.exists() or cover_file.stat().st_size == 0)
-                            and effective_cover_file
-                            and effective_cover_file.exists()
-                            and effective_cover_file.stat().st_size > 0
-                        ):
-                            try:
-                                cover_file = self._sandbox.resolve(f"{job.id}/cover.jpg")
-                                cover_file.write_bytes(effective_cover_file.read_bytes())
-                                job.cover_relative_path = str(self._sandbox.to_relative(cover_file))
-                            except Exception as exc:  # noqa: BLE001
-                                logger.warning("Не удалось сохранить обложку задачи: %s", exc)
+                            await self._transcode_to_mp3(
+                                input_raw=raw_audio_path,
+                                output_mp3=mp3_path,
+                            )
 
-                        self._write_draft_tags(
-                            mp3_path=mp3_path,
-                            track=track,
-                            cover_file=effective_cover_file,
-                        )
+                            # 2c. Запись черновых ID3v2.4 тегов через mutagen (10% веса трека)
+                            job.status = JobStatus.TAGGING
+                            update_job_progress(idx, 0.90, f"Запись ID3v2.4 тегов {idx}/{total}: {track.title}")
 
-                        # Удаляем сырой аудиофайл для экономии дискового пространства
-                        if raw_audio_path and raw_audio_path.exists():
-                            raw_audio_path.unlink()
-
-                        # Фиксируем статус трека
-                        track.status = "ready"
-                        track.converted_path = str(self._sandbox.to_relative(mp3_path))
-                        job.completed_tracks += 1
-                        track_done_progress = 10.0 + ((completed_tracks + 1.0) / total) * 90.0
-                        job.progress = min(100.0, max(job.progress, round(track_done_progress, 1)))
-                        job.updated_at = datetime.now(timezone.utc)
-
-                    except Exception as exc:
-                        # Очищаем сырые и остаточные файлы этого трека в raw_dir
-                        for part_file in raw_dir.glob(f"{idx:02d}.*"):
-                            try:
-                                part_file.unlink(missing_ok=True)
-                            except OSError:
-                                pass
-                        for cover_pat in (f"cover_{idx}.*", f"cover_{idx:02d}.*"):
-                            for cover_part in raw_dir.glob(cover_pat):
+                            # Скачиваем индивидуальную обложку трека или используем обложку альбома как fallback
+                            track_cover_file = None
+                            if track.cover_url and (
+                                cover_file is None
+                                or not cover_file.exists()
+                                or cover_file.stat().st_size == 0
+                                or not cover_url
+                                or track.cover_url != cover_url
+                            ):
                                 try:
-                                    cover_part.unlink(missing_ok=True)
+                                    track_cover_bytes = await self._deezer.download_cover_bytes(track.cover_url)
+                                    if track_cover_bytes:
+                                        track_cover_bytes = await self._ensure_jpeg_cover(track_cover_bytes)
+                                        ext = (
+                                            ".png"
+                                            if (track_cover_bytes.startswith(b"\x89PNG") or ".png" in track.cover_url.lower())
+                                            else ".jpg"
+                                        )
+                                        t_cover_path = self._sandbox.resolve(f"{job.id}/raw/cover_{idx}{ext}")
+                                        t_cover_path.write_bytes(track_cover_bytes)
+                                        track_cover_file = t_cover_path
+                                except Exception as exc:  # noqa: BLE001
+                                    logger.warning(
+                                        "Не удалось скачать обложку трека %d (%s): %s",
+                                        idx,
+                                        track.cover_url,
+                                        exc,
+                                    )
+                                    track_cover_file = None
+
+                            effective_cover_file = track_cover_file or cover_file
+
+                            # Если общая обложка задачи еще не была сохранена, сохраняем первую полученную
+                            if (
+                                effective_cover_file
+                                and effective_cover_file.exists()
+                                and effective_cover_file.stat().st_size > 0
+                            ):
+                                async with lock:
+                                    if not cover_file or not cover_file.exists() or cover_file.stat().st_size == 0:
+                                        try:
+                                            cover_file = self._sandbox.resolve(f"{job.id}/cover.jpg")
+                                            cover_file.write_bytes(effective_cover_file.read_bytes())
+                                            job.cover_relative_path = str(self._sandbox.to_relative(cover_file))
+                                        except Exception as exc:  # noqa: BLE001
+                                            logger.warning("Не удалось сохранить обложку задачи: %s", exc)
+
+                            self._write_draft_tags(
+                                mp3_path=mp3_path,
+                                track=track,
+                                cover_file=effective_cover_file,
+                            )
+
+                            # Удаляем сырой аудиофайл для экономии дискового пространства
+                            if raw_audio_path and raw_audio_path.exists():
+                                raw_audio_path.unlink()
+
+                            # Фиксируем статус трека
+                            track.status = "ready"
+                            track.converted_path = str(self._sandbox.to_relative(mp3_path))
+                            async with lock:
+                                job.completed_tracks += 1
+                            update_job_progress(
+                                idx, 1.0, f"Обработка треков ({job.completed_tracks}/{total} готово)"
+                            )
+
+                        except Exception as exc:
+                            # Очищаем сырые и остаточные файлы этого трека в raw_dir
+                            for part_file in raw_dir.glob(f"{idx:02d}.*"):
+                                try:
+                                    part_file.unlink(missing_ok=True)
                                 except OSError:
                                     pass
-                        if mp3_path.exists():
-                            try:
-                                mp3_path.unlink(missing_ok=True)
-                            except OSError:
-                                pass
+                            for cover_pat in (f"cover_{idx}.*", f"cover_{idx:02d}.*"):
+                                for cover_part in raw_dir.glob(cover_pat):
+                                    try:
+                                        cover_part.unlink(missing_ok=True)
+                                    except OSError:
+                                        pass
+                            if mp3_path.exists():
+                                try:
+                                    mp3_path.unlink(missing_ok=True)
+                                except OSError:
+                                    pass
 
-                        track.status = "error"
-                        track.error = str(exc)
-                        logger.warning(
-                            "Сбой загрузки трека %d/%d (%s): %s",
-                            idx,
-                            total,
-                            track.title,
-                            exc,
-                        )
+                            track.status = "error"
+                            track.error = str(exc)
+                            logger.warning(
+                                "Сбой загрузки трека %d/%d (%s): %s",
+                                idx,
+                                total,
+                                track.title,
+                                exc,
+                            )
 
-                        # Если это одиночный трек (total == 1), сразу выбрасываем исключение
-                        if total == 1:
-                            raise
+                            # Если это одиночный трек (total == 1), сразу выбрасываем исключение
+                            if total == 1:
+                                raise
 
-                        # Для плейлистов/альбомов (total > 1): пропускаем трек и продолжаем загрузку остальных
-                        job.progress = min(100.0, max(job.progress, round(track_base + track_weight, 1)))
-                        err_str = str(exc)
-                        if is_drm_protected_error(err_str):
-                            reason = "DRM защита"
-                        elif is_age_restricted_error(err_str):
-                            reason = "возрастное ограничение"
-                        elif any(kw in err_str.lower() for kw in ("unavailable", "private", "not available", "deleted")):
-                            reason = "недоступен"
-                        elif "copyright" in err_str.lower() or "blocked" in err_str.lower():
-                            reason = "заблокирован"
-                        else:
-                            reason = "ошибка загрузки"
-                        job.current_step = f"Пропуск трека {idx}/{total}: {track.title} ({reason})"
-                        job.updated_at = datetime.now(timezone.utc)
-                        continue
-                    finally:
-                        # Гарантированная очистка временного файла обложки трека в любых исходах
-                        if (
-                            track_cover_file
-                            and track_cover_file != cover_file
-                            and track_cover_file.exists()
-                        ):
-                            try:
-                                track_cover_file.unlink(missing_ok=True)
-                            except OSError:
-                                pass
+                            update_job_progress(idx, 1.0)
+                            err_str = str(exc)
+                            if is_drm_protected_error(err_str):
+                                reason = "DRM защита"
+                            elif is_age_restricted_error(err_str):
+                                reason = "возрастное ограничение"
+                            elif any(kw in err_str.lower() for kw in ("unavailable", "private", "not available", "deleted")):
+                                reason = "недоступен"
+                            elif "copyright" in err_str.lower() or "blocked" in err_str.lower():
+                                reason = "заблокирован"
+                            else:
+                                reason = "ошибка загрузки"
+                            job.current_step = f"Пропуск трека {idx}/{total}: {track.title} ({reason})"
+                            job.updated_at = datetime.now(timezone.utc)
+
+                        finally:
+                            # Гарантированная очистка временного файла обложки трека в любых исходах
+                            if (
+                                track_cover_file
+                                and track_cover_file != cover_file
+                                and track_cover_file.exists()
+                            ):
+                                try:
+                                    track_cover_file.unlink(missing_ok=True)
+                                except OSError:
+                                    pass
+
+                await asyncio.gather(*(
+                    _process_single_track(idx, track)
+                    for idx, track in enumerate(tracks, start=1)
+                ))
 
                 # Завершение задачи
                 job.status = JobStatus.READY
@@ -947,12 +954,16 @@ class DownloadService:
         cmd = [
             ffmpeg_bin,
             "-y",
+            "-threads",
+            "0",
             "-i",
             str(input_raw),
             "-codec:a",
             "libmp3lame",
             "-b:a",
             self._settings.AUDIO_BITRATE,
+            "-compression_level",
+            "2",
             "-ar",
             str(self._settings.AUDIO_SAMPLE_RATE),
             str(output_mp3),

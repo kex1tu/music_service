@@ -209,3 +209,150 @@ async def test_spotify_get_artist_discography():
     assert len(data["items"]) == 1
     assert data["items"][0]["name"] == "Album 1"
 
+
+@pytest.mark.asyncio
+async def test_spotify_get_artist_discography_web_scrape():
+    """Проверка скрейпинга публичной веб-страницы Spotify с initialState."""
+    import base64
+    import json
+
+    state_obj = {
+        "entities": {
+            "items": {
+                "spotify:artist:eminem_id": {
+                    "profile": {"name": "Eminem"},
+                    "visuals": {
+                        "avatarImage": {
+                            "sources": [{"url": "https://img.com/avatar.jpg", "width": 640}]
+                        }
+                    },
+                    "discography": {
+                        "albums": {
+                            "items": [
+                                {
+                                    "releases": {
+                                        "items": [
+                                            {
+                                                "name": "The Eminem Show",
+                                                "type": "ALBUM",
+                                                "uri": "spotify:album:alb_em_1",
+                                                "date": {"year": 2002},
+                                                "coverArt": {
+                                                    "sources": [{"url": "https://img.com/em_show.jpg", "width": 640}]
+                                                },
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        },
+                        "singles": {
+                            "items": [
+                                {
+                                    "releases": {
+                                        "items": [
+                                            {
+                                                "name": "Lose Yourself",
+                                                "type": "SINGLE",
+                                                "uri": "spotify:album:sng_em_1",
+                                                "date": {"year": 2002},
+                                                "coverArt": {
+                                                    "sources": [{"url": "https://img.com/lose_yourself.jpg", "width": 640}]
+                                                },
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        },
+                    },
+                }
+            }
+        }
+    }
+    b64_data = base64.b64encode(json.dumps(state_obj).encode("utf-8")).decode("utf-8")
+    html_content = f"""
+    <html>
+      <head>
+        <script id="initialState" type="text/plain">{b64_data}</script>
+      </head>
+      <body></body>
+    </html>
+    """
+
+    mock_resp = MagicMock(spec=httpx.Response)
+    mock_resp.status_code = 200
+    mock_resp.text = html_content
+
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.is_closed = False
+    mock_client.get.return_value = mock_resp
+
+    client = SpotifyClient(http_client=mock_client)
+    data = await client.get_artist_discography("eminem_id")
+
+    assert data["artist"]["name"] == "Eminem"
+    assert data["artist"]["images"][0]["url"] == "https://img.com/avatar.jpg"
+    assert len(data["items"]) == 2
+    assert data["items"][0]["id"] == "alb_em_1"
+    assert data["items"][0]["name"] == "The Eminem Show"
+    assert data["items"][0]["album_type"] == "album"
+    assert data["items"][0]["release_date"] == "2002"
+    assert data["items"][0]["images"][0]["url"] == "https://img.com/em_show.jpg"
+    assert data["items"][1]["id"] == "sng_em_1"
+    assert data["items"][1]["name"] == "Lose Yourself"
+    assert data["items"][1]["album_type"] == "single"
+
+
+@pytest.mark.asyncio
+async def test_spotify_get_artist_discography_embed_fallback():
+    """Проверка fallback на embed при отсутствии initialState на веб-странице."""
+    import json
+
+    # Первый запрос — веб-страница без initialState
+    web_html = "<html><head></head><body>No state</body></html>"
+    # Второй запрос — embed
+    embed_obj = {
+        "props": {
+            "pageProps": {
+                "state": {
+                    "data": {
+                        "entity": {
+                            "name": "Fallback Artist",
+                            "images": [{"url": "https://img.com/embed_art.jpg"}],
+                            "discography": {"all": {"items": []}},
+                        }
+                    }
+                }
+            }
+        }
+    }
+    embed_html = f"""
+    <html>
+      <head>
+        <script id="__NEXT_DATA__" type="application/json">{json.dumps(embed_obj)}</script>
+      </head>
+    </html>
+    """
+
+    async def mock_get(url, headers=None, params=None, follow_redirects=True):
+        resp = MagicMock(spec=httpx.Response)
+        resp.status_code = 200
+        if "embed" in url:
+            resp.text = embed_html
+        else:
+            resp.text = web_html
+        return resp
+
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.is_closed = False
+    mock_client.get = AsyncMock(side_effect=mock_get)
+
+    client = SpotifyClient(http_client=mock_client)
+    data = await client.get_artist_discography("fallback_id")
+
+    assert data["artist"]["name"] == "Fallback Artist"
+    assert data["artist"]["images"][0]["url"] == "https://img.com/embed_art.jpg"
+    assert data["items"] == []
+
+

@@ -107,6 +107,12 @@ class Settings(BaseSettings):
         le=10,
         description="Максимальное количество параллельных запросов сопоставления AudioMatcher (3-5)",
     )
+    TRACK_DOWNLOAD_CONCURRENCY: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Максимальное количество параллельно скачиваемых и конвертируемых треков внутри релиза (1-10)",
+    )
     JOB_TTL_HOURS: int = Field(
         default=24,
         ge=1,

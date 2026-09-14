@@ -1368,6 +1368,98 @@ async def test_resolve_apple_music_album():
     assert tracks[0].audio_source_url == "https://www.youtube.com/watch?v=daft123"
 
 
+@pytest.mark.asyncio
+async def test_resolve_artist_discography_spotify_success():
+    """Проверка успешного разрешения дискографии артиста Spotify."""
+    mock_spotify = AsyncMock()
+    mock_spotify.parse_url.return_value = ("artist", "art_123")
+    mock_spotify.get_artist_discography.return_value = {
+        "artist": {
+            "name": "Daft Punk",
+            "images": [{"url": "https://img.com/dp_avatar.jpg"}],
+        },
+        "items": [
+            {
+                "id": "alb_dp_1",
+                "name": "Discovery",
+                "album_type": "album",
+                "release_date": "2001",
+                "total_tracks": 14,
+                "images": [{"url": "https://img.com/discovery.jpg"}],
+                "external_urls": {"spotify": "https://open.spotify.com/album/alb_dp_1"},
+            }
+        ],
+    }
+
+    resolver = SourceResolver(
+        deezer_client=MagicMock(),
+        spotify_client=mock_spotify,
+    )
+
+    res = await resolver.resolve_artist_discography("https://open.spotify.com/artist/art_123")
+    assert res.artist_name == "Daft Punk"
+    assert res.artist_avatar == "https://img.com/dp_avatar.jpg"
+    assert res.source == "spotify"
+    assert res.total_releases == 1
+    assert res.releases[0].id == "alb_dp_1"
+    assert res.releases[0].title == "Discovery"
+    assert res.releases[0].year == 2001
+    assert res.releases[0].url == "https://open.spotify.com/album/alb_dp_1"
+
+
+@pytest.mark.asyncio
+async def test_resolve_artist_discography_spotify_deezer_fallback():
+    """Проверка fallback на Deezer при пустом списке релизов Spotify."""
+    mock_spotify = AsyncMock()
+    mock_spotify.parse_url.return_value = ("artist", "art_empty")
+    mock_spotify.get_artist_discography.return_value = {
+        "artist": {
+            "name": "Eminem",
+            "images": [],
+        },
+        "items": [],
+    }
+
+    mock_deezer = AsyncMock()
+    mock_deezer._request_api.return_value = {
+        "data": [
+            {
+                "id": 13,
+                "name": "Eminem",
+                "picture_xl": "https://img.com/eminem_xl.jpg",
+                "nb_album": 68,
+            }
+        ]
+    }
+    mock_deezer.get_artist_albums.return_value = [
+        {
+            "id": 12345,
+            "title": "The Marshall Mathers LP",
+            "record_type": "album",
+            "release_date": "2000-05-23",
+            "nb_tracks": 18,
+            "cover_xl": "https://img.com/mmlp.jpg",
+            "link": "https://www.deezer.com/album/12345",
+        }
+    ]
+
+    resolver = SourceResolver(
+        deezer_client=mock_deezer,
+        spotify_client=mock_spotify,
+    )
+
+    res = await resolver.resolve_artist_discography("https://open.spotify.com/artist/art_empty")
+    assert res.artist_name == "Eminem"
+    assert res.artist_avatar == "https://img.com/eminem_xl.jpg"
+    assert res.source == "spotify"
+    assert res.total_releases == 1
+    assert res.releases[0].id == "12345"
+    assert res.releases[0].title == "The Marshall Mathers LP"
+    assert res.releases[0].year == 2000
+    assert res.releases[0].url == "https://www.deezer.com/album/12345"
+
+
+
 
 
 

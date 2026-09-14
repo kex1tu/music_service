@@ -722,9 +722,54 @@ class SourceResolver:
                 )
             artist_images = artist_obj.get("images", [])
             avatar_url = artist_images[0].get("url") if artist_images else None
+            artist_name = artist_obj.get("name", "Unknown Artist")
+
+            # Fallback к поиску по каталогу Deezer, если со Spotify не удалось извлечь релизы
+            if not releases and artist_name and artist_name != "Unknown Artist":
+                logger.info(
+                    "Spotify discography empty for %s, falling back to Deezer artist search",
+                    artist_name,
+                )
+                try:
+                    search_res = await self._deezer._request_api("/search/artist", params={"q": artist_name, "limit": 5})
+                    deezer_artists = search_res.get("data", [])
+                    best_match = None
+                    for a in deezer_artists:
+                        if a.get("name", "").strip().lower() == artist_name.strip().lower():
+                            best_match = a
+                            break
+                    if not best_match and deezer_artists:
+                        best_match = max(deezer_artists, key=lambda a: a.get("nb_album", 0))
+
+                    if best_match:
+                        d_albums = await self._deezer.get_artist_albums(str(best_match["id"]), limit=150)
+                        for alb in d_albums:
+                            rec_type = alb.get("record_type", "album").lower()
+                            y = None
+                            if alb.get("release_date"):
+                                try:
+                                    y = int(str(alb.get("release_date"))[:4])
+                                except ValueError:
+                                    pass
+                            releases.append(
+                                DiscographyReleaseItem(
+                                    id=str(alb.get("id")),
+                                    title=alb.get("title", "Unknown Release"),
+                                    type=rec_type,
+                                    year=y,
+                                    track_count=alb.get("nb_tracks"),
+                                    cover_url=alb.get("cover_xl") or alb.get("cover_big") or alb.get("cover_medium"),
+                                    url=alb.get("link") or f"https://www.deezer.com/album/{alb.get('id')}",
+                                )
+                            )
+                        if not avatar_url:
+                            avatar_url = best_match.get("picture_xl") or best_match.get("picture_big")
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Deezer fallback for Spotify artist %s failed: %s", artist_name, exc)
+
             return ArtistDiscographyResponse(
                 artist_id=str(res_id),
-                artist_name=artist_obj.get("name", "Unknown Artist"),
+                artist_name=artist_name,
                 artist_avatar=avatar_url,
                 source="spotify",
                 total_releases=len(releases),

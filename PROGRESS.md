@@ -1,9 +1,9 @@
 # PROGRESS.md — Матрица статусов реализации Music Downloader & Tag Manager
 
 ## Текущий статус проекта
-- **Общий прогресс:** Все компоненты и стабилизационные доработки завершены (100%)
-- **Активный этап:** Интегрирован клиент MusicBrainz API и Cover Art Archive (строгий рейт-лимитер 1 req/s, User-Agent, поиск релизов, получение треклистов с номерами дорожек, выбор источника Deezer/MusicBrainz в редакторе тегов и галерее обложек). Исправлена пакетная загрузка и стабилизирован торрент-пайплайн aria2c.
-- **Результаты тестов:** 512/512 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
+- **Общий прогресс:** Все компоненты и оптимизационные доработки завершены (100%)
+- **Активный этап:** Реализовано параллельное скачивание и транскодирование треков альбомов (Track-level Concurrency) и оптимизированы параметры кодирования `ffmpeg` / `libmp3lame`.
+- **Результаты тестов:** 525/525 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -242,6 +242,30 @@
 | **R3: API-эндпоинт дискографии** | `app/routers/downloads.py` | **DONE** | Добавлен защищенный эндпоинт `GET /downloads/discography?url=...`, возвращающий `ArtistDiscographyResponse` для выбранного исполнителя. |
 | **R4: Frontend-компонент и модальное окно селектора** | `app/static/js/downloader.js`, `app/templates/index.html` | **DONE** | В `downloader.js` добавлена автодетекция ссылок на артистов `checkIsArtistUrl`, состояние `showDiscographyModal`, методы фильтрации по категориям (Все, Альбомы, Синглы & EP, Сборники), поиск по названию, групповой выбор и отправка выбранных URL в пакетную очередь `submitDiscographyBatch()`. В `index.html` добавлена кнопка «Дискография» в строке ввода и модальное окно с адаптивной сеткой карточек релизов. Версия скрипта обновлена до `downloader.js?v=20260914_01`. |
 | **R5: Верификация, линтинг и тесты** | `tests/test_deezer_client.py`, `tests/test_spotify_client.py`, `tests/test_yandex_client.py`, `tests/test_downloads_router.py`, `tests/test_frontend.py` | **DONE** | Разработаны юнит-тесты на парсинг ссылок артистов и получение дискографии для всех клиентов, интеграционный тест эндпоинта роутера и тест элементов интерфейса модального окна. Все 520 тестов успешно пройдены (`pytest`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). |
+
+---
+
+## Блок 24: Парсинг дискографии исполнителей Spotify и отказоустойчивый Deezer Fallback (2026-09-14T14:35:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Скрейпинг открытой SSR-страницы артиста Spotify** | `app/services/spotify_client.py` | **DONE** | Реализован метод `_scrape_artist_web(artist_id)` для извлечения SSR-тегов `<script id="initialState" type="text/plain">` с base64-данными профиля артиста при отсутствии API-ключей. Поддержано извлечение категорий `albums`, `singles`, `compilations`, `popularReleasesAlbums` с дедупликацией по `spotify:album:{id}`, извлечением обложек высокого разрешения и года релиза. |
+| **R2: Обновление `get_artist_discography`** | `app/services/spotify_client.py` | **DONE** | Приоритет отдается официальному Web API (при наличии токена), затем скрейпингу публичной SSR-страницы (`_scrape_artist_web`), и только при их недоступности — embed-странице (`_scrape_embed`) для извлечения имени и аватара исполнителя. |
+| **R3: Отказоустойчивый Deezer Fallback в SourceResolver** | `app/services/source_resolver.py` | **DONE** | В `resolve_artist_discography` для Spotify добавлен автоматический fallback: если со Spotify получено 0 релизов (например, при антибот-капче или изменении разметки), но известно имя исполнителя, выполняется поиск по каталогу Deezer (`/search/artist`), выбирается лучшее совпадение и загружаются все альбомы и синглы артиста. |
+| **R4: Верификация, линтинг и тесты** | `tests/test_spotify_client.py`, `tests/test_source_resolver.py` | **DONE** | Добавлены юнит-тесты `test_spotify_get_artist_discography_web_scrape`, `test_spotify_get_artist_discography_embed_fallback`, `test_resolve_artist_discography_spotify_success`, `test_resolve_artist_discography_spotify_deezer_fallback`. Все 524 теста успешно пройдены (`pytest`), ruff чист (All checks passed!). Проверено на реальной ссылке Eminem (`7dGJo4pcD2V6oG8kP0tJRR`) — 21 релиз. |
+
+---
+
+## Блок 25: Параллельная загрузка/транскодирование треков релиза и ускорение ffmpeg (2026-09-14T14:42:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Конфигурация параллелизма треков** | `app/config.py`, `.env.example` | **DONE** | Добавлен параметр `TRACK_DOWNLOAD_CONCURRENCY: int = Field(default=3, ge=1, le=10)` в `Settings`. В `.env.example` задокументирована переменная с пояснением (число параллельно загружаемых и конвертируемых треков внутри альбома/плейлиста). |
+| **R2: Оптимизация кодировщика ffmpeg / libmp3lame** | `app/services/download_service.py` | **DONE** | В команду транскодирования `_transcode_to_mp3` добавлены аргументы `-threads 0` (автовыбор потоков процессора) и `-compression_level 2` (быстрый режим LAME для постоянного битрейта 320 kbps CBR без потери акустического качества). |
+| **R3: Конкурентный пайплайн треков (Track-level Concurrency)** | `app/services/download_service.py` | **DONE** | В `_process_job` пайплайн переработан с последовательного цикла на параллельное выполнение через `asyncio.Semaphore(concurrency)` и `asyncio.gather`. 1) Предварительно вычисляются детерминированные имена целевых файлов (`track_target_paths`), исключающие коллизии и race conditions при нумерации треков. 2) Добавлена плавная агрегация общего прогресса джобы на основе индивидуальных процентов треков (`track_progresses`). 3) Потокобезопасное сохранение первой обложки релиза через `asyncio.Lock`. 4) Изолированная обработка ошибок и очистка временных файлов на уровне отдельного трека. |
+| **R4: Верификация, линтинг и тесты** | `tests/test_download_service.py` | **DONE** | Разработан тест `test_download_pipeline_concurrent_tracks_processing`, подтверждающий корректность конкурентной обработки треков альбома, формирование структуры файлов и вычисление прогресса. Все 525 тестов пройдены (`pytest`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). |
+
+
 
 
 

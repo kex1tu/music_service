@@ -1888,6 +1888,99 @@ async def test_torrent_pipeline_service_disabled(tmp_sandbox):
     assert "Поддержка торрентов отключена" in str(job.error)
 
 
+@pytest.mark.asyncio
+async def test_download_pipeline_concurrent_tracks_processing(tmp_sandbox):
+    """Проверка параллельной обработки треков внутри одного релиза (TRACK_DOWNLOAD_CONCURRENCY)."""
+    from app.config import Settings
+    from app.services.download_service import DownloadService
+
+    settings = Settings(
+        SECRET_KEY="test_secret_key_fixed_length_32_bytes!!",
+        ADMIN_PASSWORD_HASH="$2b$12$e8Y5t1hWzC181zK0m7oKeej1eM0.7tH2l4aG5p8fW9xK0yZ1a2b3c",
+        MUSIC_DIR=tmp_sandbox.root / "music",
+        TMP_DIR=tmp_sandbox.root / "tmp",
+        TRACK_DOWNLOAD_CONCURRENCY=3,
+    )
+
+    tracks = [
+        ResolvedTrack(
+            track_id=str(i),
+            track_number=i,
+            title=f"Concurrent Track {i}",
+            artist="Concurrent Artist",
+            album="Concurrent Album",
+            album_artist="Concurrent Artist",
+            audio_source_url=f"https://www.youtube.com/watch?v=track_{i}",
+        )
+        for i in range(1, 5)
+    ]
+
+    mock_resolver = MagicMock()
+    mock_resolver.resolve = AsyncMock(
+        return_value=(
+            {"album": "Concurrent Album", "album_artist": "Concurrent Artist", "year": 2024},
+            tracks,
+        )
+    )
+
+    active_downloads = 0
+    max_active_downloads = 0
+    lock = asyncio.Lock()
+
+    async def fake_download_raw(source_url, output_template, raw_dir, track_idx, on_progress=None):
+        nonlocal active_downloads, max_active_downloads
+        async with lock:
+            active_downloads += 1
+            max_active_downloads = max(max_active_downloads, active_downloads)
+
+        # Симулируем задержку сетевой загрузки
+        await asyncio.sleep(0.08)
+
+        async with lock:
+            active_downloads -= 1
+
+        raw_file = raw_dir / f"{track_idx:02d}.opus"
+        raw_file.write_bytes(b"RAW_DATA")
+        return raw_file
+
+    async def fake_transcode(input_raw, output_mp3):
+        await asyncio.sleep(0.02)
+        output_mp3.write_bytes(b"\xff\xfb\x90\x64" + b"\x00" * 64)
+
+    svc = DownloadService(
+        settings=settings,
+        tmp_sandbox=tmp_sandbox,
+        source_resolver=mock_resolver,
+        deezer_client=MagicMock(),
+    )
+
+    with (
+        patch.object(svc, "_download_raw_stream", side_effect=fake_download_raw),
+        patch.object(svc, "_transcode_to_mp3", side_effect=fake_transcode),
+    ):
+        job = await svc.create_job(
+            url="https://www.deezer.com/album/99999",
+            source="deezer",
+        )
+
+        for _ in range(50):
+            if job.status in (JobStatus.READY, JobStatus.ERROR):
+                break
+            await asyncio.sleep(0.05)
+
+        assert job.status == JobStatus.READY
+        assert job.progress == 100.0
+        assert job.completed_tracks == 4
+        # Проверяем, что одновременно скачивалось более 1 трека (вплоть до лимита семафора 3)
+        assert max_active_downloads >= 2
+        assert max_active_downloads <= 3
+
+        # Проверяем наличие всех 4 MP3-файлов
+        conv_dir = tmp_sandbox.root / job.id / "converted"
+        assert len(list(conv_dir.glob("*.mp3"))) == 4
+
+
+
 
 
 

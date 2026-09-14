@@ -390,6 +390,118 @@ class SpotifyClient:
             "tracks": tracks,
         }
 
+    async def _scrape_artist_web(self, artist_id: str) -> dict[str, Any] | None:
+        """Скрейпит публичную веб-страницу исполнителя https://open.spotify.com/artist/{artist_id}.
+
+        Извлекает имя, аватар и структурированную дискографию из тега <script id="initialState">.
+        """
+        client = await self._get_client()
+        should_close = self._external_client is None
+        try:
+            url = f"https://open.spotify.com/artist/{artist_id}"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+            resp = await client.get(url, headers=headers, follow_redirects=True)
+            if resp.status_code != 200:
+                logger.debug("Spotify artist web scrape status %s for %s", resp.status_code, artist_id)
+                return None
+
+            m = re.search(r'<script\s+id=["\']initialState["\'][^>]*>(.*?)</script>', resp.text, re.DOTALL)
+            if not m:
+                logger.debug("Spotify initialState script not found for %s", artist_id)
+                return None
+
+            raw_b64 = m.group(1).strip()
+            decoded = base64.b64decode(raw_b64).decode("utf-8")
+            data = json.loads(decoded)
+
+            artist_key = f"spotify:artist:{artist_id}"
+            artist_node = data.get("entities", {}).get("items", {}).get(artist_key, {})
+            if not artist_node:
+                for k, v in data.get("entities", {}).get("items", {}).items():
+                    if k.startswith("spotify:artist:") and isinstance(v, dict):
+                        artist_node = v
+                        break
+
+            name = (
+                artist_node.get("profile", {}).get("name")
+                or artist_node.get("name")
+                or "Unknown Artist"
+            )
+
+            # Avatar
+            avatar_url = None
+            avatar_sources = artist_node.get("visuals", {}).get("avatarImage", {}).get("sources", [])
+            if avatar_sources and isinstance(avatar_sources, list):
+                best_avatar = max(avatar_sources, key=lambda s: int(s.get("width") or 0))
+                avatar_url = best_avatar.get("url")
+
+            # Discography
+            discography = artist_node.get("discography", {})
+            seen_ids: set[str] = set()
+            releases: list[dict[str, Any]] = []
+
+            for cat in ["albums", "singles", "compilations", "popularReleasesAlbums"]:
+                sec = discography.get(cat, {})
+                if not isinstance(sec, dict):
+                    continue
+                cat_items = sec.get("items", [])
+                for entry in cat_items:
+                    rel_items = entry.get("releases", {}).get("items", []) if isinstance(entry, dict) else []
+                    for rel in rel_items:
+                        uri = rel.get("uri", "")
+                        rel_id = uri.split(":")[-1] if uri else None
+                        if not rel_id or rel_id in seen_ids:
+                            continue
+                        seen_ids.add(rel_id)
+
+                        # Cover art
+                        cover_sources = rel.get("coverArt", {}).get("sources", [])
+                        cover_url = None
+                        if cover_sources and isinstance(cover_sources, list):
+                            best_cover = max(cover_sources, key=lambda s: int(s.get("width") or 0))
+                            cover_url = best_cover.get("url")
+
+                        year = None
+                        date_obj = rel.get("date", {})
+                        if isinstance(date_obj, dict):
+                            year = date_obj.get("year")
+                        elif isinstance(date_obj, (int, str)):
+                            try:
+                                year = int(str(date_obj)[:4])
+                            except ValueError:
+                                pass
+
+                        rel_type = (rel.get("type") or cat).lower()
+                        if rel_type == "popularreleasesalbums":
+                            rel_type = "album"
+
+                        releases.append({
+                            "id": rel_id,
+                            "name": rel.get("name", "Unknown Release"),
+                            "album_type": rel_type,
+                            "release_date": str(year) if year else None,
+                            "total_tracks": rel.get("totalTracks") or rel.get("trackCount"),
+                            "images": [{"url": cover_url}] if cover_url else [],
+                            "external_urls": {"spotify": f"https://open.spotify.com/album/{rel_id}"},
+                        })
+
+            return {
+                "artist": {
+                    "name": name,
+                    "images": [{"url": avatar_url}] if avatar_url else [],
+                },
+                "items": releases,
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Error scraping Spotify artist web page: %s", exc)
+            return None
+        finally:
+            if should_close:
+                await client.aclose()
+
     async def get_artist_discography(self, artist_id: str) -> dict[str, Any]:
         """Получает информацию об исполнителе и список его релизов."""
         token = await self._get_api_token()
@@ -408,24 +520,40 @@ class SpotifyClient:
                     params={"include_groups": "album,single,compilation", "limit": 50},
                 )
                 albums_data = albums_resp.json().get("items", []) if albums_resp.status_code == 200 else []
-                return {
-                    "artist": artist_data,
-                    "items": albums_data,
-                }
+                if albums_data:
+                    return {
+                        "artist": artist_data,
+                        "items": albums_data,
+                    }
             except Exception as exc:  # noqa: BLE001
-                logger.debug("Spotify Web API get_artist_discography error (%s), fallback to embed", exc)
+                logger.debug("Spotify Web API get_artist_discography error (%s), fallback to scraping", exc)
             finally:
                 if should_close:
                     await client.aclose()
 
+        # Попытка парсинга публичной веб-страницы Spotify (<script id="initialState">)
+        web_data = await self._scrape_artist_web(artist_id)
+        if web_data and web_data.get("items"):
+            return web_data
+
+        # Fallback на embed-страницу для получения имени и аватара артиста
         entity = await self._scrape_embed("artist", artist_id)
-        name = entity.get("title") or entity.get("name") or "Unknown Artist"
+        name = (
+            (web_data.get("artist", {}).get("name") if web_data else None)
+            or entity.get("title")
+            or entity.get("name")
+            or "Unknown Artist"
+        )
         images = entity.get("images") or entity.get("visualIdentity", {}).get("image", [])
         avatar = None
         if isinstance(images, list) and images:
             avatar = images[0].get("url") if isinstance(images[0], dict) else None
+        elif web_data and web_data.get("artist", {}).get("images"):
+            avatar = web_data["artist"]["images"][0].get("url")
+
         releases = (
-            entity.get("discography", {}).get("all", {}).get("items", [])
+            (web_data.get("items") if web_data else [])
+            or entity.get("discography", {}).get("all", {}).get("items", [])
             or entity.get("releases", {}).get("items", [])
         )
         return {
