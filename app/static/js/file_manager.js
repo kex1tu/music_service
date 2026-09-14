@@ -20,14 +20,30 @@ function fileManagerComponent() {
             // Слушаем событие обновления из других компонентов
             window.addEventListener('refresh-file-manager', (e) => {
                 let targetPath = '';
-                if (typeof e.detail === 'string') {
+                if (typeof e?.detail === 'string') {
                     targetPath = e.detail;
-                } else if (e.detail && typeof e.detail.path === 'string') {
+                } else if (e?.detail && typeof e.detail.path === 'string') {
                     targetPath = e.detail.path;
                 } else if (typeof this.currentPath === 'string' && this.currentPath !== '[object Object]') {
                     targetPath = this.currentPath;
                 }
                 this.loadDirectory(targetPath);
+            });
+
+            // Автообновление при возврате на вкладку Файлы
+            if (this.$watch) {
+                this.$watch('$store.app.activeTab', (tab) => {
+                    if (tab === 'files') {
+                        this.loadDirectory(this.currentPath);
+                    }
+                });
+            }
+
+            // Автообновление при переключении фокуса на окно браузера
+            window.addEventListener('focus', () => {
+                if (Alpine.store('app').activeTab === 'files') {
+                    this.loadDirectory(this.currentPath);
+                }
             });
         },
 
@@ -38,7 +54,7 @@ function fileManagerComponent() {
             this.isLoading = true;
 
             try {
-                const res = await fetch(`/files?path=${encodeURIComponent(path || '')}`);
+                const res = await fetch(`/files?path=${encodeURIComponent(path || '')}&_t=${Date.now()}`);
                 if (!res.ok) {
                     if (res.status === 401) {
                         return; // Не спамить ошибками неавторизованному пользователю при старте
@@ -81,8 +97,8 @@ function fileManagerComponent() {
             try {
                 const asAlbum = item.type === 'file';
                 const url = asAlbum
-                    ? `/tags?path=${encodeURIComponent(item.path)}&as_album=true`
-                    : `/tags?path=${encodeURIComponent(item.path)}`;
+                    ? `/tags?path=${encodeURIComponent(item.path)}&as_album=true&_t=${Date.now()}`
+                    : `/tags?path=${encodeURIComponent(item.path)}&_t=${Date.now()}`;
 
                 const res = await fetch(url);
                 if (!res.ok) {
@@ -135,8 +151,9 @@ function fileManagerComponent() {
                 Alpine.store('app').activeModal = null;
                 Alpine.store('app').deleteConfirmData = null;
 
-                // Перезагружаем текущую директорию
+                // Перезагружаем текущую директорию и уведомляем аудит
                 await this.loadDirectory(this.currentPath);
+                window.dispatchEvent(new CustomEvent('refresh-audit', { detail: { force: true } }));
             } catch (err) {
                 Alpine.store('app').toast(`Ошибка: ${err.message}`, 'error');
             } finally {

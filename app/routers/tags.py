@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from app.core.exceptions import NotFoundError, PathTraversalError, TagError
 from app.dependencies import (
     CurrentUserDep,
+    LibraryAuditServiceDep,
     MusicSandboxDep,
     OrganizerServiceDep,
     TmpSandboxDep,
@@ -176,6 +177,7 @@ async def batch_save_tags(
     _: CurrentUserDep,
     tag_service: TagServiceDep,
     organizer_service: OrganizerServiceDep,
+    audit_service: LibraryAuditServiceDep,
 ) -> BatchSaveResponse:
     """Пакетно сохраняет обновленные теги ID3v2.4 во все треки альбома и организует файлы.
 
@@ -184,6 +186,7 @@ async def batch_save_tags(
         _: Проверка аутентификации текущего пользователя.
         tag_service: Сервис работы с тегами.
         organizer_service: Сервис организации и перемещения файлов медиатеки.
+        audit_service: Сервис аудита медиатеки для сброса in-memory кэша.
 
     Returns:
         BatchSaveResponse со статусом успешности, итоговым каталогом и списком сохраненных треков.
@@ -317,6 +320,9 @@ async def batch_save_tags(
             group_by_album=request.group_by_album,
             track_covers_data=track_covers_data,
         )
+
+        # Сбрасываем кэш аудита для мгновенного отражения изменений
+        audit_service.invalidate()
 
         return BatchSaveResponse(
             success=True,

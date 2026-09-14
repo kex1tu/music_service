@@ -2,7 +2,7 @@
 
 ## Текущий статус проекта
 - **Общий прогресс:** Все компоненты и оптимизационные доработки завершены (100%)
-- **Активный этап:** Исправлен механизм дозагрузки недостающих треков (Library Audit), исключены ложные детекты неполных альбомов, санитизирован поиск в Deezer и поддержана передача прямых идентификаторов.
+- **Активный этап:** Устранена проблема рассинхронизации и кэширования списков треков между вкладками и браузерами: добавлены заголовки no-cache, сброс кэша при операциях с файлами/тегами/текстами, автообновление по вкладкам и фокусу окна.
 - **Результаты тестов:** 540/540 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
@@ -319,8 +319,6 @@
 | **R2: Сквозное форматирование в маршрутах и сервисах** | `app/routers/tags.py`, `app/services/source_resolver.py`, `app/services/tag_service.py`, `tests/test_tags_router.py`, `tests/test_tag_service.py` | **DONE** | В эндпоинтах `GET /tags/deezer/albums` и `GET /tags/deezer/albums/{id}` артисты альбома и каждого трека форматируются через `format_artists`. В `source_resolver.py` сохраняются все соавторы для поиска аудиопотока и записи в ID3v2.4. В `TagService.clean_track_title()` существующие составные имена разбиваются на список отдельных исполнителей. |
 | **R3: Поддержка разделения авторов в Tag Editor UI** | `app/static/js/tag_editor.js` | **DONE** | Метод `parseArtistsString` и обновленный `cleanTrackTitle` в интерфейсе редактора тегов для распознавания и разделения запятых и фитов на `\\`. |
 
----
-
 ## Блок 15: Доработка и исправление механизма дозагрузки недостающих треков (2026-09-14T19:43:00Z)
 
 | Компонент | Пути | Статус | Описание и контрольные точки |
@@ -329,6 +327,16 @@
 | **R2: Санитизация поиска альбомов в Deezer** | `app/services/library_audit_service.py` | **DONE** | Реализована многоуровневая санитизация поисковых запросов в Deezer API при каталожной сверке (удаление суффиксов `- Single`, `- EP`, `(feat. ...)`, `[Expanded]`, `(Deluxe)` и поиск по очищенному имени альбома), устраняющая сбои сопоставления синглов и делюкс-релизов. |
 | **R3: Передача `deezer_album_id` и прямых ссылок** | `app/schemas/library_audit.py`, `app/routers/files.py`, `app/static/js/library_audit.js` | **DONE** | В схему `DownloadMissingTracksRequest` и эндпоинт `POST /files/audit/incomplete-albums/download-missing` добавлено поле `deezer_album_id`. Во фронтенде `library_audit.js` метод `downloadMissing` передает идентификатор альбома и список уже обнаруженных прямых URL треков. |
 | **R4: UI-состояния кнопки и подсказки** | `app/templates/index.html`, `app/static/js/library_audit.js` | **DONE** | В интерфейсе отображается бейдж «Укомплектован» для полных альбомов вместо неактивной кнопки. При нулевом числе созданных задач выдается информативное сообщение пользователю. |
+
+---
+
+## Блок 16: Устранение рассинхронизации данных и кэширования UI (2026-09-14T19:50:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Заголовки анти-кэширования HTTP** | `app/main.py` | **DONE** | Внедрен глобальный middleware в FastAPI, проставляющий заголовки `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`, `Pragma: no-cache` и `Expires: 0` для всех динамических API-эндпоинтов, предотвращающий застревание ответов в дисковом кэше браузеров. |
+| **R2: Принудительный сброс бэкенд-индекса и инвалидация** | `app/routers/files.py`, `app/routers/tags.py`, `app/routers/lyrics.py`, `app/services/library_audit_service.py` | **DONE** | Добавлен эндпоинт `POST /files/audit/refresh` и параметр `force=True` в `GET /files/audit/summary`. Вызов `audit_service.invalidate()` внедрен во все точки модификации медиатеки: `PUT /tags/batch`, `DELETE /files`, `POST /lyrics`, `DELETE /lyrics`. |
+| **R3: Реактивные события фронтенда и сброс кэша скриптов** | `app/static/js/file_manager.js`, `app/static/js/library_audit.js`, `app/static/js/lyrics_modal.js`, `app/static/js/tag_editor.js`, `app/templates/index.html` | **DONE** | Добавлены сквозные пользовательские события `refresh-audit` и `refresh-file-manager`, реактивные слушатели переключения вкладок `$watch('$store.app.activeTab')` и слушатели `window.addEventListener('focus')`. Во все `fetch`-запросы списков файлов и аудита добавлены динамические кэш-бастеры `_t=${Date.now()}`. Версии скриптов в `index.html` инкрементированы до `?v=20260914_03`. |
 
 
 

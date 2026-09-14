@@ -127,6 +127,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         https_only=app_settings.SESSION_COOKIE_SECURE,
     )
 
+    # Middleware для отключения кэширования динамических API-ответов в браузерах
+    @application.middleware("http")
+    async def add_no_cache_headers(request: Request, call_next):
+        response = await call_next(request)
+        if not request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
     # Регистрация глобальных обработчиков исключений
     @application.exception_handler(MusicManagerError)
     async def handle_music_manager_error(

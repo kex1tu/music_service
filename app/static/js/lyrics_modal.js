@@ -195,12 +195,14 @@ function lyricsModalComponent() {
                 Alpine.store('app').toast('Текст песни успешно сохранен!', 'success');
                 this.track.lyrics_status = this.kind;
 
-                // Реактивно уведомляем другие компоненты (Tag Editor)
+                // Реактивно уведомляем другие компоненты (Tag Editor, Audit, File Manager)
                 window.dispatchEvent(
                     new CustomEvent('lyrics-updated', {
                         detail: { path: this.track.path, kind: this.kind },
                     })
                 );
+                window.dispatchEvent(new CustomEvent('refresh-audit', { detail: { force: true } }));
+                window.dispatchEvent(new CustomEvent('refresh-file-manager'));
 
                 if (Alpine.store('app').tagEditorData) {
                     const target = Alpine.store('app').tagEditorData.tracks.find(
@@ -233,12 +235,14 @@ function lyricsModalComponent() {
                     this.source = 'none';
                     this.track.lyrics_status = 'none';
 
-                    // Реактивно уведомляем другие компоненты (Tag Editor)
+                    // Реактивно уведомляем другие компоненты (Tag Editor, Audit, File Manager)
                     window.dispatchEvent(
                         new CustomEvent('lyrics-updated', {
                             detail: { path: this.track.path, kind: 'none' },
                         })
                     );
+                    window.dispatchEvent(new CustomEvent('refresh-audit', { detail: { force: true } }));
+                    window.dispatchEvent(new CustomEvent('refresh-file-manager'));
 
                     if (Alpine.store('app').tagEditorData) {
                         const target = Alpine.store('app').tagEditorData.tracks.find(

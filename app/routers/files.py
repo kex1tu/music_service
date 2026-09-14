@@ -62,10 +62,28 @@ async def search_library(
     description="Возвращает общее число треков, альбомов, отсутствующих текстов, обложек и дубликатов.",
 )
 async def get_audit_summary(
+    force: bool = Query(default=False, description="Принудительно пересканировать диск"),
     _: CurrentUserDep = ...,
     audit_service: LibraryAuditServiceDep = ...,
 ) -> AuditSummaryResponse:
     """Возвращает дашборд-сводку аудита медиатеки."""
+    if force:
+        await audit_service.ensure_index(force=True)
+    return await audit_service.get_summary()
+
+
+@router.post(
+    "/audit/refresh",
+    response_model=AuditSummaryResponse,
+    summary="Принудительное обновление индекса аудита медиатеки",
+    description="Сбрасывает кэш и принудительно пересканирует все аудиофайлы в MUSIC_DIR.",
+)
+async def refresh_audit(
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> AuditSummaryResponse:
+    """Сбрасывает кэш и заново индексирует коллекцию."""
+    await audit_service.ensure_index(force=True)
     return await audit_service.get_summary()
 
 
@@ -271,6 +289,9 @@ def delete_file_or_directory(
     ),
     _: CurrentUserDep = ...,
     file_manager: FileManagerServiceDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
 ) -> DeleteFileResponse:
     """Удаляет файл или директорию из медиатеки с проверкой песочницы."""
-    return file_manager.delete(path)
+    res = file_manager.delete(path)
+    audit_service.invalidate()
+    return res

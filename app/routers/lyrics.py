@@ -15,7 +15,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from app.dependencies import CurrentUserDep, MusicSandboxDep, SettingsDep, TmpSandboxDep
+from app.dependencies import (
+    CurrentUserDep,
+    LibraryAuditServiceDep,
+    MusicSandboxDep,
+    SettingsDep,
+    TmpSandboxDep,
+)
 from app.schemas.lyrics import (
     DeleteLyricsResponse,
     LyricsResponse,
@@ -106,6 +112,7 @@ async def get_lyrics(
 async def save_lyrics(
     request: SaveLyricsRequest,
     lyrics_service: LyricsServiceDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
     current_user: CurrentUserDep = ...,
 ) -> LyricsResponse:
     """Сохраняет текст песни в файл на диске."""
@@ -115,6 +122,7 @@ async def save_lyrics(
         content=request.content,
         kind=request.kind,
     )
+    audit_service.invalidate()
     return lyrics_service.get_lyrics_for_track(request.track_path)
 
 
@@ -127,9 +135,11 @@ async def save_lyrics(
 async def delete_lyrics(
     path: str = Query(..., description="Относительный путь к целевому MP3-файлу"),
     lyrics_service: LyricsServiceDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
     current_user: CurrentUserDep = ...,
 ) -> DeleteLyricsResponse:
     """Удаляет файл текста трека."""
     logger.info("Пользователь '%s' запросил удаление текста для '%s'", current_user, path)
     deleted = lyrics_service.delete_lyrics(path)
+    audit_service.invalidate()
     return DeleteLyricsResponse(success=True, deleted=deleted)

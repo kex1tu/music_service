@@ -644,6 +644,7 @@ function tagEditorComponent() {
                 // Переключаемся на вкладку файлового менеджера и обновляем список
                 Alpine.store('app').activeTab = 'files';
                 window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: result.destination_dir }));
+                window.dispatchEvent(new CustomEvent('refresh-audit', { detail: { force: true } }));
             } catch (err) {
                 Alpine.store('app').toast(`Ошибка: ${err.message}`, 'error');
             } finally {

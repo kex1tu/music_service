@@ -39,8 +39,9 @@ function libraryAuditComponent() {
             this.checkLyricsProgress();
 
             // Слушаем событие обновления при переключении на вкладку или клике
-            window.addEventListener('refresh-audit', () => {
-                this.loadAll();
+            window.addEventListener('refresh-audit', (e) => {
+                const force = e?.detail?.force || false;
+                this.loadAll(force);
                 this.checkLyricsProgress();
             });
 
@@ -53,11 +54,26 @@ function libraryAuditComponent() {
                     }
                 });
             }
+
+            // Автообновление при возврате фокуса в окно браузера
+            window.addEventListener('focus', () => {
+                if (Alpine.store('app').activeTab === 'audit') {
+                    this.loadAll();
+                    this.checkLyricsProgress();
+                }
+            });
         },
 
-        async loadAll() {
+        async loadAll(force = false) {
             this.isLoading = true;
             try {
+                if (force) {
+                    try {
+                        await fetch('/files/audit/refresh', { method: 'POST' });
+                    } catch (e) {
+                        console.warn('Сбой принудительного обновления индекса:', e);
+                    }
+                }
                 await Promise.all([
                     this.loadSummary(),
                     this.loadMissingLyrics(),
@@ -72,7 +88,7 @@ function libraryAuditComponent() {
 
         async loadSummary() {
             try {
-                const res = await fetch('/files/audit/summary');
+                const res = await fetch(`/files/audit/summary?_t=${Date.now()}`);
                 if (res.ok) {
                     this.summary = await res.json();
                 }
@@ -83,7 +99,7 @@ function libraryAuditComponent() {
 
         async loadMissingLyrics() {
             try {
-                const res = await fetch('/files/audit/missing-lyrics');
+                const res = await fetch(`/files/audit/missing-lyrics?_t=${Date.now()}`);
                 if (res.ok) {
                     this.missingLyrics = await res.json();
                 }
@@ -94,7 +110,7 @@ function libraryAuditComponent() {
 
         async loadMissingCovers() {
             try {
-                const res = await fetch('/files/audit/missing-covers');
+                const res = await fetch(`/files/audit/missing-covers?_t=${Date.now()}`);
                 if (res.ok) {
                     this.missingCovers = await res.json();
                 }
@@ -105,7 +121,7 @@ function libraryAuditComponent() {
 
         async loadDuplicates() {
             try {
-                const res = await fetch('/files/audit/duplicates');
+                const res = await fetch(`/files/audit/duplicates?_t=${Date.now()}`);
                 if (res.ok) {
                     this.duplicatesData = await res.json();
                 }
@@ -193,7 +209,7 @@ function libraryAuditComponent() {
         async loadIncompleteAlbums() {
             this.incompleteLoading = true;
             try {
-                const res = await fetch('/files/audit/incomplete-albums');
+                const res = await fetch(`/files/audit/incomplete-albums?_t=${Date.now()}`);
                 if (res.ok) {
                     const data = await res.json();
                     this.incompleteAlbums = data.albums || [];
@@ -217,7 +233,7 @@ function libraryAuditComponent() {
             const path = album.path;
             this.catalogMatchLoading[path] = true;
             try {
-                const url = `/files/audit/incomplete-albums/catalog-match?path=${encodeURIComponent(path)}`;
+                const url = `/files/audit/incomplete-albums/catalog-match?path=${encodeURIComponent(path)}&_t=${Date.now()}`;
                 const res = await fetch(url);
                 if (res.ok) {
                     const matched = await res.json();
