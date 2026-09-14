@@ -2,8 +2,8 @@
 
 ## Текущий статус проекта
 - **Общий прогресс:** Все компоненты и оптимизационные доработки завершены (100%)
-- **Активный этап:** Реализована подсистема аудита целостности релизов медиатеки (Incomplete Albums Audit & One-Click Backfill): офлайн-детекция неполных альбомов по ID3v2.4 тегам TRCK/TPOS и разрывам нумерации, онлайн-сверка состава треков с официальным каталогом Deezer API, 5-я карточка дашборда и вкладка аудита с аккордеоном треклиста, а также фоновая дозагрузка недостающих треков в один клик.
-- **Результаты тестов:** 535/535 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
+- **Активный этап:** Реализовано распознавание множественных исполнителей и фитов из Deezer (через запятые, `feat`, `ft`, `&`, `x`, `vs` и др.) с сохранением целостности имен артистов (*Tyler, The Creator*, *Earth, Wind & Fire*) и форматированием через `\\` (ID3v2.4).
+- **Результаты тестов:** 538/538 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -308,6 +308,17 @@
 |---|---|---|---|
 | **EJS Challenge Solver & Deno** | `deploy.sh`, `requirements.txt`, `app/services/download_service.py` | **DONE** | Устранена ошибка YouTube anti-bot (`The page needs to be reloaded`). Добавлен пакет `yt-dlp-ejs>=0.8.0`, в venv внедрен легковесный автономный JS-рантайм Deno (`venv/bin/deno`), в `_execute_yt_dlp` добавлен явный экспорт `PATH` с каталогом `venv/bin`. |
 | **Python 3.11 Migration** | `/opt/music-manager/.python/`, `/opt/music-manager/venv/` | **DONE** | Полностью устранены предупреждения `Deprecated Feature: Support for Python version 3.10 has been deprecated`. Окружение на сервере переведено на Python 3.11.16 строго в пределах каталога `/opt/music-manager`. Сервис `music-manager.service` успешно перезапущен и протестирован на боевых треках. |
+
+---
+
+## Блок 14: Интеллектуальный парсинг множественных исполнителей и фитов (2026-09-14T19:35:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Распознавание составных авторов и фитов в DeezerClient** | `app/services/deezer_client.py`, `tests/test_deezer_client.py` | **DONE** | Реализован статический метод `split_artist_string` для корректного разделения списков артистов по запятым (`,`), фитам (`feat.`, `ft.`, `featuring`, `with`), союзам (`&`, `and`, `и`), `x`, `vs` с защитой составных псевдонимов (*Tyler, The Creator*, *Earth, Wind & Fire*, *Crosby, Stills, Nash & Young*). Метод `extract_feats_from_title` извлекает приглашенных исполнителей из полей `title` и `title_version`. Метод `format_artists` агрегирует всех уникальных артистов через `\\`. |
+| **R2: Сквозное форматирование в маршрутах и сервисах** | `app/routers/tags.py`, `app/services/source_resolver.py`, `app/services/tag_service.py`, `tests/test_tags_router.py`, `tests/test_tag_service.py` | **DONE** | В эндпоинтах `GET /tags/deezer/albums` и `GET /tags/deezer/albums/{id}` артисты альбома и каждого трека форматируются через `format_artists`. В `source_resolver.py` сохраняются все соавторы для поиска аудиопотока и записи в ID3v2.4. В `TagService.clean_track_title()` существующие составные имена разбиваются на список отдельных исполнителей. |
+| **R3: Поддержка разделения авторов в Tag Editor UI** | `app/static/js/tag_editor.js` | **DONE** | Метод `parseArtistsString` и обновленный `cleanTrackTitle` в интерфейсе редактора тегов для распознавания и разделения запятых и фитов на `\\`. |
+
 
 
 

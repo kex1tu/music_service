@@ -355,8 +355,7 @@ async def search_deezer_albums(
     items = await deezer_client.search_albums(query=query, limit=limit)
     results: list[DeezerAlbumSearchResult] = []
     for item in items:
-        artist_obj = item.get("artist", {})
-        artist_name = artist_obj.get("name", "") if isinstance(artist_obj, dict) else ""
+        artist_name = deezer_client.format_artists(item)
         cover_url = item.get("cover_xl") or item.get("cover_big") or item.get("cover_medium") or item.get("cover")
         results.append(
             DeezerAlbumSearchResult(
@@ -379,8 +378,7 @@ async def get_deezer_album_details(
 ) -> DeezerAlbumDetailsResponse:
     """Получение официальных метаданных альбома, обложки и треклиста из Deezer."""
     data = await deezer_client.get_album(album_id)
-    artist_obj = data.get("artist", {})
-    artist_name = artist_obj.get("name", "") if isinstance(artist_obj, dict) else ""
+    artist_name = deezer_client.format_artists(data)
 
     release_date = data.get("release_date")
     year: int | None = None
@@ -403,7 +401,7 @@ async def get_deezer_album_details(
     tracks_items: list[DeezerAlbumTrackItem] = []
     for idx, t in enumerate(tracks_data):
         track_num = t.get("track_position") or (idx + 1)
-        t_artist = deezer_client.format_artists(t) if ("contributors" in t or "artist" in t) else artist_name
+        t_artist = deezer_client.format_artists(t) if ("contributors" in t or "artist" in t or "title" in t) else artist_name
         tracks_items.append(
             DeezerAlbumTrackItem(
                 track_number=int(track_num),

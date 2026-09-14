@@ -32,6 +32,7 @@ def temp_storage(tmp_path: Path) -> dict[str, Path]:
 def test_settings(temp_storage: dict[str, Path]) -> Settings:
     """Возвращает настройки приложения для тестового окружения."""
     return Settings(
+        _env_file=None,
         MUSIC_DIR=temp_storage["music_dir"],
         TMP_DIR=temp_storage["tmp_dir"],
         SECRET_KEY="test_secret_key_at_least_32_characters_long_12345",
@@ -41,6 +42,7 @@ def test_settings(temp_storage: dict[str, Path]) -> Settings:
         SESSION_COOKIE_NAME="music_manager_session_test",
         SESSION_COOKIE_SECURE=False,
         SESSION_COOKIE_SAMESITE="strict",
+        YTDLP_USE_COOKIES_FIRST=False,
         DEBUG=True,
     )
 

@@ -12,6 +12,7 @@ def test_settings_valid(tmp_path: Path):
     """Проверка успешной загрузки настроек при передаче всех обязательных полей."""
     music_dir = tmp_path / "music"
     settings = Settings(
+        _env_file=None,
         MUSIC_DIR=music_dir,
         SECRET_KEY="test_secret_key_minimum_16_chars",
         ADMIN_PASSWORD_HASH="$2b$12$validbcrypthashstringtestlength1234567890",

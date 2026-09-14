@@ -922,13 +922,71 @@ function tagEditorComponent() {
             }
         },
 
+        parseArtistsString(raw) {
+            if (!raw) return [];
+            let text = String(raw).trim();
+            if (!text) return [];
+
+            const knownCompounds = [
+                "Tyler, The Creator",
+                "Tyler, the Creator",
+                "Earth, Wind & Fire",
+                "Earth, Wind and Fire",
+                "Crosby, Stills, Nash & Young",
+                "Crosby, Stills, Nash and Young",
+                "Crosby, Stills & Nash",
+                "Blood, Sweat & Tears",
+                "Blood, Sweat and Tears",
+                "Emerson, Lake & Palmer",
+                "Peter, Paul and Mary",
+                "Peter, Paul & Mary",
+                "Bell, Book & Candle",
+                "You, Me, and Everyone We Know",
+                "Me First and the Gimme Gimmes",
+                "Me, First and the Gimme Gimmes",
+            ];
+
+            const placeholders = {};
+            knownCompounds.forEach((cmp, idx) => {
+                const lowerText = text.toLowerCase();
+                const lowerCmp = cmp.toLowerCase();
+                const pos = lowerText.indexOf(lowerCmp);
+                if (pos !== -1) {
+                    const matched = text.substr(pos, cmp.length);
+                    const token = `__COMPOUND_${idx}__`;
+                    placeholders[token] = matched;
+                    text = text.replace(matched, token);
+                }
+            });
+
+            const splitRegex = /\x00|\\+|\s*;\s*|\s*,\s*|\s+&\s+|\s+\/\s+|\s+(?:feat\.?|ft\.?|featuring|with|pres\.?|presents)\s+|\s+(?:vs\.?|v\.)\s+|\s+[xX×]\s+|\s+(?:and|и)\s+/i;
+            const tokens = text.split(splitRegex);
+            const results = [];
+
+            tokens.forEach(tok => {
+                let t = tok.trim();
+                if (!t) return;
+                Object.keys(placeholders).forEach(token => {
+                    if (t.includes(token)) {
+                        t = t.replace(token, placeholders[token]);
+                    }
+                });
+                t = t.replace(/^[\s.]+|[\s.]+$/g, '');
+                if (t && !results.some(r => r.toLowerCase() === t.toLowerCase())) {
+                    results.push(t);
+                }
+            });
+
+            return results;
+        },
+
         cleanTrackTitle(track) {
             if (!track || !track.title) return;
             let rawTitle = String(track.title).trim();
             if (!rawTitle) return;
 
             let artists = track.artist
-                ? track.artist.split(/\\+|\x00/).map((a) => a.trim()).filter(Boolean)
+                ? this.parseArtistsString(track.artist)
                 : [];
 
             // 1. Ведущие порядковые номера: "01. ", "01 - ", "01 "
@@ -945,20 +1003,25 @@ function tagEditorComponent() {
                         rawTitle = restTitle;
                     }
                 } else {
-                    artists.push(candArtist);
+                    const candParts = this.parseArtistsString(candArtist);
+                    for (const cp of candParts) {
+                        if (!artists.some((a) => a.toLowerCase() === cp.toLowerCase())) {
+                            artists.push(cp);
+                        }
+                    }
                     rawTitle = restTitle;
                 }
             }
 
             // 3. Извлечение feat / ft / featuring
             // 3.1. Внутри скобок (...) или [...]
-            const bracketFeatRegex = /[\(\[]\s*(?:feat\.?|ft\.?|featuring)\s+([^\]\)]+?)[\)\]]/gi;
+            const bracketFeatRegex = /[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^\]\)]+?)[\)\]]/gi;
             let m;
             while ((m = bracketFeatRegex.exec(rawTitle)) !== null) {
                 const featContent = m[1].trim();
                 rawTitle = rawTitle.slice(0, m.index) + ' ' + rawTitle.slice(m.index + m[0].length);
                 bracketFeatRegex.lastIndex = m.index;
-                const parts = featContent.split(/\s*(?:,|&|\/|\\+|\band\b|\bи\b|\bx\b)\s*/i);
+                const parts = this.parseArtistsString(featContent);
                 for (const p of parts) {
                     const pClean = p.trim();
                     if (pClean && !artists.some((a) => a.toLowerCase() === pClean.toLowerCase())) {
@@ -968,11 +1031,11 @@ function tagEditorComponent() {
             }
 
             // 3.2. В конце названия без скобок: "Song feat. Artist2"
-            const plainFeatMatch = rawTitle.match(/\b(?:feat\.?|ft\.?|featuring)\s+([^\[\]\(\)\-]+)$/i);
+            const plainFeatMatch = rawTitle.match(/\b(?:feat\.?|ft\.?|featuring|with)\s+([^\[\]\(\)\-]+)$/i);
             if (plainFeatMatch) {
                 const featContent = plainFeatMatch[1].trim();
                 rawTitle = rawTitle.slice(0, plainFeatMatch.index).trim();
-                const parts = featContent.split(/\s*(?:,|&|\/|\\+|\band\b|\bи\b|\bx\b)\s*/i);
+                const parts = this.parseArtistsString(featContent);
                 for (const p of parts) {
                     const pClean = p.trim();
                     if (pClean && !artists.some((a) => a.toLowerCase() === pClean.toLowerCase())) {

@@ -45,6 +45,7 @@ from app.schemas.tag import (
     CoverSearchResultItem,
     TrackTags,
 )
+from app.services.deezer_client import DeezerClient
 from app.services.yandex_client import YandexMusicClient
 
 logger = logging.getLogger(__name__)
@@ -648,7 +649,7 @@ class TagService:
         # Список артистов (чистим и разбиваем существующий current_artist)
         artists_list: list[str] = [
             a.strip()
-            for a in re.split(r"\\+|\x00", str(current_artist or ""))
+            for a in DeezerClient.split_artist_string(str(current_artist or ""))
             if a.strip()
         ]
 
@@ -667,23 +668,21 @@ class TagService:
                     raw_title = rest_title
             else:
                 # Если исполнитель не был задан — берём его из префикса
-                artists_list.append(cand_artist)
+                for part in DeezerClient.split_artist_string(cand_artist):
+                    if part and part.lower() not in [a.lower() for a in artists_list]:
+                        artists_list.append(part)
                 raw_title = rest_title
 
         # 3. Извлечение feat / ft / featuring
         # 3.1. Внутри скобок (...) или [...]
         feat_bracket_regex = re.compile(
-            r"[\(\[]\s*(?:feat\.?|ft\.?|featuring)\s+([^\]\)]+?)[\)\]]",
+            r"[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^\]\)]+?)[\)\]]",
             re.IGNORECASE,
         )
         for m in list(feat_bracket_regex.finditer(raw_title)):
             feat_content = m.group(1).strip()
             raw_title = raw_title[: m.start()] + " " + raw_title[m.end() :]
-            parts = re.split(
-                r"\s*(?:,|&|/|\\+|\band\b|\bи\b|\bx\b)\s*",
-                feat_content,
-                flags=re.IGNORECASE,
-            )
+            parts = DeezerClient.split_artist_string(feat_content)
             for p in parts:
                 p_clean = p.strip()
                 if p_clean and p_clean.lower() not in [a.lower() for a in artists_list]:
@@ -691,18 +690,14 @@ class TagService:
 
         # 3.2. Без скобок в конце строки или перед разделителем
         feat_plain_regex = re.compile(
-            r"\b(?:feat\.?|ft\.?|featuring)\s+([^\[\]\(\)\-]+)$",
+            r"\b(?:feat\.?|ft\.?|featuring|with)\s+([^\[\]\(\)\-]+)$",
             re.IGNORECASE,
         )
         m_plain = feat_plain_regex.search(raw_title)
         if m_plain:
             feat_content = m_plain.group(1).strip()
             raw_title = raw_title[: m_plain.start()].strip()
-            parts = re.split(
-                r"\s*(?:,|&|/|\\+|\band\b|\bи\b|\bx\b)\s*",
-                feat_content,
-                flags=re.IGNORECASE,
-            )
+            parts = DeezerClient.split_artist_string(feat_content)
             for p in parts:
                 p_clean = p.strip()
                 if p_clean and p_clean.lower() not in [a.lower() for a in artists_list]:

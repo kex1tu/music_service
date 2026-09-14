@@ -602,6 +602,46 @@ async def test_download_raw_stream_streaming_progress(
 
 
 @pytest.mark.asyncio
+async def test_download_raw_stream_use_cookies_first(
+    download_service: DownloadService,
+    tmp_path: Path,
+):
+    """Проверка прямого запуска с cookies при включенном YTDLP_USE_COOKIES_FIRST."""
+    cookies_path = tmp_path / "cookies.txt"
+    cookies_path.write_text("# Netscape HTTP Cookie File\n")
+    download_service._settings.YTDLP_COOKIES_PATH = cookies_path
+    download_service._settings.YTDLP_USE_COOKIES_FIRST = True
+
+    raw_dir = tmp_path / "raw_first"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    out_file = raw_dir / "01.opus"
+    out_file.write_bytes(b"dummy")
+
+    mock_proc = AsyncMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = asyncio.StreamReader()
+    mock_proc.stdout.feed_eof()
+    mock_proc.stderr = asyncio.StreamReader()
+    mock_proc.stderr.feed_eof()
+    mock_proc.wait = AsyncMock(return_value=0)
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
+        result_path = await download_service._download_raw_stream(
+            source_url="https://www.youtube.com/watch?v=cookies_first_123",
+            output_template=raw_dir / "%(title)s.%(ext)s",
+            raw_dir=raw_dir,
+            track_idx=1,
+        )
+
+        assert result_path == out_file
+        assert mock_exec.call_count == 1
+        call_args = mock_exec.call_args[0]
+        assert "--cookies" in call_args
+        assert str(cookies_path) in call_args
+
+
+
+@pytest.mark.asyncio
 async def test_multi_track_fluctuating_progress_monotonicity(
     download_service: DownloadService,
     tmp_path: Path,

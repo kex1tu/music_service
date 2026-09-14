@@ -628,6 +628,49 @@ def test_deezer_album_endpoints(tags_client: TestClient, auth_tags_client: TestC
         assert details["tracks"][0]["title"] == "One More Time"
         assert details["tracks"][1]["title"] == "Aerodynamic"
 
+    # 4. Детали совместного альбома с мульти-артистами и фитами в названии
+    mock_collab_album = {
+        "id": 999999,
+        "title": "Collab Hits",
+        "contributors": [{"name": "Jay-Z"}, {"name": "Linkin Park"}],
+        "release_date": "2004-11-30",
+        "genres": {"data": [{"name": "Hip Hop"}, {"name": "Rock"}]},
+        "cover_xl": "https://cdn-images.dzcdn.net/cover_xl.jpg",
+        "tracks": {
+            "data": [
+                {
+                    "track_position": 1,
+                    "title": "Numb / Encore",
+                    "artist": {"name": "Jay-Z, Linkin Park"},
+                    "duration": 205,
+                },
+                {
+                    "track_position": 2,
+                    "title": "Renegade (feat. Eminem)",
+                    "artist": {"name": "Jay-Z"},
+                    "duration": 336,
+                },
+                {
+                    "track_position": 3,
+                    "title": "Multi Track",
+                    "artist": {"name": "jay-z, eminem"},
+                    "duration": 180,
+                },
+            ]
+        },
+    }
+
+    with patch.object(DeezerClient, "get_album", new=AsyncMock(return_value=mock_collab_album)):
+        resp = auth_tags_client.get("/tags/deezer/albums/999999")
+        assert resp.status_code == 200
+        details = resp.json()
+        assert details["artist"] == "Jay-Z\\\\Linkin Park"
+        assert details["genre"] == "Hip Hop\\\\Rock"
+        assert len(details["tracks"]) == 3
+        assert details["tracks"][0]["artist"] == "Jay-Z\\\\Linkin Park"
+        assert details["tracks"][1]["artist"] == "Jay-Z\\\\Eminem"
+        assert details["tracks"][2]["artist"] == "jay-z\\\\eminem"
+
 
 def test_musicbrainz_album_endpoints(tags_client: TestClient, auth_tags_client: TestClient):
     """Проверка эндпоинтов поиска и деталей релиза в MusicBrainz."""

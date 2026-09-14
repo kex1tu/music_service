@@ -31,6 +31,10 @@ class Settings(BaseSettings):
         default=None,
         description="Путь к файлу cookies.txt для yt-dlp (обход возрастных ограничений)",
     )
+    YTDLP_USE_COOKIES_FIRST: bool = Field(
+        default=False,
+        description="Приоритетное использование cookies без предварительной гостевой попытки для ускорения загрузки",
+    )
 
     # Безопасность и аутентификация
     SECRET_KEY: str = Field(

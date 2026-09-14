@@ -538,6 +538,11 @@ def test_clean_title_feat_extractor():
     assert title == "Hotline Bling"
     assert artists == "Drake"
 
+    # 5. Разделение запятых в current_artist (например, "jay-z, eminem")
+    title, artists = TagService.clean_title("Renegade", "jay-z, eminem")
+    assert title == "Renegade"
+    assert artists == "jay-z\\\\eminem"
+
 
 def test_clean_title_artist_prefix_and_track_numbers():
     """Проверка удаления ведущих номеров треков и префикса артиста (Artist - Title)."""

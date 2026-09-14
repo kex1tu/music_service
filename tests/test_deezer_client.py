@@ -249,6 +249,52 @@ def test_format_artists_and_extract_cover():
     assert DeezerClient.extract_best_cover_url(data_single) == "https://img.com/big.jpg"
 
 
+def test_format_artists_comma_and_feats():
+    """Проверка разбиения составных артистов (запятые, feat, ft, &, x) и извлечения фитов из названий."""
+    # 1. Запятая в имени артиста
+    assert DeezerClient.format_artists({"artist": {"name": "jay-z, eminem"}}) == "jay-z\\\\eminem"
+    assert DeezerClient.format_artists("jay-z, eminem") == "jay-z\\\\eminem"
+    assert DeezerClient.format_artists({"artist": {"name": "Eminem, 50 Cent, Dr. Dre"}}) == "Eminem\\\\50 Cent\\\\Dr. Dre"
+
+    # 2. Фиты в title и title_version
+    data_feat_title = {
+        "title": "Renegade (feat. Eminem)",
+        "artist": {"name": "JAŸ-Z"},
+    }
+    assert DeezerClient.format_artists(data_feat_title) == "JAŸ-Z\\\\Eminem"
+
+    data_title_ver = {
+        "title": "Renegade",
+        "title_version": "(feat. Eminem)",
+        "artist": {"name": "JAŸ-Z"},
+    }
+    assert DeezerClient.format_artists(data_title_ver) == "JAŸ-Z\\\\Eminem"
+
+    # 3. Разделители &, feat., ft., x, vs, и
+    assert DeezerClient.format_artists({"artist": {"name": "Jay-Z & Eminem"}}) == "Jay-Z\\\\Eminem"
+    assert DeezerClient.format_artists({"artist": {"name": "Jay-Z feat. Eminem"}}) == "Jay-Z\\\\Eminem"
+    assert DeezerClient.format_artists({"artist": {"name": "Jay-Z ft. Eminem"}}) == "Jay-Z\\\\Eminem"
+    assert DeezerClient.format_artists({"artist": {"name": "David Guetta x Bebe Rexha"}}) == "David Guetta\\\\Bebe Rexha"
+    assert DeezerClient.format_artists({"artist": {"name": "Би-2 и Сплин"}}) == "Би-2\\\\Сплин"
+
+    # 4. Сохранение составных имен (Tyler, The Creator, Earth, Wind & Fire)
+    assert DeezerClient.format_artists({"artist": {"name": "Tyler, The Creator"}}) == "Tyler, The Creator"
+    assert (
+        DeezerClient.format_artists({"artist": {"name": "Tyler, The Creator, A$AP Rocky"}})
+        == "Tyler, The Creator\\\\A$AP Rocky"
+    )
+    assert DeezerClient.format_artists({"artist": {"name": "Earth, Wind & Fire"}}) == "Earth, Wind & Fire"
+    assert DeezerClient.format_artists({"artist": {"name": "Crosby, Stills, Nash & Young"}}) == "Crosby, Stills, Nash & Young"
+
+    # 5. Устранение дубликатов (если артист есть и в artist, и в contributors, и в feat)
+    data_dup = {
+        "title": "Song (feat. Eminem)",
+        "artist": {"name": "Jay-Z"},
+        "contributors": [{"name": "Jay-Z"}, {"name": "Eminem"}],
+    }
+    assert DeezerClient.format_artists(data_dup) == "Jay-Z\\\\Eminem"
+
+
 @pytest.mark.asyncio
 async def test_parse_url_artist():
     """Проверка разбора URL профиля артиста Deezer."""

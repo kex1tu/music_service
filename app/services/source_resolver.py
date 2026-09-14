@@ -881,10 +881,9 @@ class SourceResolver:
                 or album_info.get("title")
                 or title
             )
-            artist_obj = album_data.get("artist", {})
             album_artist = (
-                artist_obj.get("name")
-                if isinstance(artist_obj, dict) and artist_obj.get("name")
+                DeezerClient.format_artists(album_data)
+                if album_data
                 else (artists_str or "Unknown Artist")
             )
 
@@ -971,12 +970,7 @@ class SourceResolver:
 
             is_album = res_type == "album"
             album_title = data.get("title", "Unknown Album")
-            artist_obj = data.get("artist", {})
-            album_artist = (
-                artist_obj.get("name")
-                if isinstance(artist_obj, dict) and artist_obj.get("name")
-                else DeezerClient.format_artists(data)
-            )
+            album_artist = DeezerClient.format_artists(data)
             year_val = None
             release_date = data.get("release_date")
             if release_date:

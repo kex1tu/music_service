@@ -242,22 +242,185 @@ class DeezerClient:
             or data.get("picture_big")
         )
 
+    KNOWN_COMPOUND_ARTISTS: tuple[str, ...] = (
+        "Tyler, The Creator",
+        "Tyler, the Creator",
+        "Earth, Wind & Fire",
+        "Earth, Wind and Fire",
+        "Crosby, Stills, Nash & Young",
+        "Crosby, Stills, Nash and Young",
+        "Crosby, Stills & Nash",
+        "Blood, Sweat & Tears",
+        "Blood, Sweat and Tears",
+        "Emerson, Lake & Palmer",
+        "Peter, Paul and Mary",
+        "Peter, Paul & Mary",
+        "Bell, Book & Candle",
+        "You, Me, and Everyone We Know",
+        "Me First and the Gimme Gimmes",
+        "Me, First and the Gimme Gimmes",
+    )
+
     @staticmethod
-    def format_artists(track_data: dict[str, Any]) -> str:
+    def split_artist_string(raw: str | None) -> list[str]:
+        """Разбивает строку исполнителей по запятым, фитам и другим разделителям.
+
+        Сохраняет целостность известных составных имен (например, Tyler, The Creator).
+        """
+        if not raw:
+            return []
+        text = str(raw).strip()
+        if not text:
+            return []
+
+        # 1. Защита известных имен с запятыми/разделителями через плейсхолдеры
+        placeholders: dict[str, str] = {}
+        for idx, compound in enumerate(DeezerClient.KNOWN_COMPOUND_ARTISTS):
+            if compound.lower() in text.lower():
+                # Находим точное вхождение с сохранением регистра
+                pattern = re.compile(re.escape(compound), re.IGNORECASE)
+                m = pattern.search(text)
+                if m:
+                    token = f"__COMPOUND_ARTIST_{idx}__"
+                    placeholders[token] = m.group(0)
+                    text = pattern.sub(token, text)
+
+        # 2. Регулярное выражение для разделителей исполнителей:
+        # - \x00, \\+
+        # - ; (с пробелами или без)
+        # - , (запятая)
+        # - & (с пробелами)
+        # - / (с пробелами)
+        # - feat., ft., featuring, with, pres., presents (с границами слов)
+        # - vs., vs, v. (с границами слов)
+        # - x, X, × (с окружающими пробелами)
+        # - and, и (с границами слов и пробелами)
+        split_pattern = re.compile(
+            r"\x00|"
+            r"\\+|"
+            r"\s*;\s*|"
+            r"\s*,\s*|"
+            r"\s+&\s+|"
+            r"\s+/\s+|"
+            r"\s+(?:feat\.?|ft\.?|featuring|with|pres\.?|presents)\s+|"
+            r"\s+(?:vs\.?|v\.)\s+|"
+            r"\s+[xX×]\s+|"
+            r"\s+(?:and|и)\s+",
+            re.IGNORECASE,
+        )
+
+        tokens = split_pattern.split(text)
+        results: list[str] = []
+
+        for token in tokens:
+            t = token.strip()
+            if not t:
+                continue
+            # Восстанавливаем защищенные имена
+            for p_key, p_val in placeholders.items():
+                if p_key in t:
+                    t = t.replace(p_key, p_val)
+            t_clean = t.strip(" .")
+            if t_clean and t_clean.lower() not in [r.lower() for r in results]:
+                results.append(t_clean)
+
+        return results
+
+    @staticmethod
+    def extract_feats_from_title(title: str | None, title_version: str | None = None) -> list[str]:
+        """Извлекает имена приглашенных артистов (feat/ft/with) из полей title и title_version."""
+        results: list[str] = []
+        candidates: list[str] = []
+        if title:
+            candidates.append(str(title))
+        if title_version:
+            candidates.append(str(title_version))
+
+        bracket_pattern = re.compile(
+            r"[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^\]\)]+?)[\)\]]",
+            re.IGNORECASE,
+        )
+        plain_pattern = re.compile(
+            r"\b(?:feat\.?|ft\.?|featuring|with)\s+([^\[\]\(\)\-]+)$",
+            re.IGNORECASE,
+        )
+
+        for text in candidates:
+            for m in bracket_pattern.finditer(text):
+                feat_raw = m.group(1).strip()
+                for art in DeezerClient.split_artist_string(feat_raw):
+                    if art and art.lower() not in [r.lower() for r in results]:
+                        results.append(art)
+
+            m_plain = plain_pattern.search(text)
+            if m_plain:
+                feat_raw = m_plain.group(1).strip()
+                for art in DeezerClient.split_artist_string(feat_raw):
+                    if art and art.lower() not in [r.lower() for r in results]:
+                        results.append(art)
+
+        return results
+
+    @staticmethod
+    def format_artists(track_data: Any) -> str:
         """Форматирует строку исполнителей с разделителем \\\\ для нескольких артистов.
 
-        Использует contributors или список artists, если они доступны.
+        Поддерживает разбор contributors, artists, artist, фитов в названии и
+        разделение по запятым / союзам.
         """
-        contributors = track_data.get("contributors", [])
-        if contributors:
-            names: list[str] = []
-            for c in contributors:
-                name = c.get("name")
-                if name and name not in names:
-                    names.append(name)
-            if names:
-                return "\\\\".join(names)
+        if not track_data:
+            return "Unknown Artist"
 
-        artist_obj = track_data.get("artist", {})
-        main_name = artist_obj.get("name") if isinstance(artist_obj, dict) else None
-        return main_name or "Unknown Artist"
+        if isinstance(track_data, str):
+            names = DeezerClient.split_artist_string(track_data)
+            return "\\\\".join(names) if names else (track_data.strip() or "Unknown Artist")
+
+        if not isinstance(track_data, dict):
+            return "Unknown Artist"
+
+        collected_names: list[str] = []
+
+        def add_name(n: str | None) -> None:
+            if not n:
+                return
+            for part in DeezerClient.split_artist_string(str(n)):
+                p_clean = part.strip()
+                if p_clean and p_clean.lower() not in [x.lower() for x in collected_names]:
+                    collected_names.append(p_clean)
+
+        # 1. Проверяем contributors
+        contributors = track_data.get("contributors", [])
+        if isinstance(contributors, list):
+            for c in contributors:
+                if isinstance(c, dict):
+                    add_name(c.get("name"))
+                elif isinstance(c, str):
+                    add_name(c)
+
+        # 2. Проверяем список artists
+        artists_list = track_data.get("artists", [])
+        if isinstance(artists_list, list):
+            for a in artists_list:
+                if isinstance(a, dict):
+                    add_name(a.get("name"))
+                elif isinstance(a, str):
+                    add_name(a)
+
+        # 3. Проверяем одиночный объект artist
+        artist_obj = track_data.get("artist")
+        if isinstance(artist_obj, dict):
+            add_name(artist_obj.get("name"))
+        elif isinstance(artist_obj, str):
+            add_name(artist_obj)
+
+        # 4. Извлекаем фиты из title / title_version
+        title = track_data.get("title")
+        title_ver = track_data.get("title_version")
+        if title or title_ver:
+            for feat in DeezerClient.extract_feats_from_title(title, title_ver):
+                add_name(feat)
+
+        if collected_names:
+            return "\\\\".join(collected_names)
+
+        return "Unknown Artist"

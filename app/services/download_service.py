@@ -956,22 +956,40 @@ class DownloadService:
         cookies_file = self._settings.cookies_file
         has_cookies = bool(cookies_file and cookies_file.is_file())
 
-        # 1. Приоритетная попытка в чистом быстром гостевом режиме (без cookies)
-        ret_code, err_msg = await _execute_yt_dlp(use_cookies=False)
+        use_cookies_first = bool(getattr(self._settings, "YTDLP_USE_COOKIES_FIRST", False) and has_cookies)
 
-        # 2. Если гостевой режим упал из-за Age Gate, и сконфигурированы cookies — повторяем с cookies
-        if ret_code != 0 and has_cookies and self.is_age_restricted_error(err_msg):
-            logger.info(
-                "Обнаружено возрастное ограничение YouTube (Age Gate: %s). Повторная попытка с cookies...",
-                err_msg,
-            )
-            for part_file in raw_dir.glob(f"{track_idx:02d}.*"):
-                try:
-                    if part_file.is_file() and part_file.name.endswith(".part"):
-                        part_file.unlink(missing_ok=True)
-                except OSError as exc:
-                    logger.debug("Не удалось удалить остаточный файл %s: %s", part_file, exc)
+        if use_cookies_first:
+            # 1. Приоритетная прямая попытка с cookies (быстрый режим без холостых падений)
             ret_code, err_msg = await _execute_yt_dlp(use_cookies=True)
+            # 2. Если попытка с cookies завершилась ошибкой, fallback в гостевой режим
+            if ret_code != 0:
+                logger.info("Попытка загрузки с cookies вернула ошибку (%s). Пробуем fallback без cookies...", err_msg)
+                for part_file in raw_dir.glob(f"{track_idx:02d}.*"):
+                    try:
+                        if part_file.is_file() and part_file.name.endswith(".part"):
+                            part_file.unlink(missing_ok=True)
+                    except OSError as exc:
+                        logger.debug("Не удалось удалить остаточный файл %s: %s", part_file, exc)
+                fallback_code, fallback_err = await _execute_yt_dlp(use_cookies=False)
+                if fallback_code == 0:
+                    ret_code, err_msg = fallback_code, fallback_err
+        else:
+            # 1. Приоритетная попытка в чистом быстром гостевом режиме (без cookies)
+            ret_code, err_msg = await _execute_yt_dlp(use_cookies=False)
+
+            # 2. Если гостевой режим упал из-за Age Gate, и сконфигурированы cookies — повторяем с cookies
+            if ret_code != 0 and has_cookies and self.is_age_restricted_error(err_msg):
+                logger.info(
+                    "Обнаружено возрастное ограничение YouTube (Age Gate: %s). Повторная попытка с cookies...",
+                    err_msg,
+                )
+                for part_file in raw_dir.glob(f"{track_idx:02d}.*"):
+                    try:
+                        if part_file.is_file() and part_file.name.endswith(".part"):
+                            part_file.unlink(missing_ok=True)
+                    except OSError as exc:
+                        logger.debug("Не удалось удалить остаточный файл %s: %s", part_file, exc)
+                ret_code, err_msg = await _execute_yt_dlp(use_cookies=True)
 
         if ret_code != 0:
             raise DownloadError(f"Ошибка yt-dlp при скачивании аудио: {err_msg}")
