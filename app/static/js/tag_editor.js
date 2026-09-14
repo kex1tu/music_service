@@ -166,6 +166,11 @@ function tagEditorComponent() {
                     track.lyrics_status = kind;
                 }
             });
+
+            // Rebuild releases when singlesMode changes
+            this.$watch('singlesMode', () => {
+                this.buildReleasesFromTracks();
+            });
         },
 
         loadData(data) {
@@ -318,20 +323,7 @@ function tagEditorComponent() {
             }
         },
 
-        applyAlbumToAll() {
-            if (!this.tracks || this.tracks.length === 0) return;
 
-            this.tracks.forEach((track) => {
-                if (this.album.album) track.album = this.album.album;
-                if (this.album.album_artist) track.album_artist = this.album.album_artist;
-                if (this.album.year !== null && this.album.year !== undefined && this.album.year !== '') {
-                    track.year = parseInt(this.album.year, 10);
-                }
-                if (this.album.genre) track.genre = this.album.genre;
-            });
-
-            Alpine.store('app').toast('Параметры альбома скопированы во все треки', 'info');
-        },
 
         handleGroupCoverUpload(event, group) {
             const file = event.target.files[0];
@@ -360,27 +352,7 @@ function tagEditorComponent() {
             reader.readAsDataURL(file);
         },
 
-        handleCoverUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
 
-            if (!file.type.startsWith('image/')) {
-                Alpine.store('app').toast('Пожалуйста, выберите изображение (JPEG или PNG)', 'error');
-                return;
-            }
-
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                this.coverPreviewUrl = e.target.result;
-                this.coverBase64 = e.target.result;
-                if (this.releases && this.releases[0]) {
-                    this.releases[0].coverPreviewUrl = e.target.result;
-                    this.releases[0].coverBase64 = e.target.result;
-                }
-                Alpine.store('app').toast('Новая обложка выбрана для альбома', 'info');
-            };
-            reader.readAsDataURL(file);
-        },
 
         applyGroupToTracks(group) {
             if (!group || !group.items || group.items.length === 0) return;
@@ -544,11 +516,12 @@ function tagEditorComponent() {
                     group.items.forEach((itemObj) => {
                         const trk = itemObj.track;
                         if (!group.isSingles) {
-                            if (group.albumTitle) trk.album = group.albumTitle;
-                            if (group.albumArtist) trk.album_artist = group.albumArtist;
-                            if (group.year) trk.year = parseInt(group.year, 10);
-                            if (group.genre) trk.genre = group.genre;
-                            if (group.discTotal) trk.disc_total = parseInt(group.discTotal, 10);
+                            // Only fill in empty track fields from group metadata, don't overwrite individual edits
+                            if (group.albumTitle && !trk.album) trk.album = group.albumTitle;
+                            if (group.albumArtist && !trk.album_artist) trk.album_artist = group.albumArtist;
+                            if (group.year && !trk.year) trk.year = parseInt(group.year, 10);
+                            if (group.genre && !trk.genre) trk.genre = group.genre;
+                            if (group.discTotal && !trk.disc_total) trk.disc_total = parseInt(group.discTotal, 10);
                         }
                         const cov = group.selectedCoverUrl || group.coverPreviewUrl;
                         if (cov && !trk.cover_url && !trk.cover_base64) {
@@ -735,6 +708,11 @@ function tagEditorComponent() {
                     ? `Shazam: успешно распознано ${recognizedCount} из ${this.tracks.length} треков!`
                     : 'Shazam не нашел совпадений для треков';
                 Alpine.store('app').toast(msg, recognizedCount > 0 ? 'success' : 'info');
+
+                // Rebuild release groups since album names may have changed after recognition
+                if (recognizedCount > 0) {
+                    this.buildReleasesFromTracks();
+                }
             } finally {
                 this.isRecognizingAll = false;
             }
@@ -1009,7 +987,19 @@ function tagEditorComponent() {
             this.draggedIndex = null;
             this.dragOverIndex = null;
             this.buildReleasesFromTracks();
-            Alpine.store('app').toast('Порядок треков изменён', 'info');
+
+            // Auto-renumber tracks in affected release groups after reorder
+            if (this.viewMode === 'grouped') {
+                this.releases.forEach((group) => {
+                    if (!group.isSingles) {
+                        this.renumberGroupTracks(group);
+                    }
+                });
+            } else {
+                this.renumberTracks();
+            }
+
+            Alpine.store('app').toast('Порядок треков изменён и перенумерован', 'info');
         },
 
         onDragEnd() {
@@ -1019,6 +1009,16 @@ function tagEditorComponent() {
 
         renumberTracks() {
             if (!this.tracks || this.tracks.length === 0) return;
+
+            // In grouped mode, renumber per-release to avoid breaking multi-release numbering
+            if (this.viewMode === 'grouped' && this.releases.length > 0) {
+                this.releases.forEach((group) => {
+                    this.renumberGroupTracks(group);
+                });
+                Alpine.store('app').toast('Треки перенумерованы по релизам!', 'success');
+                return;
+            }
+
             const hasMultipleDiscs = this.tracks.some((t) => t.disc_number && t.disc_number > 1);
             if (hasMultipleDiscs) {
                 const counters = {};
@@ -1085,7 +1085,7 @@ function tagEditorComponent() {
             }
         },
 
-        openTrackCoverGallery(originalIndex, track) {
+        openTrackCoverGallery(track, originalIndex) {
             this.coverGalleryTarget = { type: 'track', originalIndex: originalIndex, track: track };
             this.showCoverGalleryModal = true;
             this.coverSourceFilter = 'all';
@@ -1249,6 +1249,29 @@ function tagEditorComponent() {
             }
 
             this.closeCoverGallery();
+        },
+
+        removeTrack(index) {
+            if (!this.tracks || index < 0 || index >= this.tracks.length) return;
+            const removed = this.tracks[index];
+            const title = removed.title || removed.path || 'Без названия';
+            this.tracks.splice(index, 1);
+            this.buildReleasesFromTracks();
+            Alpine.store('app').toast(`Трек «${title}» исключён из списка`, 'info');
+        },
+
+        cleanGroupTitles(group) {
+            if (!group || !group.items || group.items.length === 0) return;
+            let modified = 0;
+            for (const item of group.items) {
+                const oldTitle = item.track.title;
+                const oldArtist = item.track.artist;
+                this.cleanTrackTitle(item.track);
+                if (item.track.title !== oldTitle || item.track.artist !== oldArtist) {
+                    modified++;
+                }
+            }
+            Alpine.store('app').toast(`Очищено названий в «${group.albumTitle || group.title}»: ${modified}`, 'info');
         },
 
         close() {

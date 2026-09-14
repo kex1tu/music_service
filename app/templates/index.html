@@ -30,7 +30,7 @@
 
     <!-- Компоненты приложения -->
     <script src="/static/js/downloader.js?v=20260910_02"></script>
-    <script src="/static/js/tag_editor.js?v=20260910_03"></script>
+    <script src="/static/js/tag_editor.js?v=20260914_01"></script>
     <script src="/static/js/lyrics_modal.js?v=20260910_02"></script>
     <script src="/static/js/file_manager.js?v=20260910_02"></script>
     <script src="/static/js/library_audit.js?v=20260914_01"></script>
@@ -1426,7 +1426,7 @@
                                         <path d="M9.5 16q-2.725 0-4.612-1.888T3 9.5t1.888-4.612T9.5 3t4.613 1.888T16 9.5q0 1.1-.35 2.075T14.7 13.3l5.6 5.6q.275.275.275.7t-.275.7t-.7.275t-.7-.275l-5.6-5.6q-.75.6-1.725.95T9.5 16m0-2q1.875 0 3.188-1.312T14 9.5t-1.312-3.187T9.5 5T6.313 6.313T5 9.5t1.313 3.188T9.5 14"/>
                                     </svg>
                                 </template>
-                                <span x-text="isFetchingLyrics ? `Поиск текстов (${lyricsProgress.current}/${lyricsProgress.total})...` : 'Найти тексты для альбома'"></span>
+                                <span x-text="isFetchingLyrics ? `Поиск текстов (${lyricsProgress.current}/${lyricsProgress.total})...` : 'Найти все тексты'"></span>
                             </button>
                         </div>
                     </div>
@@ -1485,33 +1485,7 @@
                                             </div>
                                         </div>
 
-                                        <!-- Быстрые действия в шапке релиза -->
-                                        <div class="flex items-center space-x-2 flex-shrink-0" @click.stop>
-                                            <template x-if="!group.isSingles">
-                                                <div class="flex items-center space-x-2">
-                                                    <button
-                                                        type="button"
-                                                        @click="openGroupCoverGallery(group)"
-                                                        class="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-pink-400 hover:text-pink-300 text-[11px] font-semibold rounded-lg border border-pink-500/30 transition flex items-center space-x-1"
-                                                        title="Найти обложку для этого релиза в галерее">
-                                                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                                                            <path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h14q.825 0 1.413.588T21 5v14q0 .825-.587 1.413T19 21zm0-2h14V5H5zm0 0V5zm2-2h10q.3 0 .45-.275t-.05-.525l-2.75-3.675q-.15-.2-.4-.2t-.4.2L11.25 16L9.4 13.525q-.15-.2-.4-.2t-.4.2l-2 2.675q-.2.25-.05.525T7 17"/>
-                                                        </svg>
-                                                        <span>Обложка</span>
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        @click="applyAlbumCoverToGroup(group)"
-                                                        class="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-emerald-400 hover:text-emerald-300 text-[11px] font-semibold rounded-lg border border-emerald-500/30 transition flex items-center space-x-1"
-                                                        title="Применить обложку релиза ко всем его трекам">
-                                                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                                                            <path d="m12 16.175l3.9-3.875q.275-.275.688-.288t.712.288q.275.275.275.7t-.275.7l-4.6 4.6q-.15.15-.325.213t-.375.062t-.375-.062t-.325-.213l-4.6-4.6q-.275-.275-.288-.687T6.7 12.3q.275-.275.7-.275t.7.275zm0-6L15.9 6.3q.275-.275.688-.287t.712.287q.275.275.275.7t-.275.7l-4.6 4.6q-.15.15-.325.213t-.375.062t-.375-.062t-.325-.213L6.7 7.7q-.275-.275-.288-.687T6.7 6.3q.275-.275.7-.275t.7.275z"/>
-                                                        </svg>
-                                                        <span>Арт трекам</span>
-                                                    </button>
-                                                </div>
-                                            </template>
-                                        </div>
+                                        <!-- Действия в заголовке убраны — дублировали кнопки внутри карточки -->
                                     </div>
 
                                     <!-- Раскрывающееся содержимое карточки релиза -->
@@ -1539,13 +1513,6 @@
                                                         </label>
                                                     </div>
                                                     <div class="flex flex-col items-center space-y-1">
-                                                        <label class="text-xs text-emerald-400 hover:underline cursor-pointer flex items-center space-x-1">
-                                                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                                                                <path d="M6 20q-.825 0-1.412-.587T4 18v-2q0-.425.288-.712T5 15t.713.288T6 16v2h12v-2q0-.425.288-.712T19 15t.713.288T20 16v2q0 .825-.587 1.413T18 20zm5-12.15L9.125 9.725q-.3.3-.712.288T7.7 9.7q-.275-.3-.288-.7t.288-.7l3.6-3.6q.15-.15.325-.212T12 4.425t.375.063t.325.212l3.6 3.6q.3.3.288.7t-.288.7q-.3.3-.712.313t-.713-.288L13 7.85V15q0 .425-.288.713T12 16t-.712-.288T11 15z"/>
-                                                            </svg>
-                                                            <span>Загрузить обложку</span>
-                                                            <input type="file" accept="image/jpeg,image/png" @change="handleGroupCoverUpload($event, group)" class="hidden">
-                                                        </label>
                                                         <button
                                                             type="button"
                                                             @click="openGroupCoverGallery(group)"
@@ -1615,7 +1582,7 @@
                                                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                                                                 <path d="M12 3a9 9 0 0 0-9 9a9 9 0 0 0 9 9a9 9 0 0 0 9-9a9 9 0 0 0-9-9m0 16a7 7 0 0 1-7-7a7 7 0 0 1 7-7a7 7 0 0 1 7 7a7 7 0 0 1-7 7m0-10a3 3 0 0 0-3 3a3 3 0 0 0 3 3a3 3 0 0 0 3-3a3 3 0 0 0-3-3m0 4a1 1 0 0 1-1-1a1 1 0 0 1 1-1a1 1 0 0 1 1 1a1 1 0 0 1-1 1"/>
                                                             </svg>
-                                                            <span>Найти в Deezer</span>
+                                                            <span>Автопоиск релиза</span>
                                                         </button>
                                                         <button
                                                             type="button"
@@ -1636,6 +1603,16 @@
                                                                 <path d="M9.5 16q-2.725 0-4.612-1.888T3 9.5t1.888-4.612T9.5 3t4.613 1.888T16 9.5q0 1.1-.35 2.075T14.7 13.3l5.6 5.6q.275.275.275.7t-.275.7t-.7.275t-.7-.275l-5.6-5.6q-.75.6-1.725.95T9.5 16m0-2q1.875 0 3.188-1.312T14 9.5t-1.312-3.187T9.5 5T6.313 6.313T5 9.5t1.313 3.188T9.5 14"/>
                                                             </svg>
                                                             <span>Найти тексты</span>
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            @click="cleanGroupTitles(group)"
+                                                            class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-amber-400 hover:text-amber-300 text-xs font-semibold rounded-lg border border-amber-500/30 transition flex items-center space-x-1.5 shadow-sm"
+                                                            title="Очистить названия треков от мусора и извлечь фиты (для этого релиза)">
+                                                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                                                <path d="M19.36 2.72l1.42 1.42a1.996 1.996 0 0 1 0 2.83l-1.42 1.42l-4.24-4.24l1.41-1.43a2 2 0 0 1 2.83 0M3 21v-4.24l10.6-10.6l4.25 4.24L7.24 21zm3.5-2H7.5l7.66-7.66l-.96-.95l-7.7 7.7z"/>
+                                                            </svg>
+                                                            <span>Очистить названия</span>
                                                         </button>
                                                         <button
                                                             type="button"
@@ -1663,10 +1640,9 @@
                                                         <th class="py-2.5 px-2 w-14 text-center">#</th>
                                                         <th class="py-2.5 px-3 min-w-[150px]">Название трека</th>
                                                         <th class="py-2.5 px-3 min-w-[130px]">Исполнитель</th>
-                                                        <th class="py-2.5 px-3 min-w-[130px]">Альбом</th>
-                                                        <th class="py-2.5 px-3 w-20">Год</th>
                                                         <th class="py-2.5 px-3 text-center w-24">Аудио</th>
                                                         <th class="py-2.5 px-3 text-center w-24">Текст</th>
+                                                        <th class="py-2.5 px-1 w-8 text-center" title="Исключить трек">✕</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody class="divide-y divide-gray-800/60 bg-gray-900/40">
@@ -1745,20 +1721,6 @@
                                                                     placeholder="Исполнитель"
                                                                     class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500">
                                                             </td>
-                                                            <td class="py-2 px-3">
-                                                                <input
-                                                                    type="text"
-                                                                    x-model="item.track.album"
-                                                                    placeholder="Альбом"
-                                                                    class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500">
-                                                            </td>
-                                                            <td class="py-2 px-3">
-                                                                <input
-                                                                    type="number"
-                                                                    x-model="item.track.year"
-                                                                    placeholder="Год"
-                                                                    class="w-20 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-center text-white focus:outline-none focus:border-emerald-500">
-                                                            </td>
                                                             <td class="py-2 px-3 text-center">
                                                                 <button
                                                                     type="button"
@@ -1792,6 +1754,17 @@
                                                                     <span x-text="item.track.lyrics_status === 'lrc' ? 'LRC' : (item.track.lyrics_status === 'txt' ? 'TXT' : '+ Текст')"></span>
                                                                 </button>
                                                             </td>
+                                                            <td class="py-2 px-1 text-center">
+                                                                <button
+                                                                    type="button"
+                                                                    @click="removeTrack(item.originalIndex)"
+                                                                    class="text-gray-600 hover:text-red-400 p-1 rounded transition"
+                                                                    title="Исключить трек из списка">
+                                                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                                                        <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
+                                                                    </svg>
+                                                                </button>
+                                                            </td>
                                                         </tr>
                                                     </template>
                                                 </tbody>
@@ -1819,6 +1792,7 @@
                                         <th class="py-2.5 px-3 w-20">Год</th>
                                         <th class="py-2.5 px-3 text-center w-24">Аудио</th>
                                         <th class="py-2.5 px-3 text-center w-24">Текст</th>
+                                        <th class="py-2.5 px-1 w-8 text-center" title="Исключить трек">✕</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-800/60 bg-gray-900/40">
@@ -1941,6 +1915,17 @@
                                                         'bg-gray-800 text-gray-400 hover:bg-gray-700': !track.lyrics_status || track.lyrics_status === 'none'
                                                     }">
                                                     <span x-text="track.lyrics_status === 'lrc' ? 'LRC' : (track.lyrics_status === 'txt' ? 'TXT' : '+ Текст')"></span>
+                                                </button>
+                                            </td>
+                                            <td class="py-2 px-1 text-center">
+                                                <button
+                                                    type="button"
+                                                    @click="removeTrack(index)"
+                                                    class="text-gray-600 hover:text-red-400 p-1 rounded transition"
+                                                    title="Исключить трек из списка">
+                                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                                        <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
+                                                    </svg>
                                                 </button>
                                             </td>
                                         </tr>
@@ -2221,6 +2206,7 @@
                         <input
                             type="checkbox"
                             x-model="singlesMode"
+                            @change="buildReleasesFromTracks()"
                             class="rounded bg-gray-900 border-gray-700 text-emerald-500 focus:ring-emerald-500/30 focus:ring-offset-0">
                         <span>Режим синглов (Artist/Track)</span>
                     </label>

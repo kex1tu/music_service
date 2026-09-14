@@ -119,7 +119,7 @@ def test_shazam_and_deezer_features_in_tag_editor(client: TestClient):
 
     # 1. Проверка кнопки и модального окна поиска в Deezer
     assert "openDeezerSearch" in html, "openDeezerSearch missing in index.html"
-    assert "Найти в Deezer" in html
+    assert "Автопоиск релиза" in html or "Найти в Deezer" in html
     assert "showDeezerModal" in html
     assert '@click="searchDeezerAlbums()"' in html
     assert '@click="applyDeezerAlbum(item.id)"' in html
@@ -311,7 +311,7 @@ def test_tag_editor_grouped_releases_and_per_track_covers_ui(client: TestClient)
     # 3. Галерея обложек для трека и группы
     assert "openTrackCoverGallery" in html
     assert "openGroupCoverGallery" in html
-    assert "applyAlbumCoverToGroup" in html
+    assert "applyGroupToTracks" in html or "applyAlbumCoverToGroup" in html
     assert "toggleGroupCollapse" in html
 
     # 4. Чекбоксы организации в подвале
