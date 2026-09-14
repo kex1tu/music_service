@@ -16,7 +16,7 @@ from app.core.exceptions import DownloadError, NotFoundError
 logger = logging.getLogger("music_manager.deezer")
 
 DEEZER_URL_PATTERN = re.compile(
-    r"(?:https?://)?(?:www\.)?deezer\.com/(?:[a-zA-Z]{2}(?:-[a-zA-Z]{2})?/)?(track|album|playlist)/(\d+)",
+    r"(?:https?://)?(?:www\.)?deezer\.com/(?:[a-zA-Z]{2}(?:-[a-zA-Z]{2})?/)?(track|album|playlist|artist)/(\d+)",
     re.IGNORECASE,
 )
 DEEZER_SHORT_LINK_PATTERN = re.compile(
@@ -48,7 +48,7 @@ class DeezerClient:
             follow_redirects=True,
         )
 
-    async def parse_url(self, url: str) -> tuple[Literal["track", "album", "playlist"], str]:
+    async def parse_url(self, url: str) -> tuple[Literal["track", "album", "playlist", "artist"], str]:
         """Определяет тип ресурса и идентификатор из URL Deezer.
 
         Поддерживает:
@@ -202,6 +202,15 @@ class DeezerClient:
     async def search_albums(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
         """Выполняет поиск альбомов по текстовому запросу."""
         data = await self._request_api("/search/album", params={"q": query, "limit": limit})
+        return data.get("data", [])
+
+    async def get_artist(self, artist_id: str) -> dict[str, Any]:
+        """Получает метаданные исполнителя из Deezer API."""
+        return await self._request_api(f"/artist/{artist_id}")
+
+    async def get_artist_albums(self, artist_id: str, limit: int = 150) -> list[dict[str, Any]]:
+        """Получает список релизов (альбомов, синглов, сборников) исполнителя."""
+        data = await self._request_api(f"/artist/{artist_id}/albums", params={"limit": limit})
         return data.get("data", [])
 
     async def download_cover_bytes(self, cover_url: str) -> bytes:

@@ -231,6 +231,19 @@
 | **R5: Улучшение структуры таблиц и новые функции управления треками** | `app/static/js/tag_editor.js`, `app/templates/index.html` | **DONE** | 1) В групповом режиме из вложенной таблицы треков убраны избыточные колонки «Альбом» и «Год» (уже присутствующие в карточке релиза). 2) Добавлена кнопка исключения трека `[✕]` (`removeTrack(index)`) для групповой и плоской таблиц. 3) В карточку релиза добавлена кнопка `[Очистить названия]` (`cleanGroupTitles(group)`) для очистки названий и извлечения фитов в рамках конкретного релиза. 4) Кнопка «Найти в Deezer» переименована в «Автопоиск релиза» (с учетом MusicBrainz), глобальная кнопка поиска текстов переименована в «Найти все тексты». 5) Версия `tag_editor.js` увеличена до `v=20260914_01`. |
 | **R6: Верификация, линтинг и тесты** | `tests/test_frontend.py` | **DONE** | Тесты обновлены с учетом актуализированных наименований кнопок. Все 512 тестов успешно пройдены (`pytest`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). |
 
+---
+
+## Блок 23: Интерактивный селектор дискографии исполнителя (Вариант А) (2026-09-14T14:22:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Схемы данных дискографии** | `app/schemas/download.py` | **DONE** | Добавлены Pydantic-модели `DiscographyReleaseItem` (id, title, type: album/single/ep/compilation, year, track_count, cover_url, url) и `ArtistDiscographyResponse` (artist_id, artist_name, artist_avatar, source, total_releases, releases). |
+| **R2: Клиенты источников (Deezer, Spotify, Yandex, Apple, YouTube)** | `app/services/deezer_client.py`, `app/services/spotify_client.py`, `app/services/yandex_client.py`, `app/services/apple_music_client.py`, `app/services/source_resolver.py` | **DONE** | Во всех клиентах расширен `parse_url` для распознавания URL профилей исполнителей (`/artist/`, `/channel/`, `/@handle`). Реализованы методы извлечения дискографий: `get_artist_discography` / `get_artist_albums`. В `SourceResolver` добавлен единый фасад `resolve_artist_discography(url)` с маппингом релизов и обложек. |
+| **R3: API-эндпоинт дискографии** | `app/routers/downloads.py` | **DONE** | Добавлен защищенный эндпоинт `GET /downloads/discography?url=...`, возвращающий `ArtistDiscographyResponse` для выбранного исполнителя. |
+| **R4: Frontend-компонент и модальное окно селектора** | `app/static/js/downloader.js`, `app/templates/index.html` | **DONE** | В `downloader.js` добавлена автодетекция ссылок на артистов `checkIsArtistUrl`, состояние `showDiscographyModal`, методы фильтрации по категориям (Все, Альбомы, Синглы & EP, Сборники), поиск по названию, групповой выбор и отправка выбранных URL в пакетную очередь `submitDiscographyBatch()`. В `index.html` добавлена кнопка «Дискография» в строке ввода и модальное окно с адаптивной сеткой карточек релизов. Версия скрипта обновлена до `downloader.js?v=20260914_01`. |
+| **R5: Верификация, линтинг и тесты** | `tests/test_deezer_client.py`, `tests/test_spotify_client.py`, `tests/test_yandex_client.py`, `tests/test_downloads_router.py`, `tests/test_frontend.py` | **DONE** | Разработаны юнит-тесты на парсинг ссылок артистов и получение дискографии для всех клиентов, интеграционный тест эндпоинта роутера и тест элементов интерфейса модального окна. Все 520 тестов успешно пройдены (`pytest`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). |
+
+
 
 
 

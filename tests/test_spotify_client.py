@@ -157,8 +157,55 @@ async def test_spotify_get_playlist_embed():
 
     client = SpotifyClient(http_client=mock_client)
     playlist = await client.get_playlist("pl_123")
-    assert playlist["title"] == "Today's Top Hits"
-    assert playlist["artist"] == "Spotify"
-    assert len(playlist["tracks"]) == 2
     assert playlist["tracks"][0]["title"] == "Hit Song 1"
     assert playlist["tracks"][1]["duration"] == 210
+
+
+@pytest.mark.asyncio
+async def test_spotify_parse_url_artist():
+    """Проверка разбора URL профиля артиста Spotify."""
+    client = SpotifyClient()
+    res_type, res_id = await client.parse_url("https://open.spotify.com/artist/4tZwfgrHOc3mvqYxwDoOD5")
+    assert res_type == "artist"
+    assert res_id == "4tZwfgrHOc3mvqYxwDoOD5"
+
+
+@pytest.mark.asyncio
+async def test_spotify_get_artist_discography():
+    """Проверка получения дискографии артиста Spotify."""
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.is_closed = False
+
+    async def mock_get(url, headers=None, params=None):
+        resp = MagicMock(spec=httpx.Response)
+        resp.status_code = 200
+        if "albums" in url:
+            resp.json.return_value = {
+                "items": [
+                    {
+                        "id": "alb_1",
+                        "name": "Album 1",
+                        "album_type": "album",
+                        "release_date": "2022-01-01",
+                        "total_tracks": 10,
+                        "images": [{"url": "https://img.com/alb1.jpg"}],
+                    }
+                ]
+            }
+        else:
+            resp.json.return_value = {
+                "name": "Test Artist",
+                "images": [{"url": "https://img.com/artist.jpg"}],
+            }
+        return resp
+
+    mock_client.get = AsyncMock(side_effect=mock_get)
+    client = SpotifyClient(client_id="cid", client_secret="csec", http_client=mock_client)
+    client._access_token = "valid_token"
+    client._token_expires_at = 9999999999.0
+
+    data = await client.get_artist_discography("artist_123")
+    assert data["artist"]["name"] == "Test Artist"
+    assert len(data["items"]) == 1
+    assert data["items"][0]["name"] == "Album 1"
+

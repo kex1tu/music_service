@@ -191,3 +191,36 @@ async def test_yandex_direct_download_url():
     assert direct_url is not None
     assert "https://s123.yandex.net/get-mp3/" in direct_url
     assert "/1725900000/stream/file.mp3" in direct_url
+
+
+@pytest.mark.asyncio
+async def test_yandex_parse_url_artist():
+    """Проверка разбора URL профиля артиста Яндекс Музыки."""
+    client = YandexMusicClient()
+    res_type, params = await client.parse_url("https://music.yandex.ru/artist/3121")
+    assert res_type == "artist"
+    assert params["artist_id"] == "3121"
+
+
+@pytest.mark.asyncio
+async def test_yandex_get_artist_discography():
+    """Проверка получения информации об артисте и списка альбомов в Яндекс Музыке."""
+    mock_resp = MagicMock(spec=httpx.Response)
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "artist": {"name": "Кино", "cover": {"uri": "avatars.yandex.net/get-music-content/123/%%"}},
+        "albums": [
+            {"id": 1, "title": "Группа крови", "year": 1988, "trackCount": 11, "type": "album"}
+        ],
+    }
+
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.is_closed = False
+    mock_client.get.return_value = mock_resp
+
+    client = YandexMusicClient(http_client=mock_client)
+    data = await client.get_artist_discography("3121")
+    assert data["artist"]["name"] == "Кино"
+    assert len(data["albums"]) == 1
+    assert data["albums"][0]["title"] == "Группа крови"
+

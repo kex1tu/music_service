@@ -247,3 +247,53 @@ def test_format_artists_and_extract_cover():
     }
     assert DeezerClient.format_artists(data_single) == "Justice"
     assert DeezerClient.extract_best_cover_url(data_single) == "https://img.com/big.jpg"
+
+
+@pytest.mark.asyncio
+async def test_parse_url_artist():
+    """Проверка разбора URL профиля артиста Deezer."""
+    client = DeezerClient()
+    res_type, res_id = await client.parse_url("https://www.deezer.com/artist/27")
+    assert res_type == "artist"
+    assert res_id == "27"
+
+    res_type, res_id = await client.parse_url("https://www.deezer.com/ru/artist/119")
+    assert res_type == "artist"
+    assert res_id == "119"
+
+
+@pytest.mark.asyncio
+async def test_get_artist_and_albums():
+    """Проверка получения метаданных артиста и списка его релизов."""
+    mock_http = MagicMock(spec=httpx.AsyncClient)
+    mock_http.is_closed = False
+
+    async def mock_get(url, params=None):
+        resp = MagicMock(spec=httpx.Response)
+        resp.status_code = 200
+        if "artist/27/albums" in url:
+            resp.json.return_value = {
+                "data": [
+                    {"id": 101, "title": "Discovery", "record_type": "album", "release_date": "2001-03-12"},
+                    {"id": 102, "title": "One More Time", "record_type": "single", "release_date": "2000-11-13"},
+                ]
+            }
+        else:
+            resp.json.return_value = {
+                "id": 27,
+                "name": "Daft Punk",
+                "picture_xl": "https://e-cdns-images.dzcdn.net/images/artist/dp.jpg",
+            }
+        return resp
+
+    mock_http.get = AsyncMock(side_effect=mock_get)
+    client = DeezerClient(http_client=mock_http)
+
+    artist = await client.get_artist("27")
+    assert artist["name"] == "Daft Punk"
+
+    albums = await client.get_artist_albums("27")
+    assert len(albums) == 2
+    assert albums[0]["title"] == "Discovery"
+    assert albums[1]["record_type"] == "single"
+

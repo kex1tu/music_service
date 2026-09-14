@@ -19,7 +19,11 @@ from rapidfuzz import fuzz, utils
 
 from app.config import Settings
 from app.core.exceptions import AudioMatchError, UnsupportedSourceError
-from app.schemas.download import ResolvedTrack
+from app.schemas.download import (
+    ArtistDiscographyResponse,
+    DiscographyReleaseItem,
+    ResolvedTrack,
+)
 from app.services.apple_music_client import AppleMusicClient
 from app.services.deezer_client import DeezerClient
 from app.services.spotify_client import SpotifyClient
@@ -613,6 +617,198 @@ class SourceResolver:
             return {"album": "", "album_artist": "", "year": None, "cover_url": None}, []
 
         raise UnsupportedSourceError(f"Неподдерживаемый источник: {source}")
+
+    async def resolve_artist_discography(self, url: str) -> ArtistDiscographyResponse:
+        """Разрешает URL исполнителя в структурированную дискографию со списком релизов."""
+        source = self.detect_source(url)
+
+        if source == "deezer":
+            res_type, res_id = await self._deezer.parse_url(url)
+            if res_type != "artist":
+                raise UnsupportedSourceError("Ссылка Deezer должна вести на профиль артиста (/artist/{id})")
+            artist_data = await self._deezer.get_artist(res_id)
+            albums_data = await self._deezer.get_artist_albums(res_id, limit=150)
+            releases: list[DiscographyReleaseItem] = []
+            for alb in albums_data:
+                rec_type = alb.get("record_type", "album").lower()
+                year = None
+                rel_date = alb.get("release_date")
+                if rel_date:
+                    try:
+                        year = int(str(rel_date)[:4])
+                    except ValueError:
+                        pass
+                releases.append(
+                    DiscographyReleaseItem(
+                        id=str(alb.get("id")),
+                        title=alb.get("title", "Unknown Release"),
+                        type=rec_type,
+                        year=year,
+                        track_count=alb.get("nb_tracks"),
+                        cover_url=alb.get("cover_xl") or alb.get("cover_big") or alb.get("cover_medium"),
+                        url=alb.get("link") or f"https://www.deezer.com/album/{alb.get('id')}",
+                    )
+                )
+            return ArtistDiscographyResponse(
+                artist_id=str(res_id),
+                artist_name=artist_data.get("name", "Unknown Artist"),
+                artist_avatar=artist_data.get("picture_xl") or artist_data.get("picture_big") or artist_data.get("picture_medium"),
+                source="deezer",
+                total_releases=len(releases),
+                releases=releases,
+            )
+
+        if source == "yandex":
+            res_type, params = await self._yandex.parse_url(url)
+            if res_type != "artist":
+                raise UnsupportedSourceError("Ссылка Яндекс Музыки должна вести на профиль артиста (/artist/{id})")
+            artist_id = params["artist_id"]
+            data = await self._yandex.get_artist_discography(artist_id)
+            artist_obj = data.get("artist", {})
+            albums_data = data.get("albums", [])
+            releases = []
+            for alb in albums_data:
+                alb_type = alb.get("type", "album").lower()
+                releases.append(
+                    DiscographyReleaseItem(
+                        id=str(alb.get("id")),
+                        title=alb.get("title", "Unknown Release"),
+                        type=alb_type,
+                        year=alb.get("year"),
+                        track_count=alb.get("trackCount"),
+                        cover_url=self._yandex.format_cover(alb.get("coverUri")),
+                        url=f"https://music.yandex.ru/album/{alb.get('id')}",
+                    )
+                )
+            cover_obj = artist_obj.get("cover", {})
+            avatar_url = self._yandex.format_cover(cover_obj.get("uri")) if isinstance(cover_obj, dict) else None
+            return ArtistDiscographyResponse(
+                artist_id=str(artist_id),
+                artist_name=artist_obj.get("name", "Unknown Artist"),
+                artist_avatar=avatar_url,
+                source="yandex",
+                total_releases=len(releases),
+                releases=releases,
+            )
+
+        if source == "spotify":
+            res_type, res_id = await self._spotify.parse_url(url)
+            if res_type != "artist":
+                raise UnsupportedSourceError("Ссылка Spotify должна вести на профиль артиста (/artist/{id})")
+            data = await self._spotify.get_artist_discography(res_id)
+            artist_obj = data.get("artist", {})
+            albums_data = data.get("items", [])
+            releases = []
+            for item in albums_data:
+                images = item.get("images", [])
+                cover = images[0].get("url") if images else None
+                year = None
+                rel_date = item.get("release_date")
+                if rel_date:
+                    try:
+                        year = int(str(rel_date)[:4])
+                    except ValueError:
+                        pass
+                releases.append(
+                    DiscographyReleaseItem(
+                        id=str(item.get("id")),
+                        title=item.get("name", "Unknown Release"),
+                        type=item.get("album_type", "album").lower(),
+                        year=year,
+                        track_count=item.get("total_tracks"),
+                        cover_url=cover,
+                        url=item.get("external_urls", {}).get("spotify") or f"https://open.spotify.com/album/{item.get('id')}",
+                    )
+                )
+            artist_images = artist_obj.get("images", [])
+            avatar_url = artist_images[0].get("url") if artist_images else None
+            return ArtistDiscographyResponse(
+                artist_id=str(res_id),
+                artist_name=artist_obj.get("name", "Unknown Artist"),
+                artist_avatar=avatar_url,
+                source="spotify",
+                total_releases=len(releases),
+                releases=releases,
+            )
+
+        if source == "applemusic":
+            res_type, params = self._apple.parse_url(url)
+            if res_type != "artist":
+                raise UnsupportedSourceError("Ссылка Apple Music должна вести на профиль артиста (/artist/{id})")
+            artist_id = params.get("artist_id", "")
+            data = await self._apple.get_artist_discography(url, artist_id)
+            releases = [
+                DiscographyReleaseItem(
+                    id=str(rel.get("id")),
+                    title=rel.get("title", "Unknown Release"),
+                    type=rel.get("type", "album"),
+                    year=rel.get("year"),
+                    track_count=rel.get("track_count"),
+                    cover_url=rel.get("cover_url"),
+                    url=rel.get("url"),
+                )
+                for rel in data.get("releases", [])
+            ]
+            return ArtistDiscographyResponse(
+                artist_id=str(artist_id),
+                artist_name=data.get("artist_name", "Unknown Artist"),
+                artist_avatar=data.get("artist_avatar"),
+                source="applemusic",
+                total_releases=len(releases),
+                releases=releases,
+            )
+
+        if source in ("youtube", "soundcloud"):
+            return await self._resolve_ytdlp_artist_discography(url, source)
+
+        raise UnsupportedSourceError(f"Получение дискографии не поддерживается для источника: {source}")
+
+    async def _resolve_ytdlp_artist_discography(self, url: str, source: str) -> ArtistDiscographyResponse:
+        """Извлекает релизы исполнителя YouTube / SoundCloud через yt-dlp."""
+        def _extract(target_url: str) -> dict[str, Any]:
+            opts = {
+                "extract_flat": True,
+                "skip_download": True,
+                "quiet": True,
+                "no_warnings": True,
+                "ignoreconfig": True,
+            }
+            if self._cookies_path and self._cookies_path.is_file():
+                opts["cookiefile"] = str(self._cookies_path)
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(target_url, download=False) or {}
+
+        info = await asyncio.to_thread(_extract, url)
+        channel_name = info.get("channel") or info.get("uploader") or info.get("title") or "Unknown Channel"
+        avatar = info.get("thumbnail")
+        entries = list(info.get("entries") or [])
+
+        releases = []
+        for idx, entry in enumerate(entries, start=1):
+            e_id = entry.get("id") or str(idx)
+            e_title = entry.get("title") or f"Release {idx}"
+            e_url = entry.get("url") or entry.get("webpage_url") or f"https://www.youtube.com/playlist?list={e_id}"
+            e_cover = entry.get("thumbnail") or avatar
+            releases.append(
+                DiscographyReleaseItem(
+                    id=str(e_id),
+                    title=e_title,
+                    type="album",
+                    year=None,
+                    track_count=entry.get("playlist_count"),
+                    cover_url=e_cover,
+                    url=e_url,
+                )
+            )
+
+        return ArtistDiscographyResponse(
+            artist_id=str(info.get("channel_id") or info.get("id") or "channel"),
+            artist_name=channel_name,
+            artist_avatar=avatar,
+            source=source,
+            total_releases=len(releases),
+            releases=releases,
+        )
 
     async def _resolve_deezer(self, url: str) -> tuple[dict[str, Any], list[ResolvedTrack]]:
         """Разрешает Deezer URL: извлекает метаданные и связывает аудио через AudioMatcher."""

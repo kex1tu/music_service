@@ -222,3 +222,26 @@ class DownloadTracksResponse(BaseModel):
         default_factory=list,
         description="Список треков с предзаполненными метаданными",
     )
+
+
+class DiscographyReleaseItem(BaseModel):
+    """Описание релиза (альбома, сингла, EP, сборника) в дискографии исполнителя."""
+
+    id: str = Field(..., description="Идентификатор релиза в сервисе-источнике")
+    title: str = Field(..., description="Название релиза")
+    type: str = Field(default="album", description="Тип релиза (album, single, ep, compilation)")
+    year: int | None = Field(default=None, description="Год выпуска")
+    track_count: int | None = Field(default=None, description="Количество треков в релизе")
+    cover_url: str | None = Field(default=None, description="Прямой URL обложки")
+    url: str = Field(..., description="Прямой веб-URL релиза для скачивания")
+
+
+class ArtistDiscographyResponse(BaseModel):
+    """Сводная информация о дискографии артиста со списком релизов."""
+
+    artist_id: str = Field(..., description="Идентификатор исполнителя")
+    artist_name: str = Field(..., description="Имя артиста / название группы")
+    artist_avatar: str | None = Field(default=None, description="Аватар/фото исполнителя")
+    source: str = Field(..., description="Сервис-источник (deezer, spotify, yandex, applemusic, youtube)")
+    total_releases: int = Field(..., description="Общее число доступных релизов")
+    releases: list[DiscographyReleaseItem] = Field(default_factory=list, description="Список релизов исполнителя")

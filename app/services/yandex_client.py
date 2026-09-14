@@ -46,6 +46,10 @@ PLAYLIST_UUID_PATTERN = re.compile(
     r"(?:https?://)?(?:www\.)?music\.yandex\.(?:ru|com|by|kz)/playlist/([a-zA-Z0-9_\-]+)",
     re.IGNORECASE,
 )
+ARTIST_PATTERN = re.compile(
+    r"(?:https?://)?(?:www\.)?music\.yandex\.(?:ru|com|by|kz)/artist/(\d+)",
+    re.IGNORECASE,
+)
 
 
 class YandexMusicClient:
@@ -80,7 +84,7 @@ class YandexMusicClient:
             follow_redirects=True,
         )
 
-    async def parse_url(self, url: str) -> tuple[Literal["track", "album", "playlist"], dict[str, str]]:
+    async def parse_url(self, url: str) -> tuple[Literal["track", "album", "playlist", "artist"], dict[str, str]]:
         """Определяет тип ресурса и параметры из URL Яндекс Музыки.
 
         Raises:
@@ -89,6 +93,11 @@ class YandexMusicClient:
         clean_url = url.strip()
         if not re.match(r"^https?://", clean_url, re.IGNORECASE):
             clean_url = f"https://{clean_url}"
+
+        # 0. Артист: /artist/123
+        m = ARTIST_PATTERN.search(clean_url)
+        if m:
+            return "artist", {"artist_id": m.group(1)}
 
         # 1. Трек в альбоме: /album/123/track/456
         m = TRACK_WITH_ALBUM_PATTERN.search(clean_url)
@@ -276,6 +285,22 @@ class YandexMusicClient:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Не удалось сгенерировать прямую ссылку Яндекс Музыки для трека %s: %s", track_id, exc)
             return None
+        finally:
+            if should_close:
+                await client.aclose()
+
+    async def get_artist_discography(self, artist_id: str) -> dict[str, Any]:
+        """Запрашивает информацию об исполнителе и список его релизов."""
+        client = await self._get_client()
+        should_close = self._external_client is None
+        try:
+            url = f"{self.BASE_WEB_URL}/handlers/artist.jsx?artist={artist_id}&what=albums"
+            resp = await client.get(url)
+            if resp.status_code == 404:
+                raise NotFoundError(f"Исполнитель Яндекс Музыки {artist_id} не найден")
+            if resp.status_code != 200:
+                raise DownloadError(f"Яндекс Музыка вернула HTTP {resp.status_code} для исполнителя {artist_id}")
+            return resp.json()
         finally:
             if should_close:
                 await client.aclose()

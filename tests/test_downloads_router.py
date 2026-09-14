@@ -175,3 +175,38 @@ def test_upload_torrent_invalid_extension(authenticated_client: TestClient):
     assert resp.status_code == 400
     assert resp.json()["error"] == "UNSUPPORTED_SOURCE"
 
+
+def test_get_artist_discography_endpoint(authenticated_client: TestClient):
+    """Проверка эндпоинта GET /downloads/discography."""
+    from app.schemas.download import ArtistDiscographyResponse, DiscographyReleaseItem
+    from app.services.source_resolver import SourceResolver
+
+    mock_resp = ArtistDiscographyResponse(
+        artist_id="27",
+        artist_name="Daft Punk",
+        artist_avatar="https://img.com/avatar.jpg",
+        source="deezer",
+        total_releases=1,
+        releases=[
+            DiscographyReleaseItem(
+                id="101",
+                title="Discovery",
+                type="album",
+                year=2001,
+                track_count=14,
+                cover_url="https://img.com/discovery.jpg",
+                url="https://www.deezer.com/album/101",
+            )
+        ],
+    )
+
+    with patch.object(SourceResolver, "resolve_artist_discography", new=AsyncMock(return_value=mock_resp)):
+        resp = authenticated_client.get("/downloads/discography?url=https://www.deezer.com/artist/27")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["artist_name"] == "Daft Punk"
+        assert data["total_releases"] == 1
+        assert data["releases"][0]["title"] == "Discovery"
+        assert data["releases"][0]["year"] == 2001
+
+

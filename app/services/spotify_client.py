@@ -20,7 +20,7 @@ from app.core.exceptions import DownloadError, NotFoundError
 logger = logging.getLogger("music_manager.spotify")
 
 SPOTIFY_URL_PATTERN = re.compile(
-    r"(?:https?://)?(?:open\.)?spotify\.com/(?:[a-zA-Z]{2}(?:-[a-zA-Z]{2})?/)?(track|album|playlist)/([a-zA-Z0-9]+)",
+    r"(?:https?://)?(?:open\.)?spotify\.com/(?:[a-zA-Z]{2}(?:-[a-zA-Z]{2})?/)?(track|album|playlist|artist)/([a-zA-Z0-9]+)",
     re.IGNORECASE,
 )
 SPOTIFY_LINK_PATTERN = re.compile(
@@ -59,7 +59,7 @@ class SpotifyClient:
             follow_redirects=True,
         )
 
-    async def parse_url(self, url: str) -> tuple[Literal["track", "album", "playlist"], str]:
+    async def parse_url(self, url: str) -> tuple[Literal["track", "album", "playlist", "artist"], str]:
         """Определяет тип ресурса и идентификатор Spotify.
 
         Raises:
@@ -388,4 +388,47 @@ class SpotifyClient:
             "artist": pl_owner,
             "cover_url": cover_url,
             "tracks": tracks,
+        }
+
+    async def get_artist_discography(self, artist_id: str) -> dict[str, Any]:
+        """Получает информацию об исполнителе и список его релизов."""
+        token = await self._get_api_token()
+        if token:
+            client = await self._get_client()
+            should_close = self._external_client is None
+            try:
+                artist_resp = await client.get(
+                    f"https://api.spotify.com/v1/artists/{artist_id}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                artist_data = artist_resp.json() if artist_resp.status_code == 200 else {}
+                albums_resp = await client.get(
+                    f"https://api.spotify.com/v1/artists/{artist_id}/albums",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={"include_groups": "album,single,compilation", "limit": 50},
+                )
+                albums_data = albums_resp.json().get("items", []) if albums_resp.status_code == 200 else []
+                return {
+                    "artist": artist_data,
+                    "items": albums_data,
+                }
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Spotify Web API get_artist_discography error (%s), fallback to embed", exc)
+            finally:
+                if should_close:
+                    await client.aclose()
+
+        entity = await self._scrape_embed("artist", artist_id)
+        name = entity.get("title") or entity.get("name") or "Unknown Artist"
+        images = entity.get("images") or entity.get("visualIdentity", {}).get("image", [])
+        avatar = None
+        if isinstance(images, list) and images:
+            avatar = images[0].get("url") if isinstance(images[0], dict) else None
+        releases = (
+            entity.get("discography", {}).get("all", {}).get("items", [])
+            or entity.get("releases", {}).get("items", [])
+        )
+        return {
+            "artist": {"name": name, "images": [{"url": avatar}] if avatar else []},
+            "items": releases,
         }

@@ -332,6 +332,32 @@ def test_tag_editor_grouped_releases_and_per_track_covers_ui(client: TestClient)
     assert "groupByAlbum" in tag_editor_js
 
 
+def test_artist_discography_picker_ui(client: TestClient):
+    """Проверка элементов интерфейса селектора дискографии артиста."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+
+    # 1. Проверка разметки модального окна дискографии
+    assert "showDiscographyModal" in html
+    assert "closeDiscographyModal()" in html
+    assert "filteredReleases()" in html
+    assert "submitDiscographyBatch()" in html
+    assert "discographyFilter" in html
+
+    # 2. Проверка кнопки быстрой дискографии в строке ввода
+    assert "checkIsArtistUrl(url)" in html
+    assert "Дискография" in html
+
+    # 3. Проверка методов в downloader.js
+    downloader_js = (PROJECT_ROOT / "app" / "static" / "js" / "downloader.js").read_text(encoding="utf-8")
+    assert "checkIsArtistUrl" in downloader_js
+    assert "openDiscographyModal" in downloader_js
+    assert "submitDiscographyBatch" in downloader_js
+    assert "filteredReleases" in downloader_js
+    assert "toggleRelease" in downloader_js
+
+
 
 
 

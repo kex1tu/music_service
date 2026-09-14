@@ -16,8 +16,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, UploadFile, status
 
-from app.dependencies import CurrentUserDep, DownloadServiceDep, TmpSandboxDep
+from app.dependencies import (
+    CurrentUserDep,
+    DownloadServiceDep,
+    SourceResolverDep,
+    TmpSandboxDep,
+)
 from app.schemas.download import (
+    ArtistDiscographyResponse,
     BatchDownloadResponse,
     CreateBatchDownloadRequest,
     CreateDownloadRequest,
@@ -75,6 +81,22 @@ async def create_batch_downloads(
         jobs=[j.to_response() for j in jobs],
         total_queued=len(jobs),
     )
+
+
+@router.get(
+    "/discography",
+    response_model=ArtistDiscographyResponse,
+    summary="Получение дискографии артиста",
+    description="Принимает URL профиля исполнителя (Deezer, Spotify, Яндекс Музыка, Apple Music, YouTube), возвращает список релизов.",
+)
+async def get_artist_discography(
+    url: str,
+    source_resolver: SourceResolverDep,
+    current_user: CurrentUserDep,
+) -> ArtistDiscographyResponse:
+    """Разрешает URL артиста и возвращает список доступных альбомов, синглов и EP."""
+    logger.info("Пользователь '%s' запросил дискографию по URL: %s", current_user, url)
+    return await source_resolver.resolve_artist_discography(url)
 
 
 @router.post(

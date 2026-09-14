@@ -45,8 +45,8 @@ class AppleMusicClient:
             follow_redirects=True,
         )
 
-    def parse_url(self, url: str) -> tuple[Literal["track", "album", "playlist"], dict[str, str]]:
-        """Определяет тип ресурса (track, album, playlist) и идентификаторы Apple Music.
+    def parse_url(self, url: str) -> tuple[Literal["track", "album", "playlist", "artist"], dict[str, str]]:
+        """Определяет тип ресурса (track, album, playlist, artist) и идентификаторы Apple Music.
 
         Raises:
             DownloadError: Если формат URL некорректен или не распознан.
@@ -74,6 +74,11 @@ class AppleMusicClient:
         m_album = re.search(r"/album/(?:[^/]+/)?(\d+)", clean_url, re.IGNORECASE)
         if m_album:
             return "album", {"album_id": m_album.group(1)}
+
+        # Артист /artist/name/123 или /artist/123
+        m_art = re.search(r"/artist/(?:[^/]+/)?(\d+)", clean_url, re.IGNORECASE)
+        if m_art:
+            return "artist", {"artist_id": m_art.group(1)}
 
         raise DownloadError(f"Строка '{url}' не является распознаваемым URL Apple Music")
 
@@ -317,3 +322,55 @@ class AppleMusicClient:
             }
 
         raise NotFoundError("Не удалось обнаружить треки в коллекции Apple Music")
+
+    async def get_artist_discography(self, url: str, artist_id: str) -> dict[str, Any]:
+        """Извлекает дискографию исполнителя из страницы Apple Music."""
+        page_info = await self.fetch_page_data(url)
+        payload = page_info.get("payload")
+        artist_name = "Unknown Artist"
+        avatar_url = None
+        releases: list[dict[str, Any]] = []
+
+        if page_info.get("type") == "server_data" and isinstance(payload, list) and payload:
+            first = payload[0] if isinstance(payload, list) else payload
+            data_items = first.get("data", []) if isinstance(first, dict) else []
+            for item in data_items:
+                if item.get("type") == "artists":
+                    attrs = item.get("attributes", {})
+                    artist_name = attrs.get("name", artist_name)
+                    artwork = attrs.get("artwork", {})
+                    avatar_url = self.format_cover(artwork.get("url"))
+                elif item.get("type") in ("albums", "recordings"):
+                    attrs = item.get("attributes", {})
+                    rel_title = attrs.get("name")
+                    if rel_title:
+                        artwork = attrs.get("artwork", {})
+                        rel_cover = self.format_cover(artwork.get("url"))
+                        year_val = None
+                        if attrs.get("releaseDate"):
+                            try:
+                                year_val = int(str(attrs["releaseDate"])[:4])
+                            except ValueError:
+                                pass
+                        releases.append({
+                            "id": str(item.get("id")),
+                            "title": rel_title,
+                            "type": "single" if attrs.get("isSingle") else "album",
+                            "year": year_val,
+                            "track_count": attrs.get("trackCount"),
+                            "cover_url": rel_cover,
+                            "url": attrs.get("url") or f"https://music.apple.com/album/{item.get('id')}",
+                        })
+
+        if not artist_name or artist_name == "Unknown Artist":
+            og_title = page_info.get("title")
+            if og_title:
+                artist_name = og_title.split(" on Apple Music")[0].split(" в Apple Music")[0].strip()
+            if page_info.get("image"):
+                avatar_url = self.format_cover(page_info.get("image"))
+
+        return {
+            "artist_name": artist_name,
+            "artist_avatar": avatar_url,
+            "releases": releases,
+        }
