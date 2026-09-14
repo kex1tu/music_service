@@ -77,13 +77,16 @@ class LibraryAuditService:
         self._lock = asyncio.Lock()
         # Кеш треков: rel_path -> dict(mtime=float, size=int, track=TrackTags)
         self._cache: dict[str, dict[str, Any]] = {}
+        # Кеш сверок релизов с каталогом Deezer: path -> IncompleteAlbumItem
+        self._catalog_cache: dict[str, IncompleteAlbumItem] = {}
         # Прогресс пакетного сбора текстов
         self._lyrics_progress = BatchLyricsProgressResponse(is_running=False)
         self._lyrics_task: asyncio.Task | None = None
 
     def invalidate(self) -> None:
-        """Сбрасывает кеш индекса."""
+        """Сбрасывает кеш индекса и каталога."""
         self._cache.clear()
+        self._catalog_cache.clear()
 
     async def ensure_index(self, force: bool = False) -> None:
         """Выполняет инкрементальное обновление in-memory индекса медиатеки."""
@@ -566,6 +569,28 @@ class LibraryAuditService:
             )
             year = next((t.year for t in tracks if t.year), None)
 
+            # Определение сингла: если 1 трек и в названии папки или альбома есть single / сингл
+            alb_dir_name = Path(album_dir).name.lower() if album_dir else ""
+            alb_name_lower = (album_name or "").lower()
+            if len(tracks) == 1 and (
+                "single" in alb_dir_name
+                or "сингл" in alb_dir_name
+                or "single" in alb_name_lower
+                or "сингл" in alb_name_lower
+            ):
+                continue
+
+            # 1. Проверяем кэш сверок с Deezer
+            if album_dir in self._catalog_cache:
+                cached_match = self._catalog_cache[album_dir]
+                # Если сверенный релиз укомплектован (все треки присутствуют) -> пропускаем!
+                if cached_match.expected_count <= cached_match.present_count or not cached_match.missing_tracks:
+                    continue
+                # Иначе включаем сверенный результат из кеша
+                incomplete_albums.append(cached_match)
+                total_missing_tracks_count += len(cached_match.missing_tracks)
+                continue
+
             # Проверка наличия обложки
             has_cover = any(t.has_cover for t in tracks)
             if not has_cover and album_dir:
@@ -662,6 +687,20 @@ class LibraryAuditService:
                         all_tracks.append(missing_trk)
 
             if is_incomplete and total_expected_tracks > total_present_tracks:
+                # Кандидат на неполный альбом.
+                # Попробуем автоматически сверить с Deezer, если клиент доступен
+                if self._deezer_client:
+                    try:
+                        matched = await self.match_album_catalog(album_dir or first_t.path)
+                        if matched.expected_count <= matched.present_count or not matched.missing_tracks:
+                            # В официальном каталоге Deezer все треки релиза на месте (ложный признак неполноты по тегам)
+                            continue
+                        incomplete_albums.append(matched)
+                        total_missing_tracks_count += len(matched.missing_tracks)
+                        continue
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("Сверка с каталогом Deezer для %s завершилась с ошибкой: %s", album_dir, exc)
+
                 incomplete_albums.append(
                     IncompleteAlbumItem(
                         path=album_dir or first_t.path,
@@ -809,11 +848,7 @@ class LibraryAuditService:
                     logger.warning("Сбой поиска альбома в Deezer (%s): %s", q, exc)
 
         if not album_data:
-            offline_res = await self.get_incomplete_albums()
-            for alb in offline_res.albums:
-                if alb.path == norm_album_path:
-                    return alb
-            return IncompleteAlbumItem(
+            fallback_item = IncompleteAlbumItem(
                 path=norm_album_path,
                 album=album_name,
                 artist=artist_name,
@@ -821,7 +856,9 @@ class LibraryAuditService:
                 has_cover=has_cover,
                 present_count=len(local_tracks),
                 expected_count=len(local_tracks),
+                is_catalog_matched=False,
             )
+            return fallback_item
 
         deezer_tracks = album_data.get("tracks", {}).get("data", [])
         cover_url = DeezerClient.extract_best_cover_url(album_data)
@@ -907,7 +944,7 @@ class LibraryAuditService:
                 missing_tracks.append(trk_info)
                 all_matched_tracks.append(trk_info)
 
-        return IncompleteAlbumItem(
+        res_item = IncompleteAlbumItem(
             path=norm_album_path,
             album=deezer_title or album_name,
             artist=deezer_artist or artist_name,
@@ -922,4 +959,6 @@ class LibraryAuditService:
             is_catalog_matched=True,
             deezer_album_id=deezer_id,
         )
+        self._catalog_cache[norm_album_path] = res_item
+        return res_item
 

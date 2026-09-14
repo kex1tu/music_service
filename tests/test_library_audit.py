@@ -624,4 +624,80 @@ async def test_download_missing_with_deezer_album_id(
         authenticated_client.app.dependency_overrides.pop(get_download_service, None)
 
 
+@pytest.mark.asyncio
+async def test_incomplete_albums_auto_match_deezer_filters_false_positives(tmp_path: Path):
+    """Проверка, что ложно-неполный альбом (25 треков из 25 в Deezer, но track_total=30) отсеивается."""
+    from app.core.sandbox import PathSandbox
+
+    sandbox = PathSandbox(tmp_path)
+    album_dir = tmp_path / "Eminem" / "The Slim Shady LP"
+    album_dir.mkdir(parents=True, exist_ok=True)
+
+    mock_dz = MagicMock()
+    # Deezer возвращает 25 треков для этого альбома
+    dz_tracks = [{"id": i, "title": f"Song {i}", "track_position": i, "disk_number": 1} for i in range(1, 26)]
+    mock_dz.search_albums = AsyncMock(return_value=[{"id": 1111, "title": "The Slim Shady LP", "artist": {"name": "Eminem"}}])
+    mock_dz.get_album = AsyncMock(return_value={"id": 1111, "title": "The Slim Shady LP", "tracks": {"data": dz_tracks}})
+
+    mock_tag_svc = MagicMock()
+    audit_svc = LibraryAuditService(music_sandbox=sandbox, tag_service=mock_tag_svc, deezer_client=mock_dz)
+
+    # 25 локальных треков, но у каждого track_total=30
+    cache = {}
+    for i in range(1, 26):
+        rel = f"Eminem/The Slim Shady LP/{i:02d}. Song {i}.mp3"
+        cache[rel] = {
+            "mtime": 1000.0,
+            "size": 1000,
+            "track": TrackTags(
+                path=rel,
+                track_number=i,
+                track_total=30,  # Завышенный track_total
+                title=f"Song {i}",
+                artist="Eminem",
+                album="The Slim Shady LP",
+            ),
+        }
+    audit_svc._cache = cache
+    audit_svc.ensure_index = AsyncMock()
+
+    res = await audit_svc.get_incomplete_albums()
+    # Так как в каталоге Deezer всего 25 треков и все 25 есть на диске, альбом не должен возвращаться как неполный!
+    assert res.total_incomplete_albums == 0
+    assert len(res.albums) == 0
+    # Проверяем, что результат сохранился в кэше каталога
+    assert "Eminem/The Slim Shady LP" in audit_svc._catalog_cache
+
+
+@pytest.mark.asyncio
+async def test_incomplete_albums_single_folder_ignored(tmp_path: Path):
+    """Проверка, что папка сингла с 1 треком и track_number=13 не попадает в неполные релизы."""
+    from app.core.sandbox import PathSandbox
+
+    sandbox = PathSandbox(tmp_path)
+    mock_tag_svc = MagicMock()
+    audit_svc = LibraryAuditService(music_sandbox=sandbox, tag_service=mock_tag_svc)
+
+    rel = "Eminem/From The D 2 The LBC - Single/01. Song.mp3"
+    audit_svc._cache = {
+        rel: {
+            "mtime": 1000.0,
+            "size": 1000,
+            "track": TrackTags(
+                path=rel,
+                track_number=13,  # Например, 13-й трек сборника, скачанный как сингл
+                track_total=20,
+                title="From The D 2 The LBC",
+                artist="Eminem",
+                album="From The D 2 The LBC - Single",
+            ),
+        }
+    }
+    audit_svc.ensure_index = AsyncMock()
+
+    res = await audit_svc.get_incomplete_albums()
+    assert res.total_incomplete_albums == 0
+    assert len(res.albums) == 0
+
+
 
