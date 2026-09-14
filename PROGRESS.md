@@ -2,8 +2,8 @@
 
 ## Текущий статус проекта
 - **Общий прогресс:** Все компоненты и оптимизационные доработки завершены (100%)
-- **Активный этап:** Устранена проблема рассинхронизации и кэширования списков треков между вкладками и браузерами: добавлены заголовки no-cache, сброс кэша при операциях с файлами/тегами/текстами, автообновление по вкладкам и фокусу окна.
-- **Результаты тестов:** 540/540 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
+- **Активный этап:** Реализована автоматическая каталожная сверка неполных релизов с Deezer, постоянное кэширование укомплектованных релизов и мгновенная дозагрузка недостающих треков.
+- **Результаты тестов:** 542/542 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -337,6 +337,18 @@
 | **R1: Заголовки анти-кэширования HTTP** | `app/main.py` | **DONE** | Внедрен глобальный middleware в FastAPI, проставляющий заголовки `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`, `Pragma: no-cache` и `Expires: 0` для всех динамических API-эндпоинтов, предотвращающий застревание ответов в дисковом кэше браузеров. |
 | **R2: Принудительный сброс бэкенд-индекса и инвалидация** | `app/routers/files.py`, `app/routers/tags.py`, `app/routers/lyrics.py`, `app/services/library_audit_service.py` | **DONE** | Добавлен эндпоинт `POST /files/audit/refresh` и параметр `force=True` в `GET /files/audit/summary`. Вызов `audit_service.invalidate()` внедрен во все точки модификации медиатеки: `PUT /tags/batch`, `DELETE /files`, `POST /lyrics`, `DELETE /lyrics`. |
 | **R3: Реактивные события фронтенда и сброс кэша скриптов** | `app/static/js/file_manager.js`, `app/static/js/library_audit.js`, `app/static/js/lyrics_modal.js`, `app/static/js/tag_editor.js`, `app/templates/index.html` | **DONE** | Добавлены сквозные пользовательские события `refresh-audit` и `refresh-file-manager`, реактивные слушатели переключения вкладок `$watch('$store.app.activeTab')` и слушатели `window.addEventListener('focus')`. Во все `fetch`-запросы списков файлов и аудита добавлены динамические кэш-бастеры `_t=${Date.now()}`. Версии скриптов в `index.html` инкрементированы до `?v=20260914_03`. |
+
+---
+
+## Блок 17: Автоматическая каталожная сверка и кэширование неполных релизов (2026-09-14T20:08:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Кэширование сверок и отсечение ложно-неполных релизов** | `app/services/library_audit_service.py`, `tests/test_library_audit.py` | **DONE** | Внедрен in-memory кэш `_catalog_cache` в `LibraryAuditService`. В методе `get_incomplete_albums()` добавлена автоматическая сверка кандидатов с официальным каталогом Deezer (`match_album_catalog`). Релизы, у которых все треки официального альбома присутствуют на диске (например, 25 из 25 в `The Slim Shady LP` при старых тегах `track_total=30`), навсегда помечаются укомплектованными и исключаются из списка неполных релизов. |
+| **R2: Игнорирование одиночных синглов в неполных альбомах** | `app/services/library_audit_service.py`, `tests/test_library_audit.py` | **DONE** | Папки синглов с 1 треком (где имя каталога или тег альбома содержит `- Single`, `[Single]`, `сингл`) больше не расцениваются как неполные альбомы, даже если трек имел порядковый номер сборника (например, 13/20). |
+| **R3: Предзаполнение Deezer URL для мгновенной дозагрузки** | `app/services/library_audit_service.py`, `app/static/js/library_audit.js` | **DONE** | При обнаружении действительно неполных релизов (например, `The Death of Slim Shady` без трека 2 «Habits», `Curtain Call 2` с 4 из 25 треков) они сразу поставляются на фронтенд со статусом `is_catalog_matched: true` и готовыми `deezer_url`. Кнопка «Скачать недостающие» мгновенно ставит недостающие треки в очередь загрузок без необходимости ручной сверки. |
+| **R4: Тесты и деплой на сервер** | `tests/test_library_audit.py` | **DONE** | Добавлены модульные тесты `test_incomplete_albums_auto_match_deezer_filters_false_positives` и `test_incomplete_albums_single_folder_ignored`. Все 542 теста успешно пройдены (`pytest tests/`, 100% pass), линтер `ruff` чист. Изменения закоммичены, запушены в репозиторий и развернуты на боевом сервере `nl_vpn` с перезапуском `music-manager.service`. |
+
 
 
 
