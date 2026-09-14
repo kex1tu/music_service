@@ -665,7 +665,7 @@ def test_deezer_album_endpoints(tags_client: TestClient, auth_tags_client: TestC
         assert resp.status_code == 200
         details = resp.json()
         assert details["artist"] == "Jay-Z\\\\Linkin Park"
-        assert details["genre"] == "Hip Hop\\\\Rock"
+        assert details["genre"] == "Hip-Hop\\\\Rock"
         assert len(details["tracks"]) == 3
         assert details["tracks"][0]["artist"] == "Jay-Z\\\\Linkin Park"
         assert details["tracks"][1]["artist"] == "Jay-Z\\\\Eminem"

@@ -168,6 +168,7 @@ class LibraryAuditService:
                 disc_number=disc_number,
                 disc_total=disc_total,
                 duration=duration_sec,
+                genre=item.get("genre"),
                 has_cover=bool(item.get("has_cover", False)),
                 lyrics_status=lyrics_status,
             )

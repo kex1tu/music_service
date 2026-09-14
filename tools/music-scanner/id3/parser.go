@@ -188,6 +188,8 @@ func parseID3v22Frames(data []byte, meta *TrackMeta) {
 			meta.AlbumArtist = decodeTextFrame(frameData)
 		case "TAL":
 			meta.Album = decodeTextFrame(frameData)
+		case "TCO":
+			meta.Genre = decodeTextFrame(frameData)
 		case "TRK":
 			parseTrackNumber(decodeTextFrame(frameData), meta)
 		case "TYE":
@@ -212,6 +214,8 @@ func applyFrame(frameID string, data []byte, meta *TrackMeta) {
 		meta.AlbumArtist = decodeTextFrame(data)
 	case "TALB":
 		meta.Album = decodeTextFrame(data)
+	case "TCON":
+		meta.Genre = decodeTextFrame(data)
 	case "TRCK":
 		parseTrackNumber(decodeTextFrame(data), meta)
 	case "TPOS":

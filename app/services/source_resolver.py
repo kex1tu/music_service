@@ -24,6 +24,7 @@ from app.schemas.download import (
     DiscographyReleaseItem,
     ResolvedTrack,
 )
+from app.schemas.tag import format_genres
 from app.services.apple_music_client import AppleMusicClient
 from app.services.deezer_client import DeezerClient
 from app.services.spotify_client import SpotifyClient
@@ -926,7 +927,7 @@ class SourceResolver:
             if genres_list and isinstance(genres_list, list):
                 genre_names = [g.get("name") for g in genres_list if isinstance(g, dict) and g.get("name")]
                 if genre_names:
-                    genre_name = "\\\\".join(genre_names)
+                    genre_name = format_genres(genre_names)
 
             track_pos = int(data.get("track_position") or 1)
             disk_num = int(data.get("disk_number") or 1)
@@ -1004,7 +1005,7 @@ class SourceResolver:
             if genres_list and isinstance(genres_list, list):
                 genre_names = [g.get("name") for g in genres_list if isinstance(g, dict) and g.get("name")]
                 if genre_names:
-                    genre_name = "\\\\".join(genre_names)
+                    genre_name = format_genres(genre_names)
 
             cover_url = DeezerClient.extract_best_cover_url(data)
             raw_tracks = data.get("tracks", {}).get("data", [])

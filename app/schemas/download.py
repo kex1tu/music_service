@@ -5,9 +5,11 @@
 """
 
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.schemas.tag import format_genres
 
 
 class JobStatus(str, Enum):
@@ -132,6 +134,11 @@ class ResolvedTrack(BaseModel):
         description="Текст ошибки при сбое обработки трека",
     )
 
+    @field_validator("genre", mode="before")
+    @classmethod
+    def _validate_genre(cls, v: Any) -> str | None:
+        return format_genres(v)
+
 
 class DownloadJobResponse(BaseModel):
     """Схема ответа с текущим статусом и прогрессом задачи загрузки (для polling)."""
@@ -247,6 +254,11 @@ class DownloadTracksResponse(BaseModel):
         default_factory=list,
         description="Список треков с предзаполненными метаданными",
     )
+
+    @field_validator("genre", mode="before")
+    @classmethod
+    def _validate_genre(cls, v: Any) -> str | None:
+        return format_genres(v)
 
 
 class DiscographyReleaseItem(BaseModel):

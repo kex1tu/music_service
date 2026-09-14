@@ -53,6 +53,33 @@ function tagEditorComponent() {
             return this.releases;
         },
 
+        formatGenres(raw) {
+            if (!raw) return '';
+            let items = [];
+            if (Array.isArray(raw)) {
+                raw.forEach((el) => {
+                    if (el) items.push(...String(el).split(/[\x00/;,|]|\s*\\+\s*/));
+                });
+            } else {
+                items = String(raw).split(/[\x00/;,|]|\s*\\+\s*/);
+            }
+            const cleaned = [];
+            const seen = new Set();
+            const hipHopRe = /(^|[^a-zA-Z0-9а-яА-ЯёЁ])(?:hip[- ]?hop|хип[- ]?хоп)(?=$|[^a-zA-Z0-9а-яА-ЯёЁ])/gi;
+
+            for (const item of items) {
+                let part = item.trim();
+                if (!part) continue;
+                part = part.replace(hipHopRe, (m, p1) => (p1 || '') + 'Hip-Hop');
+                const lower = part.toLowerCase();
+                if (!seen.has(lower)) {
+                    seen.add(lower);
+                    cleaned.push(part);
+                }
+            }
+            return cleaned.join('\\\\');
+        },
+
         buildReleasesFromTracks() {
             const groupsMap = {};
             const order = [];
@@ -72,7 +99,7 @@ function tagEditorComponent() {
                         albumArtist: track.album_artist || track.artist || this.album.album_artist || '',
                         year: track.year || this.album.year || null,
                         discTotal: track.disc_total || this.album.disc_total || 1,
-                        genre: track.genre || this.album.genre || '',
+                        genre: this.formatGenres(track.genre || this.album.genre || ''),
                         coverPreviewUrl: null,
                         coverPath: null,
                         coverBase64: null,
@@ -85,7 +112,7 @@ function tagEditorComponent() {
                         groupsMap[key].year = track.year;
                     }
                     if (!groupsMap[key].genre && track.genre) {
-                        groupsMap[key].genre = track.genre;
+                        groupsMap[key].genre = this.formatGenres(track.genre);
                     }
                     if (track.disc_total && track.disc_total > groupsMap[key].discTotal) {
                         groupsMap[key].discTotal = track.disc_total;
@@ -218,7 +245,7 @@ function tagEditorComponent() {
                 album_artist: data.album?.album_artist || '',
                 album: data.album?.album || '',
                 year: data.album?.year || null,
-                genre: data.album?.genre || '',
+                genre: this.formatGenres(data.album?.genre || ''),
                 disc_total: data.album?.disc_total || null,
                 track_total: data.album?.track_total || null,
             };
@@ -240,7 +267,7 @@ function tagEditorComponent() {
                     album: (t.album !== undefined && t.album !== null && t.album !== '') ? t.album : (this.album.album || ''),
                     album_artist: (t.album_artist !== undefined && t.album_artist !== null && t.album_artist !== '') ? t.album_artist : (this.album.album_artist || ''),
                     year: (t.year !== undefined && t.year !== null && t.year !== '') ? t.year : (this.album.year || null),
-                    genre: (t.genre !== undefined && t.genre !== null && t.genre !== '') ? t.genre : (this.album.genre || ''),
+                    genre: this.formatGenres((t.genre !== undefined && t.genre !== null && t.genre !== '') ? t.genre : (this.album.genre || '')),
                     cover_url: t.cover_url || null,
                     cover_path: t.cover_path || null,
                     cover_base64: t.cover_base64 || null,
@@ -391,7 +418,7 @@ function tagEditorComponent() {
                 if (group.year !== null && group.year !== undefined && group.year !== '') {
                     track.year = parseInt(group.year, 10);
                 }
-                if (group.genre) track.genre = group.genre;
+                if (group.genre) track.genre = this.formatGenres(group.genre);
                 if (group.discTotal !== null && group.discTotal !== undefined && group.discTotal !== '') {
                     track.disc_total = parseInt(group.discTotal, 10);
                 }
@@ -554,7 +581,7 @@ function tagEditorComponent() {
                                 trk.year = !isNaN(parsedYear) && parsedYear > 0 ? parsedYear : null;
                             }
                             if (group.genre !== undefined && group.genre !== null) {
-                                trk.genre = group.genre;
+                                trk.genre = this.formatGenres(group.genre);
                             }
                             if (group.discTotal !== undefined && group.discTotal !== null && group.discTotal !== '') {
                                 const parsedDiscTotal = parseInt(group.discTotal, 10);
@@ -584,7 +611,7 @@ function tagEditorComponent() {
                         album: isSingleRelease && firstRelease ? (firstRelease.albumTitle || '') : (this.album.album || ''),
                         album_artist: isSingleRelease && firstRelease ? (firstRelease.albumArtist || '') : (this.album.album_artist || ''),
                         year: isSingleRelease && firstRelease && firstRelease.year ? (parseInt(firstRelease.year, 10) || null) : (this.album.year ? parseInt(this.album.year, 10) : null),
-                        genre: isSingleRelease && firstRelease ? (firstRelease.genre || '') : (this.album.genre || ''),
+                        genre: this.formatGenres(isSingleRelease && firstRelease ? (firstRelease.genre || '') : (this.album.genre || '')),
                         cover_path: isSingleRelease && firstRelease ? firstRelease.coverPath : this.coverPath,
                         disc_total: isSingleRelease && firstRelease && firstRelease.discTotal ? (parseInt(firstRelease.discTotal, 10) || null) : (this.album.disc_total ? parseInt(this.album.disc_total, 10) : null),
                     },
@@ -605,7 +632,7 @@ function tagEditorComponent() {
                             album: t.album || '',
                             album_artist: t.album_artist || '',
                             year: !isNaN(parsedYear) && parsedYear >= 1000 && parsedYear <= 2999 ? parsedYear : null,
-                            genre: t.genre || '',
+                            genre: this.formatGenres(t.genre || ''),
                             lyrics_status: t.lyrics_status || 'none',
                             has_cover: t.has_cover || !!t.cover_preview_url || !!t.cover_url || !!t.cover_base64 || !!t.cover_path,
                             cover_url: t.cover_url || null,
@@ -713,7 +740,8 @@ function tagEditorComponent() {
                     if (!this.album.album && data.album) this.album.album = data.album;
                     if (!this.album.album_artist && data.artist) this.album.album_artist = data.artist;
                     if (!this.album.year && data.year) this.album.year = data.year;
-                    if (!this.album.genre && data.genre) this.album.genre = data.genre;
+                    if (!this.album.genre && data.genre) this.album.genre = this.formatGenres(data.genre);
+                    if (data.genre) track.genre = this.formatGenres(data.genre);
 
                     if (!this.coverPreviewUrl && data.cover_url) {
                         this.coverPreviewUrl = data.cover_url;
@@ -760,7 +788,8 @@ function tagEditorComponent() {
                                 if (!this.album.album && data.album) this.album.album = data.album;
                                 if (!this.album.album_artist && data.artist) this.album.album_artist = data.artist;
                                 if (!this.album.year && data.year) this.album.year = data.year;
-                                if (!this.album.genre && data.genre) this.album.genre = data.genre;
+                                if (!this.album.genre && data.genre) this.album.genre = this.formatGenres(data.genre);
+                                if (data.genre) track.genre = this.formatGenres(data.genre);
 
                                 if (!this.coverPreviewUrl && data.cover_url) {
                                     this.coverPreviewUrl = data.cover_url;
@@ -870,7 +899,7 @@ function tagEditorComponent() {
                     targetGroup.title = data.title || targetGroup.title;
                     targetGroup.albumArtist = data.artist || targetGroup.albumArtist;
                     if (data.year) targetGroup.year = data.year;
-                    if (data.genre) targetGroup.genre = data.genre;
+                    if (data.genre) targetGroup.genre = this.formatGenres(data.genre);
 
                     if (data.cover_url) {
                         targetGroup.coverPreviewUrl = data.cover_url;
@@ -904,7 +933,7 @@ function tagEditorComponent() {
                                 it.track.album = data.title;
                                 it.track.album_artist = data.artist;
                                 if (data.year) it.track.year = data.year;
-                                if (data.genre) it.track.genre = data.genre;
+                                if (data.genre) it.track.genre = this.formatGenres(data.genre);
                             }
                             if (data.cover_url) {
                                 it.track.cover_url = data.cover_url;
@@ -917,7 +946,7 @@ function tagEditorComponent() {
                     this.album.album = data.title || this.album.album;
                     this.album.album_artist = data.artist || this.album.album_artist;
                     if (data.year) this.album.year = data.year;
-                    if (data.genre) this.album.genre = data.genre;
+                    if (data.genre) this.album.genre = this.formatGenres(data.genre);
 
                     if (data.cover_url) {
                         this.coverPreviewUrl = data.cover_url;
@@ -950,7 +979,7 @@ function tagEditorComponent() {
                                 track.album = data.title;
                                 track.album_artist = data.artist;
                                 if (data.year) track.year = data.year;
-                                if (data.genre) track.genre = data.genre;
+                                if (data.genre) track.genre = this.formatGenres(data.genre);
                             }
                         });
                     }

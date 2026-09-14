@@ -743,3 +743,86 @@ async def test_search_covers_aggregation(service_and_paths):
         assert "1000x1000" in yandex_item.cover_url
         assert yandex_item.width == 1000
 
+
+def test_genre_formatting_and_hip_hop_normalization():
+    """Проверка разделения жанров по разделителям и канонической записи Hip-Hop."""
+    from app.schemas.tag import format_genres, normalize_genre_item
+
+    # Hip-Hop канонический вид через дефис
+    assert normalize_genre_item("Hip Hop") == "Hip-Hop"
+    assert normalize_genre_item("hip hop") == "Hip-Hop"
+    assert normalize_genre_item("hip-hop") == "Hip-Hop"
+    assert normalize_genre_item("HIP HOP") == "Hip-Hop"
+    assert normalize_genre_item("hiphop") == "Hip-Hop"
+    assert normalize_genre_item("хип хоп") == "Hip-Hop"
+    assert normalize_genre_item("хип-хоп") == "Hip-Hop"
+    assert normalize_genre_item("Russian Hip Hop") == "Russian Hip-Hop"
+
+    # Не затрагивает сторонние жанры
+    assert normalize_genre_item("Trip Hop") == "Trip Hop"
+    assert normalize_genre_item("R&B") == "R&B"
+    assert normalize_genre_item("Post-Punk") == "Post-Punk"
+
+    # Разделение по слешам (Deezer: "Rap/Hip Hop")
+    assert format_genres("Rap/Hip Hop") == "Rap\\\\Hip-Hop"
+    assert format_genres("Hip-Hop/Rap") == "Hip-Hop\\\\Rap"
+
+    # Разделение по запятым, точкам с запятой, пайпам, null-байтам и бэкслешам
+    assert format_genres("Hip Hop, Rap; Trap | Drill") == "Hip-Hop\\\\Rap\\\\Trap\\\\Drill"
+    assert format_genres("Rap\x00Hip Hop") == "Rap\\\\Hip-Hop"
+    assert format_genres("Rap\\\\Hip Hop") == "Rap\\\\Hip-Hop"
+
+    # Списки жанров (из внешних API)
+    assert format_genres(["Rap/Hip Hop", "Trap"]) == "Rap\\\\Hip-Hop\\\\Trap"
+    assert format_genres(["hip hop", "Rap"]) == "Hip-Hop\\\\Rap"
+
+    # Дедупликация без учета регистра
+    assert format_genres("Rap\\\\Hip-Hop\\\\rap\\\\hip hop") == "Rap\\\\Hip-Hop"
+
+    # Пустые значения
+    assert format_genres(None) is None
+    assert format_genres("") is None
+    assert format_genres("   ") is None
+
+
+def test_genre_schema_validation_and_id3_roundtrip(service_and_paths):
+    """Проверка автоматической нормализации в Pydantic и сохранения в ID3v2.4."""
+    svc, music_dir, _ = service_and_paths
+    test_file = music_dir / "genre_test.mp3"
+    test_file.write_bytes(MINIMAL_MP3)
+
+    # Pydantic schema validation: слеши и "Hip Hop" мгновенно приводятся к каноническому виду
+    album = AlbumTags(album="Test", album_artist="Artist", genre="Rap/Hip Hop, Trap")
+    assert album.genre == "Rap\\\\Hip-Hop\\\\Trap"
+
+    track = TrackTags(
+        path="genre_test.mp3",
+        title="Test Title",
+        artist="Artist",
+        album="Test",
+        genre="Hip Hop/Rap",
+    )
+    assert track.genre == "Hip-Hop\\\\Rap"
+
+    # Проверка сохранения оригинального регистра не-Hip-Hop жанров
+    track_lower = TrackTags(
+        path="genre_test.mp3",
+        title="Test Title",
+        artist="Artist",
+        album="Test",
+        genre="hip hop/rap",
+    )
+    assert track_lower.genre == "Hip-Hop\\\\rap"
+
+    # Запись в ID3v2.4
+    svc.write_tags(test_file, track)
+
+    # Проверка сырого TCON фрейма в mutagen: список ["Hip-Hop", "Rap"]
+    id3 = ID3(str(test_file))
+    assert id3["TCON"].text == ["Hip-Hop", "Rap"]
+
+    # Чтение обратно через TagService
+    read_back = svc.read_tags(test_file, rel_path="genre_test.mp3")
+    assert read_back.genre == "Hip-Hop\\\\Rap"
+
+

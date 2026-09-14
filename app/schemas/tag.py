@@ -4,9 +4,55 @@
 и ответов API для редактора тегов.
 """
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+
+def normalize_genre_item(item: str) -> str:
+    """Нормализует отдельный жанр, приводя 'Hip-Hop' к каноническому виду через дефис."""
+    cleaned = item.strip()
+    if not cleaned:
+        return ""
+    # Hip-Hop строго пишется как 'Hip-Hop' (через дефис)
+    return re.sub(r"(?i)\b(?:hip[- ]?hop|хип[- ]?хоп)\b", "Hip-Hop", cleaned)
+
+
+def format_genres(raw: Any) -> str | None:
+    """Нормализует жанры: разбивает по разделителям (/ ; , | \x00 \\),
+
+    нормализует Hip-Hop к виду 'Hip-Hop', устраняет дубликаты без учета регистра
+    и объединяет через '\\\\'.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (list, tuple, set)):
+        items: list[str] = []
+        for el in raw:
+            if el is not None:
+                items.extend(re.split(r"[\x00/;,|]|\s*\\+\s*", str(el)))
+    else:
+        raw_str = str(raw).strip()
+        if not raw_str:
+            return None
+        items = re.split(r"[\x00/;,|]|\s*\\+\s*", raw_str)
+
+    cleaned_items: list[str] = []
+    seen: set[str] = set()
+
+    for item in items:
+        part = normalize_genre_item(item)
+        if not part:
+            continue
+        lower_key = part.lower()
+        if lower_key not in seen:
+            seen.add(lower_key)
+            cleaned_items.append(part)
+
+    if not cleaned_items:
+        return None
+    return "\\\\".join(cleaned_items)
 
 
 class AlbumTags(BaseModel):
@@ -65,6 +111,11 @@ class AlbumTags(BaseModel):
             return val if val >= 1 else None
         except (ValueError, TypeError):
             return None
+
+    @field_validator("genre", mode="before")
+    @classmethod
+    def _validate_genre(cls, v: Any) -> str | None:
+        return format_genres(v)
 
 
 class TrackTags(BaseModel):
@@ -179,6 +230,11 @@ class TrackTags(BaseModel):
         except (ValueError, TypeError):
             return None
 
+    @field_validator("genre", mode="before")
+    @classmethod
+    def _validate_genre(cls, v: Any) -> str | None:
+        return format_genres(v)
+
 
 class AlbumDetailsResponse(BaseModel):
     """Полные сведения об альбоме и входящих в него треках."""
@@ -265,6 +321,11 @@ class RecognizedTrackResponse(BaseModel):
     genre: str | None = Field(default=None, description="Жанр композиции")
     cover_url: str | None = Field(default=None, description="URL обложки высокого разрешения")
 
+    @field_validator("genre", mode="before")
+    @classmethod
+    def _validate_genre(cls, v: Any) -> str | None:
+        return format_genres(v)
+
 
 class DeezerAlbumSearchResult(BaseModel):
     """Элемент списка результатов поиска альбомов в Deezer."""
@@ -296,4 +357,10 @@ class DeezerAlbumDetailsResponse(BaseModel):
     genre: str | None = Field(default=None, description="Основной жанр")
     cover_url: str | None = Field(default=None, description="URL обложки высокого разрешения (1000x1000)")
     tracks: list[DeezerAlbumTrackItem] = Field(default_factory=list, description="Список треков альбома")
+
+    @field_validator("genre", mode="before")
+    @classmethod
+    def _validate_genre(cls, v: Any) -> str | None:
+        return format_genres(v)
+
 

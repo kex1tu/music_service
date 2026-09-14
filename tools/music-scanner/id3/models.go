@@ -7,6 +7,7 @@ type TrackMeta struct {
 	Artist       string  `json:"artist"`
 	Album        string  `json:"album"`
 	AlbumArtist  string  `json:"album_artist"`
+	Genre        string  `json:"genre"`
 	Year         int     `json:"year"`
 	TrackNumber  int     `json:"track_number"`
 	TrackTotal   int     `json:"track_total"`

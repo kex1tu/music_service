@@ -29,6 +29,7 @@ from app.schemas.download import (
     QueueSummaryResponse,
     ResolvedTrack,
 )
+from app.schemas.tag import format_genres
 from app.services.deezer_client import DeezerClient
 from app.services.source_resolver import SourceResolver
 from app.services.torrent_service import (
@@ -1109,13 +1110,15 @@ class DownloadService:
 
         # Жанр
         if track.genre:
-            genre_list = [
-                g.strip()
-                for g in track.genre.replace("\x00", "\\\\").split("\\\\")
-                if g.strip()
-            ]
-            if genre_list:
-                tags.add(TCON(encoding=3, text=genre_list))
+            formatted_genre = format_genres(track.genre)
+            if formatted_genre:
+                genre_list = [
+                    g.strip()
+                    for g in formatted_genre.split("\\")
+                    if g.strip()
+                ]
+                if genre_list:
+                    tags.add(TCON(encoding=3, text=genre_list))
 
         # Встраивание обложки
         if cover_file and cover_file.exists() and cover_file.stat().st_size > 0:

@@ -2132,6 +2132,8 @@
                                                         <input
                                                             type="text"
                                                             x-model="group.genre"
+                                                            @blur="group.genre = formatGenres(group.genre)"
+                                                            @change="group.genre = formatGenres(group.genre)"
                                                             placeholder="House\\Electronic"
                                                             class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500">
                                                     </div>

@@ -12,6 +12,7 @@ import logging
 import re
 import urllib.parse
 from pathlib import Path
+from typing import Any
 
 import httpx
 from mutagen import MutagenError
@@ -44,6 +45,7 @@ from app.schemas.tag import (
     AlbumTags,
     CoverSearchResultItem,
     TrackTags,
+    format_genres,
 )
 from app.services.deezer_client import DeezerClient
 from app.services.yandex_client import YandexMusicClient
@@ -84,6 +86,14 @@ class TagService:
             return ""
         cleaned = [v.strip() for v in values if v and v.strip()]
         return "\\\\".join(cleaned)
+
+    @staticmethod
+    def parse_genres(raw: Any) -> list[str]:
+        """Разбивает жанры на список значений с нормализацией Hip-Hop и разделением по всем разделителям."""
+        res = format_genres(raw)
+        if not res:
+            return []
+        return [p.strip() for p in res.split("\\") if p.strip()]
 
     def resolve_path(self, rel_path: str | Path, allow_root: bool = False) -> Path:
         """Разрешает относительный путь через подходящую песочницу (music или tmp).
@@ -239,8 +249,8 @@ class TagService:
         genre_parts: list[str] = []
         if "TCON" in tags and tags["TCON"].text:
             for item in tags["TCON"].text:
-                genre_parts.extend(self.parse_multivalue(str(item)))
-        genre = self.format_multivalue(genre_parts) if genre_parts else None
+                genre_parts.append(str(item))
+        genre = format_genres(genre_parts) if genre_parts else None
 
         # 8. Наличие встроенной обложки (APIC)
         has_cover = False
@@ -360,7 +370,7 @@ class TagService:
                 id3_tags.delall("TYER")
 
             # 7. Жанр
-            genre_list = self.parse_multivalue(tags.genre)
+            genre_list = self.parse_genres(tags.genre)
             if genre_list:
                 id3_tags.add(TCON(encoding=3, text=genre_list))
             else:

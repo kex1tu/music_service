@@ -2,8 +2,8 @@
 
 ## Текущий статус проекта
 - **Текущий статус проекта:** 100% готовность, все проверки и тесты пройдены.
-- **Активный этап:** Реализован изолированный нативный Go CLI-сканер (`music-scanner`) с потоковой NDJSON-индексацией медиатеки и прозрачным fallback на Python.
-- **Результаты тестов:** 543/543 passed (`pytest`), ruff linter — 0 замечаний (All checks passed!).
+- **Активный этап:** Унифицировано форматирование жанров (разделение через `\\`) и строгая нормализация Hip-Hop через дефис на бэкенде, в схемах Pydantic, ID3v2.4, Go-сканере и во фронтенде.
+- **Результаты тестов:** 548/548 passed (`pytest`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -391,6 +391,19 @@
 | **R2: Исправление логики сохранения и распространения тегов релиза** | `app/static/js/tag_editor.js` | **DONE** | Устранена блокировка редактирования в методе `saveAlbum`: убрано ошибочное условие `!trk.album` / `!group.isSingles`, которое блокировало сохранение изменений полей карточки релиза (название альбома, исполнитель альбома, год, жанр, диски) для треков, уже имевших теги, и препятствовало объединению синглов в альбом. Изменения карточки релиза гарантированно распространяются на треки группы. В плоском режиме (`viewMode === 'flat'`) сохранены индивидуальные правки таблицы. Добавлена строгая клиентская валидация чисел перед отправкой и информативный вывод ошибок `err.detail` в тосте. |
 | **R3: Валидаторы Pydantic и нормализация путей** | `app/schemas/tag.py`, `app/services/tag_service.py`, `app/services/organizer_service.py` | **DONE** | 1. В `AlbumTags` и `TrackTags` добавлены `mode="before"` валидаторы для `year`, `track_number`, `disc_number`, `track_total`, `disc_total`. Значения `0`, некорректные строки и выходящие за диапазон числа безопасно приводятся к `None` или `1` вместо падения с HTTP 422 `RequestValidationError`.<br>2. В `TagService.resolve_path` и `OrganizerService._resolve_source_path` добавлена нормализация путей с префиксом `music_library/` (или именем корневой папки медиатеки), исключающая ложные ошибки HTTP 404 `NotFoundError`. |
 | **R4: Тесты и верификация** | `tests/test_recognition_service.py`, `tests/test_tags_router.py` | **DONE** | Добавлены тесты `test_shazam_russian_defaults`, `test_batch_save_with_zero_or_invalid_numbers`, `test_get_tags_and_batch_save_with_music_library_prefix`. Все 546 тестов пройдены успешно (100% pass), линтер `ruff check` чист (0 замечаний). |
+
+---
+
+## Блок 22: Унификация жанров (разделитель `\\\\`) и канонизация `Hip-Hop` (2026-09-15T00:35:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Функции нормализации и валидаторы Pydantic** | `app/schemas/tag.py`, `app/schemas/download.py` | **DONE** | 1. `normalize_genre_item(item)`: строго приводит все варианты написания (`Hip Hop`, `hip hop`, `hip-hop`, `hiphop`, `хип хоп`, `хип-хоп`, `Russian Hip Hop`) к каноническому виду `Hip-Hop` через дефис, не затрагивая сторонние жанры (`Trip Hop`, `R&B`, `Post-Punk`).<br>2. `format_genres(raw)`: разбивает жанры по всем разделителям (`/`, `,`, `;`, `\|`, `\x00`, `\\`), нормализует элементы через `normalize_genre_item`, дедуплицирует без учета регистра с сохранением исходного порядка и склеивает через `\\`.<br>3. Pydantic `@field_validator("genre", mode="before")` внедрен во все схемы: `AlbumTags`, `TrackTags`, `RecognizedTrackResponse`, `DeezerAlbumDetailsResponse`, `ResolvedTrack`, `DownloadMetadata`. Любые входные данные автоматически нормализуются. |
+| **R2: Обновление аудио-пайплайна и сервисов** | `app/services/tag_service.py`, `app/services/download_service.py`, `app/services/source_resolver.py`, `app/routers/tags.py` | **DONE** | 1. `tag_service.py`: метод `parse_genres(raw)` преобразует жанры в список для mutagen ID3v2.4 TCON с null-разделением; `read_tags` использует `format_genres`.<br>2. `download_service.py`: `_embed_metadata` гарантированно форматирует жанры перед добавлением TCON.<br>3. `source_resolver.py` и `routers/tags.py`: списки жанров Deezer (`"Rap/Hip Hop"`) собираются через `format_genres`, исключая сохранение неразбитых слешей. |
+| **R3: Поддержка в нативном Go CLI-сканере (`music-scanner`)** | `tools/music-scanner/id3/models.go`, `tools/music-scanner/id3/parser.go`, `app/services/library_audit_service.py` | **DONE** | 1. В Go-модель `TrackMeta` добавлено поле `Genre string` (`json:"genre"`).<br>2. В `parser.go` добавлен парсинг ID3v2.2 фрейма `TCO` и ID3v2.3/2.4 `TCON`.<br>3. `LibraryAuditService._ensure_index_native` передает `genre=item.get("genre")` в `TrackTags`, где поле автоматически нормализуется Pydantic.<br>4. Бинарник `bin/music-scanner` скомпилирован заново (`CGO_ENABLED=0`, `-ldflags="-s -w"`). |
+| **R4: Редактор тегов на фронтенде (UI)** | `app/static/js/tag_editor.js`, `app/templates/index.html` | **DONE** | 1. В компонент `tagEditorComponent` добавлен метод `formatGenres(raw)`.<br>2. Интеграция в `buildReleasesFromTracks`, `openTagEditor`, `applyGroupToTracks`, `saveAlbum`, `recognizeTrack`, `recognizeAllTracks` и `applyDeezerAlbum`.<br>3. Поле ввода жанров в шаблоне карточки релиза (`index.html`) оснащено слушателями `@blur` и `@change` (`group.genre = formatGenres(group.genre)`), что сразу разделяет введенные жанры через `\\` и нормализует `Hip-Hop` прямо при редактировании в браузере. |
+| **R5: Тесты и верификация** | `tests/test_tag_service.py`, `tests/test_tags_router.py` | **DONE** | Добавлены тесты `test_genre_formatting_and_hip_hop_normalization` и `test_genre_schema_validation_and_id3_roundtrip`. Обновлена проверка нормализации Deezer в `test_tags_router.py`. Все 548 тестов пройдены успешно (100% pass), линтер `ruff check` чист (0 замечаний). |
+
 
 
 

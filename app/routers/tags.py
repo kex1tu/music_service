@@ -35,6 +35,7 @@ from app.schemas.tag import (
     RecognizedTrackResponse,
     SaveAlbumRequest,
     TrackTags,
+    format_genres,
 )
 from app.services.deezer_client import DeezerClient
 from app.services.recognition_service import RecognitionService
@@ -387,7 +388,7 @@ async def get_deezer_album_details(
     if genres_list and isinstance(genres_list, list):
         genre_names = [g.get("name") for g in genres_list if isinstance(g, dict) and g.get("name")]
         if genre_names:
-            genre = "\\\\".join(genre_names)
+            genre = format_genres(genre_names)
 
     cover_url = deezer_client.extract_best_cover_url(data)
 
