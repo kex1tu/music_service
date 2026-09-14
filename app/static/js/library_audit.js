@@ -241,6 +241,7 @@ function libraryAuditComponent() {
                     if (idx !== -1) {
                         this.incompleteAlbums[idx] = matched;
                     }
+                    return matched;
                 } else {
                     Alpine.store('app').toast('Не удалось найти треклист альбома в Deezer', 'warning');
                 }
@@ -250,9 +251,30 @@ function libraryAuditComponent() {
             } finally {
                 this.catalogMatchLoading[path] = false;
             }
+            return null;
         },
 
         async downloadMissing(album, trackUrl = null) {
+            const path = album.path;
+            let currentAlbum = album;
+
+            // 1. Если релиз еще не был сверен с Deezer, сначала выполняем сверку
+            if (!currentAlbum.is_catalog_matched) {
+                const matched = await this.matchCatalog(currentAlbum);
+                if (matched) {
+                    currentAlbum = matched;
+                } else {
+                    const idx = this.incompleteAlbums.findIndex(a => a.path === path);
+                    if (idx !== -1) currentAlbum = this.incompleteAlbums[idx];
+                }
+            }
+
+            // 2. Если после сверки все треки релиза уже есть
+            if (currentAlbum.is_catalog_matched && (currentAlbum.expected_count <= currentAlbum.present_count || !currentAlbum.missing_tracks || currentAlbum.missing_tracks.length === 0)) {
+                Alpine.store('app').toast('Все треки релиза уже присутствуют в медиатеке', 'info');
+                return;
+            }
+
             let directUrl = null;
             let trackNumber = null;
             if (typeof trackUrl === 'string') {
@@ -265,20 +287,20 @@ function libraryAuditComponent() {
             let trackUrls = null;
             if (directUrl) {
                 trackUrls = [directUrl];
-            } else if (!trackNumber && album.missing_tracks && album.missing_tracks.length > 0) {
-                const availableUrls = album.missing_tracks.map(t => t.deezer_url).filter(Boolean);
+            } else if (!trackNumber && currentAlbum.missing_tracks && currentAlbum.missing_tracks.length > 0) {
+                const availableUrls = currentAlbum.missing_tracks.map(t => t.deezer_url).filter(Boolean);
                 if (availableUrls.length > 0) {
                     trackUrls = availableUrls;
                 }
             }
 
             const trackKey = directUrl || (trackNumber ? `track_${trackNumber}` : null);
-            const key = trackKey ? `${album.path}:::${trackKey}` : album.path;
+            const key = trackKey ? `${currentAlbum.path}:::${trackKey}` : currentAlbum.path;
             this.downloadingTracks[key] = true;
             try {
                 const payload = {
-                    path: album.path,
-                    deezer_album_id: album.deezer_album_id || null,
+                    path: currentAlbum.path,
+                    deezer_album_id: currentAlbum.deezer_album_id || null,
                     track_urls: trackUrls,
                     track_numbers: trackNumber ? [trackNumber] : null,
                 };
@@ -291,11 +313,14 @@ function libraryAuditComponent() {
                     const jobs = await res.json();
                     if (jobs && jobs.length > 0) {
                         Alpine.store('app').toast(`Поставлено в очередь загрузок: ${jobs.length}`, 'success');
-                        if (Alpine.store('app').queue && Alpine.store('app').queue.fetchQueue) {
-                            await Alpine.store('app').queue.fetchQueue();
+                        if (Alpine.store('app').queue) {
+                            if (Alpine.store('app').queue.fetchQueue) {
+                                await Alpine.store('app').queue.fetchQueue();
+                            }
+                            Alpine.store('app').queue.isOpen = true;
                         }
                     } else {
-                        if (album.is_catalog_matched && (album.expected_count <= album.present_count || (album.missing_tracks && album.missing_tracks.length === 0))) {
+                        if (currentAlbum.is_catalog_matched && (currentAlbum.expected_count <= currentAlbum.present_count || (currentAlbum.missing_tracks && currentAlbum.missing_tracks.length === 0))) {
                             Alpine.store('app').toast('Все треки релиза уже присутствуют в медиатеке', 'info');
                         } else {
                             Alpine.store('app').toast('Не найдено ссылок для скачивания недостающих треков в каталоге', 'warning');
