@@ -201,4 +201,8 @@ class DownloadMissingTracksRequest(BaseModel):
         default=None,
         description="Опциональный список идентификаторов треков Deezer",
     )
+    track_numbers: list[int] | None = Field(
+        default=None,
+        description="Опциональный список номеров дорожек для выборочного скачивания",
+    )
 

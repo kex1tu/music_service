@@ -1787,10 +1787,10 @@
                                                         <td class="p-2.5 text-right">
                                                             <template x-if="!t.is_present">
                                                                 <button
-                                                                    @click="downloadMissing(alb, t.deezer_url)"
-                                                                    :disabled="downloadingTracks[`${alb.path}:::${t.deezer_url}`]"
+                                                                    @click="downloadMissing(alb, t)"
+                                                                    :disabled="downloadingTracks[`${alb.path}:::${t.deezer_url || ('track_' + t.track_number)}`]"
                                                                     class="px-2.5 py-1 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 rounded text-[11px] font-medium transition inline-flex items-center space-x-1">
-                                                                    <svg class="w-3 h-3" :class="{'animate-spin': downloadingTracks[`${alb.path}:::${t.deezer_url}`]}" viewBox="0 0 24 24" fill="currentColor">
+                                                                    <svg class="w-3 h-3" :class="{'animate-spin': downloadingTracks[`${alb.path}:::${t.deezer_url || ('track_' + t.track_number)}`]}" viewBox="0 0 24 24" fill="currentColor">
                                                                         <path d="M12 16l-5-5h3V4h4v7h3l-5 5zm9-4v7H3v-7H1v7a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2v-7h-2z"/>
                                                                     </svg>
                                                                     <span>Скачать</span>

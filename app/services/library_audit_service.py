@@ -789,10 +789,11 @@ class LibraryAuditService:
         missing_tracks: list[IncompleteTrackInfo] = []
         missing_numbers: list[int] = []
         present_count = 0
+        used_local_indices: set[int] = set()
 
-        for dz_t in deezer_tracks:
-            dz_pos = dz_t.get("track_position", 1)
-            dz_disc = dz_t.get("disk_number", 1)
+        for idx, dz_t in enumerate(deezer_tracks, start=1):
+            dz_pos = int(dz_t.get("track_position") or idx)
+            dz_disc = int(dz_t.get("disk_number") or 1)
             dz_title = dz_t.get("title", "")
             dz_dur = dz_t.get("duration")
             dz_tid = str(dz_t.get("id", ""))
@@ -800,20 +801,40 @@ class LibraryAuditService:
 
             clean_dz_title = normalize_clean_string(dz_title)
             matched_loc: TrackTags | None = None
+            matched_loc_idx: int | None = None
 
-            for loc in local_tracks:
+            # 1. Попытка точного сопоставления по (disc_number, track_number)
+            for loc_i, loc in enumerate(local_tracks):
+                if loc_i in used_local_indices:
+                    continue
                 loc_disc = loc.disc_number if loc.disc_number and loc.disc_number > 0 else 1
                 if loc_disc == dz_disc and loc.track_number == dz_pos:
                     matched_loc = loc
+                    matched_loc_idx = loc_i
                     break
 
+            # 2. Попытка сопоставления только по track_number (если номер диска не прописан)
             if not matched_loc:
-                for loc in local_tracks:
-                    if loc.title and normalize_clean_string(loc.title) == clean_dz_title:
+                for loc_i, loc in enumerate(local_tracks):
+                    if loc_i in used_local_indices:
+                        continue
+                    if loc.track_number == dz_pos:
                         matched_loc = loc
+                        matched_loc_idx = loc_i
                         break
 
-            if matched_loc:
+            # 3. Попытка сопоставления по названию песни
+            if not matched_loc and clean_dz_title:
+                for loc_i, loc in enumerate(local_tracks):
+                    if loc_i in used_local_indices:
+                        continue
+                    if loc.title and normalize_clean_string(loc.title) == clean_dz_title:
+                        matched_loc = loc
+                        matched_loc_idx = loc_i
+                        break
+
+            if matched_loc and matched_loc_idx is not None:
+                used_local_indices.add(matched_loc_idx)
                 present_count += 1
                 all_matched_tracks.append(
                     IncompleteTrackInfo(

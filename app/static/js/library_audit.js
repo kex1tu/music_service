@@ -237,12 +237,23 @@ function libraryAuditComponent() {
         },
 
         async downloadMissing(album, trackUrl = null) {
-            const key = trackUrl ? `${album.path}:::${trackUrl}` : album.path;
+            let directUrl = null;
+            let trackNumber = null;
+            if (typeof trackUrl === 'string') {
+                directUrl = trackUrl;
+            } else if (trackUrl && typeof trackUrl === 'object') {
+                directUrl = trackUrl.deezer_url || null;
+                trackNumber = trackUrl.track_number || null;
+            }
+
+            const trackKey = directUrl || (trackNumber ? `track_${trackNumber}` : null);
+            const key = trackKey ? `${album.path}:::${trackKey}` : album.path;
             this.downloadingTracks[key] = true;
             try {
                 const payload = {
                     path: album.path,
-                    track_urls: trackUrl ? [trackUrl] : null,
+                    track_urls: directUrl ? [directUrl] : null,
+                    track_numbers: trackNumber ? [trackNumber] : null,
                 };
                 const res = await fetch('/files/audit/incomplete-albums/download-missing', {
                     method: 'POST',
@@ -260,7 +271,12 @@ function libraryAuditComponent() {
                         Alpine.store('app').toast('Не найдено ссылок для скачивания недостающих треков', 'warning');
                     }
                 } else {
-                    Alpine.store('app').toast('Ошибка отправки запроса на скачивание', 'error');
+                    let errText = 'Ошибка отправки запроса на скачивание';
+                    try {
+                        const errData = await res.json();
+                        if (errData && errData.detail) errText = errData.detail;
+                    } catch (_) {}
+                    Alpine.store('app').toast(errText, 'error');
                 }
             } catch (e) {
                 console.error('Ошибка дозагрузки треков:', e);

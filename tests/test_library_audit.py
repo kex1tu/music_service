@@ -6,9 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from app.dependencies import get_library_audit_service
+from app.core.sandbox import PathSandbox
+from app.dependencies import get_download_service, get_library_audit_service
 from app.schemas.lyrics import LyricsSearchResult
 from app.schemas.tag import TrackTags
+from app.services.download_service import DownloadJob
 from app.services.library_audit_service import (
     LibraryAuditService,
     normalize_clean_string,
@@ -410,4 +412,97 @@ async def test_match_album_catalog_and_download_endpoint(
     finally:
         authenticated_client.app.dependency_overrides.pop(get_library_audit_service, None)
         authenticated_client.app.dependency_overrides.pop(get_download_service, None)
+
+
+@pytest.mark.asyncio
+async def test_match_album_catalog_without_explicit_track_position_field(
+    authenticated_client: TestClient,
+    tmp_path: Path,
+):
+    """Проверка корректного вычисления dz_pos по порядку в списке, если track_position отсутствует."""
+    music_dir = tmp_path / "music"
+    album_dir = music_dir / "Kendrick Lamar" / "DAMN"
+    album_dir.mkdir(parents=True, exist_ok=True)
+
+    # Локально есть треки 1 и 3, пропущен 2
+    f1 = album_dir / "01. BLOOD..mp3"
+    f1.write_bytes(b"dummy1")
+    f3 = album_dir / "03. YAH..mp3"
+    f3.write_bytes(b"dummy3")
+
+    mock_tag_service = MagicMock()
+    mock_tag_service.read_tags.side_effect = lambda p, rel_path: TrackTags(
+        path=rel_path,
+        filename=p.name,
+        title=p.stem.split(". ", 1)[-1],
+        artist="Kendrick Lamar",
+        album="DAMN.",
+        track_number=int(p.stem[:2]),
+        track_total=3,
+        disc_number=1,
+        disc_total=1,
+    )
+
+    mock_dz = MagicMock()
+    # Deezer возвращает треки БЕЗ поля 'track_position'
+    mock_dz.search_albums = AsyncMock(return_value=[{"id": 39949511, "title": "DAMN.", "artist": {"name": "Kendrick Lamar"}}])
+    mock_dz.get_album = AsyncMock(
+        return_value={
+            "id": 39949511,
+            "title": "DAMN.",
+            "artist": {"name": "Kendrick Lamar"},
+            "tracks": {
+                "data": [
+                    {"id": 101, "title": "BLOOD.", "duration": 118},  # pos 1
+                    {"id": 102, "title": "DNA.", "duration": 185},    # pos 2 (отсутствует локально!)
+                    {"id": 103, "title": "YAH.", "duration": 160},    # pos 3
+                ]
+            },
+        }
+    )
+
+    sandbox = PathSandbox(music_dir)
+    audit_svc = LibraryAuditService(
+        music_sandbox=sandbox,
+        tag_service=mock_tag_service,
+        deezer_client=mock_dz,
+    )
+    audit_svc.ensure_index = AsyncMock()
+
+    mock_download_service = MagicMock()
+    mock_job = DownloadJob(job_id="job_dna", url="https://www.deezer.com/track/102", source="deezer")
+    mock_download_service.create_job = AsyncMock(return_value=mock_job)
+
+    authenticated_client.app.dependency_overrides[get_library_audit_service] = lambda: audit_svc
+    authenticated_client.app.dependency_overrides[get_download_service] = lambda: mock_download_service
+
+    try:
+        # Проверяем сопоставление
+        match_res = authenticated_client.get(
+            "/files/audit/incomplete-albums/catalog-match",
+            params={"path": "Kendrick Lamar/DAMN"},
+        )
+        assert match_res.status_code == 200
+        matched = match_res.json()
+        assert len(matched["missing_tracks"]) == 1
+        assert matched["missing_tracks"][0]["title"] == "DNA."
+        assert matched["missing_tracks"][0]["track_number"] == 2
+        assert matched["missing_tracks"][0]["deezer_url"] == "https://www.deezer.com/track/102"
+
+        # Проверяем скачивание конкретного недостающего трека по track_numbers
+        dl_res = authenticated_client.post(
+            "/files/audit/incomplete-albums/download-missing",
+            json={"path": "Kendrick Lamar/DAMN", "track_numbers": [2]},
+        )
+        assert dl_res.status_code == 200
+        jobs = dl_res.json()
+        assert len(jobs) == 1
+        mock_download_service.create_job.assert_called_once_with(
+            url="https://www.deezer.com/track/102",
+            source="auto",
+        )
+    finally:
+        authenticated_client.app.dependency_overrides.pop(get_library_audit_service, None)
+        authenticated_client.app.dependency_overrides.pop(get_download_service, None)
+
 

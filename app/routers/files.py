@@ -196,13 +196,12 @@ async def download_missing_album_tracks(
         ]
     else:
         matched = await audit_service.match_album_catalog(album_path=request.path)
-        urls = [t.deezer_url for t in matched.missing_tracks if t.deezer_url]
-        if not urls:
-            for t in matched.missing_tracks:
-                if t.title:
-                    clean_query = f"{matched.artist} - {t.title}".strip(" -")
-                    if clean_query:
-                        urls.append(f"ytsearch:{clean_query}")
+        candidates = matched.missing_tracks
+        if request.track_numbers:
+            target_nums = set(request.track_numbers)
+            candidates = [t for t in candidates if t.track_number in target_nums]
+
+        urls = [t.deezer_url for t in candidates if t.deezer_url]
 
     if not urls:
         return []
