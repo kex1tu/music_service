@@ -250,6 +250,14 @@ class OrganizerService:
             except (PathTraversalError, StorageConfigurationError, OSError):
                 pass
 
+        music_root_name = self._music_sandbox.root.name
+        if rel_str == "music_library" or rel_str == music_root_name:
+            rel_str = ""
+        elif rel_str.startswith("music_library/"):
+            rel_str = rel_str[len("music_library/") :]
+        elif rel_str.startswith(f"{music_root_name}/"):
+            rel_str = rel_str[len(music_root_name) + 1 :]
+
         return self._music_sandbox.resolve(rel_str, allow_root=True)
 
     def _is_tmp_source(self, source_dir: str, tracks: list[TrackTags]) -> bool:

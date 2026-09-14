@@ -44,7 +44,10 @@ class DeezerClient:
             return self._external_client
         return httpx.AsyncClient(
             timeout=httpx.Timeout(15.0, connect=10.0),
-            headers={"User-Agent": "MusicManager/1.0 (+https://github.com)"},
+            headers={
+                "User-Agent": "MusicManager/1.0 (+https://github.com)",
+                "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            },
             follow_redirects=True,
         )
 

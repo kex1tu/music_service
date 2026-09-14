@@ -870,6 +870,8 @@ class DownloadService:
                 "--progress-delta",
                 "0.2",
                 "--no-warnings",
+                "--add-header",
+                "Accept-Language:ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
             ]
 
             cookies_file = self._settings.cookies_file

@@ -2,8 +2,8 @@
 
 ## Текущий статус проекта
 - **Текущий статус проекта:** 100% готовность, все проверки и тесты пройдены.
-- **Активный этап:** Реализовано глубокое потрековое определение исполнителей и фитов при сопоставлении с Deezer (в редакторе тегов, аудите неполных релизов и загрузчике).
-- **Результаты тестов:** 533/533 passed (`pytest`), ruff linter — 0 замечаний (All checks passed!).
+- **Активный этап:** Реализован изолированный нативный Go CLI-сканер (`music-scanner`) с потоковой NDJSON-индексацией медиатеки и прозрачным fallback на Python.
+- **Результаты тестов:** 543/543 passed (`pytest`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -369,6 +369,28 @@
 | **R2: Потрековое определение в Tag Editor и аудиторе релизов** | `app/routers/tags.py`, `app/schemas/library_audit.py`, `app/services/library_audit_service.py`, `app/services/source_resolver.py` | **DONE** | В эндпоинте `/tags/deezer/albums/{id}` каждый трек альбома получает индивидуально распознанный список соавторов через `\\`. В `LibraryAuditService.match_album_catalog` и `IncompleteTrackInfo` добавлено поле `artist` для каждого трека релиза. В `SourceResolver._resolve_deezer` треки альбомов и плейлистов скачиваются с точными исполнителями. |
 | **R3: Интеллектуальное сопоставление в UI (Frontend)** | `app/static/js/tag_editor.js`, `app/templates/index.html` | **DONE** | В `tag_editor.js` метод `applyDeezerAlbum` дополнен интеллектуальным сопоставлением треков (по номеру дорожки `track_number`, затем по нечеткому совпадению названия `title`, с fallback на индекс) и точной записью индивидуальных исполнителей `it.track.artist = dt.artist`. В таблице неполных релизов на дашборде аудита выводится имя трекового артиста. |
 | **R4: Тесты и верификация** | `tests/test_deezer_client.py`, `tests/test_library_audit.py` | **DONE** | Добавлены тесты `test_get_album_with_track_details` и `test_format_artists_with_contributor_roles`. Все 533 теста пройдены на 100% (`pytest`), ruff linter — 0 ошибок. |
+
+---
+
+## Блок 20: Нативный Go CLI-сканер медиатеки (`music-scanner`) и потоковая NDJSON-индексация (2026-09-14T22:10:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Автономный Go-модуль сканера (`music-scanner`)** | `tools/music-scanner/go.mod`, `tools/music-scanner/main.go`, `tools/music-scanner/id3/models.go`, `tools/music-scanner/id3/parser.go`, `tools/music-scanner/scanner/walker.go`, `tools/music-scanner/scanner/worker.go` | **DONE** | Реализован автономный Go-модуль без внешних библиотек (pure Go). Высокоскоростной обход файлов через `filepath.WalkDir` (Producer), пул из $N$ горутин (`NumCPU*2` воркеров), легковесный ID3v2.3/v2.4 парсер с чтением только заголовка и тегов без считывания всего аудиопотока, вычисление длительности из TLEN / MPEG Xing / CBR фреймов, проверка наличия `.lrc`/`.txt`, потоковый вывод в stdout в формате NDJSON. Скомпилирован статический ELF-бинарник `bin/music-scanner` (2.2 МБ). |
+| **R2: Адаптер сервиса в Python (`NativeScannerService`)** | `app/services/native_scanner.py`, `app/config.py`, `requirements.txt`, `.env.example` | **DONE** | Создан сервис `NativeScannerService` для безопасного запуска бинарника `music-scanner --root {safe_root}` через `asyncio.create_subprocess_exec`. Построчный асинхронный парсинг NDJSON-потока с ускорением через `orjson` (с fallback на `json`). Проверка прав на исполнение (`is_available`), санитизация путей через `PathSandbox.root`. Опция `MUSIC_SCANNER_BIN_PATH` в `Settings`. Библиотека `orjson` добавлена в `requirements.txt`. |
+| **R3: Интеграция в `LibraryAuditService` и Dependency Injection** | `app/services/library_audit_service.py`, `app/dependencies.py` | **DONE** | Внедрен метод `_ensure_index_native()`: создание объектов `TrackTags` напрямую из структур Go, инкрементальное сопоставление по `mtime` и `lyrics_status`, удаление удаленных файлов. Автоматический безопасный fallback на стандартный Python `os.walk` + `mutagen` (`_ensure_index_python()`) при отсутствии бинарника или любых сбоях процесса. Добавлен DI-провайдер `get_native_scanner` и внедрение в `get_library_audit_service`. |
+| **R4: Модульные тесты и верификация** | `tests/test_native_scanner.py` | **DONE** | 10 комплексных тестов в `tests/test_native_scanner.py`: проверка доступности бинарника, парсинг NDJSON-потока, устойчивость к поврежденным строкам JSON, обработка кодов ошибок, индексация через Go-сканер, откат на Python при отсутствии бинарника и при ошибках выполнения, сквозной тест реального бинарника `bin/music-scanner`. Все 543 теста успешно пройдены (`pytest`, 100% pass), линтер `ruff check` чист (0 замечаний). |
+
+---
+
+## Блок 21: Предотвращение транслитерации/латинизации названий и исправление редактирования треков (2026-09-14T22:55:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Запрет транслитерации и латинизации метаданных** | `app/services/download_service.py`, `app/services/source_resolver.py`, `app/services/deezer_client.py`, `app/services/apple_music_client.py`, `app/services/spotify_client.py`, `app/services/recognition_service.py` | **DONE** | 1. `download_service.py`: в команду yt-dlp добавлен заголовок `--add-header "Accept-Language:ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"`.<br>2. `source_resolver.py`: в конфигурацию yt-dlp для поиска треков, альбомов и дискографий добавлены `http_headers: {"Accept-Language": "ru-RU,..."}` и `extractor_args: {"youtube": {"lang": ["ru"]}}`.<br>3. `deezer_client.py`, `apple_music_client.py`, `spotify_client.py`: заменен/добавлен заголовок `Accept-Language: ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7` вместо жестко зашитого `en-US`.<br>4. `recognition_service.py`: клиент Shazam инициализируется с `language="ru-RU", endpoint_country="RU"`, что исключает принудительную романизацию распознанных кириллических треков. |
+| **R2: Исправление логики сохранения и распространения тегов релиза** | `app/static/js/tag_editor.js` | **DONE** | Устранена блокировка редактирования в методе `saveAlbum`: убрано ошибочное условие `!trk.album` / `!group.isSingles`, которое блокировало сохранение изменений полей карточки релиза (название альбома, исполнитель альбома, год, жанр, диски) для треков, уже имевших теги, и препятствовало объединению синглов в альбом. Изменения карточки релиза гарантированно распространяются на треки группы. В плоском режиме (`viewMode === 'flat'`) сохранены индивидуальные правки таблицы. Добавлена строгая клиентская валидация чисел перед отправкой и информативный вывод ошибок `err.detail` в тосте. |
+| **R3: Валидаторы Pydantic и нормализация путей** | `app/schemas/tag.py`, `app/services/tag_service.py`, `app/services/organizer_service.py` | **DONE** | 1. В `AlbumTags` и `TrackTags` добавлены `mode="before"` валидаторы для `year`, `track_number`, `disc_number`, `track_total`, `disc_total`. Значения `0`, некорректные строки и выходящие за диапазон числа безопасно приводятся к `None` или `1` вместо падения с HTTP 422 `RequestValidationError`.<br>2. В `TagService.resolve_path` и `OrganizerService._resolve_source_path` добавлена нормализация путей с префиксом `music_library/` (или именем корневой папки медиатеки), исключающая ложные ошибки HTTP 404 `NotFoundError`. |
+| **R4: Тесты и верификация** | `tests/test_recognition_service.py`, `tests/test_tags_router.py` | **DONE** | Добавлены тесты `test_shazam_russian_defaults`, `test_batch_save_with_zero_or_invalid_numbers`, `test_get_tags_and_batch_save_with_music_library_prefix`. Все 546 тестов пройдены успешно (100% pass), линтер `ruff check` чист (0 замечаний). |
 
 
 

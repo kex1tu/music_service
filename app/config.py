@@ -200,6 +200,12 @@ class Settings(BaseSettings):
         description="Режим отладки",
     )
 
+    # Нативный Go-сканер медиатеки
+    MUSIC_SCANNER_BIN_PATH: Path | None = Field(
+        default=None,
+        description="Путь к скомпилированному бинарнику Go-сканера (None = auto-detect PROJECT_ROOT/bin/music-scanner)",
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

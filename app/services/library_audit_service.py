@@ -40,6 +40,7 @@ from app.schemas.library_audit import (
 from app.schemas.tag import TrackTags
 from app.services.deezer_client import DeezerClient
 from app.services.lyrics_service import LyricsService
+from app.services.native_scanner import NativeScannerService
 from app.services.tag_service import TagService
 
 logger = logging.getLogger("music_manager.services.library_audit")
@@ -69,11 +70,13 @@ class LibraryAuditService:
         tag_service: TagService,
         lyrics_service: LyricsService | None = None,
         deezer_client: DeezerClient | None = None,
+        native_scanner: NativeScannerService | None = None,
     ) -> None:
         self._music_sandbox = music_sandbox
         self._tag_service = tag_service
         self._lyrics_service = lyrics_service
         self._deezer_client = deezer_client
+        self._native_scanner = native_scanner
         self._lock = asyncio.Lock()
         # Кеш треков: rel_path -> dict(mtime=float, size=int, track=TrackTags)
         self._cache: dict[str, dict[str, Any]] = {}
@@ -99,61 +102,144 @@ class LibraryAuditService:
                 self._cache.clear()
                 return
 
-            # Сканируем рекурсивно все MP3-файлы
-            found_paths: set[str] = set()
+            # 1. Если доступен сверхбыстрый нативный Go-сканер — используем его
+            if self._native_scanner and self._native_scanner.is_available:
+                try:
+                    await self._ensure_index_native()
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Сбой нативного Go-сканера, откат на стандартный Python-обход: %s", exc)
 
-            for root_dir, dirs, files in os.walk(music_root):
-                # Игнорируем скрытые папки (.git, etc)
-                dirs[:] = [d for d in dirs if not d.startswith(".")]
+            # 2. Fallback на стандартный Python os.walk + mutagen
+            await self._ensure_index_python()
 
-                for fname in files:
-                    if fname.startswith(".") or not fname.lower().endswith(".mp3"):
-                        continue
+    async def _ensure_index_native(self) -> None:
+        """Быстрое потоковое обновление индекса медиатеки через Go CLI-сканер."""
+        assert self._native_scanner is not None
+        found_paths: set[str] = set()
 
-                    full_path = Path(root_dir) / fname
-                    try:
-                        rel_path = str(self._music_sandbox.to_relative(full_path)).replace("\\", "/")
-                    except (ValueError, OSError) as exc:
-                        logger.debug("Пропуск файла вне песочницы %s: %s", full_path, exc)
-                        continue
+        async for item in self._native_scanner.scan_stream():
+            raw_rel = item.get("rel_path")
+            if not raw_rel:
+                continue
 
-                    found_paths.add(rel_path)
+            rel_path = str(raw_rel).replace("\\", "/")
+            found_paths.add(rel_path)
 
-                    try:
-                        st = full_path.stat()
-                        mtime = st.st_mtime
-                        size = st.st_size
-                    except OSError:
-                        continue
+            mtime = float(item.get("mtime", 0.0))
+            size = int(item.get("size", 0))
+            lyrics_status = item.get("lyrics_status") or "none"
 
-                    cached = self._cache.get(rel_path)
-                    # Проверяем также существование внешних текстов, так как они могли добавиться/удалиться
-                    lrc_exists = full_path.with_suffix(".lrc").exists()
-                    txt_exists = full_path.with_suffix(".txt").exists()
-                    cur_lyrics_status = "lrc" if lrc_exists else ("txt" if txt_exists else "none")
+            cached = self._cache.get(rel_path)
+            if (
+                cached
+                and cached["mtime"] == mtime
+                and cached["track"].lyrics_status == lyrics_status
+            ):
+                continue
 
-                    if (
-                        cached
-                        and cached["mtime"] == mtime
-                        and cached["track"].lyrics_status == cur_lyrics_status
-                    ):
-                        continue
+            dur_raw = item.get("duration")
+            duration_sec = round(float(dur_raw)) if dur_raw and float(dur_raw) > 0 else None
 
-                    try:
-                        track_tags = self._tag_service.read_tags(full_path, rel_path=rel_path)
-                        track_tags.lyrics_status = cur_lyrics_status
-                        self._cache[rel_path] = {
-                            "mtime": mtime,
-                            "size": size,
-                            "track": track_tags,
-                        }
-                    except (OSError, ValueError, TypeError) as exc:
-                        logger.warning("Ошибка чтения тегов трека %s: %s", rel_path, exc)
+            year_val = item.get("year")
+            parsed_year = int(year_val) if year_val and int(year_val) > 0 else None
 
-            # Удаляем из кеша файлы, которых больше нет на диске
-            stale_keys = [k for k in self._cache if k not in found_paths]
-            for k in stale_keys:
-                self._cache.pop(k, None)
+            trck_num = item.get("track_number")
+            track_number = int(trck_num) if trck_num and int(trck_num) > 0 else 1
+
+            trck_tot = item.get("track_total")
+            track_total = int(trck_tot) if trck_tot and int(trck_tot) > 0 else None
+
+            disc_num = item.get("disc_number")
+            disc_number = int(disc_num) if disc_num and int(disc_num) > 0 else 1
+
+            disc_tot = item.get("disc_total")
+            disc_total = int(disc_tot) if disc_tot and int(disc_tot) > 0 else None
+
+            track_tags = TrackTags(
+                path=rel_path,
+                title=item.get("title") or Path(rel_path).stem,
+                artist=item.get("artist") or "",
+                album=item.get("album") or "",
+                album_artist=item.get("album_artist") or "",
+                year=parsed_year,
+                track_number=track_number,
+                track_total=track_total,
+                disc_number=disc_number,
+                disc_total=disc_total,
+                duration=duration_sec,
+                has_cover=bool(item.get("has_cover", False)),
+                lyrics_status=lyrics_status,
+            )
+
+            self._cache[rel_path] = {
+                "mtime": mtime,
+                "size": size,
+                "track": track_tags,
+            }
+
+        # Удаляем из кеша файлы, которых больше нет на диске
+        stale_keys = [k for k in self._cache if k not in found_paths]
+        for k in stale_keys:
+            self._cache.pop(k, None)
+
+    async def _ensure_index_python(self) -> None:
+        """Резервный стандартный метод обновления индекса через os.walk и mutagen."""
+        music_root = self._music_sandbox.root
+        found_paths: set[str] = set()
+
+        for root_dir, dirs, files in os.walk(music_root):
+            # Игнорируем скрытые папки (.git, etc)
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+
+            for fname in files:
+                if fname.startswith(".") or not fname.lower().endswith(".mp3"):
+                    continue
+
+                full_path = Path(root_dir) / fname
+                try:
+                    rel_path = str(self._music_sandbox.to_relative(full_path)).replace("\\", "/")
+                except (ValueError, OSError) as exc:
+                    logger.debug("Пропуск файла вне песочницы %s: %s", full_path, exc)
+                    continue
+
+                found_paths.add(rel_path)
+
+                try:
+                    st = full_path.stat()
+                    mtime = st.st_mtime
+                    size = st.st_size
+                except OSError:
+                    continue
+
+                cached = self._cache.get(rel_path)
+                # Проверяем также существование внешних текстов, так как они могли добавиться/удалиться
+                lrc_exists = full_path.with_suffix(".lrc").exists()
+                txt_exists = full_path.with_suffix(".txt").exists()
+                cur_lyrics_status = "lrc" if lrc_exists else ("txt" if txt_exists else "none")
+
+                if (
+                    cached
+                    and cached["mtime"] == mtime
+                    and cached["track"].lyrics_status == cur_lyrics_status
+                ):
+                    continue
+
+                try:
+                    track_tags = self._tag_service.read_tags(full_path, rel_path=rel_path)
+                    track_tags.lyrics_status = cur_lyrics_status
+                    self._cache[rel_path] = {
+                        "mtime": mtime,
+                        "size": size,
+                        "track": track_tags,
+                    }
+                except (OSError, ValueError, TypeError) as exc:
+                    logger.warning("Ошибка чтения тегов трека %s: %s", rel_path, exc)
+
+        # Удаляем из кеша файлы, которых больше нет на диске
+        stale_keys = [k for k in self._cache if k not in found_paths]
+        for k in stale_keys:
+            self._cache.pop(k, None)
 
     async def search(self, query: str, limit: int = 20) -> LibrarySearchResponse:
         """Выполняет глобальный поиск по артистам, альбомам и трекам."""

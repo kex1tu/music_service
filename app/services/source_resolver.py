@@ -251,6 +251,14 @@ class AudioMatcher:
             "no_warnings": True,
             "simulate": True,
             "ignoreconfig": True,
+            "http_headers": {
+                "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            },
+            "extractor_args": {
+                "youtube": {
+                    "lang": ["ru"],
+                }
+            },
         }
         if self._cookies_path and self._cookies_path.is_file():
             self._ytdl_opts["cookiefile"] = str(self._cookies_path)
@@ -817,6 +825,14 @@ class SourceResolver:
                 "quiet": True,
                 "no_warnings": True,
                 "ignoreconfig": True,
+                "http_headers": {
+                    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+                },
+                "extractor_args": {
+                    "youtube": {
+                        "lang": ["ru"],
+                    }
+                },
             }
             if self._cookies_path and self._cookies_path.is_file():
                 opts["cookiefile"] = str(self._cookies_path)
@@ -1468,6 +1484,14 @@ class SourceResolver:
             "quiet": True,
             "no_warnings": True,
             "ignoreconfig": True,
+            "http_headers": {
+                "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            },
+            "extractor_args": {
+                "youtube": {
+                    "lang": ["ru"],
+                }
+            },
         }
         if self._cookies_path and self._cookies_path.is_file():
             ytdl_opts["cookiefile"] = str(self._cookies_path)

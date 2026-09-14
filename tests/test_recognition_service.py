@@ -97,3 +97,12 @@ async def test_recognize_audio_path_traversal(recognition_service: tuple[Recogni
     service, _, _ = recognition_service
     with pytest.raises(PathTraversalError):
         await service.recognize_audio("../../../etc/passwd")
+
+
+def test_shazam_russian_defaults(tmp_path: Path):
+    """Проверка конфигурации языка Shazam по умолчанию для предотвращения транслитерации."""
+    music_sandbox = PathSandbox(tmp_path / "music")
+    service = RecognitionService(music_sandbox=music_sandbox)
+    assert service.shazam.language == "ru-RU"
+    assert service.shazam.endpoint_country == "RU"
+

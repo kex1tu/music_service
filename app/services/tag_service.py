@@ -134,6 +134,15 @@ class TagService:
             except (StorageConfigurationError, OSError) as exc:
                 logger.debug("Сбой сопоставления песочниц для '%s': %s", rel_str, exc)
 
+        # Нормализация путей, явно включающих имя корневого каталога библиотеки (music_library/)
+        music_root_name = self._music_sandbox.root.name
+        if rel_str == "music_library" or rel_str == music_root_name:
+            rel_str = ""
+        elif rel_str.startswith("music_library/"):
+            rel_str = rel_str[len("music_library/") :]
+        elif rel_str.startswith(f"{music_root_name}/"):
+            rel_str = rel_str[len(music_root_name) + 1 :]
+
         return self._music_sandbox.resolve(rel_str, allow_root=allow_root)
 
     def read_tags(self, file_path: Path, rel_path: str = "") -> TrackTags:

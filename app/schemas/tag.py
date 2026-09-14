@@ -4,9 +4,9 @@
 и ответов API для редактора тегов.
 """
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AlbumTags(BaseModel):
@@ -43,6 +43,28 @@ class AlbumTags(BaseModel):
         ge=1,
         description="Всего дисков в альбоме",
     )
+
+    @field_validator("year", mode="before")
+    @classmethod
+    def _validate_album_year(cls, v: Any) -> int | None:
+        if v is None or v == "":
+            return None
+        try:
+            val = int(v)
+            return val if 1000 <= val <= 2999 else None
+        except (ValueError, TypeError):
+            return None
+
+    @field_validator("disc_total", mode="before")
+    @classmethod
+    def _validate_album_disc_total(cls, v: Any) -> int | None:
+        if v is None or v == "":
+            return None
+        try:
+            val = int(v)
+            return val if val >= 1 else None
+        except (ValueError, TypeError):
+            return None
 
 
 class TrackTags(BaseModel):
@@ -123,6 +145,39 @@ class TrackTags(BaseModel):
         default=None,
         description="Относительный безопасный путь к файлу обложки в песочнице",
     )
+
+    @field_validator("year", mode="before")
+    @classmethod
+    def _validate_track_year(cls, v: Any) -> int | None:
+        if v is None or v == "":
+            return None
+        try:
+            val = int(v)
+            return val if 1000 <= val <= 2999 else None
+        except (ValueError, TypeError):
+            return None
+
+    @field_validator("track_number", "disc_number", mode="before")
+    @classmethod
+    def _validate_positive_int_default_1(cls, v: Any) -> int:
+        if v is None or v == "":
+            return 1
+        try:
+            val = int(v)
+            return max(val, 1)
+        except (ValueError, TypeError):
+            return 1
+
+    @field_validator("track_total", "disc_total", mode="before")
+    @classmethod
+    def _validate_positive_int_optional(cls, v: Any) -> int | None:
+        if v is None or v == "":
+            return None
+        try:
+            val = int(v)
+            return val if val >= 1 else None
+        except (ValueError, TypeError):
+            return None
 
 
 class AlbumDetailsResponse(BaseModel):

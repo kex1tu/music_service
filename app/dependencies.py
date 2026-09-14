@@ -18,6 +18,7 @@ from app.services.download_service import DownloadService
 from app.services.file_manager_service import FileManagerService
 from app.services.library_audit_service import LibraryAuditService
 from app.services.lyrics_service import GeniusClient, LrclibClient, LyricsService
+from app.services.native_scanner import NativeScannerService
 from app.services.organizer_service import OrganizerService
 from app.services.source_resolver import SourceResolver
 from app.services.tag_service import TagService
@@ -223,6 +224,25 @@ def get_lyrics_service(
 
 LyricsServiceDep = Annotated[LyricsService, Depends(get_lyrics_service)]
 
+_native_scanner: NativeScannerService | None = None
+
+
+def get_native_scanner(
+    music_sandbox: MusicSandboxDep,
+    settings: SettingsDep,
+) -> NativeScannerService:
+    """Провайдер синглтона нативного сканера NativeScannerService."""
+    global _native_scanner
+    if _native_scanner is None:
+        _native_scanner = NativeScannerService(
+            music_sandbox=music_sandbox,
+            bin_path=settings.MUSIC_SCANNER_BIN_PATH,
+        )
+    return _native_scanner
+
+
+NativeScannerDep = Annotated[NativeScannerService, Depends(get_native_scanner)]
+
 _library_audit_service: LibraryAuditService | None = None
 
 
@@ -231,6 +251,7 @@ def get_library_audit_service(
     tag_service: TagServiceDep,
     lyrics_service: LyricsServiceDep,
     deezer_client: DeezerClientDep,
+    native_scanner: NativeScannerDep,
 ) -> LibraryAuditService:
     """Провайдер синглтона сервиса аудита и глобального поиска медиатеки."""
     global _library_audit_service
@@ -240,6 +261,7 @@ def get_library_audit_service(
             tag_service=tag_service,
             lyrics_service=lyrics_service,
             deezer_client=deezer_client,
+            native_scanner=native_scanner,
         )
     return _library_audit_service
 

@@ -31,7 +31,7 @@ class RecognitionService:
         """Инициализирует сервис с внедрением песочниц и клиента Shazam."""
         self.music_sandbox = music_sandbox
         self.tmp_sandbox = tmp_sandbox
-        self.shazam = shazam or Shazam()
+        self.shazam = shazam or Shazam(language="ru-RU", endpoint_country="RU")
 
     def _resolve_track_path(self, rel_path: str) -> Path:
         """Безопасно разрешает путь к MP3-файлу через песочницы медиатеки и временных загрузок."""

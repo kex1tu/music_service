@@ -538,67 +538,85 @@ function tagEditorComponent() {
             this.isSaving = true;
 
             try {
-                // Применяем метаданные групп релиза к входящим в них трекам
-                this.releases.forEach((group) => {
-                    group.items.forEach((itemObj) => {
-                        const trk = itemObj.track;
-                        if (!group.isSingles) {
-                            // Only fill in empty track fields from group metadata, don't overwrite individual edits
-                            if (group.albumTitle && !trk.album) trk.album = group.albumTitle;
-                            if (group.albumArtist && !trk.album_artist) trk.album_artist = group.albumArtist;
-                            if (group.year && !trk.year) trk.year = parseInt(group.year, 10);
-                            if (group.genre && !trk.genre) trk.genre = group.genre;
-                            if (group.discTotal && !trk.disc_total) trk.disc_total = parseInt(group.discTotal, 10);
-                        }
-                        const cov = group.selectedCoverUrl || group.coverPreviewUrl;
-                        if (cov && !trk.cover_url && !trk.cover_base64) {
-                            if (group.selectedCoverUrl) trk.cover_url = group.selectedCoverUrl;
-                            else if (group.coverBase64) trk.cover_base64 = group.coverBase64;
-                            else if (cov.startsWith('http')) trk.cover_url = cov;
-                            else if (cov.startsWith('data:')) trk.cover_base64 = cov;
-                            trk.has_cover = true;
-                        }
-                        if (group.coverPath && !trk.cover_path && !trk.cover_url && !trk.cover_base64) {
-                            trk.cover_path = group.coverPath;
-                            trk.has_cover = true;
-                        }
+                // В режиме группировки применяем метаданные карточек релиза к входящим в них трекам
+                if (this.viewMode === 'grouped' && this.releases) {
+                    this.releases.forEach((group) => {
+                        group.items.forEach((itemObj) => {
+                            const trk = itemObj.track;
+                            if (group.albumTitle !== undefined && group.albumTitle !== null) {
+                                trk.album = group.albumTitle;
+                            }
+                            if (group.albumArtist !== undefined && group.albumArtist !== null) {
+                                trk.album_artist = group.albumArtist;
+                            }
+                            if (group.year !== undefined && group.year !== null && group.year !== '') {
+                                const parsedYear = parseInt(group.year, 10);
+                                trk.year = !isNaN(parsedYear) && parsedYear > 0 ? parsedYear : null;
+                            }
+                            if (group.genre !== undefined && group.genre !== null) {
+                                trk.genre = group.genre;
+                            }
+                            if (group.discTotal !== undefined && group.discTotal !== null && group.discTotal !== '') {
+                                const parsedDiscTotal = parseInt(group.discTotal, 10);
+                                trk.disc_total = !isNaN(parsedDiscTotal) && parsedDiscTotal > 0 ? parsedDiscTotal : null;
+                            }
+                            const cov = group.selectedCoverUrl || group.coverPreviewUrl;
+                            if (cov) {
+                                if (group.selectedCoverUrl) trk.cover_url = group.selectedCoverUrl;
+                                else if (group.coverBase64) trk.cover_base64 = group.coverBase64;
+                                else if (cov.startsWith('http')) trk.cover_url = cov;
+                                else if (cov.startsWith('data:')) trk.cover_base64 = cov;
+                                trk.has_cover = true;
+                            }
+                            if (group.coverPath) {
+                                trk.cover_path = group.coverPath;
+                                trk.has_cover = true;
+                            }
+                        });
                     });
-                });
+                }
 
-                const firstRelease = this.releases[0];
-                const isSingleAlbum = this.releases.length === 1 && !firstRelease?.isSingles;
+                const firstRelease = this.releases && this.releases.length > 0 ? this.releases[0] : null;
+                const isSingleRelease = this.releases && this.releases.length === 1;
 
                 const payload = {
                     album: {
-                        album: isSingleAlbum ? (firstRelease.albumTitle || '') : (this.album.album || ''),
-                        album_artist: isSingleAlbum ? (firstRelease.albumArtist || '') : (this.album.album_artist || ''),
-                        year: isSingleAlbum && firstRelease.year ? parseInt(firstRelease.year, 10) : (this.album.year ? parseInt(this.album.year, 10) : null),
-                        genre: isSingleAlbum ? (firstRelease.genre || '') : (this.album.genre || ''),
-                        cover_path: isSingleAlbum ? firstRelease.coverPath : this.coverPath,
-                        disc_total: isSingleAlbum && firstRelease.discTotal ? parseInt(firstRelease.discTotal, 10) : (this.album.disc_total ? parseInt(this.album.disc_total, 10) : null),
+                        album: isSingleRelease && firstRelease ? (firstRelease.albumTitle || '') : (this.album.album || ''),
+                        album_artist: isSingleRelease && firstRelease ? (firstRelease.albumArtist || '') : (this.album.album_artist || ''),
+                        year: isSingleRelease && firstRelease && firstRelease.year ? (parseInt(firstRelease.year, 10) || null) : (this.album.year ? parseInt(this.album.year, 10) : null),
+                        genre: isSingleRelease && firstRelease ? (firstRelease.genre || '') : (this.album.genre || ''),
+                        cover_path: isSingleRelease && firstRelease ? firstRelease.coverPath : this.coverPath,
+                        disc_total: isSingleRelease && firstRelease && firstRelease.discTotal ? (parseInt(firstRelease.discTotal, 10) || null) : (this.album.disc_total ? parseInt(this.album.disc_total, 10) : null),
                     },
-                    tracks: this.tracks.map((t) => ({
-                        path: t.path,
-                        track_number: parseInt(t.track_number, 10) || 1,
-                        track_total: t.track_total ? parseInt(t.track_total, 10) : null,
-                        disc_number: parseInt(t.disc_number, 10) || 1,
-                        disc_total: t.disc_total ? parseInt(t.disc_total, 10) : null,
-                        title: t.title || '',
-                        artist: t.artist || '',
-                        album: t.album || '',
-                        album_artist: t.album_artist || '',
-                        year: t.year ? parseInt(t.year, 10) : null,
-                        genre: t.genre || '',
-                        lyrics_status: t.lyrics_status || 'none',
-                        has_cover: t.has_cover || !!t.cover_preview_url || !!t.cover_url || !!t.cover_base64 || !!t.cover_path,
-                        cover_url: t.cover_url || null,
-                        cover_base64: t.cover_base64 || null,
-                        cover_path: t.cover_path || null,
-                    })),
+                    tracks: this.tracks.map((t) => {
+                        const parsedTrackNum = parseInt(t.track_number, 10);
+                        const parsedTrackTotal = parseInt(t.track_total, 10);
+                        const parsedDiscNum = parseInt(t.disc_number, 10);
+                        const parsedDiscTotal = parseInt(t.disc_total, 10);
+                        const parsedYear = parseInt(t.year, 10);
+                        return {
+                            path: t.path,
+                            track_number: !isNaN(parsedTrackNum) && parsedTrackNum >= 1 ? parsedTrackNum : 1,
+                            track_total: !isNaN(parsedTrackTotal) && parsedTrackTotal >= 1 ? parsedTrackTotal : null,
+                            disc_number: !isNaN(parsedDiscNum) && parsedDiscNum >= 1 ? parsedDiscNum : 1,
+                            disc_total: !isNaN(parsedDiscTotal) && parsedDiscTotal >= 1 ? parsedDiscTotal : null,
+                            title: t.title || '',
+                            artist: t.artist || '',
+                            album: t.album || '',
+                            album_artist: t.album_artist || '',
+                            year: !isNaN(parsedYear) && parsedYear >= 1000 && parsedYear <= 2999 ? parsedYear : null,
+                            genre: t.genre || '',
+                            lyrics_status: t.lyrics_status || 'none',
+                            has_cover: t.has_cover || !!t.cover_preview_url || !!t.cover_url || !!t.cover_base64 || !!t.cover_path,
+                            cover_url: t.cover_url || null,
+                            cover_base64: t.cover_base64 || null,
+                            cover_path: t.cover_path || null,
+                        };
+                    }),
                     source_dir: this.sourceDir || 'tmp_downloads',
-                    cover_path: isSingleAlbum ? firstRelease.coverPath : this.coverPath,
-                    cover_base64: isSingleAlbum ? firstRelease.coverBase64 : (this.coverBase64 || null),
-                    cover_url: isSingleAlbum ? firstRelease.selectedCoverUrl : (this.selectedCoverUrl || null),
+                    cover_path: isSingleRelease && firstRelease ? firstRelease.coverPath : this.coverPath,
+                    cover_base64: isSingleRelease && firstRelease ? firstRelease.coverBase64 : (this.coverBase64 || null),
+                    cover_url: isSingleRelease && firstRelease ? firstRelease.selectedCoverUrl : (this.selectedCoverUrl || null),
                     apply_album_to_tracks: false, // теги уже корректно распределены по трекам
                     reorganize: true, // переместить в каноническую структуру MUSIC_DIR
                     singles_mode: this.singlesMode,
@@ -612,8 +630,11 @@ function tagEditorComponent() {
                 });
 
                 if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.message || 'Ошибка сохранения альбома');
+                    const err = await res.json().catch(() => ({}));
+                    const detailMsg = err.detail
+                        ? (Array.isArray(err.detail) ? err.detail.map(d => d.msg || JSON.stringify(d)).join(', ') : String(err.detail))
+                        : (err.message || 'Ошибка сохранения альбома');
+                    throw new Error(detailMsg);
                 }
 
                 const result = await res.json();

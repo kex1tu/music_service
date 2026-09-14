@@ -980,6 +980,80 @@ def test_batch_save_with_track_cover_path(
     assert not (tmp_dir / "job_cov2").exists()
 
 
+def test_batch_save_with_zero_or_invalid_numbers(
+    auth_tags_client: TestClient, temp_storage: dict[str, Path]
+):
+    """Проверка устойчивости схем к track_number=0, disc_number=0, year=0 или invalid."""
+    music_dir = temp_storage["music_dir"]
+    track_file = music_dir / "01. Invalid Num Track.mp3"
+    track_file.write_bytes(MINIMAL_MP3)
+
+    payload = {
+        "album": {
+            "album": "Safe Album",
+            "album_artist": "Safe Artist",
+            "year": 0,  # должно нормализоваться в None
+            "disc_total": 0,  # должно нормализоваться в None
+        },
+        "tracks": [
+            {
+                "path": "01. Invalid Num Track.mp3",
+                "track_number": 0,  # должно нормализоваться в 1
+                "disc_number": 0,  # должно нормализоваться в 1
+                "track_total": 0,  # должно нормализоваться в None
+                "disc_total": 0,  # должно нормализоваться в None
+                "year": 500,  # должно нормализоваться в None (<1000)
+                "title": "Normalized Track",
+                "artist": "Safe Artist",
+                "album": "Safe Album",
+            }
+        ],
+        "source_dir": "music_library",
+        "apply_album_to_tracks": False,
+        "reorganize": False,
+    }
+
+    resp = auth_tags_client.put("/tags/batch", json=payload)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["success"] is True
+
+
+def test_get_tags_and_batch_save_with_music_library_prefix(
+    auth_tags_client: TestClient, temp_storage: dict[str, Path]
+):
+    """Проверка корректного разрешения путей, начинающихся с music_library/."""
+    music_dir = temp_storage["music_dir"]
+    track_file = music_dir / "prefix_track.mp3"
+    track_file.write_bytes(MINIMAL_MP3)
+
+    # 1. GET /tags с префиксом music_library/
+    resp_get = auth_tags_client.get("/tags", params={"path": "music_library/prefix_track.mp3"})
+    assert resp_get.status_code == 200
+
+    # 2. PUT /tags/batch с префиксом music_library/
+    payload = {
+        "album": {"album": "Prefix Album", "album_artist": "Prefix Artist"},
+        "tracks": [
+            {
+                "path": "music_library/prefix_track.mp3",
+                "track_number": 1,
+                "title": "Prefix Track",
+                "artist": "Prefix Artist",
+                "album": "Prefix Album",
+            }
+        ],
+        "source_dir": "music_library",
+        "apply_album_to_tracks": False,
+        "reorganize": False,
+    }
+
+    resp_put = auth_tags_client.put("/tags/batch", json=payload)
+    assert resp_put.status_code == 200
+    assert resp_put.json()["success"] is True
+
+
+
 
 
 
