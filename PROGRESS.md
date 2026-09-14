@@ -2,8 +2,8 @@
 
 ## Текущий статус проекта
 - **Текущий статус проекта:** 100% готовность, все проверки и тесты пройдены.
-- **Активный этап:** Полное удаление интеграции с MusicBrainz, упрощение и оптимизация поиска релизов и обложек (Deezer, Apple Music, Яндекс Музыка, Spotify).
-- **Результаты тестов:** 531/531 passed (`pytest`), ruff linter — 0 замечаний (All checks passed!).
+- **Активный этап:** Реализовано глубокое потрековое определение исполнителей и фитов при сопоставлении с Deezer (в редакторе тегов, аудите неполных релизов и загрузчике).
+- **Результаты тестов:** 533/533 passed (`pytest`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -358,6 +358,18 @@
 | **R1: Очистка бэкенда и эндпоинтов** | `app/services/musicbrainz_client.py`, `app/dependencies.py`, `app/routers/tags.py`, `app/schemas/tag.py`, `app/services/tag_service.py` | **DONE** | Полностью удален сервис `MusicBrainzClient` и файл `app/services/musicbrainz_client.py`. Удалена зависимость `MusicBrainzClientDep` и эндпоинты `/tags/musicbrainz/albums` и `/tags/musicbrainz/albums/{release_id}`. Из схемы `CoverSearchResultItem` и сервиса `TagService.search_covers` исключен источник `musicbrainz`. |
 | **R2: Очистка фронтенда** | `app/templates/index.html`, `app/static/js/tag_editor.js` | **DONE** | Удален переключатель источников метаданных (`metadataSource`) в редакторе тегов, поиск релизов переведен на прямой опрос Deezer (`searchDeezerAlbums`), в галерее обложек оставлены 4 проверенных источника (Apple Music, Deezer, Яндекс Музыка, Spotify). |
 | **R3: Актуализация тестов и верификация** | `tests/test_musicbrainz_client.py`, `tests/test_tags_router.py`, `tests/test_frontend.py` | **DONE** | Удален устаревший тестовый файл `tests/test_musicbrainz_client.py` и тест `test_musicbrainz_album_endpoints`. Все 531 тест успешно пройдены (`pytest`, 100% pass), линтер `ruff check app tests` без единого замечания. |
+
+---
+
+## Блок 19: Потрековое определение исполнителей при сопоставлении с Deezer (2026-09-14T20:21:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Обогащение треков через `/track/{id}` в DeezerClient** | `app/services/deezer_client.py`, `tests/test_deezer_client.py` | **DONE** | В методы `DeezerClient.get_album` и `get_playlist` добавлен флаг `fetch_track_details=True` с параллельным получением полного списка `contributors` для каждого трека через `asyncio.gather(Semaphore(10))` менее чем за 0.5с. В `format_artists` добавлена приоритетная фильтрация исполнительских ролей (`Main`, `Featured`, `Primary`, `Performer`). |
+| **R2: Потрековое определение в Tag Editor и аудиторе релизов** | `app/routers/tags.py`, `app/schemas/library_audit.py`, `app/services/library_audit_service.py`, `app/services/source_resolver.py` | **DONE** | В эндпоинте `/tags/deezer/albums/{id}` каждый трек альбома получает индивидуально распознанный список соавторов через `\\`. В `LibraryAuditService.match_album_catalog` и `IncompleteTrackInfo` добавлено поле `artist` для каждого трека релиза. В `SourceResolver._resolve_deezer` треки альбомов и плейлистов скачиваются с точными исполнителями. |
+| **R3: Интеллектуальное сопоставление в UI (Frontend)** | `app/static/js/tag_editor.js`, `app/templates/index.html` | **DONE** | В `tag_editor.js` метод `applyDeezerAlbum` дополнен интеллектуальным сопоставлением треков (по номеру дорожки `track_number`, затем по нечеткому совпадению названия `title`, с fallback на индекс) и точной записью индивидуальных исполнителей `it.track.artist = dt.artist`. В таблице неполных релизов на дашборде аудита выводится имя трекового артиста. |
+| **R4: Тесты и верификация** | `tests/test_deezer_client.py`, `tests/test_library_audit.py` | **DONE** | Добавлены тесты `test_get_album_with_track_details` и `test_format_artists_with_contributor_roles`. Все 533 теста пройдены на 100% (`pytest`), ruff linter — 0 ошибок. |
+
 
 
 

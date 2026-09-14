@@ -132,6 +132,7 @@ class IncompleteTrackInfo(BaseModel):
     track_number: int = Field(default=1, description="Номер дорожки")
     disc_number: int = Field(default=1, description="Номер диска")
     title: str = Field(default="", description="Название трека")
+    artist: str = Field(default="", description="Исполнители трека (\\\\ для нескольких)")
     duration: int | None = Field(default=None, description="Длительность трека в секундах")
     is_present: bool = Field(default=False, description="Присутствует ли трек в медиатеке")
     local_path: str | None = Field(

@@ -963,9 +963,9 @@ class SourceResolver:
 
         if res_type in ("album", "playlist"):
             data = (
-                await self._deezer.get_album(res_id)
+                await self._deezer.get_album(res_id, fetch_track_details=True)
                 if res_type == "album"
-                else await self._deezer.get_playlist(res_id)
+                else await self._deezer.get_playlist(res_id, fetch_track_details=True)
             )
 
             is_album = res_type == "album"
@@ -1003,6 +1003,8 @@ class SourceResolver:
             async def _resolve_single_track(item: dict[str, Any], default_pos: int) -> ResolvedTrack:
                 t_title = item.get("title", "Unknown Track")
                 t_artists = DeezerClient.format_artists(item)
+                if not t_artists or t_artists == "Unknown Artist":
+                    t_artists = album_artist
                 t_duration = safe_int_duration(item.get("duration"))
                 t_disk = int(item.get("disk_number") or 1)
                 t_pos = int(item.get("track_position") or default_pos)

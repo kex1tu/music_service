@@ -343,3 +343,73 @@ async def test_get_artist_and_albums():
     assert albums[0]["title"] == "Discovery"
     assert albums[1]["record_type"] == "single"
 
+
+@pytest.mark.asyncio
+async def test_get_album_with_track_details():
+    """Проверка дозагрузки деталей треков и извлечения авторов при fetch_track_details=True."""
+    mock_http = MagicMock(spec=httpx.AsyncClient)
+    mock_http.is_closed = False
+
+    async def mock_get(url, params=None):
+        resp = MagicMock(spec=httpx.Response)
+        resp.status_code = 200
+        if "album/343324187" in url:
+            resp.json.return_value = {
+                "id": 343324187,
+                "title": "Curtain Call 2",
+                "artist": {"name": "Eminem"},
+                "tracks": {
+                    "data": [
+                        {"id": 1853469917, "title": "Godzilla", "track_position": 1, "disk_number": 1, "artist": {"name": "Eminem"}},
+                        {"id": 1853469918, "title": "Lighters", "track_position": 2, "disk_number": 1, "artist": {"name": "Bad Meets Evil"}},
+                    ],
+                    "next": None,
+                },
+            }
+        elif "track/1853469917" in url:
+            resp.json.return_value = {
+                "id": 1853469917,
+                "title": "Godzilla",
+                "artist": {"name": "Eminem"},
+                "contributors": [
+                    {"name": "Eminem", "role": "Main"},
+                    {"name": "Juice WRLD", "role": "Featured"},
+                ],
+            }
+        elif "track/1853469918" in url:
+            resp.json.return_value = {
+                "id": 1853469918,
+                "title": "Lighters",
+                "artist": {"name": "Bad Meets Evil"},
+                "contributors": [
+                    {"name": "Bad Meets Evil", "role": "Main"},
+                    {"name": "Bruno Mars", "role": "Featured"},
+                ],
+            }
+        return resp
+
+    mock_http.get = AsyncMock(side_effect=mock_get)
+    client = DeezerClient(http_client=mock_http)
+
+    album = await client.get_album("343324187", fetch_track_details=True)
+    tracks = album["tracks"]["data"]
+    assert len(tracks) == 2
+    assert DeezerClient.format_artists(tracks[0]) == "Eminem\\\\Juice WRLD"
+    assert DeezerClient.format_artists(tracks[1]) == "Bad Meets Evil\\\\Bruno Mars"
+
+
+def test_format_artists_with_contributor_roles():
+    """Проверка правильной фильтрации ролей исполнителей (Main/Featured vs Composer)."""
+    track_data = {
+        "title": "Godzilla",
+        "artist": {"name": "Eminem"},
+        "contributors": [
+            {"name": "Eminem", "role": "Main"},
+            {"name": "Juice WRLD", "role": "Featured"},
+            {"name": "Luis Resto", "role": "Composer"},
+            {"name": "D.A. Got That Dope", "role": "Producer"},
+        ],
+    }
+    assert DeezerClient.format_artists(track_data) == "Eminem\\\\Juice WRLD"
+
+

@@ -1776,9 +1776,14 @@
                                                         <td class="p-2.5 text-center font-mono text-gray-400" x-text="t.disc_number > 1 ? `${t.disc_number}-${t.track_number}` : t.track_number"></td>
                                                         <td class="p-2.5">
                                                             <div class="font-medium text-white truncate max-w-sm" x-text="t.title || `Трек #${t.track_number}`"></div>
-                                                            <template x-if="t.duration">
-                                                                <div class="text-[10px] text-gray-500 font-mono" x-text="`${Math.floor(t.duration / 60)}:${String(Math.floor(t.duration % 60)).padStart(2, '0')}`"></div>
-                                                            </template>
+                                                            <div class="flex items-center space-x-2 text-[10px] text-gray-400">
+                                                                <template x-if="t.artist && t.artist !== alb.artist">
+                                                                    <span class="truncate max-w-[200px]" x-text="t.artist"></span>
+                                                                </template>
+                                                                <template x-if="t.duration">
+                                                                    <span class="text-gray-500 font-mono" x-text="`${Math.floor(t.duration / 60)}:${String(Math.floor(t.duration % 60)).padStart(2, '0')}`"></span>
+                                                                </template>
+                                                            </div>
                                                         </td>
                                                         <td class="p-2.5 text-center">
                                                             <template x-if="t.is_present">

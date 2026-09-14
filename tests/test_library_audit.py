@@ -614,7 +614,7 @@ async def test_download_missing_with_deezer_album_id(
         assert res.status_code == 200
         jobs = res.json()
         assert len(jobs) == 1
-        mock_dz.get_album.assert_called_once_with("999999")
+        mock_dz.get_album.assert_called_once_with("999999", fetch_track_details=True)
         mock_download_service.create_job.assert_called_once_with(
             url="https://www.deezer.com/track/2",
             source="auto",

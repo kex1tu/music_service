@@ -135,8 +135,8 @@ class DeezerClient:
         """Запрашивает метаданные трека по ID."""
         return await self._request_api(f"/track/{track_id}")
 
-    async def get_album(self, album_id: str) -> dict[str, Any]:
-        """Запрашивает метаданные альбома со всеми треками (с пагинацией при необходимости)."""
+    async def get_album(self, album_id: str, fetch_track_details: bool = False) -> dict[str, Any]:
+        """Запрашивает метаданные альбома со всеми треками (с пагинацией и дозагрузкой деталей треков при необходимости)."""
         data = await self._request_api(f"/album/{album_id}")
 
         # Проверяем, есть ли дополнительные страницы треков
@@ -157,6 +157,34 @@ class DeezerClient:
                     break
                 tracks_list.extend(page_tracks)
                 next_url = page_data.get("next")
+
+            if fetch_track_details and tracks_list:
+                import asyncio
+                sem = asyncio.Semaphore(10)
+
+                async def _fetch_track_detail(t: dict[str, Any]) -> dict[str, Any]:
+                    tid = t.get("id")
+                    if not tid:
+                        return t
+                    async with sem:
+                        try:
+                            res = await client.get(f"{self.BASE_API_URL}/track/{tid}")
+                            if res.status_code == 200:
+                                t_detail = res.json()
+                                if isinstance(t_detail, dict) and "error" not in t_detail:
+                                    for k in ("track_position", "disk_number"):
+                                        if k in t and (k not in t_detail or not t_detail[k]):
+                                            t_detail[k] = t[k]
+                                    return t_detail
+                        except Exception as exc:  # noqa: BLE001
+                            logger.debug("Не удалось получить детальные данные трека %s: %s", tid, exc)
+                    return t
+
+                enriched_tracks = await asyncio.gather(
+                    *(_fetch_track_detail(t) for t in tracks_list),
+                    return_exceptions=False,
+                )
+                tracks_list = list(enriched_tracks)
         finally:
             if should_close:
                 await client.aclose()
@@ -165,7 +193,7 @@ class DeezerClient:
         data["tracks"] = tracks_obj
         return data
 
-    async def get_playlist(self, playlist_id: str) -> dict[str, Any]:
+    async def get_playlist(self, playlist_id: str, fetch_track_details: bool = False) -> dict[str, Any]:
         """Запрашивает метаданные плейлиста со всеми треками."""
         data = await self._request_api(f"/playlist/{playlist_id}")
 
@@ -186,6 +214,34 @@ class DeezerClient:
                     break
                 tracks_list.extend(page_tracks)
                 next_url = page_data.get("next")
+
+            if fetch_track_details and tracks_list:
+                import asyncio
+                sem = asyncio.Semaphore(10)
+
+                async def _fetch_track_detail(t: dict[str, Any]) -> dict[str, Any]:
+                    tid = t.get("id")
+                    if not tid:
+                        return t
+                    async with sem:
+                        try:
+                            res = await client.get(f"{self.BASE_API_URL}/track/{tid}")
+                            if res.status_code == 200:
+                                t_detail = res.json()
+                                if isinstance(t_detail, dict) and "error" not in t_detail:
+                                    for k in ("track_position", "disk_number"):
+                                        if k in t and (k not in t_detail or not t_detail[k]):
+                                            t_detail[k] = t[k]
+                                    return t_detail
+                        except Exception as exc:  # noqa: BLE001
+                            logger.debug("Не удалось получить детальные данные трека %s: %s", tid, exc)
+                    return t
+
+                enriched_tracks = await asyncio.gather(
+                    *(_fetch_track_detail(t) for t in tracks_list),
+                    return_exceptions=False,
+                )
+                tracks_list = list(enriched_tracks)
         finally:
             if should_close:
                 await client.aclose()
@@ -390,8 +446,18 @@ class DeezerClient:
 
         # 1. Проверяем contributors
         contributors = track_data.get("contributors", [])
-        if isinstance(contributors, list):
-            for c in contributors:
+        if isinstance(contributors, list) and contributors:
+            perf_contribs = [
+                c
+                for c in contributors
+                if isinstance(c, dict)
+                and (
+                    not c.get("role")
+                    or str(c.get("role")).lower() in ("main", "featured", "primary", "performer")
+                )
+            ]
+            target_contribs = perf_contribs if perf_contribs else contributors
+            for c in target_contribs:
                 if isinstance(c, dict):
                     add_name(c.get("name"))
                 elif isinstance(c, str):

@@ -371,7 +371,7 @@ async def get_deezer_album_details(
     deezer_client: DeezerClientDep,
 ) -> DeezerAlbumDetailsResponse:
     """Получение официальных метаданных альбома, обложки и треклиста из Deezer."""
-    data = await deezer_client.get_album(album_id)
+    data = await deezer_client.get_album(album_id, fetch_track_details=True)
     artist_name = deezer_client.format_artists(data)
 
     release_date = data.get("release_date")
@@ -395,7 +395,9 @@ async def get_deezer_album_details(
     tracks_items: list[DeezerAlbumTrackItem] = []
     for idx, t in enumerate(tracks_data):
         track_num = t.get("track_position") or (idx + 1)
-        t_artist = deezer_client.format_artists(t) if ("contributors" in t or "artist" in t or "title" in t) else artist_name
+        t_artist = deezer_client.format_artists(t)
+        if not t_artist or t_artist == "Unknown Artist":
+            t_artist = artist_name
         tracks_items.append(
             DeezerAlbumTrackItem(
                 track_number=int(track_num),

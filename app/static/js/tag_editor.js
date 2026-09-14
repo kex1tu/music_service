@@ -860,11 +860,26 @@ function tagEditorComponent() {
 
                     if (data.tracks && data.tracks.length > 0) {
                         targetGroup.items.forEach((it, idx) => {
-                            const dt = data.tracks[idx];
+                            let dt = null;
+                            const curTrackNum = parseInt(it.track.track_number, 10);
+                            if (curTrackNum && !isNaN(curTrackNum)) {
+                                dt = data.tracks.find((t) => parseInt(t.track_number, 10) === curTrackNum);
+                            }
+                            if (!dt && it.track.title) {
+                                const cleanLocal = it.track.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+                                dt = data.tracks.find((t) => {
+                                    const cleanRemote = (t.title || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+                                    return cleanLocal && cleanRemote && (cleanLocal === cleanRemote || cleanLocal.includes(cleanRemote) || cleanRemote.includes(cleanLocal));
+                                });
+                            }
+                            if (!dt) {
+                                dt = data.tracks[idx];
+                            }
+
                             if (dt) {
                                 it.track.track_number = dt.track_number;
                                 it.track.title = dt.title;
-                                it.track.artist = dt.artist;
+                                it.track.artist = dt.artist || data.artist || it.track.artist;
                                 it.track.album = data.title;
                                 it.track.album_artist = data.artist;
                                 if (data.year) it.track.year = data.year;
@@ -891,11 +906,26 @@ function tagEditorComponent() {
 
                     if (data.tracks && data.tracks.length > 0) {
                         this.tracks.forEach((track, idx) => {
-                            const dt = data.tracks[idx];
+                            let dt = null;
+                            const curTrackNum = parseInt(track.track_number, 10);
+                            if (curTrackNum && !isNaN(curTrackNum)) {
+                                dt = data.tracks.find((t) => parseInt(t.track_number, 10) === curTrackNum);
+                            }
+                            if (!dt && track.title) {
+                                const cleanLocal = track.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+                                dt = data.tracks.find((t) => {
+                                    const cleanRemote = (t.title || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+                                    return cleanLocal && cleanRemote && (cleanLocal === cleanRemote || cleanLocal.includes(cleanRemote) || cleanRemote.includes(cleanLocal));
+                                });
+                            }
+                            if (!dt) {
+                                dt = data.tracks[idx];
+                            }
+
                             if (dt) {
                                 track.track_number = dt.track_number;
                                 track.title = dt.title;
-                                track.artist = dt.artist;
+                                track.artist = dt.artist || data.artist || track.artist;
                                 track.album = data.title;
                                 track.album_artist = data.artist;
                                 if (data.year) track.year = data.year;

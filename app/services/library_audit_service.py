@@ -790,7 +790,7 @@ class LibraryAuditService:
         album_data: dict[str, Any] | None = None
         if deezer_album_id:
             try:
-                album_data = await self._deezer_client.get_album(deezer_album_id)
+                album_data = await self._deezer_client.get_album(deezer_album_id, fetch_track_details=True)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Не удалось получить альбом Deezer по ID %s: %s", deezer_album_id, exc)
 
@@ -841,7 +841,7 @@ class LibraryAuditService:
                                 break
 
                         cand_id = str(best_candidate.get("id"))
-                        album_data = await self._deezer_client.get_album(cand_id)
+                        album_data = await self._deezer_client.get_album(cand_id, fetch_track_details=True)
                         if album_data:
                             break
                 except Exception as exc:  # noqa: BLE001
@@ -862,7 +862,7 @@ class LibraryAuditService:
 
         deezer_tracks = album_data.get("tracks", {}).get("data", [])
         cover_url = DeezerClient.extract_best_cover_url(album_data)
-        deezer_artist = album_data.get("artist", {}).get("name", artist_name)
+        deezer_artist = DeezerClient.format_artists(album_data) if album_data.get("artist") else artist_name
         deezer_title = album_data.get("title", album_name)
         deezer_id = str(album_data.get("id", ""))
 
@@ -876,6 +876,9 @@ class LibraryAuditService:
             dz_pos = int(dz_t.get("track_position") or idx)
             dz_disc = int(dz_t.get("disk_number") or 1)
             dz_title = dz_t.get("title", "")
+            dz_artist = DeezerClient.format_artists(dz_t)
+            if not dz_artist or dz_artist == "Unknown Artist":
+                dz_artist = deezer_artist or artist_name
             dz_dur = dz_t.get("duration")
             dz_tid = str(dz_t.get("id", ""))
             dz_url = f"https://www.deezer.com/track/{dz_tid}" if dz_tid else None
@@ -922,6 +925,7 @@ class LibraryAuditService:
                         track_number=dz_pos,
                         disc_number=dz_disc,
                         title=dz_title,
+                        artist=dz_artist,
                         duration=dz_dur or matched_loc.duration,
                         is_present=True,
                         local_path=matched_loc.path,
@@ -935,6 +939,7 @@ class LibraryAuditService:
                     track_number=dz_pos,
                     disc_number=dz_disc,
                     title=dz_title,
+                    artist=dz_artist,
                     duration=dz_dur,
                     is_present=False,
                     local_path=None,
