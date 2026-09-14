@@ -181,11 +181,12 @@ async def get_library_duplicates(
     description="Находит альбомы, в которых не хватает треков по тегам TRCK/TPOS или нарушена числовая последовательность.",
 )
 async def get_incomplete_albums(
+    auto_match: bool = Query(default=False, description="Автоматически сверять альбомы с каталогом Deezer"),
     _: CurrentUserDep = ...,
     audit_service: LibraryAuditServiceDep = ...,
 ) -> IncompleteAlbumsResponse:
     """Возвращает список неполных альбомов коллекции."""
-    return await audit_service.get_incomplete_albums()
+    return await audit_service.get_incomplete_albums(auto_match=auto_match)
 
 
 @router.get(

@@ -364,7 +364,7 @@ function libraryAuditComponent() {
                             'success'
                         );
                     }
-                    await this.loadAll(true);
+                    await this.loadAll(false);
                     window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
                 } else {
                     let msg = 'Ошибка при реорганизации медиатеки';

@@ -661,7 +661,7 @@ async def test_incomplete_albums_auto_match_deezer_filters_false_positives(tmp_p
     audit_svc._cache = cache
     audit_svc.ensure_index = AsyncMock()
 
-    res = await audit_svc.get_incomplete_albums()
+    res = await audit_svc.get_incomplete_albums(auto_match=True)
     # Так как в каталоге Deezer всего 25 треков и все 25 есть на диске, альбом не должен возвращаться как неполный!
     assert res.total_incomplete_albums == 0
     assert len(res.albums) == 0

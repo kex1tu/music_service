@@ -33,7 +33,7 @@
     <script src="/static/js/tag_editor.js?v=20260914_04"></script>
     <script src="/static/js/lyrics_modal.js?v=20260914_04"></script>
     <script src="/static/js/file_manager.js?v=20260914_04"></script>
-    <script src="/static/js/library_audit.js?v=20260915_01"></script>
+    <script src="/static/js/library_audit.js?v=20260915_03"></script>
 
     <!-- Alpine.js CDN -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -1276,7 +1276,7 @@
                 <div class="flex items-center space-x-3 shrink-0">
                     <button
                         @click="confirmReorganizeLibrary()"
-                        :disabled="isLoading || isReorganizing"
+                        :disabled="isReorganizing"
                         class="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 hover:text-indigo-200 border border-indigo-500/40 disabled:opacity-50 text-xs font-medium rounded-lg transition flex items-center justify-center space-x-2">
                         <template x-if="isReorganizing">
                             <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
@@ -3079,7 +3079,7 @@
                 </button>
                 <button
                     type="button"
-                    @click="window.dispatchEvent(new CustomEvent('confirm-reorganize-library'))"
+                    @click="$store.app.activeModal = null; window.dispatchEvent(new CustomEvent('confirm-reorganize-library'))"
                     class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition shadow-lg shadow-indigo-600/30 flex items-center space-x-1.5">
                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/>

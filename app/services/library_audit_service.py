@@ -627,7 +627,7 @@ class LibraryAuditService:
             total_duplicate_files=total_dup_files,
         )
 
-    async def get_incomplete_albums(self, auto_match: bool = True) -> IncompleteAlbumsResponse:
+    async def get_incomplete_albums(self, auto_match: bool = False) -> IncompleteAlbumsResponse:
         """Обнаруживает альбомы с недостающими треками на основе тегов TRCK/TPOS и непрерывности нумерации."""
         await self.ensure_index()
 
@@ -645,6 +645,7 @@ class LibraryAuditService:
 
         incomplete_albums: list[IncompleteAlbumItem] = []
         total_missing_tracks_count = 0
+        quota_exceeded = False
 
         for album_dir, tracks in albums_dict.items():
             if not tracks:
@@ -789,12 +790,12 @@ class LibraryAuditService:
                     total_missing_tracks_count += len(cached_match.missing_tracks)
                     continue
 
-                # Попробуем автоматически сверить с Deezer, если клиент доступен и включен auto_match
-                if self._deezer_client and auto_match:
+                # Попробуем автоматически сверить с Deezer, если клиент доступен и явно включен auto_match
+                if self._deezer_client and auto_match and not quota_exceeded:
                     try:
                         matched = await asyncio.wait_for(
                             self.match_album_catalog(album_dir or first_t.path),
-                            timeout=5.0,
+                            timeout=3.0,
                         )
                         if matched.expected_count <= matched.present_count or not matched.missing_tracks:
                             continue
@@ -803,6 +804,10 @@ class LibraryAuditService:
                         continue
                     except Exception as exc:  # noqa: BLE001
                         logger.debug("Сверка с каталогом Deezer для %s завершилась с ошибкой: %s", album_dir, exc)
+                        err_str = str(exc)
+                        if "Quota limit exceeded" in err_str or "[4]" in err_str:
+                            quota_exceeded = True
+                            logger.warning("Превышен лимит запросов к Deezer API (Quota limit exceeded). Автоматическая сверка прервана.")
 
                 incomplete_albums.append(
                     IncompleteAlbumItem(
