@@ -33,7 +33,7 @@
     <script src="/static/js/tag_editor.js?v=20260910_03"></script>
     <script src="/static/js/lyrics_modal.js?v=20260910_02"></script>
     <script src="/static/js/file_manager.js?v=20260910_02"></script>
-    <script src="/static/js/library_audit.js?v=20260910_02"></script>
+    <script src="/static/js/library_audit.js?v=20260914_01"></script>
 
     <!-- Alpine.js CDN -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -408,7 +408,7 @@
                     <span>Файлы</span>
                 </button>
                 <button
-                    @click="$store.app.activeTab = 'audit'"
+                    @click="$store.app.activeTab = 'audit'; $dispatch('refresh-audit')"
                     :class="$store.app.activeTab === 'audit' ? 'bg-emerald-600 text-white font-medium shadow' : 'text-gray-400 hover:text-gray-200'"
                     class="px-3 sm:px-4 py-1.5 rounded-md text-sm transition-all flex items-center space-x-2">
                     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
@@ -915,6 +915,8 @@
                     </table>
                 </div>
             </div>
+        </section>
+
         <!-- ==================== ВКЛАДКА 3: АУДИТ МЕДИАТЕКИ ==================== -->
         <section x-show="$store.app.activeTab === 'audit'" x-data="libraryAuditComponent()" class="space-y-6 animate-fade-in">
             <!-- Заголовок и кнопка обновления -->
@@ -1223,8 +1225,8 @@
                                                     <template x-if="trk.bitrate">
                                                         <span x-text="`${trk.bitrate} kbps`"></span>
                                                     </template>
-                                                    <template x-if="trk.size_bytes">
-                                                        <span x-text="`${(trk.size_bytes / 1024 / 1024).toFixed(1)} МБ`"></span>
+                                                    <template x-if="trk.size || trk.size_bytes">
+                                                        <span x-text="`${((trk.size || trk.size_bytes) / 1024 / 1024).toFixed(1)} МБ`"></span>
                                                     </template>
                                                 </div>
                                             </div>

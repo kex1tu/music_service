@@ -83,6 +83,7 @@ class MissingCoverItem(BaseModel):
     artist: str = Field(default="", description="Исполнитель")
     album: str = Field(default="", description="Альбом")
     is_album_dir: bool = Field(default=False, description="Флаг: является ли элемент папкой альбома")
+    track_count: int = Field(default=1, description="Количество треков в релизе/папке")
 
 
 class DuplicateTrackItem(BaseModel):
@@ -91,6 +92,7 @@ class DuplicateTrackItem(BaseModel):
     path: str = Field(..., description="Относительный путь к MP3 файлу")
     filename: str = Field(..., description="Имя файла")
     size: int | None = Field(default=None, description="Размер файла в байтах")
+    size_bytes: int | None = Field(default=None, description="Размер файла в байтах (алиас для UI)")
     duration: int | None = Field(default=None, description="Длительность трека в секундах")
     bitrate: int | None = Field(default=None, description="Битрейт в kbps")
     modified_at: str = Field(..., description="Дата и время изменения файла")

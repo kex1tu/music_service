@@ -31,6 +31,22 @@ function libraryAuditComponent() {
         init() {
             this.loadAll();
             this.checkLyricsProgress();
+
+            // Слушаем событие обновления при переключении на вкладку или клике
+            window.addEventListener('refresh-audit', () => {
+                this.loadAll();
+                this.checkLyricsProgress();
+            });
+
+            // Автоматически обновляем данные при активации вкладки Аудит
+            if (this.$watch) {
+                this.$watch('$store.app.activeTab', (tab) => {
+                    if (tab === 'audit') {
+                        this.loadAll();
+                        this.checkLyricsProgress();
+                    }
+                });
+            }
         },
 
         async loadAll() {

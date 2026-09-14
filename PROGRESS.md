@@ -210,6 +210,17 @@
 | **R4: Frontend интерфейс (Deezer / MusicBrainz)** | `app/templates/index.html`, `app/static/js/tag_editor.js` | **DONE** | В модальном окне автопоиска альбома добавлен селектор источника метаданных: **Deezer** / **MusicBrainz**. В галерею обложек добавлен фильтр и стилизованный бейдж **MusicBrainz (500×500)**. Логика автозаполнения в `tag_editor.js` унифицирована для обоих провайдеров. |
 | **R5: Верификация, линтинг и тесты** | `tests/test_musicbrainz_client.py`, `tests/test_tags_router.py` | **DONE** | Разработано 10 новых юнит-тестов в `test_musicbrainz_client.py` (поиск релизов, разбор метаданных треков, format_artist_credit, обработка 404/429/Retry-After, сетевые ошибки, поиск обложек). Добавлены интеграционные тесты для роутера в `test_tags_router.py`. Все 512 тестов успешно пройдены (`pytest`, 100% pass), `ruff check app tests` чист (All checks passed!). |
 
+---
+
+## Блок 21: Исправление отображения и реактивности вкладки «Аудит медиатеки» (2026-09-14T13:00:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Исправление DOM-иерархии шаблона (Unclosed Section Bugfix)** | `app/templates/index.html`, `tests/test_frontend.py` | **DONE** | Устранена критическая ошибка верстки: закрыт пропущенный тег `</section>` для секции файлового менеджера перед секцией аудита. Ранее блок аудита оказывался дочерним элементом секции файлов и при `$store.app.activeTab = 'audit'` скрывался вместе с родительской секцией (`display: none`). Добавлен тест структуры DOM в `test_frontend.py` для предотвращения регрессий. |
+| **R2: Реактивное обновление данных аудита и согласование схем** | `app/static/js/library_audit.js`, `app/templates/index.html`, `app/schemas/library_audit.py`, `app/services/library_audit_service.py` | **DONE** | В `library_audit.js` и кнопку навигации добавлен слушатель и диспатч события `refresh-audit`, а также `$watch` за `$store.app.activeTab === 'audit'`, чтобы при переходе на вкладку данные автоматически подгружались. В `MissingCoverItem` добавлено поле `track_count` для корректного отображения числа треков релиза в таблице. В `DuplicateTrackItem` и шаблоне дубликатов поддержано отображение размера через `size_bytes` / `size`. |
+| **R3: Верификация, линтинг и тесты** | `tests/test_frontend.py`, `tests/test_library_audit.py` | **DONE** | Все 512 тестов успешно пройдены (`pytest`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). Полное соответствие всем архитектурным инвариантам (Zero-Database, PathSandbox, No-Build Frontend). |
+
+
 
 
 

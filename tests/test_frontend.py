@@ -239,8 +239,18 @@ def test_library_audit_tab_and_components_ui(client: TestClient):
 
     # Навигация и инициализация компонента
     assert "$store.app.activeTab === 'audit'" in html
+    assert "$dispatch('refresh-audit')" in html
     assert "libraryAuditComponent()" in html
     assert "library_audit.js" in html
+
+    # Проверка DOM-структуры: секция аудита не должна быть вложена в секцию файлов
+    files_sec_idx = html.find("x-show=\"$store.app.activeTab === 'files'\"")
+    audit_sec_idx = html.find("x-show=\"$store.app.activeTab === 'audit'\"")
+    assert files_sec_idx != -1 and audit_sec_idx != -1
+    assert files_sec_idx < audit_sec_idx
+    # Между секцией files и секцией audit обязательно должен быть закрывающий тег </section>
+    between_sections = html[files_sec_idx:audit_sec_idx]
+    assert "</section>" in between_sections
 
     # Сводка метрик
     assert "summary.total_tracks" in html
@@ -258,6 +268,8 @@ def test_library_audit_tab_and_components_ui(client: TestClient):
     # Проверка исходного файла library_audit.js
     audit_js = (PROJECT_ROOT / "app" / "static" / "js" / "library_audit.js").read_text(encoding="utf-8")
     assert "libraryAuditComponent" in audit_js
+    assert "refresh-audit" in audit_js
+    assert "$watch" in audit_js
     assert "loadSummary" in audit_js
     assert "loadMissingLyrics" in audit_js
     assert "loadMissingCovers" in audit_js

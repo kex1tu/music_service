@@ -425,6 +425,7 @@ class LibraryAuditService:
                         artist=first_t.album_artist or first_t.artist or "Неизвестный исполнитель",
                         album=first_t.album or "",
                         is_album_dir=is_album,
+                        track_count=len(tracks),
                     )
                 )
 
@@ -497,6 +498,7 @@ class LibraryAuditService:
                         path=tr["path"],
                         filename=tr["filename"],
                         size=tr["size"],
+                        size_bytes=tr["size"],
                         duration=tr["duration"],
                         bitrate=320,
                         modified_at=datetime.fromtimestamp(tr["mtime"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M"),
