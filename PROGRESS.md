@@ -300,6 +300,16 @@
 | **R4: Frontend интерфейс (5-я карточка, вкладка и аккордеон треклиста)** | `app/static/js/library_audit.js`, `app/templates/index.html` | **DONE** | В `library_audit.js` добавлены методы `loadIncompleteAlbums()`, `toggleAlbumExpand()`, `matchCatalog()` и `downloadMissing()`. В `index.html` добавлена 5-я карточка метрик на дашборде аудита, кнопка подраздела «Неполные релизы» в таб-баре, карточки неполных релизов с прогресс-барами полноты, бейджами пропущенных номеров дорожек, аккордеоном сверки треклиста и кнопками мгновенной догрузки. |
 | **R5: Верификация, линтинг и тесты** | `tests/test_library_audit.py`, `tests/test_frontend.py` | **DONE** | Добавлены модульные тесты `test_incomplete_albums_detection`, интеграционные тесты эндпоинтов каталожной сверки и догрузки `test_match_album_catalog_and_download_endpoint`, а также UI-тест `test_incomplete_albums_audit_ui`. Все 535 тестов успешно пройдены (`pytest`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). |
 
+---
+
+## Блок 13: Стабилизация загрузчика YouTube (yt-dlp EJS + Python 3.11)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **EJS Challenge Solver & Deno** | `deploy.sh`, `requirements.txt`, `app/services/download_service.py` | **DONE** | Устранена ошибка YouTube anti-bot (`The page needs to be reloaded`). Добавлен пакет `yt-dlp-ejs>=0.8.0`, в venv внедрен легковесный автономный JS-рантайм Deno (`venv/bin/deno`), в `_execute_yt_dlp` добавлен явный экспорт `PATH` с каталогом `venv/bin`. |
+| **Python 3.11 Migration** | `/opt/music-manager/.python/`, `/opt/music-manager/venv/` | **DONE** | Полностью устранены предупреждения `Deprecated Feature: Support for Python version 3.10 has been deprecated`. Окружение на сервере переведено на Python 3.11.16 строго в пределах каталога `/opt/music-manager`. Сервис `music-manager.service` успешно перезапущен и протестирован на боевых треках. |
+
+
 
 
 

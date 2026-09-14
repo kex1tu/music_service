@@ -7,6 +7,7 @@
 
 import asyncio
 import logging
+import os
 import re
 import shutil
 import sys
@@ -880,10 +881,15 @@ class DownloadService:
             cmd.append(source_url)
 
             logger.debug("Запуск yt-dlp (use_cookies=%s): %s", use_cookies, " ".join(cmd))
+            sub_env = os.environ.copy()
+            bin_dir = str(Path(sys.executable).parent)
+            sub_env["PATH"] = f"{bin_dir}:{sub_env.get('PATH', '')}"
+
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=sub_env,
             )
 
             progress_regex = re.compile(r"(?:\[download\]|\bdownload:)?\s*(\d+(?:\.\d+)?)%")

@@ -152,6 +152,17 @@ echo "Установка Python-библиотек из requirements.txt..."
 "${APP_DIR}/venv/bin/pip" install --upgrade pip setuptools wheel -q
 "${APP_DIR}/venv/bin/pip" install -r "${APP_DIR}/requirements.txt" -q
 
+# Установка/проверка JavaScript рантайма Deno (для yt-dlp EJS challenge solver)
+if [[ ! -f "${APP_DIR}/venv/bin/deno" ]]; then
+    echo "Установка автономного JS-рантайма Deno для yt-dlp EJS..."
+    DENO_TMP="$(mktemp -d)"
+    curl -fsSL -o "${DENO_TMP}/deno.zip" https://github.com/denoland/deno/releases/download/v2.9.6/deno-x86_64-unknown-linux-gnu.zip
+    "${APP_DIR}/venv/bin/python" -m zipfile -e "${DENO_TMP}/deno.zip" "${DENO_TMP}"
+    mv "${DENO_TMP}/deno" "${APP_DIR}/venv/bin/deno"
+    chmod 755 "${APP_DIR}/venv/bin/deno"
+    rm -rf "${DENO_TMP}"
+fi
+
 # Генерация .env конфигурации
 if [[ ! -f "${APP_DIR}/.env" ]]; then
     echo "Генерация секретов и файла .env для Music Manager..."
