@@ -14,6 +14,7 @@ import asyncio
 import logging
 import os
 import re
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -602,7 +603,23 @@ class LibraryAuditService:
                         track_map[t.track_number] = t
 
                 track_totals = [t.track_total for t in disc_tracks if t.track_total and t.track_total > 0]
-                max_track_total = max(track_totals) if track_totals else None
+                if track_totals:
+                    counts = Counter(track_totals)
+                    consensus_total, freq = counts.most_common(1)[0]
+                    # Если за значение проголосовало большинство или оно совпадает с числом треков
+                    if freq >= len(disc_tracks) / 2 or consensus_total == len(disc_tracks):
+                        max_track_total = consensus_total
+                    else:
+                        max_track_total = max(track_totals)
+                else:
+                    max_track_total = None
+
+                # Если это одиночный трек в папке сингла, не считаем его частью сборника на 35 треков
+                if len(disc_tracks) == 1:
+                    alb_lower = (album_name or "").lower()
+                    if "single" in alb_lower or "сингл" in alb_lower:
+                        max_track_total = 1
+
                 max_track_num = max(track_map.keys()) if track_map else 0
 
                 # Определение ожидаемого количества треков:
@@ -739,13 +756,38 @@ class LibraryAuditService:
                 logger.warning("Не удалось получить альбом Deezer по ID %s: %s", deezer_album_id, exc)
 
         if not album_data:
-            q = f"{artist_name} {album_name}".strip()
-            if q:
+            clean_alb = re.sub(
+                r"\s*[-–—]\s*(?:Single|EP|LP)(?:\s*[-–—]\s*\d{4})?",
+                "",
+                album_name,
+                flags=re.IGNORECASE,
+            )
+            clean_alb = re.sub(
+                r"\s*[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+[^\]\)]+?[\)\]]",
+                "",
+                clean_alb,
+                flags=re.IGNORECASE,
+            )
+            clean_alb = re.sub(
+                r"\s*[\(\[](?:Expanded|Deluxe|Special|Bonus|Extended|Remastered|Edition|Version|Anniversary|Original).*?[\)\]]",
+                "",
+                clean_alb,
+                flags=re.IGNORECASE,
+            ).strip()
+
+            queries = [f"{artist_name} {album_name}".strip()]
+            if clean_alb and clean_alb.lower() != album_name.lower():
+                queries.append(f"{artist_name} {clean_alb}".strip())
+                queries.append(clean_alb)
+
+            for q in queries:
+                if not q:
+                    continue
                 try:
                     candidates = await self._deezer_client.search_albums(q, limit=5)
                     if candidates:
                         best_candidate = candidates[0]
-                        clean_target_alb = normalize_clean_string(album_name)
+                        clean_target_alb = normalize_clean_string(clean_alb or album_name)
                         clean_target_art = normalize_clean_string(artist_name)
 
                         for cand in candidates:
@@ -761,6 +803,8 @@ class LibraryAuditService:
 
                         cand_id = str(best_candidate.get("id"))
                         album_data = await self._deezer_client.get_album(cand_id)
+                        if album_data:
+                            break
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Сбой поиска альбома в Deezer (%s): %s", q, exc)
 

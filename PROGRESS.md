@@ -2,8 +2,8 @@
 
 ## Текущий статус проекта
 - **Общий прогресс:** Все компоненты и оптимизационные доработки завершены (100%)
-- **Активный этап:** Реализовано распознавание множественных исполнителей и фитов из Deezer (через запятые, `feat`, `ft`, `&`, `x`, `vs` и др.) с сохранением целостности имен артистов (*Tyler, The Creator*, *Earth, Wind & Fire*) и форматированием через `\\` (ID3v2.4).
-- **Результаты тестов:** 538/538 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
+- **Активный этап:** Исправлен механизм дозагрузки недостающих треков (Library Audit), исключены ложные детекты неполных альбомов, санитизирован поиск в Deezer и поддержана передача прямых идентификаторов.
+- **Результаты тестов:** 540/540 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -318,6 +318,18 @@
 | **R1: Распознавание составных авторов и фитов в DeezerClient** | `app/services/deezer_client.py`, `tests/test_deezer_client.py` | **DONE** | Реализован статический метод `split_artist_string` для корректного разделения списков артистов по запятым (`,`), фитам (`feat.`, `ft.`, `featuring`, `with`), союзам (`&`, `and`, `и`), `x`, `vs` с защитой составных псевдонимов (*Tyler, The Creator*, *Earth, Wind & Fire*, *Crosby, Stills, Nash & Young*). Метод `extract_feats_from_title` извлекает приглашенных исполнителей из полей `title` и `title_version`. Метод `format_artists` агрегирует всех уникальных артистов через `\\`. |
 | **R2: Сквозное форматирование в маршрутах и сервисах** | `app/routers/tags.py`, `app/services/source_resolver.py`, `app/services/tag_service.py`, `tests/test_tags_router.py`, `tests/test_tag_service.py` | **DONE** | В эндпоинтах `GET /tags/deezer/albums` и `GET /tags/deezer/albums/{id}` артисты альбома и каждого трека форматируются через `format_artists`. В `source_resolver.py` сохраняются все соавторы для поиска аудиопотока и записи в ID3v2.4. В `TagService.clean_track_title()` существующие составные имена разбиваются на список отдельных исполнителей. |
 | **R3: Поддержка разделения авторов в Tag Editor UI** | `app/static/js/tag_editor.js` | **DONE** | Метод `parseArtistsString` и обновленный `cleanTrackTitle` в интерфейсе редактора тегов для распознавания и разделения запятых и фитов на `\\`. |
+
+---
+
+## Блок 15: Доработка и исправление механизма дозагрузки недостающих треков (2026-09-14T19:43:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Определение консенсусного количества треков** | `app/services/library_audit_service.py`, `tests/test_library_audit.py` | **DONE** | Исправлено ложное определение неполных альбомов из-за единичных сбойных тегов `track_total` (например, 35 вместо 13): внедрен расчет консенсуса по большинству треков через `Counter` и корректное распознавание одиночных синглов. |
+| **R2: Санитизация поиска альбомов в Deezer** | `app/services/library_audit_service.py` | **DONE** | Реализована многоуровневая санитизация поисковых запросов в Deezer API при каталожной сверке (удаление суффиксов `- Single`, `- EP`, `(feat. ...)`, `[Expanded]`, `(Deluxe)` и поиск по очищенному имени альбома), устраняющая сбои сопоставления синглов и делюкс-релизов. |
+| **R3: Передача `deezer_album_id` и прямых ссылок** | `app/schemas/library_audit.py`, `app/routers/files.py`, `app/static/js/library_audit.js` | **DONE** | В схему `DownloadMissingTracksRequest` и эндпоинт `POST /files/audit/incomplete-albums/download-missing` добавлено поле `deezer_album_id`. Во фронтенде `library_audit.js` метод `downloadMissing` передает идентификатор альбома и список уже обнаруженных прямых URL треков. |
+| **R4: UI-состояния кнопки и подсказки** | `app/templates/index.html`, `app/static/js/library_audit.js` | **DONE** | В интерфейсе отображается бейдж «Укомплектован» для полных альбомов вместо неактивной кнопки. При нулевом числе созданных задач выдается информативное сообщение пользователю. |
+
 
 
 

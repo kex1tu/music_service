@@ -1681,15 +1681,23 @@
                                     <!-- Кнопки действий -->
                                     <div class="flex items-center space-x-2 shrink-0 self-end sm:self-center">
                                         <!-- Кнопка Скачать все недостающие -->
-                                        <button
-                                            @click="downloadMissing(alb)"
-                                            :disabled="downloadingTracks[alb.path]"
-                                            class="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 shadow">
-                                            <svg class="w-3.5 h-3.5" :class="{'animate-spin': downloadingTracks[alb.path]}" viewBox="0 0 24 24" fill="currentColor">
-                                                <path d="M12 16l-5-5h3V4h4v7h3l-5 5zm9-4v7H3v-7H1v7a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2v-7h-2z"/>
-                                            </svg>
-                                            <span x-text="downloadingTracks[alb.path] ? 'Отправка...' : `Скачать недостающие (${alb.expected_count - alb.present_count})`"></span>
-                                        </button>
+                                        <template x-if="alb.expected_count > alb.present_count">
+                                            <button
+                                                @click="downloadMissing(alb)"
+                                                :disabled="downloadingTracks[alb.path]"
+                                                class="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 shadow">
+                                                <svg class="w-3.5 h-3.5" :class="{'animate-spin': downloadingTracks[alb.path]}" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M12 16l-5-5h3V4h4v7h3l-5 5zm9-4v7H3v-7H1v7a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2v-7h-2z"/>
+                                                </svg>
+                                                <span x-text="downloadingTracks[alb.path] ? 'Отправка...' : `Скачать недостающие (${alb.expected_count - alb.present_count})`"></span>
+                                            </button>
+                                        </template>
+                                        <template x-if="alb.expected_count <= alb.present_count">
+                                            <span class="px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg text-xs font-medium flex items-center space-x-1">
+                                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                                                <span>Укомплектован</span>
+                                            </span>
+                                        </template>
 
                                         <!-- Кнопка разворачивания треклиста -->
                                         <button

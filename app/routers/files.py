@@ -195,7 +195,10 @@ async def download_missing_album_tracks(
             if tid and tid.strip()
         ]
     else:
-        matched = await audit_service.match_album_catalog(album_path=request.path)
+        matched = await audit_service.match_album_catalog(
+            album_path=request.path,
+            deezer_album_id=request.deezer_album_id,
+        )
         candidates = matched.missing_tracks
         if request.track_numbers:
             target_nums = set(request.track_numbers)

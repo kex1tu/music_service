@@ -506,3 +506,122 @@ async def test_match_album_catalog_without_explicit_track_position_field(
         authenticated_client.app.dependency_overrides.pop(get_download_service, None)
 
 
+@pytest.mark.asyncio
+async def test_consensus_track_total_ignores_rogue_tag(tmp_path: Path):
+    """Проверка, что единичный сбойный тег track_total=35 в альбоме из 13 треков не ломает аудит."""
+    sandbox = PathSandbox(tmp_path)
+    mock_tag_svc = MagicMock()
+    audit_svc = LibraryAuditService(music_sandbox=sandbox, tag_service=mock_tag_svc)
+
+    tracks = []
+    for i in range(1, 14):
+        # Трек 13 имеет ошибочный тег track_total=35, остальные track_total=13
+        t_total = 35 if i == 13 else 13
+        tracks.append(
+            TrackTags(
+                path=f"Kamikaze/{i:02d}. Track {i}.mp3",
+                track_number=i,
+                track_total=t_total,
+                disc_number=1,
+                disc_total=1,
+                title=f"Track {i}",
+                artist="Eminem",
+                album="Kamikaze",
+            )
+        )
+
+    audit_svc._cache = {
+        t.path: {"mtime": 1000.0, "size": 1000, "track": t}
+        for t in tracks
+    }
+    audit_svc.ensure_index = AsyncMock()
+
+    res = await audit_svc.get_incomplete_albums()
+    # Альбом не должен считаться неполным!
+    assert res.total_incomplete_albums == 0
+    assert len(res.albums) == 0
+
+
+@pytest.mark.asyncio
+async def test_download_missing_with_deezer_album_id(
+    authenticated_client: TestClient,
+    tmp_path: Path,
+):
+    """Проверка передачи deezer_album_id в запрос на дозагрузку недостающих треков."""
+    sandbox = PathSandbox(tmp_path)
+    mock_dz = MagicMock()
+    mock_dz.get_album = AsyncMock(
+        return_value={
+            "id": 999999,
+            "title": "Special Album",
+            "tracks": {
+                "data": [
+                    {"id": 1, "title": "T1", "track_position": 1, "disk_number": 1},
+                    {"id": 2, "title": "T2", "track_position": 2, "disk_number": 1},
+                ]
+            },
+        }
+    )
+
+    (tmp_path / "Artist" / "Album").mkdir(parents=True, exist_ok=True)
+    f1 = tmp_path / "Artist" / "Album" / "01. T1.mp3"
+    f1.write_bytes(b"dummy")
+
+    mock_tag_svc = MagicMock()
+    mock_tag_svc.read_tags = MagicMock(return_value=TrackTags(
+        path="Artist/Album/01. T1.mp3",
+        track_number=1,
+        track_total=2,
+        disc_number=1,
+        disc_total=1,
+        title="T1",
+        artist="Artist",
+        album="Album",
+    ))
+    audit_svc = LibraryAuditService(music_sandbox=sandbox, tag_service=mock_tag_svc, deezer_client=mock_dz)
+    audit_svc._cache = {
+        "Artist/Album/01. T1.mp3": {
+            "mtime": 1000.0,
+            "size": 1000,
+            "track": TrackTags(
+                path="Artist/Album/01. T1.mp3",
+                track_number=1,
+                track_total=2,
+                disc_number=1,
+                disc_total=1,
+                title="T1",
+                artist="Artist",
+                album="Album",
+            ),
+        }
+    }
+    audit_svc.ensure_index = AsyncMock()
+
+    mock_download_service = MagicMock()
+    mock_download_service.create_job = AsyncMock(return_value=DownloadJob(job_id="job_t2", url="https://www.deezer.com/track/2", source="deezer"))
+
+    authenticated_client.app.dependency_overrides[get_library_audit_service] = lambda: audit_svc
+    authenticated_client.app.dependency_overrides[get_download_service] = lambda: mock_download_service
+
+    try:
+        res = authenticated_client.post(
+            "/files/audit/incomplete-albums/download-missing",
+            json={
+                "path": "Artist/Album",
+                "deezer_album_id": "999999",
+            },
+        )
+        assert res.status_code == 200
+        jobs = res.json()
+        assert len(jobs) == 1
+        mock_dz.get_album.assert_called_once_with("999999")
+        mock_download_service.create_job.assert_called_once_with(
+            url="https://www.deezer.com/track/2",
+            source="auto",
+        )
+    finally:
+        authenticated_client.app.dependency_overrides.pop(get_library_audit_service, None)
+        authenticated_client.app.dependency_overrides.pop(get_download_service, None)
+
+
+

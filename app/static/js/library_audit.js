@@ -246,13 +246,24 @@ function libraryAuditComponent() {
                 trackNumber = trackUrl.track_number || null;
             }
 
+            let trackUrls = null;
+            if (directUrl) {
+                trackUrls = [directUrl];
+            } else if (!trackNumber && album.missing_tracks && album.missing_tracks.length > 0) {
+                const availableUrls = album.missing_tracks.map(t => t.deezer_url).filter(Boolean);
+                if (availableUrls.length > 0) {
+                    trackUrls = availableUrls;
+                }
+            }
+
             const trackKey = directUrl || (trackNumber ? `track_${trackNumber}` : null);
             const key = trackKey ? `${album.path}:::${trackKey}` : album.path;
             this.downloadingTracks[key] = true;
             try {
                 const payload = {
                     path: album.path,
-                    track_urls: directUrl ? [directUrl] : null,
+                    deezer_album_id: album.deezer_album_id || null,
+                    track_urls: trackUrls,
                     track_numbers: trackNumber ? [trackNumber] : null,
                 };
                 const res = await fetch('/files/audit/incomplete-albums/download-missing', {
@@ -268,7 +279,11 @@ function libraryAuditComponent() {
                             await Alpine.store('app').queue.fetchQueue();
                         }
                     } else {
-                        Alpine.store('app').toast('Не найдено ссылок для скачивания недостающих треков', 'warning');
+                        if (album.is_catalog_matched && (album.expected_count <= album.present_count || (album.missing_tracks && album.missing_tracks.length === 0))) {
+                            Alpine.store('app').toast('Все треки релиза уже присутствуют в медиатеке', 'info');
+                        } else {
+                            Alpine.store('app').toast('Не найдено ссылок для скачивания недостающих треков в каталоге', 'warning');
+                        }
                     }
                 } else {
                     let errText = 'Ошибка отправки запроса на скачивание';

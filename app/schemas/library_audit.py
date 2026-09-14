@@ -193,6 +193,10 @@ class DownloadMissingTracksRequest(BaseModel):
     """Запрос на дозагрузку недостающих треков релиза."""
 
     path: str = Field(..., description="Относительный путь к каталогу альбома в медиатеке")
+    deezer_album_id: str | None = Field(
+        default=None,
+        description="Опциональный ID альбома в Deezer для точной сверки каталога",
+    )
     track_urls: list[str] | None = Field(
         default=None,
         description="Опциональный список прямых URL треков Deezer для скачивания",
