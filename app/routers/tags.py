@@ -15,7 +15,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
 
-from app.core.exceptions import NotFoundError, TagError
+from app.core.exceptions import NotFoundError, PathTraversalError, TagError
 from app.dependencies import (
     CurrentUserDep,
     MusicSandboxDep,
@@ -276,6 +276,14 @@ async def batch_save_tags(
                     track_cover_mime = dl_mime
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Сбой скачивания обложки трека %s по URL '%s': %s", track.path, track.cover_url, exc)
+            elif track.cover_path:
+                try:
+                    c_file = tag_service.resolve_path(track.cover_path)
+                    if c_file.exists() and c_file.is_file():
+                        track_cover_bytes = c_file.read_bytes()
+                        track_cover_mime = "image/png" if c_file.suffix.lower() == ".png" else "image/jpeg"
+                except (PathTraversalError, OSError) as exc:
+                    logger.warning("Сбой чтения обложки трека %s из %s: %s", track.path, track.cover_path, exc)
 
             if track_cover_bytes is None:
                 track_cover_bytes = cover_bytes

@@ -173,6 +173,40 @@ def test_write_draft_tags(download_service: DownloadService, tmp_path: Path):
     assert tags.getall("APIC")[0].type == 3
 
 
+def test_write_draft_tags_with_totals_and_disc(download_service: DownloadService, tmp_path: Path):
+    """Проверка записи TRCK (X/Y) и TPOS (X/Y) в ID3v2.4 при наличии total/disc полей."""
+    mp3_file = tmp_path / "test_disc_track.mp3"
+    mp3_file.write_bytes(b"\xff\xfb\x90\x64" + b"\x00" * 128)
+
+    track = ResolvedTrack(
+        track_id="11",
+        track_number=3,
+        track_total=12,
+        disc_number=2,
+        disc_total=2,
+        title="Voyager",
+        artist="Daft Punk",
+        album="Discovery",
+        album_artist="Daft Punk",
+        year=2001,
+        genre="Electronic",
+        duration=227,
+        audio_source_url="https://yt.com/sample",
+    )
+
+    download_service._write_draft_tags(
+        mp3_path=mp3_file,
+        track=track,
+        cover_file=None,
+    )
+
+    tags = ID3(str(mp3_file))
+    assert tags.version == (2, 4, 0)
+    assert tags.getall("TRCK")[0].text == ["3/12"]
+    assert tags.getall("TPOS")[0].text == ["2/2"]
+    assert tags.getall("TIT2")[0].text == ["Voyager"]
+
+
 @pytest.mark.asyncio
 async def test_pipeline_error_handling(download_service: DownloadService):
     """Проверка перевода задачи в статус ERROR при сбое разрешения источника."""

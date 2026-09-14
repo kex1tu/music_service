@@ -1459,6 +1459,169 @@ async def test_resolve_artist_discography_spotify_deezer_fallback():
     assert res.releases[0].url == "https://www.deezer.com/album/12345"
 
 
+@pytest.mark.asyncio
+async def test_resolve_deezer_track_full_metadata():
+    """Проверка извлечения полных метаданных (альбом, артист альбома, год, жанр, трек, диск) для одиночного трека Deezer."""
+    mock_deezer = MagicMock()
+    mock_deezer.parse_url = AsyncMock(return_value=("track", "3135556"))
+    mock_deezer.get_track = AsyncMock(
+        return_value={
+            "id": 3135556,
+            "title": "Harder, Better, Faster, Stronger",
+            "duration": 224,
+            "track_position": 4,
+            "disk_number": 1,
+            "isrc": "GBDUW0000059",
+            "artist": {"name": "Daft Punk"},
+            "album": {
+                "id": 302127,
+                "title": "Discovery",
+                "cover_xl": "https://img.com/discovery_xl.jpg",
+            },
+        }
+    )
+    mock_deezer.get_album = AsyncMock(
+        return_value={
+            "id": 302127,
+            "title": "Discovery",
+            "artist": {"name": "Daft Punk"},
+            "release_date": "2001-03-12",
+            "nb_tracks": 14,
+            "genres": {
+                "data": [
+                    {"name": "Electronic"},
+                    {"name": "French Touch"},
+                ]
+            },
+            "tracks": {
+                "data": [
+                    {"disk_number": 1},
+                    {"disk_number": 1},
+                ]
+            },
+        }
+    )
+    mock_deezer.format_artists = MagicMock(return_value="Daft Punk")
+    mock_deezer.extract_best_cover_url = MagicMock(return_value="https://img.com/discovery_xl.jpg")
+
+    mock_matcher = MagicMock()
+    mock_matcher.find_best_match = AsyncMock(return_value="https://www.youtube.com/watch?v=sample")
+
+    resolver = SourceResolver(deezer_client=mock_deezer, audio_matcher=mock_matcher)
+    album_meta, tracks = await resolver.resolve("https://www.deezer.com/track/3135556")
+
+    assert len(tracks) == 1
+    t = tracks[0]
+    assert t.title == "Harder, Better, Faster, Stronger"
+    assert t.artist == "Daft Punk"
+    assert t.album == "Discovery"
+    assert t.album_artist == "Daft Punk"  # НЕ "Unknown Artist"!
+    assert t.year == 2001
+    assert t.genre == "Electronic\\\\French Touch"
+    assert t.track_number == 4
+    assert t.track_total == 14
+    assert t.disc_number == 1
+    assert t.disc_total == 1
+    assert t.cover_url == "https://img.com/discovery_xl.jpg"
+
+    assert album_meta["album"] == "Discovery"
+    assert album_meta["album_artist"] == "Daft Punk"
+    assert album_meta["year"] == 2001
+    assert album_meta["genre"] == "Electronic\\\\French Touch"
+    assert album_meta["track_total"] == 14
+    assert album_meta["disc_total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_resolve_deezer_album_multi_disc_metadata():
+    """Проверка извлечения метаданных мульти-дискового альбома Deezer (disc_number, disc_total, track_total, genre, year)."""
+    mock_deezer = MagicMock()
+    mock_deezer.parse_url = AsyncMock(return_value=("album", "99999"))
+    mock_deezer.get_album = AsyncMock(
+        return_value={
+            "id": 99999,
+            "title": "Double Album",
+            "artist": {"name": "Legendary Band"},
+            "release_date": "1979-11-30",
+            "nb_tracks": 4,
+            "genres": {
+                "data": [
+                    {"name": "Progressive Rock"},
+                    {"name": "Art Rock"},
+                ]
+            },
+            "tracks": {
+                "data": [
+                    {
+                        "id": 101,
+                        "title": "Track 1 Disc 1",
+                        "duration": 180,
+                        "track_position": 1,
+                        "disk_number": 1,
+                        "artist": {"name": "Legendary Band"},
+                    },
+                    {
+                        "id": 102,
+                        "title": "Track 2 Disc 1",
+                        "duration": 200,
+                        "track_position": 2,
+                        "disk_number": 1,
+                        "artist": {"name": "Legendary Band"},
+                    },
+                    {
+                        "id": 201,
+                        "title": "Track 1 Disc 2",
+                        "duration": 210,
+                        "track_position": 1,
+                        "disk_number": 2,
+                        "artist": {"name": "Legendary Band"},
+                    },
+                    {
+                        "id": 202,
+                        "title": "Track 2 Disc 2",
+                        "duration": 220,
+                        "track_position": 2,
+                        "disk_number": 2,
+                        "artist": {"name": "Legendary Band"},
+                    },
+                ]
+            },
+        }
+    )
+    mock_deezer.format_artists = MagicMock(return_value="Legendary Band")
+    mock_deezer.extract_best_cover_url = MagicMock(return_value="https://img.com/double_album.jpg")
+
+    mock_matcher = MagicMock()
+    mock_matcher.find_best_match = AsyncMock(return_value="https://www.youtube.com/watch?v=sample")
+
+    resolver = SourceResolver(deezer_client=mock_deezer, audio_matcher=mock_matcher)
+    album_meta, tracks = await resolver.resolve("https://www.deezer.com/album/99999")
+
+    assert len(tracks) == 4
+    assert album_meta["album"] == "Double Album"
+    assert album_meta["album_artist"] == "Legendary Band"
+    assert album_meta["year"] == 1979
+    assert album_meta["genre"] == "Progressive Rock\\\\Art Rock"
+    assert album_meta["track_total"] == 4
+    assert album_meta["disc_total"] == 2
+
+    # Проверяем треки первого и второго дисков
+    assert tracks[0].track_number == 1
+    assert tracks[0].track_total == 4
+    assert tracks[0].disc_number == 1
+    assert tracks[0].disc_total == 2
+    assert tracks[0].genre == "Progressive Rock\\\\Art Rock"
+    assert tracks[0].year == 1979
+
+    assert tracks[2].track_number == 1
+    assert tracks[2].track_total == 4
+    assert tracks[2].disc_number == 2
+    assert tracks[2].disc_total == 2
+    assert tracks[2].genre == "Progressive Rock\\\\Art Rock"
+    assert tracks[2].year == 1979
+
+
+
 
 
 

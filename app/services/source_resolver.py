@@ -867,6 +867,65 @@ class SourceResolver:
             duration = safe_int_duration(data.get("duration"))
             cover_url = DeezerClient.extract_best_cover_url(data)
 
+            # Извлекаем детальные метаданные альбома из Deezer API при наличии album_id
+            album_id = album_info.get("id")
+            album_data: dict[str, Any] = {}
+            if album_id:
+                try:
+                    album_data = await self._deezer.get_album(str(album_id))
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Не удалось получить полные данные альбома %s: %s", album_id, exc)
+
+            album_title = (
+                album_data.get("title")
+                or album_info.get("title")
+                or title
+            )
+            artist_obj = album_data.get("artist", {})
+            album_artist = (
+                artist_obj.get("name")
+                if isinstance(artist_obj, dict) and artist_obj.get("name")
+                else (artists_str or "Unknown Artist")
+            )
+
+            # Извлекаем дату релиза
+            year_val = None
+            release_date = (
+                album_data.get("release_date")
+                or album_info.get("release_date")
+                or data.get("release_date")
+            )
+            if release_date:
+                m = re.match(r"^(\d{4})", str(release_date))
+                if m:
+                    year_val = int(m.group(1))
+
+            # Извлекаем жанры
+            genre_name = None
+            genres_data = album_data.get("genres", {})
+            genres_list = (
+                genres_data.get("data", [])
+                if isinstance(genres_data, dict)
+                else (genres_data if isinstance(genres_data, list) else [])
+            )
+            if genres_list and isinstance(genres_list, list):
+                genre_names = [g.get("name") for g in genres_list if isinstance(g, dict) and g.get("name")]
+                if genre_names:
+                    genre_name = "\\\\".join(genre_names)
+
+            track_pos = int(data.get("track_position") or 1)
+            disk_num = int(data.get("disk_number") or 1)
+            total_tracks = int(album_data.get("nb_tracks") or 1)
+            disc_total = 1
+            if album_data.get("tracks", {}).get("data"):
+                disc_total = max(
+                    (int(t.get("disk_number") or 1) for t in album_data["tracks"]["data"]),
+                    default=1,
+                )
+
+            if not cover_url:
+                cover_url = DeezerClient.extract_best_cover_url(album_data)
+
             audio_url = await self._matcher.find_best_match(
                 title=title,
                 artist=artists_str.replace("\\\\", " "),
@@ -876,12 +935,16 @@ class SourceResolver:
 
             track = ResolvedTrack(
                 track_id=str(data.get("id", res_id)),
-                track_number=int(data.get("track_position") or 1),
+                track_number=track_pos,
+                track_total=total_tracks,
+                disc_number=disk_num,
+                disc_total=disc_total,
                 title=title,
                 artist=artists_str,
-                album=album_info.get("title", ""),
-                album_artist=DeezerClient.format_artists(album_info),
-                year=int(data.get("release_date", "0")[:4]) if data.get("release_date") else None,
+                album=album_title,
+                album_artist=album_artist,
+                year=year_val,
+                genre=genre_name,
                 duration=duration,
                 isrc=data.get("isrc"),
                 cover_url=cover_url,
@@ -892,6 +955,9 @@ class SourceResolver:
                 "album": track.album,
                 "album_artist": track.album_artist or artists_str,
                 "year": track.year,
+                "genre": track.genre,
+                "disc_total": disc_total,
+                "track_total": total_tracks,
                 "cover_url": cover_url,
             }
             return album_meta, [track]
@@ -903,19 +969,40 @@ class SourceResolver:
                 else await self._deezer.get_playlist(res_id)
             )
 
+            is_album = res_type == "album"
             album_title = data.get("title", "Unknown Album")
-            album_artist = DeezerClient.format_artists(data)
+            artist_obj = data.get("artist", {})
+            album_artist = (
+                artist_obj.get("name")
+                if isinstance(artist_obj, dict) and artist_obj.get("name")
+                else DeezerClient.format_artists(data)
+            )
             year_val = None
             release_date = data.get("release_date")
-            if release_date and len(release_date) >= 4 and release_date[:4].isdigit():
-                year_val = int(release_date[:4])
+            if release_date:
+                m = re.match(r"^(\d{4})", str(release_date))
+                if m:
+                    year_val = int(m.group(1))
+
             genre_name = None
-            genres_data = data.get("genres", {}).get("data", [])
-            if genres_data:
-                genre_name = "\\\\".join(g.get("name", "") for g in genres_data if g.get("name"))
+            genres_data = data.get("genres", {})
+            genres_list = (
+                genres_data.get("data", [])
+                if isinstance(genres_data, dict)
+                else (genres_data if isinstance(genres_data, list) else [])
+            )
+            if genres_list and isinstance(genres_list, list):
+                genre_names = [g.get("name") for g in genres_list if isinstance(g, dict) and g.get("name")]
+                if genre_names:
+                    genre_name = "\\\\".join(genre_names)
 
             cover_url = DeezerClient.extract_best_cover_url(data)
             raw_tracks = data.get("tracks", {}).get("data", [])
+            total_tracks_count = int(data.get("nb_tracks") or len(raw_tracks) or 1)
+            disc_total_val = max(
+                (int(t.get("disk_number") or 1) for t in raw_tracks),
+                default=1,
+            )
 
             semaphore = asyncio.Semaphore(self._settings.MATCHER_CONCURRENCY)
 
@@ -923,6 +1010,36 @@ class SourceResolver:
                 t_title = item.get("title", "Unknown Track")
                 t_artists = DeezerClient.format_artists(item)
                 t_duration = safe_int_duration(item.get("duration"))
+                t_disk = int(item.get("disk_number") or 1)
+                t_pos = int(item.get("track_position") or default_pos)
+
+                if is_album:
+                    t_album = album_title
+                    t_album_artist = album_artist
+                    t_cover = cover_url
+                    t_year = year_val
+                    t_genre = genre_name
+                    t_track_total = total_tracks_count
+                    t_disc_total = disc_total_val
+                else:
+                    # Плейлисты: каждый трек содержит собственные метаданные альбома
+                    t_album_obj = item.get("album", {})
+                    t_album = t_album_obj.get("title") or album_title
+                    t_album_artist = (
+                        t_album_obj.get("artist", {}).get("name")
+                        if isinstance(t_album_obj.get("artist"), dict)
+                        else (item.get("artist", {}).get("name") or t_artists)
+                    )
+                    t_cover = DeezerClient.extract_best_cover_url(t_album_obj) or cover_url
+                    t_year = None
+                    t_rel_date = t_album_obj.get("release_date") or item.get("release_date")
+                    if t_rel_date:
+                        m_t = re.match(r"^(\d{4})", str(t_rel_date))
+                        if m_t:
+                            t_year = int(m_t.group(1))
+                    t_genre = genre_name
+                    t_track_total = None
+                    t_disc_total = 1
 
                 audio_url = ""
                 track_status = "pending"
@@ -944,16 +1061,19 @@ class SourceResolver:
 
                 return ResolvedTrack(
                     track_id=str(item.get("id", default_pos)),
-                    track_number=int(item.get("track_position") or default_pos),
+                    track_number=t_pos,
+                    track_total=t_track_total,
+                    disc_number=t_disk,
+                    disc_total=t_disc_total,
                     title=t_title,
                     artist=t_artists,
-                    album=album_title,
-                    album_artist=album_artist,
-                    year=year_val,
-                    genre=genre_name,
+                    album=t_album,
+                    album_artist=t_album_artist,
+                    year=t_year,
+                    genre=t_genre,
                     duration=t_duration,
                     isrc=item.get("isrc"),
-                    cover_url=cover_url,
+                    cover_url=t_cover,
                     audio_source_url=audio_url,
                     status=track_status,
                     error=error_msg,
@@ -973,6 +1093,8 @@ class SourceResolver:
                 "album_artist": album_artist,
                 "year": year_val,
                 "genre": genre_name,
+                "disc_total": disc_total_val,
+                "track_total": total_tracks_count,
                 "cover_url": cover_url,
             }
             return album_meta, tracks

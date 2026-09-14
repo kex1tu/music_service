@@ -2,8 +2,8 @@
 
 ## Текущий статус проекта
 - **Общий прогресс:** Все компоненты и оптимизационные доработки завершены (100%)
-- **Активный этап:** Реализовано параллельное скачивание и транскодирование треков альбомов (Track-level Concurrency) и оптимизированы параметры кодирования `ffmpeg` / `libmp3lame`.
-- **Результаты тестов:** 525/525 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
+- **Активный этап:** Реализовано автоматическое извлечение и мгновенное предзаполнение полных официальных метаданных релизов Deezer в редакторе тегов (альбом, исполнитель альбома, год, жанр, номер и общее количество треков, номер и общее количество дисков) как для одиночных треков, так и для альбомов, плейлистов и дискографий, а также корректная запись фреймов `TRCK` (`X/Y`) и `TPOS` (`X/Y`) в стандарте ID3v2.4 через `mutagen`.
+- **Результаты тестов:** 532/532 passed (`pytest tests/ -v`), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -264,6 +264,31 @@
 | **R2: Оптимизация кодировщика ffmpeg / libmp3lame** | `app/services/download_service.py` | **DONE** | В команду транскодирования `_transcode_to_mp3` добавлены аргументы `-threads 0` (автовыбор потоков процессора) и `-compression_level 2` (быстрый режим LAME для постоянного битрейта 320 kbps CBR без потери акустического качества). |
 | **R3: Конкурентный пайплайн треков (Track-level Concurrency)** | `app/services/download_service.py` | **DONE** | В `_process_job` пайплайн переработан с последовательного цикла на параллельное выполнение через `asyncio.Semaphore(concurrency)` и `asyncio.gather`. 1) Предварительно вычисляются детерминированные имена целевых файлов (`track_target_paths`), исключающие коллизии и race conditions при нумерации треков. 2) Добавлена плавная агрегация общего прогресса джобы на основе индивидуальных процентов треков (`track_progresses`). 3) Потокобезопасное сохранение первой обложки релиза через `asyncio.Lock`. 4) Изолированная обработка ошибок и очистка временных файлов на уровне отдельного трека. |
 | **R4: Верификация, линтинг и тесты** | `tests/test_download_service.py` | **DONE** | Разработан тест `test_download_pipeline_concurrent_tracks_processing`, подтверждающий корректность конкурентной обработки треков альбома, формирование структуры файлов и вычисление прогресса. Все 525 тестов пройдены (`pytest`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). |
+
+---
+
+## Блок 26: Пакетное открытие и редактирование всех релизов из очереди (Bulk Edit Queue in Tag Editor) (2026-09-14T15:50:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Схемы и роутер тегов (cover_path & track covers)** | `app/schemas/tag.py`, `app/routers/tags.py` | **DONE** | В схему `TrackTags` добавлено поле `cover_path: str | None`. В `PUT /tags/batch` поддержано чтение и валидация бинарных данных обложки из `track.cover_path` через `tag_service.resolve_path()` для наполнения `track_covers_data`. Это исключает передачу громоздких base64 строк при открытии скачанных релизов с локального диска. |
+| **R2: Зачистка нескольких задач в OrganizerService** | `app/services/organizer_service.py` | **DONE** | В шаг 6 `organize_album()` добавлено извлечение и очистка всех каталогов задач `job_id` в песочнице `_tmp_sandbox` из путей всех перемещенных треков (`track.path`) и `source_dir`, что обеспечивает полную очистку временных буферов всех сохраненных релизов при пакетной организации. |
+| **R3: Frontend очереди и пакетного открытия (index.html)** | `app/templates/index.html` | **DONE** | В глобальный стор `Alpine.store('app').queue` добавлен геттер `readyCount` и метод `openAllReadyJobsInTagEditor()`, выполняющий параллельный опрос `/downloads/{jobId}/tracks` для всех завершенных задач и объединяющий треки с их `cover_path` и массивом `jobIds`. Добавлена кнопка «В теги всё (N)» в шапке шторки очереди, баннер пакетного редактирования «Готово к тегированию: N рел.» внутри списка задач, вспомогательная кнопка в карточке активной загрузки и бейдж на плавающей кнопке-пилюле. |
+| **R4: Редактор тегов и сохранение нескольких задач (tag_editor.js)** | `app/static/js/tag_editor.js`, `app/static/js/downloader.js` | **DONE** | В `tag_editor.js` реализована поддержка `this.jobIds`: детерминированное разделение на карточки релизов по композитному ключу `${albumArtistKey}:::${albumName.toLowerCase()}`, сохранение обложки каждого релиза через `cover_path` / `cover_preview_url`, динамический текст кнопки «Сохранить всё в медиатеку (N рел.)», отправка запросов `DELETE /downloads/${jid}` после успешного сохранения и мгновенная синхронизация очереди. |
+| **R5: Верификация, линтинг и тесты** | `tests/test_organizer_service.py`, `tests/test_tags_router.py`, `tests/test_frontend.py` | **DONE** | Добавлены тесты `test_organize_multiple_tmp_jobs_cleanup`, `test_batch_save_with_track_cover_path` и `test_queue_bulk_edit_ui`. Все 528 тестов успешно пройдены (`pytest`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). |
+
+---
+
+## Блок 27: Полное извлечение и предзаполнение метаданных Deezer в Tag Editor и запись ID3v2.4 (2026-09-14T16:00:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Извлечение и обогащение метаданных в SourceResolver** | `app/services/source_resolver.py`, `app/schemas/download.py` | **DONE** | 1) Для одиночных треков Deezer: автоматический запрос `get_album(album_id)` при наличии альбома. Исправлена критическая ошибка, из-за которой `album_artist` становился `"Unknown Artist"` (теперь берется точное имя `artist.name` альбома). Извлечены жанры `genres`, год `release_date`, общее число дорожек `nb_tracks` (`track_total`) и номер диска `disk_number` (`disc_number`). 2) Для альбомов и плейлистов: корректное извлечение `artist.name`, жанров, общего числа треков и расчет `disc_total` как максимума по `disk_number`. 3) Поля `track_total`, `disc_number`, `disc_total` добавлены в модель `ResolvedTrack` и возвращаются в `album_meta`. |
+| **R2: Запись тегов TRCK и TPOS в ID3v2.4 и API задач** | `app/services/download_service.py`, `app/schemas/download.py` | **DONE** | 1) В `_write_draft_tags` добавлен импорт `TPOS` из mutagen. Тег `TRCK` записывается в формате `f"{track_number}/{track_total}"`, а фрейм `TPOS` — в формате `f"{disc_number}/{disc_total}"`. 2) В схему `DownloadTracksResponse` и метод `get_job_tracks()` добавлены поля `disc_total` и `track_total`. |
+| **R3: Предзаполнение полей в интерфейсе Tag Editor** | `app/templates/index.html`, `app/static/js/downloader.js`, `app/static/js/tag_editor.js` | **DONE** | 1) В `downloader.js` и `index.html` при открытии задачи (`openTagEditorForJob` / `openJobInTagEditor` / `openAllReadyJobsInTagEditor`) поля `disc_total`, `track_total`, `disc_number`, `genre`, `year`, `album_artist` передаются в объект `album` и каждый трек. 2) В `tag_editor.js`: метод `loadData()` сохраняет `disc_total` и `track_total` в объекте `album`, настраивает fallback для треков, а `buildReleasesFromTracks()` устанавливает `group.discTotal`, `group.genre`, `group.year` и дозаполняет их из треков группы. Все поля релиза Deezer мгновенно видны при открытии редактора. |
+| **R4: Верификация, линтинг и тесты** | `tests/test_source_resolver.py`, `tests/test_download_service.py`, `tests/test_frontend.py` | **DONE** | Добавлены тесты `test_resolve_deezer_track_full_metadata`, `test_resolve_deezer_album_multi_disc_metadata`, `test_write_draft_tags_with_totals_and_disc`, `test_tag_editor_and_downloader_disc_and_track_total_fields`. Все 532 теста успешно пройдены (`pytest`, 100% pass), линтер `ruff check app tests` чист (All checks passed!). |
+
+
 
 
 

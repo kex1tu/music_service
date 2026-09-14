@@ -930,5 +930,90 @@ def test_batch_save_with_per_track_covers_and_singles_mode(
     assert mime2 == "image/png"
 
 
+def test_batch_save_with_track_cover_path(
+    auth_tags_client: TestClient, temp_storage: dict[str, Path]
+):
+    """Проверка сохранения нескольких релизов из разных задач с путями к обложкам через track.cover_path."""
+    tmp_dir = temp_storage["tmp_dir"]
+    music_dir = temp_storage["music_dir"]
+
+    # Создаем 2 разные задачи в TMP_DIR
+    job1_dir = tmp_dir / "job_cov1" / "converted"
+    job1_dir.mkdir(parents=True, exist_ok=True)
+    t1 = job1_dir / "01. Song A.mp3"
+    t1.write_bytes(MINIMAL_MP3)
+    (tmp_dir / "job_cov1" / "cover.jpg").write_bytes(DUMMY_JPEG)
+
+    job2_dir = tmp_dir / "job_cov2" / "converted"
+    job2_dir.mkdir(parents=True, exist_ok=True)
+    t2 = job2_dir / "01. Song B.mp3"
+    t2.write_bytes(MINIMAL_MP3)
+    (tmp_dir / "job_cov2" / "cover.png").write_bytes(DUMMY_PNG)
+
+    payload = {
+        "album": {
+            "album_artist": "",
+            "album": "",
+            "year": 2024,
+        },
+        "tracks": [
+            {
+                "path": "tmp_downloads/job_cov1/converted/01. Song A.mp3",
+                "track_number": 1,
+                "title": "Song A",
+                "artist": "Artist One",
+                "album_artist": "Artist One",
+                "album": "Album One",
+                "year": 2023,
+                "cover_path": "tmp_downloads/job_cov1/cover.jpg",
+            },
+            {
+                "path": "tmp_downloads/job_cov2/converted/01. Song B.mp3",
+                "track_number": 1,
+                "title": "Song B",
+                "artist": "Artist Two",
+                "album_artist": "Artist Two",
+                "album": "Album Two",
+                "year": 2024,
+                "cover_path": "tmp_downloads/job_cov2/cover.png",
+            },
+        ],
+        "source_dir": "tmp_downloads",
+        "apply_album_to_tracks": False,
+        "singles_mode": False,
+        "group_by_album": True,
+    }
+
+    resp = auth_tags_client.put("/tags/batch", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+
+    svc = TagService(music_sandbox=PathSandbox(music_dir))
+
+    t1_abs = music_dir / "Artist One/Album One - 2023/01. Song A.mp3"
+    t2_abs = music_dir / "Artist Two/Album Two - 2024/01. Song B.mp3"
+
+    assert t1_abs.exists()
+    assert t2_abs.exists()
+
+    # Проверяем, что обложки записались в MP3 и файлы cover.* создались
+    assert (t1_abs.parent / "cover.jpg").exists()
+    assert (t2_abs.parent / "cover.png").exists()
+
+    cov1 = svc.read_cover(t1_abs)
+    assert cov1 is not None
+    assert cov1[1] == "image/jpeg"
+
+    cov2 = svc.read_cover(t2_abs)
+    assert cov2 is not None
+    assert cov2[1] == "image/png"
+
+    # Проверяем очистку временных директорий обеих задач
+    assert not (tmp_dir / "job_cov1").exists()
+    assert not (tmp_dir / "job_cov2").exists()
+
+
+
 
 

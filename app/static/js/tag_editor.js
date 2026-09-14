@@ -60,7 +60,8 @@ function tagEditorComponent() {
             (this.tracks || []).forEach((track, originalIndex) => {
                 const albumName = (track.album || '').trim();
                 const isSingle = !albumName || this.singlesMode;
-                const key = isSingle ? '__singles__' : albumName.toLowerCase();
+                const albumArtistKey = (track.album_artist || track.artist || this.album.album_artist || '').trim().toLowerCase();
+                const key = isSingle ? '__singles__' : `${albumArtistKey}:::${albumName.toLowerCase()}`;
 
                 if (!groupsMap[key]) {
                     groupsMap[key] = {
@@ -79,6 +80,16 @@ function tagEditorComponent() {
                         items: [],
                     };
                     order.push(key);
+                } else {
+                    if (!groupsMap[key].year && track.year) {
+                        groupsMap[key].year = track.year;
+                    }
+                    if (!groupsMap[key].genre && track.genre) {
+                        groupsMap[key].genre = track.genre;
+                    }
+                    if (track.disc_total && track.disc_total > groupsMap[key].discTotal) {
+                        groupsMap[key].discTotal = track.disc_total;
+                    }
                 }
                 groupsMap[key].items.push({ track, originalIndex });
             });
@@ -87,13 +98,14 @@ function tagEditorComponent() {
             result.forEach((group) => {
                 if (!group.isSingles) {
                     const firstWithCover = group.items.find(
-                        (it) => it.track.cover_preview_url || it.track.cover_url || it.track.cover_base64
+                        (it) => it.track.cover_preview_url || it.track.cover_url || it.track.cover_base64 || it.track.cover_path
                     );
                     if (firstWithCover) {
                         group.coverPreviewUrl =
                             firstWithCover.track.cover_preview_url ||
                             firstWithCover.track.cover_url ||
                             firstWithCover.track.cover_base64;
+                        group.coverPath = firstWithCover.track.cover_path || null;
                         group.coverBase64 = firstWithCover.track.cover_base64 || null;
                         group.selectedCoverUrl = firstWithCover.track.cover_url || null;
                     } else if (this.coverPreviewUrl) {
@@ -104,6 +116,7 @@ function tagEditorComponent() {
                     }
                 } else if (this.coverPreviewUrl) {
                     group.coverPreviewUrl = this.coverPreviewUrl;
+                    group.coverPath = this.coverPath;
                 }
             });
 
@@ -200,6 +213,7 @@ function tagEditorComponent() {
             this.deezerResults = [];
             this.isSearchingDeezer = false;
             this.isLoadingDeezerDetails = false;
+            this.jobIds = data.jobIds || (data.jobId ? [data.jobId] : []);
 
             this.album = {
                 album_artist: data.album?.album_artist || '',
@@ -207,20 +221,34 @@ function tagEditorComponent() {
                 year: data.album?.year || null,
                 genre: data.album?.genre || '',
                 disc_total: data.album?.disc_total || null,
+                track_total: data.album?.track_total || null,
             };
 
-            this.tracks = (data.tracks || []).map((t) => ({
-                ...t,
-                track_number: t.track_number !== undefined && t.track_number !== null ? t.track_number : 1,
-                track_total: t.track_total || null,
-                disc_number: t.disc_number !== undefined && t.disc_number !== null ? t.disc_number : 1,
-                disc_total: t.disc_total || (data.album?.disc_total || null),
-                album: (t.album !== undefined && t.album !== null && t.album !== '') ? t.album : (this.album.album || ''),
-                year: (t.year !== undefined && t.year !== null && t.year !== '') ? t.year : (this.album.year || null),
-                cover_url: t.cover_url || null,
-                cover_base64: t.cover_base64 || null,
-                cover_preview_url: t.has_cover && t.path ? `/tags/cover?path=${encodeURIComponent(t.path)}&t=${Date.now()}` : null,
-            }));
+            this.tracks = (data.tracks || []).map((t) => {
+                let covPrev = t.cover_preview_url || t.cover_url || null;
+                if (!covPrev && t.cover_path) {
+                    covPrev = `/tags/cover?path=${encodeURIComponent(t.cover_path)}&t=${Date.now()}`;
+                } else if (!covPrev && t.has_cover && t.path) {
+                    covPrev = `/tags/cover?path=${encodeURIComponent(t.path)}&t=${Date.now()}`;
+                }
+
+                return {
+                    ...t,
+                    track_number: t.track_number !== undefined && t.track_number !== null ? t.track_number : 1,
+                    track_total: t.track_total || (data.album?.track_total || null),
+                    disc_number: t.disc_number !== undefined && t.disc_number !== null ? t.disc_number : 1,
+                    disc_total: t.disc_total || (data.album?.disc_total || null),
+                    album: (t.album !== undefined && t.album !== null && t.album !== '') ? t.album : (this.album.album || ''),
+                    album_artist: (t.album_artist !== undefined && t.album_artist !== null && t.album_artist !== '') ? t.album_artist : (this.album.album_artist || ''),
+                    year: (t.year !== undefined && t.year !== null && t.year !== '') ? t.year : (this.album.year || null),
+                    genre: (t.genre !== undefined && t.genre !== null && t.genre !== '') ? t.genre : (this.album.genre || ''),
+                    cover_url: t.cover_url || null,
+                    cover_path: t.cover_path || null,
+                    cover_base64: t.cover_base64 || null,
+                    cover_preview_url: covPrev,
+                    job_id: t.job_id || null,
+                };
+            });
             this.sourceDir = data.sourceDir || '';
             this.coverPath = data.coverPath || null;
 
@@ -531,6 +559,10 @@ function tagEditorComponent() {
                             else if (cov.startsWith('data:')) trk.cover_base64 = cov;
                             trk.has_cover = true;
                         }
+                        if (group.coverPath && !trk.cover_path && !trk.cover_url && !trk.cover_base64) {
+                            trk.cover_path = group.coverPath;
+                            trk.has_cover = true;
+                        }
                     });
                 });
 
@@ -559,11 +591,12 @@ function tagEditorComponent() {
                         year: t.year ? parseInt(t.year, 10) : null,
                         genre: t.genre || '',
                         lyrics_status: t.lyrics_status || 'none',
-                        has_cover: t.has_cover || !!t.cover_preview_url || !!t.cover_url || !!t.cover_base64,
+                        has_cover: t.has_cover || !!t.cover_preview_url || !!t.cover_url || !!t.cover_base64 || !!t.cover_path,
                         cover_url: t.cover_url || null,
                         cover_base64: t.cover_base64 || null,
+                        cover_path: t.cover_path || null,
                     })),
-                    source_dir: this.sourceDir,
+                    source_dir: this.sourceDir || 'tmp_downloads',
                     cover_path: isSingleAlbum ? firstRelease.coverPath : this.coverPath,
                     cover_base64: isSingleAlbum ? firstRelease.coverBase64 : (this.coverBase64 || null),
                     cover_url: isSingleAlbum ? firstRelease.selectedCoverUrl : (this.selectedCoverUrl || null),
@@ -585,7 +618,25 @@ function tagEditorComponent() {
                 }
 
                 const result = await res.json();
-                Alpine.store('app').toast('Теги успешно сохранены и треки размещены в медиатеке!', 'success');
+                const totalSavedReleases = this.releases.length;
+                const toastMsg = totalSavedReleases > 1
+                    ? `Успешно сохранено ${totalSavedReleases} релизов (${this.tracks.length} треков) в медиатеку!`
+                    : 'Теги успешно сохранены и треки размещены в медиатеке!';
+                Alpine.store('app').toast(toastMsg, 'success');
+
+                // Очищаем сохраненные задачи из очереди
+                if (this.jobIds && this.jobIds.length > 0) {
+                    try {
+                        await Promise.allSettled(
+                            this.jobIds.map((jid) => fetch(`/downloads/${jid}`, { method: 'DELETE' }))
+                        );
+                        if (Alpine.store('app').queue) {
+                            await Alpine.store('app').queue.fetchQueue();
+                        }
+                    } catch (cleanupErr) {
+                        console.debug('Сбой очистки сохраненных задач из очереди:', cleanupErr);
+                    }
+                }
 
                 // Закрываем редактор
                 Alpine.store('app').closeTagEditor();

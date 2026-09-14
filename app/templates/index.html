@@ -29,8 +29,8 @@
     <link rel="stylesheet" href="/static/css/style.css">
 
     <!-- Компоненты приложения -->
-    <script src="/static/js/downloader.js?v=20260914_01"></script>
-    <script src="/static/js/tag_editor.js?v=20260914_01"></script>
+    <script src="/static/js/downloader.js?v=20260914_02"></script>
+    <script src="/static/js/tag_editor.js?v=20260914_02"></script>
     <script src="/static/js/lyrics_modal.js?v=20260910_02"></script>
     <script src="/static/js/file_manager.js?v=20260910_02"></script>
     <script src="/static/js/library_audit.js?v=20260914_01"></script>
@@ -72,6 +72,9 @@
                     },
                     get percent() {
                         return Math.round(this.summary?.overall_progress || 0);
+                    },
+                    get readyCount() {
+                        return (this.jobs || []).filter((j) => j.status === 'READY').length;
                     },
 
                     async init() {
@@ -134,7 +137,10 @@
                                 album: data.album || '',
                                 year: data.year || null,
                                 genre: data.genre || '',
+                                disc_total: data.disc_total || null,
+                                track_total: data.track_total || null,
                                 cover_url: data.cover_url || null,
+                                cover_path: data.cover_path || `tmp_downloads/${jobId}/cover.jpg`,
                             };
                             const validTracks = (data.tracks || []).filter(
                                 (t) => t.status !== 'error' && (t.converted_path || t.status === 'ok' || t.status === 'ready')
@@ -143,9 +149,16 @@
                                 Alpine.store('app').toast('Нет готовых треков для редактирования', 'warning');
                                 return;
                             }
+                            const coverPath = data.cover_path || `tmp_downloads/${jobId}/cover.jpg`;
+                            const coverPreview = data.cover_url || `/tags/cover?path=${encodeURIComponent(coverPath)}&t=${Date.now()}`;
+                            const hasCover = !!data.cover_url || !!data.cover_path;
+
                             const tracks = validTracks.map((t) => ({
                                 path: t.converted_path || `tmp_downloads/${jobId}/converted/${t.track_number}.mp3`,
-                                track_number: t.track_number,
+                                track_number: t.track_number !== undefined && t.track_number !== null ? t.track_number : 1,
+                                track_total: t.track_total || data.track_total || validTracks.length,
+                                disc_number: t.disc_number || 1,
+                                disc_total: t.disc_total || data.disc_total || 1,
                                 title: t.title,
                                 artist: t.artist,
                                 album: t.album || album.album,
@@ -154,18 +167,128 @@
                                 genre: t.genre || album.genre,
                                 duration: t.duration,
                                 lyrics_status: 'none',
-                                has_cover: !!data.cover_url,
+                                has_cover: hasCover,
+                                cover_url: t.cover_url || data.cover_url || null,
+                                cover_path: coverPath,
+                                cover_preview_url: t.cover_url || coverPreview,
+                                job_id: jobId,
                             }));
                             Alpine.store('app').openTagEditor({
                                 album,
                                 tracks,
                                 sourceDir: `tmp_downloads/${jobId}/converted`,
-                                coverPath: `tmp_downloads/${jobId}/cover.jpg`,
-                                hasCover: !!data.cover_url,
+                                coverPath: coverPath,
+                                hasCover: hasCover,
+                                jobIds: [jobId],
                             });
                             this.isOpen = false;
                         } catch (err) {
                             Alpine.store('app').toast(err.message, 'error');
+                        }
+                    },
+
+                    async openAllReadyJobsInTagEditor() {
+                        const readyJobs = (this.jobs || []).filter((j) => j.status === 'READY');
+                        if (readyJobs.length === 0) {
+                            Alpine.store('app').toast('В очереди нет завершенных релизов для редактирования', 'warning');
+                            return;
+                        }
+
+                        Alpine.store('app').toast(`Загрузка данных для ${readyJobs.length} релиз(ов)...`, 'info');
+
+                        try {
+                            const responses = await Promise.all(
+                                readyJobs.map((j) =>
+                                    fetch(`/downloads/${j.id}/tracks`).then((r) => (r.ok ? r.json() : null))
+                                )
+                            );
+
+                            let allTracks = [];
+                            let allJobIds = [];
+                            let firstAlbum = null;
+                            let firstCoverPath = null;
+                            let hasAnyCover = false;
+
+                            responses.forEach((data, index) => {
+                                if (!data) return;
+                                const jobId = readyJobs[index].id;
+                                allJobIds.push(jobId);
+
+                                const album = {
+                                    album_artist: data.album_artist || '',
+                                    album: data.album || '',
+                                    year: data.year || null,
+                                    genre: data.genre || '',
+                                    disc_total: data.disc_total || null,
+                                    track_total: data.track_total || null,
+                                    cover_url: data.cover_url || null,
+                                    cover_path: data.cover_path || `tmp_downloads/${jobId}/cover.jpg`,
+                                };
+
+                                if (!firstAlbum && (album.album || album.album_artist)) {
+                                    firstAlbum = album;
+                                    firstCoverPath = album.cover_path;
+                                }
+
+                                const validTracks = (data.tracks || []).filter(
+                                    (t) => t.status !== 'error' && (t.converted_path || t.status === 'ok' || t.status === 'ready')
+                                );
+
+                                const defaultCoverPath = data.cover_path || `tmp_downloads/${jobId}/cover.jpg`;
+                                const defaultCoverPreview = data.cover_url || `/tags/cover?path=${encodeURIComponent(defaultCoverPath)}&t=${Date.now()}`;
+                                const jobHasCover = !!data.cover_url || !!data.cover_path;
+                                if (jobHasCover) hasAnyCover = true;
+
+                                validTracks.forEach((t) => {
+                                    const trkCoverUrl = t.cover_url || data.cover_url || null;
+                                    const trkCoverPath = defaultCoverPath;
+                                    const trkHasCover = !!trkCoverUrl || jobHasCover;
+
+                                    allTracks.push({
+                                        path: t.converted_path || `tmp_downloads/${jobId}/converted/${t.track_number}.mp3`,
+                                        track_number: t.track_number !== undefined && t.track_number !== null ? t.track_number : 1,
+                                        track_total: t.track_total || data.track_total || validTracks.length,
+                                        disc_number: t.disc_number || 1,
+                                        disc_total: t.disc_total || data.disc_total || 1,
+                                        title: t.title,
+                                        artist: t.artist,
+                                        album: t.album || album.album,
+                                        album_artist: t.album_artist || album.album_artist,
+                                        year: t.year || album.year,
+                                        genre: t.genre || album.genre,
+                                        duration: t.duration,
+                                        lyrics_status: 'none',
+                                        has_cover: trkHasCover,
+                                        cover_url: trkCoverUrl,
+                                        cover_path: trkCoverPath,
+                                        cover_preview_url: trkCoverUrl || defaultCoverPreview,
+                                        job_id: jobId,
+                                    });
+                                });
+                            });
+
+                            if (allTracks.length === 0) {
+                                Alpine.store('app').toast('Нет готовых треков для редактирования', 'warning');
+                                return;
+                            }
+
+                            Alpine.store('app').openTagEditor({
+                                album: firstAlbum || {
+                                    album_artist: '',
+                                    album: '',
+                                    year: null,
+                                    genre: '',
+                                },
+                                tracks: allTracks,
+                                sourceDir: 'tmp_downloads',
+                                coverPath: firstCoverPath || (allTracks[0]?.cover_path || null),
+                                hasCover: hasAnyCover,
+                                jobIds: allJobIds,
+                            });
+                            this.isOpen = false;
+                            Alpine.store('app').toast(`Открыто релизов: ${allJobIds.length}, треков: ${allTracks.length}`, 'success');
+                        } catch (err) {
+                            Alpine.store('app').toast(`Ошибка загрузки очереди: ${err.message}`, 'error');
                         }
                     },
                 },
@@ -658,14 +781,29 @@
                         <!-- Кнопки действий задачи -->
                         <div class="flex items-center justify-end space-x-3 pt-2">
                             <template x-if="job.status === 'READY'">
-                                <button
-                                    @click="openTagEditorForJob(job.id)"
-                                    class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition shadow flex items-center space-x-1.5">
-                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="m21.4 14.25l-7.15 7.15q-.3.3-.675.45t-.75.15t-.75-.15t-.675-.45l-8.825-8.825q-.275-.275-.425-.637T2 11.175V4q0-.825.588-1.412T4 2h7.175q.4 0 .775.163t.65.437l8.8 8.825q.3.3.438.675t.137.75t-.137.738t-.438.662M6.5 8q.625 0 1.063-.437T8 6.5t-.437-1.062T6.5 5t-1.062.438T5 6.5t.438 1.063T6.5 8"/>
-                                    </svg>
-                                    <span>Открыть в редакторе тегов</span>
-                                </button>
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <template x-if="$store.app.queue.readyCount > 1">
+                                        <button
+                                            type="button"
+                                            @click="$store.app.queue.openAllReadyJobsInTagEditor()"
+                                            class="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-lg transition shadow flex items-center space-x-1.5 animate-pulse"
+                                            title="Открыть все завершенные релизы из очереди в редакторе тегов">
+                                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M4 18q-.825 0-1.412-.587T2 16V4q0-.825.588-1.412T4 2h12q.825 0 1.413.588T18 4v12q0 .825-.587 1.413T16 18zm16 4q-.825 0-1.412-.587T18 20V7q0-.425.288-.712T19 6t.713.288T20 7v13h-13q-.425 0-.712-.288T6 19t.288-.712T7 18h13z"/>
+                                            </svg>
+                                            <span>Редактировать всё из очереди (<span x-text="$store.app.queue.readyCount"></span>)</span>
+                                        </button>
+                                    </template>
+                                    <button
+                                        type="button"
+                                        @click="openTagEditorForJob(job.id)"
+                                        class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition shadow flex items-center space-x-1.5">
+                                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="m21.4 14.25l-7.15 7.15q-.3.3-.675.45t-.75.15t-.75-.15t-.675-.45l-8.825-8.825q-.275-.275-.425-.637T2 11.175V4q0-.825.588-1.412T4 2h7.175q.4 0 .775.163t.65.437l8.8 8.825q.3.3.438.675t.137.75t-.137.738t-.438.662M6.5 8q.625 0 1.063-.437T8 6.5t-.437-1.062T6.5 5t-1.062.438T5 6.5t.438 1.063T6.5 8"/>
+                                        </svg>
+                                        <span x-text="$store.app.queue.readyCount > 1 ? 'Открыть этот релиз' : 'Открыть в редакторе тегов'"></span>
+                                    </button>
+                                </div>
                             </template>
                             <template x-if="job.status !== 'READY' && job.status !== 'ERROR'">
                                 <button
@@ -2441,7 +2579,7 @@
                                 <path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h11.175q.4 0 .763.15t.637.425l2.85 2.85q.275.275.425.638t.15.762V19q0 .825-.587 1.413T19 21zm9.125-3.875Q15 16.25 15 15t-.875-2.125T12 12t-2.125.875T9 15t.875 2.125T12 18t2.125-.875M7 10h7q.425 0 .713-.288T15 9V7q0-.425-.288-.712T14 6H7q-.425 0-.712.288T6 7v2q0 .425.288.713T7 10"/>
                             </svg>
                         </template>
-                        <span x-text="isSaving ? 'Сохранение...' : 'Сохранить в медиатеку'"></span>
+                        <span x-text="isSaving ? 'Сохранение...' : (releases.length > 1 ? `Сохранить всё в медиатеку (${releases.length} рел.)` : 'Сохранить в медиатеку')"></span>
                     </button>
                 </div>
             </div>
@@ -2779,6 +2917,18 @@
                     </div>
                 </div>
                 <div class="flex items-center space-x-1.5">
+                    <template x-if="$store.app.queue.readyCount > 0">
+                        <button
+                            type="button"
+                            @click="$store.app.queue.openAllReadyJobsInTagEditor()"
+                            :title="`Редактировать все готовые (${$store.app.queue.readyCount})`"
+                            class="text-[11px] font-bold text-white px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 transition shadow flex items-center space-x-1 animate-pulse">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="m21.4 14.25l-7.15 7.15q-.3.3-.675.45t-.75.15t-.75-.15t-.675-.45l-8.825-8.825q-.275-.275-.425-.637T2 11.175V4q0-.825.588-1.412T4 2h7.175q.4 0 .775.163t.65.437l8.8 8.825q.3.3.438.675t.137.75t-.137.738t-.438.662M6.5 8q.625 0 1.063-.437T8 6.5t-.437-1.062T6.5 5t-1.062.438T5 6.5t.438 1.063T6.5 8"/>
+                            </svg>
+                            <span>В теги всё (<span x-text="$store.app.queue.readyCount"></span>)</span>
+                        </button>
+                    </template>
                     <button
                         @click="$store.app.queue.clearCompleted()"
                         title="Очистить завершенные"
@@ -2797,6 +2947,25 @@
 
             <!-- Список задач в очереди -->
             <div class="flex-1 overflow-y-auto divide-y divide-gray-800/60 p-2 space-y-1">
+                <!-- Баннер быстрого массового редактирования при наличии нескольких готовых релизов -->
+                <template x-if="$store.app.queue.readyCount > 1">
+                    <div class="p-2.5 mb-1 bg-gradient-to-r from-emerald-950/90 to-teal-950/80 border border-emerald-500/40 rounded-xl flex items-center justify-between gap-2 shadow-sm">
+                        <div class="min-w-0">
+                            <div class="text-[11px] font-bold text-white flex items-center space-x-1.5">
+                                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                <span>Готово к тегированию:</span>
+                                <span class="text-emerald-400 font-mono" x-text="`${$store.app.queue.readyCount} рел.`"></span>
+                            </div>
+                            <div class="text-[10px] text-gray-400 truncate">Редактируйте всю пачку одновременно</div>
+                        </div>
+                        <button
+                            type="button"
+                            @click="$store.app.queue.openAllReadyJobsInTagEditor()"
+                            class="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1 shadow flex-shrink-0">
+                            <span>Редактировать всё</span>
+                        </button>
+                    </div>
+                </template>
                 <template x-if="$store.app.queue.jobs.length === 0">
                     <div class="py-8 text-center text-gray-500 text-xs">
                         Очередь загрузок пуста
@@ -2865,7 +3034,10 @@
                 </svg>
                 <span>Очередь:</span>
                 <span class="text-emerald-400 font-mono" x-text="`${$store.app.queue.activeCount} акт.`"></span>
-                <template x-if="$store.app.queue.totalCount > 0">
+                <template x-if="$store.app.queue.readyCount > 0">
+                    <span class="text-emerald-300 font-mono text-[11px] font-semibold" x-text="`• ${$store.app.queue.readyCount} готов.`"></span>
+                </template>
+                <template x-if="$store.app.queue.totalCount > 0 && $store.app.queue.activeCount > 0">
                     <span class="text-gray-400 text-[11px] font-normal" x-text="`(${$store.app.queue.percent}%)`"></span>
                 </template>
             </div>

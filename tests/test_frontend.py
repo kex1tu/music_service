@@ -358,6 +358,48 @@ def test_artist_discography_picker_ui(client: TestClient):
     assert "toggleRelease" in downloader_js
 
 
+def test_queue_bulk_edit_ui(client: TestClient):
+    """Проверка элементов интерфейса массового редактирования всех готовых релизов из очереди."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+
+    # 1. Проверка наличия методов и геттеров в хранилище очереди index.html
+    assert "openAllReadyJobsInTagEditor" in html
+    assert "get readyCount()" in html or "readyCount" in html
+
+    # 2. Кнопка массового открытия в шапке шторки очереди
+    assert "В теги всё" in html
+    assert "openAllReadyJobsInTagEditor()" in html
+
+    # 3. Баннер пакетного тегирования в списке задач очереди
+    assert "Готово к тегированию:" in html
+    assert "Редактировать всё" in html
+
+    # 4. Вспомогательная кнопка в активной карточке загрузчика
+    assert "Редактировать всё из очереди" in html
+
+    # 5. Проверка логики в tag_editor.js
+    tag_editor_js = (PROJECT_ROOT / "app" / "static" / "js" / "tag_editor.js").read_text(encoding="utf-8")
+    assert "this.jobIds" in tag_editor_js
+    assert "jobIds.length" in tag_editor_js
+    assert "/downloads/${jid}" in tag_editor_js or "/downloads/" in tag_editor_js
+
+
+def test_tag_editor_and_downloader_disc_and_track_total_fields():
+    """Проверка передачи disc_total, track_total и disc_number во фронтенд-скриптах downloader.js и tag_editor.js."""
+    downloader_js = (PROJECT_ROOT / "app" / "static" / "js" / "downloader.js").read_text(encoding="utf-8")
+    assert "disc_total: data.disc_total" in downloader_js
+    assert "track_total: data.track_total" in downloader_js
+
+    tag_editor_js = (PROJECT_ROOT / "app" / "static" / "js" / "tag_editor.js").read_text(encoding="utf-8")
+    assert "disc_total: data.album?.disc_total" in tag_editor_js
+    assert "track_total: data.album?.track_total" in tag_editor_js
+    assert "group.discTotal" in tag_editor_js
+
+
+
+
 
 
 

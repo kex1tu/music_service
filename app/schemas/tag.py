@@ -119,6 +119,10 @@ class TrackTags(BaseModel):
         default=None,
         description="Base64-кодированное изображение индивидуальной обложки трека",
     )
+    cover_path: str | None = Field(
+        default=None,
+        description="Относительный безопасный путь к файлу обложки в песочнице",
+    )
 
 
 class AlbumDetailsResponse(BaseModel):

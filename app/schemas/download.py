@@ -63,6 +63,21 @@ class ResolvedTrack(BaseModel):
         ge=1,
         description="Порядковый номер трека на диске",
     )
+    track_total: int | None = Field(
+        default=None,
+        ge=1,
+        description="Общее число треков в релизе/альбоме",
+    )
+    disc_number: int = Field(
+        default=1,
+        ge=1,
+        description="Номер диска",
+    )
+    disc_total: int | None = Field(
+        default=None,
+        ge=1,
+        description="Общее число дисков в релизе",
+    )
     title: str = Field(
         ...,
         description="Название трека",
@@ -209,6 +224,16 @@ class DownloadTracksResponse(BaseModel):
     genre: str | None = Field(
         default=None,
         description="Жанр релиза",
+    )
+    disc_total: int | None = Field(
+        default=None,
+        ge=1,
+        description="Общее количество дисков",
+    )
+    track_total: int | None = Field(
+        default=None,
+        ge=1,
+        description="Общее количество треков",
     )
     cover_url: str | None = Field(
         default=None,

@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from mutagen.id3 import APIC, ID3, TALB, TCON, TDRC, TIT2, TPE1, TPE2, TRCK
+from mutagen.id3 import APIC, ID3, TALB, TCON, TDRC, TIT2, TPE1, TPE2, TPOS, TRCK
 
 from app.config import Settings
 from app.core.exceptions import DownloadError, NotFoundError, UnsupportedSourceError
@@ -202,6 +202,8 @@ class DownloadService:
             album=meta.get("album") or (first_track.album if first_track else ""),
             year=meta.get("year") or (first_track.year if first_track else None),
             genre=meta.get("genre") or (first_track.genre if first_track else None),
+            disc_total=meta.get("disc_total") or (first_track.disc_total if first_track else None),
+            track_total=meta.get("track_total") or (first_track.track_total if first_track else None) or (len(job.tracks) if job.tracks else None),
             cover_url=meta.get("cover_url") or (first_track.cover_url if first_track else None),
             cover_path=job.cover_relative_path,
             tracks=job.tracks,
@@ -1031,7 +1033,21 @@ class DownloadService:
 
         # Номер дорожки
         if track.track_number:
-            tags.add(TRCK(encoding=3, text=[str(track.track_number)]))
+            trck_val = (
+                f"{track.track_number}/{track.track_total}"
+                if track.track_total
+                else str(track.track_number)
+            )
+            tags.add(TRCK(encoding=3, text=[trck_val]))
+
+        # Номер диска (TPOS)
+        if track.disc_number:
+            tpos_val = (
+                f"{track.disc_number}/{track.disc_total}"
+                if track.disc_total
+                else str(track.disc_number)
+            )
+            tags.add(TPOS(encoding=3, text=[tpos_val]))
 
         # Год релиза
         if track.year:

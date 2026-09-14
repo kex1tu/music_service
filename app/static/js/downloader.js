@@ -268,7 +268,10 @@ function downloaderComponent() {
                     album: data.album || '',
                     year: data.year || null,
                     genre: data.genre || '',
+                    disc_total: data.disc_total || null,
+                    track_total: data.track_total || null,
                     cover_url: data.cover_url || null,
+                    cover_path: data.cover_path || `tmp_downloads/${jobId}/cover.jpg`,
                 };
 
                 const validTracks = (data.tracks || []).filter(
@@ -280,9 +283,16 @@ function downloaderComponent() {
                     return;
                 }
 
+                const coverPath = data.cover_path || `tmp_downloads/${jobId}/cover.jpg`;
+                const coverPreview = data.cover_url || `/tags/cover?path=${encodeURIComponent(coverPath)}&t=${Date.now()}`;
+                const hasCover = !!data.cover_url || !!data.cover_path;
+
                 const tracks = validTracks.map((t) => ({
                     path: t.converted_path || `tmp_downloads/${jobId}/converted/${t.track_number}.mp3`,
-                    track_number: t.track_number,
+                    track_number: t.track_number !== undefined && t.track_number !== null ? t.track_number : 1,
+                    track_total: t.track_total || data.track_total || validTracks.length,
+                    disc_number: t.disc_number || 1,
+                    disc_total: t.disc_total || data.disc_total || 1,
                     title: t.title,
                     artist: t.artist,
                     album: t.album || album.album,
@@ -291,10 +301,13 @@ function downloaderComponent() {
                     genre: t.genre || album.genre,
                     duration: t.duration,
                     lyrics_status: 'none',
-                    has_cover: !!data.cover_url,
+                    has_cover: hasCover,
+                    cover_url: t.cover_url || data.cover_url || null,
+                    cover_path: coverPath,
+                    cover_preview_url: t.cover_url || coverPreview,
+                    job_id: jobId,
                 }));
 
-                const coverPath = `tmp_downloads/${jobId}/cover.jpg`;
                 const sourceDir = `tmp_downloads/${jobId}/converted`;
 
                 Alpine.store('app').openTagEditor({
@@ -302,7 +315,8 @@ function downloaderComponent() {
                     tracks,
                     sourceDir,
                     coverPath,
-                    hasCover: !!data.cover_url,
+                    hasCover,
+                    jobIds: [jobId],
                 });
             } catch (err) {
                 Alpine.store('app').toast(`Ошибка открытия редактора: ${err.message}`, 'error');

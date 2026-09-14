@@ -675,3 +675,57 @@ def test_organize_with_individual_track_covers_data(
     assert album_cover_path.read_bytes() == custom_cover
 
 
+def test_organize_multiple_tmp_jobs_cleanup(
+    organizer: tuple[OrganizerService, TagService, Path, Path],
+):
+    """Проверка перемещения треков из нескольких tmp-задач и зачистки всех их временных директорий."""
+    org, _, music_dir, tmp_dir = organizer
+
+    # Создаем 2 разные задачи в TMP_DIR
+    job1_dir = tmp_dir / "job_alpha" / "converted"
+    job1_dir.mkdir(parents=True, exist_ok=True)
+    (job1_dir / "01.mp3").write_bytes(MINIMAL_MP3)
+    (tmp_dir / "job_alpha" / "cover.jpg").write_bytes(DUMMY_JPEG)
+
+    job2_dir = tmp_dir / "job_beta" / "converted"
+    job2_dir.mkdir(parents=True, exist_ok=True)
+    (job2_dir / "01.mp3").write_bytes(MINIMAL_MP3)
+    (tmp_dir / "job_beta" / "cover.jpg").write_bytes(DUMMY_JPEG)
+
+    tracks = [
+        TrackTags(
+            path="tmp_downloads/job_alpha/converted/01.mp3",
+            track_number=1,
+            title="Alpha Track",
+            artist="Alpha Artist",
+            album_artist="Alpha Artist",
+            album="Alpha Album",
+            year=2021,
+        ),
+        TrackTags(
+            path="tmp_downloads/job_beta/converted/01.mp3",
+            track_number=1,
+            title="Beta Track",
+            artist="Beta Artist",
+            album_artist="Beta Artist",
+            album="Beta Album",
+            year=2022,
+        ),
+    ]
+
+    res = org.organize_album(
+        album=AlbumTags(album_artist="", album="", year=2020),
+        tracks=tracks,
+        source_dir="tmp_downloads",
+        group_by_album=True,
+    )
+
+    assert len(res.tracks) == 2
+    assert (music_dir / "Alpha Artist/Alpha Album - 2021/01. Alpha Track.mp3").exists()
+    assert (music_dir / "Beta Artist/Beta Album - 2022/01. Beta Track.mp3").exists()
+
+    # Оба временных каталога задач должны быть зачищены
+    assert not (tmp_dir / "job_alpha").exists()
+    assert not (tmp_dir / "job_beta").exists()
+
+

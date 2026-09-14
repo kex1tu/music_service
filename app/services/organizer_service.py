@@ -719,20 +719,43 @@ class OrganizerService:
                     pass
 
             # 6. Очистка исходных директорий
-            if is_tmp:
-                try:
-                    src_dir_abs = self._resolve_source_path(source_dir)
-                    if self._tmp_sandbox and src_dir_abs.is_relative_to(self._tmp_sandbox.root):
-                        rel_to_tmp = self._tmp_sandbox.to_relative(src_dir_abs)
-                        job_id = rel_to_tmp.parts[0] if rel_to_tmp.parts else None
-                        if job_id:
-                            job_root = self._tmp_sandbox.resolve(job_id)
-                            if job_root.exists() and job_root != self._tmp_sandbox.root:
-                                shutil.rmtree(job_root, ignore_errors=True)
-                                logger.info("Удален временный каталог загрузки: %s", job_id)
-                except (PathTraversalError, OSError) as exc:
-                    logger.debug("Сбой очистки временного каталога задачи: %s", exc)
-            else:
+            if is_tmp and self._tmp_sandbox:
+                job_roots_to_clean: set[Path] = set()
+                if source_dir:
+                    try:
+                        src_dir_abs = self._resolve_source_path(source_dir)
+                        if src_dir_abs.is_relative_to(self._tmp_sandbox.root):
+                            rel_to_tmp = self._tmp_sandbox.to_relative(src_dir_abs)
+                            job_id = rel_to_tmp.parts[0] if rel_to_tmp.parts else None
+                            if job_id and job_id not in (".", ".."):
+                                job_root = self._tmp_sandbox.resolve(job_id)
+                                if job_root.exists() and job_root != self._tmp_sandbox.root:
+                                    job_roots_to_clean.add(job_root)
+                    except (PathTraversalError, OSError) as exc:
+                        logger.debug("Сбой разрешения source_dir для очистки tmp: %s", exc)
+
+                for t in tracks:
+                    if not t.path:
+                        continue
+                    try:
+                        src_path_abs = self._resolve_source_path(t.path)
+                        if src_path_abs.is_relative_to(self._tmp_sandbox.root):
+                            rel_to_tmp = self._tmp_sandbox.to_relative(src_path_abs)
+                            job_id = rel_to_tmp.parts[0] if rel_to_tmp.parts else None
+                            if job_id and job_id not in (".", ".."):
+                                job_root = self._tmp_sandbox.resolve(job_id)
+                                if job_root.exists() and job_root != self._tmp_sandbox.root:
+                                    job_roots_to_clean.add(job_root)
+                    except (PathTraversalError, OSError) as exc:
+                        logger.debug("Сбой разрешения трека для очистки tmp: %s", exc)
+
+                for job_root in job_roots_to_clean:
+                    try:
+                        shutil.rmtree(job_root, ignore_errors=True)
+                        logger.info("Удален временный каталог загрузки: %s", job_root.name)
+                    except OSError as exc:
+                        logger.debug("Не удалось удалить временный каталог %s: %s", job_root, exc)
+            elif not is_tmp:
                 for old_dir in old_dirs_to_clean:
                     self.cleanup_empty_directories(old_dir)
 
