@@ -291,12 +291,13 @@ func (db *DB) SaveTrackBatch(records []TrackAuditRecord) error {
 			UPDATE albums SET
 				present_tracks_count = (SELECT COUNT(*) FROM tracks WHERE album_id = ?),
 				is_complete = CASE
-					WHEN total_tracks > 0 AND (SELECT COUNT(*) FROM tracks WHERE album_id = ?) >= total_tracks THEN 1
+					WHEN total_tracks > 1 AND (SELECT COUNT(*) FROM tracks WHERE album_id = ?) >= total_tracks THEN 1
+					WHEN (total_tracks <= 1 OR total_tracks IS NULL) AND (SELECT COUNT(*) FROM tracks WHERE album_id = ?) >= 1 THEN 1
 					ELSE 0
 				END,
 				updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?
-		`, albumID, albumID, albumID)
+		`, albumID, albumID, albumID, albumID)
 	}
 
 	return tx.Commit()
@@ -351,10 +352,11 @@ func (db *DB) DeleteMissingFiles(existingRelPaths map[string]bool) (int, error) 
 }
 
 type IncompleteAlbumInfo struct {
-	ID        int64
-	Artist    string
-	Title     string
-	DeezerID  string
+	ID          int64
+	Artist      string
+	Title       string
+	TotalTracks int
+	DeezerID    string
 }
 
 // GetIncompleteAlbums возвращает список неполных альбомов для сверки с каталогом Deezer/Genius.
@@ -363,10 +365,12 @@ func (db *DB) GetIncompleteAlbums() ([]IncompleteAlbumInfo, error) {
 	defer db.mu.Unlock()
 
 	rows, err := db.conn.Query(`
-		SELECT al.id, ar.name, al.title, COALESCE(al.deezer_id, '')
+		SELECT al.id, ar.name, al.title, COALESCE(al.total_tracks, 0), COALESCE(al.deezer_id, '')
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
-		WHERE al.is_complete = 0 OR al.total_tracks = 0
+		WHERE (al.is_complete = 0 AND al.total_tracks > 1)
+		   OR (SELECT COUNT(*) FROM missing_tracks WHERE album_id = al.id) > 0
+		   OR al.total_tracks = 0
 	`)
 	if err != nil {
 		return nil, err
@@ -376,12 +380,64 @@ func (db *DB) GetIncompleteAlbums() ([]IncompleteAlbumInfo, error) {
 	var res []IncompleteAlbumInfo
 	for rows.Next() {
 		var item IncompleteAlbumInfo
-		if err := rows.Scan(&item.ID, &item.Artist, &item.Title, &item.DeezerID); err != nil {
+		if err := rows.Scan(&item.ID, &item.Artist, &item.Title, &item.TotalTracks, &item.DeezerID); err != nil {
 			return nil, err
 		}
 		res = append(res, item)
 	}
 	return res, nil
+}
+
+// GetAlbumTracks возвращает список существующих локальных треков альбома.
+func (db *DB) GetAlbumTracks(albumID int64) ([]TrackAuditRecord, error) {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	rows, err := db.conn.Query(`
+		SELECT t.title, ar.name, t.track_number, t.disc_number, t.duration, t.file_path
+		FROM tracks t
+		JOIN artists ar ON t.artist_id = ar.id
+		WHERE t.album_id = ?
+		ORDER BY t.disc_number, t.track_number
+	`, albumID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tracks []TrackAuditRecord
+	for rows.Next() {
+		var r TrackAuditRecord
+		var dur sql.NullFloat64
+		if err := rows.Scan(&r.Title, &r.Artist, &r.TrackNumber, &r.DiscNumber, &dur, &r.RelPath); err != nil {
+			return nil, err
+		}
+		if dur.Valid {
+			r.Duration = dur.Float64
+		}
+		tracks = append(tracks, r)
+	}
+	return tracks, nil
+}
+
+// UpdateAlbumCatalogInfo обновляет метаданные альбома, полученные из внешнего каталога Deezer (общее число треков, ID релиза).
+func (db *DB) UpdateAlbumCatalogInfo(albumID int64, totalTracks int, deezerID string, coverURL string) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	_, err := db.conn.Exec(`
+		UPDATE albums SET
+			total_tracks = CASE WHEN total_tracks <= 0 THEN ? ELSE total_tracks END,
+			deezer_id = COALESCE(NULLIF(deezer_id, ''), ?),
+			is_complete = CASE
+				WHEN ? > 0 AND (SELECT COUNT(*) FROM tracks WHERE album_id = ?) >= ? THEN 1
+				WHEN total_tracks <= 1 AND (SELECT COUNT(*) FROM tracks WHERE album_id = ?) >= 1 THEN 1
+				ELSE 0
+			END,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, totalTracks, deezerID, totalTracks, albumID, totalTracks, albumID, albumID)
+	return err
 }
 
 // SaveMissingTracks сохраняет найденные отсутствующие треки в таблицу missing_tracks.

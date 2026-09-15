@@ -49,8 +49,29 @@ func TestAnalyzeAndNormalizeGenre(t *testing.T) {
 		t.Fatalf("expected Rock \\\\ Pop, got %+v", res)
 	}
 
-	// 4. Unknown Russian genre
-	res = AnalyzeAndNormalizeGenre("Кастомный жанр")
+	// 4. Specific new mappings requested
+	res = AnalyzeAndNormalizeGenre("Поп\\Рок")
+	if !res.HasCyrillic || !res.IsAutoFixable || res.CanonicalGenre != "Pop \\Rock\\Pop-Rock" {
+		t.Fatalf("expected Pop \\Rock\\Pop-Rock, got %+v", res)
+	}
+
+	res = AnalyzeAndNormalizeGenre("Альтернативная музыка")
+	if !res.HasCyrillic || !res.IsAutoFixable || res.CanonicalGenre != "Alternative" {
+		t.Fatalf("expected Alternative, got %+v", res)
+	}
+
+	res = AnalyzeAndNormalizeGenre("Поп")
+	if !res.HasCyrillic || !res.IsAutoFixable || res.CanonicalGenre != "Pop" {
+		t.Fatalf("expected Pop, got %+v", res)
+	}
+
+	res = AnalyzeAndNormalizeGenre("Танцевальная музыка")
+	if !res.HasCyrillic || !res.IsAutoFixable || res.CanonicalGenre != "Dance Music" {
+		t.Fatalf("expected Dance Music, got %+v", res)
+	}
+
+	// 5. Unknown Russian genre
+	res = AnalyzeAndNormalizeGenre("Кастомный неизвестный жанр")
 	if !res.HasCyrillic || res.IsAutoFixable {
 		t.Fatalf("expected unfixable custom Cyrillic genre, got %+v", res)
 	}

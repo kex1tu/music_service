@@ -1303,7 +1303,7 @@
             </div>
 
             <!-- Сводка метрик коллекции (7 карточек) -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7 gap-4">
                 <!-- Карточка 1: Всего треков -->
                 <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
                     <div class="flex items-center justify-between">
@@ -1372,8 +1372,8 @@
                         </span>
                     </div>
                     <div class="mt-4 flex items-baseline space-x-2">
-                        <span class="text-2xl font-bold text-red-300 font-mono" x-text="duplicatesData.total_duplicate_files || summary.duplicates_count"></span>
-                        <span class="text-xs text-gray-500">копий файлов</span>
+                        <span class="text-2xl font-bold text-red-300 font-mono" x-text="duplicatesData.total_duplicate_files || summary.duplicates_count || 0"></span>
+                        <span class="text-xs text-gray-500" x-text="`в ${(duplicatesData.groups ? duplicatesData.groups.length : 0)} группах`"></span>
                     </div>
                 </div>
 
@@ -1391,7 +1391,7 @@
                         </span>
                     </div>
                     <div class="mt-4 flex items-baseline space-x-2">
-                        <span class="text-2xl font-bold text-sky-300 font-mono" x-text="incompleteAlbums.length || summary.incomplete_albums_count"></span>
+                        <span class="text-2xl font-bold text-sky-300 font-mono" x-text="(incompleteAlbums ? incompleteAlbums.length : (summary.incomplete_albums_count ?? 0)) ?? 0"></span>
                         <span class="text-xs text-gray-500">альбомов</span>
                     </div>
                 </div>
@@ -1410,7 +1410,7 @@
                         </span>
                     </div>
                     <div class="mt-4 flex items-baseline space-x-2">
-                        <span class="text-2xl font-bold text-amber-300 font-mono" x-text="invalidPaths.length || summary.invalid_paths_count"></span>
+                        <span class="text-2xl font-bold text-amber-300 font-mono" x-text="(invalidPaths ? invalidPaths.length : (summary.invalid_paths_count ?? 0)) ?? 0"></span>
                         <span class="text-xs text-gray-500">путей</span>
                     </div>
                 </div>
@@ -1429,7 +1429,7 @@
                         </span>
                     </div>
                     <div class="mt-4 flex items-baseline space-x-2">
-                        <span class="text-2xl font-bold text-rose-300 font-mono" x-text="nonEnGenres.length || summary.non_en_genres_count"></span>
+                        <span class="text-2xl font-bold text-rose-300 font-mono" x-text="(nonEnGenres ? nonEnGenres.length : (summary.non_en_genres_count ?? 0)) ?? 0"></span>
                         <span class="text-xs text-gray-500">тегов</span>
                     </div>
                 </div>
@@ -1442,14 +1442,14 @@
                     :class="activeSubTab === 'lyrics' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
                     class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
                     <span>Треки без текстов</span>
-                    <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="missingLyrics.length"></span>
+                    <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="missingLyrics.length || summary.missing_lyrics_count || 0"></span>
                 </button>
                 <button
                     @click="activeSubTab = 'covers'"
                     :class="activeSubTab === 'covers' ? 'bg-yellow-600/20 text-yellow-300 border border-yellow-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
                     class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
                     <span>Релизы без обложек</span>
-                    <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="missingCovers.length"></span>
+                    <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="missingCovers.length || summary.missing_covers_count || 0"></span>
                 </button>
                 <button
                     @click="activeSubTab = 'duplicates'"
@@ -1463,21 +1463,21 @@
                     :class="activeSubTab === 'incomplete' ? 'bg-sky-600/20 text-sky-300 border border-sky-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
                     class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
                     <span>Неполные релизы</span>
-                    <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="incompleteAlbums.length"></span>
+                    <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="incompleteAlbums.length || summary.incomplete_albums_count || 0"></span>
                 </button>
                 <button
                     @click="activeSubTab = 'paths'"
                     :class="activeSubTab === 'paths' ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
                     class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
                     <span>Некорректные пути</span>
-                    <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="invalidPaths.length || summary.invalid_paths_count"></span>
+                    <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="invalidPaths.length || summary.invalid_paths_count || 0"></span>
                 </button>
                 <button
                     @click="activeSubTab = 'genres'"
                     :class="activeSubTab === 'genres' ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
                     class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
                     <span>Жанры на проверку</span>
-                    <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="nonEnGenres.length || summary.non_en_genres_count"></span>
+                    <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="nonEnGenres.length || summary.non_en_genres_count || 0"></span>
                 </button>
             </div>
 
@@ -1529,12 +1529,20 @@
 
                 <!-- Таблица треков без текстов -->
                 <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl">
-                    <template x-if="missingLyrics.length === 0">
+                    <template x-if="isLoading">
+                        <div class="p-8 text-center text-gray-400 text-sm flex items-center justify-center space-x-2">
+                            <svg class="w-4 h-4 animate-spin text-purple-400" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
+                            </svg>
+                            <span>Загрузка данных...</span>
+                        </div>
+                    </template>
+                    <template x-if="!isLoading && missingLyrics.length === 0">
                         <div class="p-8 text-center text-gray-500 text-sm">
                             Отлично! У всех треков в медиатеке уже есть тексты песен.
                         </div>
                     </template>
-                    <template x-if="missingLyrics.length > 0">
+                    <template x-if="!isLoading && missingLyrics.length > 0">
                         <div class="overflow-x-auto max-h-[600px]">
                             <table class="w-full text-left border-collapse text-xs">
                                 <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider font-semibold sticky top-0 z-10 border-b border-gray-800">
@@ -1585,12 +1593,20 @@
             <!-- СЕКЦИЯ 2: Релизы без обложек -->
             <div x-show="activeSubTab === 'covers'" class="space-y-4">
                 <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl">
-                    <template x-if="missingCovers.length === 0">
+                    <template x-if="isLoading">
+                        <div class="p-8 text-center text-gray-400 text-sm flex items-center justify-center space-x-2">
+                            <svg class="w-4 h-4 animate-spin text-yellow-400" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
+                            </svg>
+                            <span>Загрузка данных...</span>
+                        </div>
+                    </template>
+                    <template x-if="!isLoading && missingCovers.length === 0">
                         <div class="p-8 text-center text-gray-500 text-sm">
                             Отлично! У всех альбомов и папок есть файлы обложек (`cover.jpg` / вшитые теги).
                         </div>
                     </template>
-                    <template x-if="missingCovers.length > 0">
+                    <template x-if="!isLoading && missingCovers.length > 0">
                         <div class="overflow-x-auto max-h-[600px]">
                             <table class="w-full text-left border-collapse text-xs">
                                 <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider font-semibold sticky top-0 z-10 border-b border-gray-800">
@@ -1630,12 +1646,20 @@
 
             <!-- СЕКЦИЯ 3: Дубликаты песен -->
             <div x-show="activeSubTab === 'duplicates'" class="space-y-4">
-                <template x-if="!duplicatesData.groups || duplicatesData.groups.length === 0">
+                <template x-if="isLoading">
+                    <div class="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-400 text-sm flex items-center justify-center space-x-2">
+                        <svg class="w-4 h-4 animate-spin text-red-400" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
+                        </svg>
+                        <span>Загрузка данных...</span>
+                    </div>
+                </template>
+                <template x-if="!isLoading && (!duplicatesData.groups || duplicatesData.groups.length === 0)">
                     <div class="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-500 text-sm">
                         Дубликатов не обнаружено — медиатека чиста!
                     </div>
                 </template>
-                <template x-if="duplicatesData.groups && duplicatesData.groups.length > 0">
+                <template x-if="!isLoading && duplicatesData.groups && duplicatesData.groups.length > 0">
                     <div class="space-y-4">
                         <template x-for="(grp, gIdx) in duplicatesData.groups" :key="gIdx">
                             <div class="bg-gray-900 border border-red-800/40 rounded-xl p-5 shadow-xl space-y-3">
@@ -1904,12 +1928,20 @@
                 </div>
 
                 <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl">
-                    <template x-if="invalidPaths.length === 0">
+                    <template x-if="isLoading">
+                        <div class="p-8 text-center text-gray-400 text-sm flex items-center justify-center space-x-2">
+                            <svg class="w-4 h-4 animate-spin text-amber-400" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
+                            </svg>
+                            <span>Загрузка данных...</span>
+                        </div>
+                    </template>
+                    <template x-if="!isLoading && invalidPaths.length === 0">
                         <div class="p-8 text-center text-gray-500 text-sm">
                             Отлично! Все файлы медиатеки разложены по каноническому стандарту.
                         </div>
                     </template>
-                    <template x-if="invalidPaths.length > 0">
+                    <template x-if="!isLoading && invalidPaths.length > 0">
                         <div class="overflow-x-auto max-h-[600px]">
                             <table class="w-full text-left border-collapse text-xs">
                                 <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider font-semibold sticky top-0 z-10 border-b border-gray-800">
@@ -1954,12 +1986,20 @@
                 </div>
 
                 <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl">
-                    <template x-if="nonEnGenres.length === 0">
+                    <template x-if="isLoading">
+                        <div class="p-8 text-center text-gray-400 text-sm flex items-center justify-center space-x-2">
+                            <svg class="w-4 h-4 animate-spin text-rose-400" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
+                            </svg>
+                            <span>Загрузка данных...</span>
+                        </div>
+                    </template>
+                    <template x-if="!isLoading && nonEnGenres.length === 0">
                         <div class="p-8 text-center text-gray-500 text-sm">
                             Все жанры соответствуют международным англоязычным стандартам.
                         </div>
                     </template>
-                    <template x-if="nonEnGenres.length > 0">
+                    <template x-if="!isLoading && nonEnGenres.length > 0">
                         <div class="overflow-x-auto max-h-[600px]">
                             <table class="w-full text-left border-collapse text-xs">
                                 <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider font-semibold sticky top-0 z-10 border-b border-gray-800">

@@ -9,6 +9,14 @@ var cyrillicRegex = regexp.MustCompile(`\p{Cyrillic}`)
 var genreSplitRegex = regexp.MustCompile(`(\\\\+|\x00|/|;|,|\|)`)
 
 var RussianGenreMap = map[string]string{
+	"поп\\рок":              "Pop \\Rock\\Pop-Rock",
+	"поп/рок":               "Pop \\Rock\\Pop-Rock",
+	"поп-рок":               "Pop \\Rock\\Pop-Rock",
+	"поп рок":               "Pop \\Rock\\Pop-Rock",
+	"альтернативная музыка": "Alternative",
+	"альтернатива":          "Alternative",
+	"танцевальная музыка":   "Dance Music",
+	"танцевальная":          "Dance Music",
 	"русский рэп":          "Russian Hip-Hop",
 	"рэп":                  "Hip-Hop",
 	"хип-хоп":              "Hip-Hop",
@@ -83,7 +91,18 @@ func AnalyzeAndNormalizeGenre(rawGenre string) GenreCheckResult {
 		}
 	}
 
-	// Разбиваем на отдельные жанры, если указано несколько через разделители
+	// 1. Проверяем точное совпадение всей строки (для составных жанров вида Поп\Рок)
+	trimmedLower := strings.ToLower(trimmed)
+	if directEn, ok := RussianGenreMap[trimmedLower]; ok {
+		return GenreCheckResult{
+			OriginalGenre:  trimmed,
+			HasCyrillic:    true,
+			IsAutoFixable:  true,
+			CanonicalGenre: directEn,
+		}
+	}
+
+	// 2. Разбиваем на отдельные жанры, если указано несколько через разделители
 	parts := genreSplitRegex.Split(trimmed, -1)
 	var normalizedParts []string
 	allMapped := true

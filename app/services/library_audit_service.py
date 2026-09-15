@@ -146,7 +146,7 @@ class LibraryAuditService:
             return False
         try:
             assert aiosqlite is not None
-            async with aiosqlite.connect(str(self._db_path)) as db:
+            async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
                 db.row_factory = aiosqlite.Row
                 async with db.execute(
                     """
@@ -445,7 +445,7 @@ class LibraryAuditService:
         if self._is_db_available():
             try:
                 assert aiosqlite is not None
-                async with aiosqlite.connect(str(self._db_path)) as db:
+                async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
                     async with db.execute("SELECT COUNT(*) FROM tracks") as cur:
                         row = await cur.fetchone()
                         total_tracks = row[0] if row else 0
@@ -458,7 +458,13 @@ class LibraryAuditService:
                     async with db.execute("SELECT COUNT(*) FROM albums WHERE has_cover = 0") as cur:
                         row = await cur.fetchone()
                         missing_covers_count = row[0] if row else 0
-                    async with db.execute("SELECT COUNT(*) FROM albums WHERE is_complete = 0") as cur:
+                    async with db.execute(
+                        """
+                        SELECT COUNT(*) FROM albums
+                        WHERE (is_complete = 0 AND total_tracks > 1)
+                           OR (SELECT COUNT(*) FROM missing_tracks WHERE album_id = albums.id) > 0
+                        """
+                    ) as cur:
                         row = await cur.fetchone()
                         incomplete_albums_count = row[0] if row else 0
                     async with db.execute("SELECT COUNT(*) FROM tracks WHERE is_path_valid = 0") as cur:
@@ -507,6 +513,9 @@ class LibraryAuditService:
         album_paths.discard("")
         total_albums = len(album_paths)
 
+        invalid_paths_list = await self.get_invalid_paths()
+        non_en_genres_list = await self.get_non_en_genres()
+
         return AuditSummaryResponse(
             total_tracks=total_tracks,
             total_albums=total_albums,
@@ -514,8 +523,8 @@ class LibraryAuditService:
             missing_covers_count=missing_covers_count,
             duplicates_count=duplicates_count,
             incomplete_albums_count=incomplete_albums_count,
-            invalid_paths_count=0,
-            non_en_genres_count=0,
+            invalid_paths_count=len(invalid_paths_list),
+            non_en_genres_count=len(non_en_genres_list),
         )
 
     async def get_invalid_paths(self) -> list[InvalidPathItem]:
@@ -524,23 +533,54 @@ class LibraryAuditService:
         if self._is_db_available():
             try:
                 assert aiosqlite is not None
-                async with aiosqlite.connect(str(self._db_path)) as db:
+                async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
                     db.row_factory = aiosqlite.Row
                     async with db.execute(
                         "SELECT file_path, suggested_path, path_violation_reason FROM tracks WHERE is_path_valid = 0"
                     ) as cur:
                         rows = await cur.fetchall()
-                        return [
-                            InvalidPathItem(
-                                path=row["file_path"],
-                                suggested_path=row["suggested_path"] or row["file_path"],
-                                reason=row["path_violation_reason"] or "Несоответствие каноническому пути",
-                            )
-                            for row in rows
-                        ]
+                        if rows:
+                            return [
+                                InvalidPathItem(
+                                    path=row["file_path"],
+                                    suggested_path=row["suggested_path"] or row["file_path"],
+                                    reason=row["path_violation_reason"] or "Несоответствие каноническому пути",
+                                )
+                                for row in rows
+                            ]
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Ошибка получения некорректных путей из SQLite: %s", exc)
-        return []
+                logger.warning("Ошибка получения некорректных путей из SQLite, откат на in-memory: %s", exc)
+
+        # Fallback: вычисляем некорректные пути по self._cache
+        invalid_items: list[InvalidPathItem] = []
+        for item in self._cache.values():
+            t: TrackTags = item["track"]
+            p = Path(t.path)
+            album_name = t.album or (p.parent.name if str(p.parent) != "." else "Unknown Album")
+            title_name = t.title or p.stem
+            track_num = t.track_number if t.track_number and t.track_number > 0 else 1
+
+            clean_album = re.sub(r"[\\/:\*\?\"<>\|]", "_", album_name).strip(". ") or "Unknown Album"
+            clean_title = re.sub(r"[\\/:\*\?\"<>\|]", "_", title_name).strip(". ") or "Unknown Title"
+            expected_filename = f"{track_num:02d}. {clean_title}.mp3"
+            expected_path = f"{clean_album}/{expected_filename}"
+
+            actual_normalized = t.path.replace("\\", "/")
+            if actual_normalized != expected_path:
+                reasons = []
+                actual_dir = str(p.parent).replace("\\", "/") if str(p.parent) != "." else ""
+                if actual_dir != clean_album:
+                    reasons.append(f"папка '{actual_dir}' не совпадает с канонической '{clean_album}'")
+                if p.name != expected_filename:
+                    reasons.append(f"имя файла '{p.name}' не совпадает с каноническим '{expected_filename}'")
+                invalid_items.append(
+                    InvalidPathItem(
+                        path=actual_normalized,
+                        suggested_path=expected_path,
+                        reason="; ".join(reasons) or "Несоответствие каноническому пути",
+                    )
+                )
+        return invalid_items
 
     async def get_non_en_genres(self) -> list[NonEnGenreItem]:
         """Возвращает список треков с русскоязычными жанрами."""
@@ -548,7 +588,7 @@ class LibraryAuditService:
         if self._is_db_available():
             try:
                 assert aiosqlite is not None
-                async with aiosqlite.connect(str(self._db_path)) as db:
+                async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
                     db.row_factory = aiosqlite.Row
                     async with db.execute(
                         """
@@ -564,18 +604,34 @@ class LibraryAuditService:
                         """
                     ) as cur:
                         rows = await cur.fetchall()
-                        return [
-                            NonEnGenreItem(
-                                path=row["file_path"],
-                                current_genre=row["current_genre"],
-                                canonical_genre=row["canonical_genre"],
-                                is_auto_fixed=bool(row["is_auto_fixed"]),
-                            )
-                            for row in rows
-                        ]
+                        if rows:
+                            return [
+                                NonEnGenreItem(
+                                    path=row["file_path"],
+                                    current_genre=row["current_genre"],
+                                    canonical_genre=row["canonical_genre"],
+                                    is_auto_fixed=bool(row["is_auto_fixed"]),
+                                )
+                                for row in rows
+                            ]
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Ошибка получения русскоязычных жанров из SQLite: %s", exc)
-        return []
+                logger.warning("Ошибка получения русскоязычных жанров из SQLite, откат на in-memory: %s", exc)
+
+        # Fallback: вычисляем по self._cache
+        non_en_items: list[NonEnGenreItem] = []
+        cyrillic_pattern = re.compile(r"[\u0400-\u04FF]")
+        for item in self._cache.values():
+            t: TrackTags = item["track"]
+            if t.genre and cyrillic_pattern.search(t.genre):
+                non_en_items.append(
+                    NonEnGenreItem(
+                        path=t.path,
+                        current_genre=t.genre,
+                        canonical_genre="",
+                        is_auto_fixed=False,
+                    )
+                )
+        return non_en_items
 
     async def get_missing_lyrics(self) -> list[MissingLyricsItem]:
         """Возвращает список треков без внешних текстов песен (.lrc/.txt)."""
@@ -822,7 +878,7 @@ class LibraryAuditService:
         if self._is_db_available():
             try:
                 assert aiosqlite is not None
-                async with aiosqlite.connect(str(self._db_path)) as db:
+                async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
                     db.row_factory = aiosqlite.Row
                     async with db.execute(
                         """
@@ -831,12 +887,13 @@ class LibraryAuditService:
                                al.deezer_id, al.spotify_id, al.youtube_id, al.yandex_id, al.genius_id
                         FROM albums al
                         JOIN artists ar ON al.artist_id = ar.id
-                        WHERE al.is_complete = 0 OR al.total_tracks = 0
+                        WHERE (al.is_complete = 0 AND al.total_tracks > 1)
+                           OR (SELECT COUNT(*) FROM missing_tracks WHERE album_id = al.id) > 0
                         """
                     ) as cur:
                         album_rows = await cur.fetchall()
 
-                    if album_rows:
+                    if album_rows is not None:
                         incomplete_items = []
                         total_missing = 0
                         for a in album_rows:
@@ -1338,6 +1395,25 @@ class LibraryAuditService:
             is_catalog_matched=True,
             deezer_album_id=deezer_id,
         )
+        if self._is_db_available() and deezer_id and len(deezer_tracks) > 0:
+            try:
+                assert aiosqlite is not None
+                async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
+                    await db.execute(
+                        """
+                        UPDATE albums SET
+                            total_tracks = CASE WHEN total_tracks <= 0 THEN ? ELSE total_tracks END,
+                            deezer_id = COALESCE(NULLIF(deezer_id, ''), ?),
+                            is_complete = CASE WHEN ? > 0 AND present_tracks_count >= ? THEN 1 ELSE 0 END,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE folder_path = ? OR title = ?
+                        """,
+                        (len(deezer_tracks), deezer_id, len(deezer_tracks), len(deezer_tracks), norm_album_path, album_name),
+                    )
+                    await db.commit()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Не удалось обновить total_tracks в SQLite: %s", exc)
+
         self._catalog_cache[norm_album_path] = res_item
         return res_item
 

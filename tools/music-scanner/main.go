@@ -184,11 +184,22 @@ func runScanCycle(
 						continue
 					}
 
-					missing := catalog.FindMissingTracks(album.ID, nil, remoteAlbum)
+					// Если у альбома не было задано total_tracks, обновляем его из каталога Deezer
+					if album.TotalTracks <= 0 && remoteAlbum.NbTracks > 0 {
+						_ = database.UpdateAlbumCatalogInfo(album.ID, remoteAlbum.NbTracks, remoteAlbum.ID, remoteAlbum.CoverURL)
+					}
+
+					// Загружаем существующие локальные треки альбома для точной сверки
+					localTracks, err := database.GetAlbumTracks(album.ID)
+					if err != nil {
+						localTracks = nil
+					}
+
+					missing := catalog.FindMissingTracks(album.ID, localTracks, remoteAlbum)
 					if len(missing) > 0 {
 						_ = database.SaveMissingTracks(album.ID, missing)
-						log.Printf("[music-auditor] Album '%s - %s': found %d missing tracks",
-							album.Artist, album.Title, len(missing))
+						log.Printf("[music-auditor] Album '%s - %s': found %d missing tracks (present: %d, expected: %d)",
+							album.Artist, album.Title, len(missing), len(localTracks), remoteAlbum.NbTracks)
 					}
 				}
 			}
