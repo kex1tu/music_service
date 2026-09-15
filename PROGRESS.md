@@ -2,8 +2,9 @@
 
 ## Текущий статус проекта
 - **Текущий статус проекта:** 100% готовность, все проверки и тесты пройдены.
-- **Активный этап:** Подсистема аудита и каталогизации медиатеки на Go (Daemon + fsnotify) + SQLite: фоновый демон `music-scanner --daemon`, отслеживание изменений через `fsnotify` (500 мс дебаунс), SQLite (`data/library.db`) в WAL-режиме, валидация путей `{Album}/{TrackNumber:02d}. {Title}.mp3`, автозамена русских жанров на английские в ID3v2.4, платформа внешних ID (Deezer, Spotify, YouTube Music, Яндекс Музыка, Genius), детекция `missing_tracks`, новые карточки и таблицы в веб-интерфейсе.
-- **Результаты тестов:** 553/553 passed (`pytest`), Go unit tests passed (100% pass), ruff linter — 0 замечаний (All checks passed!).
+- **Активный этап:** Подсистема аудита и каталогизации медиатеки на Go (Daemon + fsnotify) + SQLite: фоновый демон `music-scanner --daemon`, отслеживание изменений через `fsnotify` (500 мс дебаунс), SQLite (`data/library.db`) в WAL-режиме, валидация путей `{Album}/{TrackNumber:02d}. {Title}.mp3`, автозамена русских жанров на английские в ID3v2.4 (`Поп\Рок` -> `Pop \Rock\Pop-Rock`, `Альтернативная музыка` -> `Alternative`, `Поп` -> `Pop`, `Танцевальная музыка` -> `Dance Music`), автоопределение общего числа треков через Deezer API при `TRACKTOTAL == 0`, платформа внешних ID (Deezer, Spotify, YouTube Music, Яндекс Музыка, Genius), детекция `missing_tracks`, дашборд с адаптивной сеткой карточек (7 колонок) и индикацией загрузки без ложных пустых состояний.
+- **Результаты тестов:** 554/554 passed (`pytest`), Go unit tests passed (100% pass), ruff linter — 0 замечаний (All checks passed!).
+- **Деплой:** Развёрнуто и активно на обоих серверах (`nl_vpn` / `144.31.51.105` и `nl_music` / `194.76.168.20`).
 
 ---
 
@@ -444,6 +445,18 @@
 | **R3: Интеграция с FastAPI бэкендом** | `app/schemas/library_audit.py`, `app/services/library_audit_service.py`, `app/routers/files.py`, `app/dependencies.py` | **DONE** | 1. Добавлены схемы `InvalidPathItem`, `NonEnGenreItem`, поля `invalid_paths_count`, `non_en_genres_count` в `AuditSummaryResponse`, внешние платформенные ID в `IncompleteAlbumItem` и `IncompleteTrackInfo`.<br>2. Роуты `GET /files/audit/invalid-paths` и `GET /files/audit/non-en-genres`.<br>3. Чтение сводки, некорректных путей, жанров и недостающих треков из SQLite в `LibraryAuditService`. |
 | **R4: Пользовательский интерфейс (Frontend No-Build)** | `app/templates/index.html`, `app/static/js/library_audit.js` | **DONE** | 1. Добавлены карточки «Не по шаблону» и «Жанры (не-EN)» в дашборд сводки аудита.<br>2. Добавлены подразделы (subtabs) «Некорректные пути» и «Жанры на проверку» с таблицами, статусами автоисправлений и переходами в файловый менеджер.<br>3. В `library_audit.js` добавлены методы `loadInvalidPaths()` и `loadNonEnGenres()`. |
 | **R5: Системная интеграция и тестирование** | `music-auditor.service`, `tests/test_audit_sqlite.py`, `tests/test_frontend.py` | **DONE** | 1. Создан systemd unit `music-auditor.service` для запуска Go-демона в фоне с параметрами `--daemon --auto-fix-genres --check-missing`.<br>2. Написаны модульные и интеграционные тесты для базы данных, сервиса аудита, эндпоинтов API и UI.<br>3. Все 553 теста пройдены успешно (`pytest`), Go unit tests зелёные, ruff линтер чист. |
+
+---
+
+## Блок 21: Устранение рассинхронизаций дашборда аудита, автозамена жанров и обнаружение треков через Deezer (2026-09-15)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Автозамена русских жанров на английские в ID3v2.4** | `tools/music-scanner/validator/genre.go`, `tools/music-scanner/validator/validator_test.go` | **DONE** | Добавлены строгие правила автонормализации жанров:<br>• `Поп\Рок` / `Поп/Рок` / `Поп-Рок` $\rightarrow$ `Pop \Rock\Pop-Rock`<br>• `Альтернативная музыка` / `Альтернатива` $\rightarrow$ `Alternative`<br>• `Поп` / `Поп-музыка` $\rightarrow$ `Pop`<br>• `Танцевальная музыка` / `Танцевальная` $\rightarrow$ `Dance Music`<br>Приоритетная проверка целой строки перед разбиением. Модульные тесты Go пройдены. |
+| **R2: Автоопределение `total_tracks` альбомов через Deezer API** | `tools/music-scanner/db/sqlite.go`, `tools/music-scanner/main.go`, `app/services/library_audit_service.py` | **DONE** | 1. Если для альбома в тегах не указано `TRACKTOTAL` (`total_tracks <= 0`), демон Go и бэкенд Python запрашивают Deezer API (`/search/album`), получают фактическое число треков `nb_tracks` и `deezer_id` и сохраняют в SQLite `albums`.<br>2. Реализован метод `GetAlbumTracks(albumID)` для сопоставления фактических локальных треков с каталогом релиза.<br>3. Обновлена логика `is_complete` для одиночных треков/синглов. |
+| **R3: Устранение рассинхронизаций и багов отображения дашборда аудита** | `app/templates/index.html`, `app/services/library_audit_service.py` | **DONE** | 1. **Исправлен баг «Некорректные пути»:** добавлены спиннеры загрузки `<template x-if="isLoading">` и условия `!isLoading` для секций «Некорректные пути», «Жанры», «Тексты», «Обложки» и «Дубликаты», устраняющие ложное отображение *«Отлично! Все файлы разложены по каноническому стандарту»* во время фоновой загрузки данных.<br>2. **Исправлена сетка дашборда:** контейнер переведен на `grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7` для корректного размещения всех 7 метрик в один ряд на широких экранах.<br>3. **Устранение пустых чисел:** для всех бейджей и карточек добавлены безопасные фолбэки `summary.total_tracks ?? 0`, `invalid_paths_count ?? 0`, `non_en_genres_count ?? 0`.<br>4. **Формулировка дубликатов:** заменено на «в N группах дубликатов».<br>5. Добавлен `timeout=30.0` при подключении `aiosqlite` и fallback при пустой SQLite базе. |
+| **R4: Деплой на оба production-сервера** | `nl_vpn` (144.31.51.105), `nl_music` (194.76.168.20) | **DONE** | Скомпилирован оптимизированный бинарник `bin/music-scanner`, выполнен `git pull origin main`, обновлены бинарники и перезапущены сервисы `music-manager.service` и `music-auditor.service` на обоих серверах. Все сервисы активны и ведут корректный аудит. |
+
 
 
 
