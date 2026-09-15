@@ -196,10 +196,13 @@ func runScanCycle(
 					}
 
 					missing := catalog.FindMissingTracks(album.ID, localTracks, remoteAlbum)
+					_ = database.SaveMissingTracks(album.ID, missing)
 					if len(missing) > 0 {
-						_ = database.SaveMissingTracks(album.ID, missing)
 						log.Printf("[music-auditor] Album '%s - %s': found %d missing tracks (present: %d, expected: %d)",
 							album.Artist, album.Title, len(missing), len(localTracks), remoteAlbum.NbTracks)
+					} else {
+						log.Printf("[music-auditor] Album '%s - %s': complete (%d tracks)",
+							album.Artist, album.Title, len(localTracks))
 					}
 				}
 			}

@@ -5,11 +5,33 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
 	_ "modernc.org/sqlite"
 )
+
+var artistSeparatorRegex = regexp.MustCompile(`(?i)(\\\\+|\x00|/|;|,|\||\s+feat\.?\s+|\s+ft\.?\s+|\s+&\s+|\s+with\s+)`)
+var cleanMetaRegex = regexp.MustCompile(`[\p{P}\s_]+`)
+
+func extractPrimaryArtist(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parts := artistSeparatorRegex.Split(raw, 2)
+	if len(parts) > 0 {
+		return strings.TrimSpace(parts[0])
+	}
+	return raw
+}
+
+func cleanMetaString(s string) string {
+	s = strings.ToLower(s)
+	s = cleanMetaRegex.ReplaceAllString(s, "")
+	return s
+}
 
 type DB struct {
 	conn *sql.DB
@@ -142,43 +164,98 @@ func (db *DB) SaveTrackBatch(records []TrackAuditRecord) error {
 	genreCache := make(map[string]int64)
 
 	for _, r := range records {
-		// 1. Artist
-		artistName := r.Artist
-		if strings.TrimSpace(artistName) == "" {
-			artistName = "Unknown Artist"
+		// 1. Определение Album Artist и Track Artist
+		albumArtistName := strings.TrimSpace(r.AlbumArtist)
+		if albumArtistName == "" {
+			albumArtistName = extractPrimaryArtist(r.Artist)
 		}
-		artistID, ok := artistCache[artistName]
+		if albumArtistName == "" {
+			albumArtistName = "Unknown Artist"
+		}
+
+		albumArtistID, ok := artistCache[albumArtistName]
 		if !ok {
-			err = tx.QueryRow("SELECT id FROM artists WHERE name = ?", artistName).Scan(&artistID)
+			err = tx.QueryRow("SELECT id FROM artists WHERE name = ?", albumArtistName).Scan(&albumArtistID)
 			if err == sql.ErrNoRows {
-				res, err := tx.Exec("INSERT INTO artists (name, clean_name) VALUES (?, ?)", artistName, r.CleanArtist)
+				res, err := tx.Exec("INSERT INTO artists (name, clean_name) VALUES (?, ?)", albumArtistName, cleanMetaString(albumArtistName))
 				if err != nil {
-					return fmt.Errorf("failed to insert artist %s: %w", artistName, err)
+					return fmt.Errorf("failed to insert album artist %s: %w", albumArtistName, err)
 				}
-				artistID, _ = res.LastInsertId()
+				albumArtistID, _ = res.LastInsertId()
 			} else if err != nil {
 				return err
 			}
-			artistCache[artistName] = artistID
+			artistCache[albumArtistName] = albumArtistID
 		}
 
-		// 2. Album
-		albumTitle := r.Album
-		if strings.TrimSpace(albumTitle) == "" {
-			albumTitle = "Unknown Album"
+		trackArtistName := strings.TrimSpace(r.Artist)
+		if trackArtistName == "" {
+			trackArtistName = albumArtistName
 		}
-		albumKey := fmt.Sprintf("%d:%s", artistID, albumTitle)
+		trackArtistID := albumArtistID
+		if trackArtistName != albumArtistName {
+			var ok bool
+			trackArtistID, ok = artistCache[trackArtistName]
+			if !ok {
+				err = tx.QueryRow("SELECT id FROM artists WHERE name = ?", trackArtistName).Scan(&trackArtistID)
+				if err == sql.ErrNoRows {
+					res, err := tx.Exec("INSERT INTO artists (name, clean_name) VALUES (?, ?)", trackArtistName, r.CleanArtist)
+					if err != nil {
+						return fmt.Errorf("failed to insert track artist %s: %w", trackArtistName, err)
+					}
+					trackArtistID, _ = res.LastInsertId()
+				} else if err != nil {
+					return err
+				}
+				artistCache[trackArtistName] = trackArtistID
+			}
+		}
+
+		// 2. Определение каталога и альбома
+		folderPath := filepath.Dir(r.RelPath)
+		baseFolder := filepath.Base(folderPath)
+		baseLower := strings.ToLower(baseFolder)
+		if strings.HasPrefix(baseLower, "cd") || strings.HasPrefix(baseLower, "disc") || strings.HasPrefix(baseLower, "диск") {
+			folderPath = filepath.Dir(folderPath)
+		}
+		if folderPath == "." {
+			folderPath = ""
+		}
+
+		albumTitle := strings.TrimSpace(r.Album)
+		if albumTitle == "" {
+			if folderPath != "" {
+				albumTitle = filepath.Base(folderPath)
+			} else {
+				albumTitle = "Unknown Album"
+			}
+		}
+
+		var albumKey string
+		if folderPath != "" {
+			albumKey = fmt.Sprintf("folder:%s", folderPath)
+		} else {
+			albumKey = fmt.Sprintf("artist_album:%d:%s", albumArtistID, albumTitle)
+		}
+
 		albumID, ok := albumCache[albumKey]
 		if !ok {
-			err = tx.QueryRow("SELECT id FROM albums WHERE artist_id = ? AND title = ?", artistID, albumTitle).Scan(&albumID)
-			folderPath := filepath.Dir(r.RelPath)
+			if folderPath != "" {
+				err = tx.QueryRow("SELECT id FROM albums WHERE folder_path = ? LIMIT 1", folderPath).Scan(&albumID)
+			} else {
+				err = sql.ErrNoRows
+			}
+			if err == sql.ErrNoRows {
+				err = tx.QueryRow("SELECT id FROM albums WHERE artist_id = ? AND title = ? LIMIT 1", albumArtistID, albumTitle).Scan(&albumID)
+			}
+
 			if err == sql.ErrNoRows {
 				res, err := tx.Exec(`
 					INSERT INTO albums (
 						artist_id, title, clean_title, album_artist, year,
 						total_tracks, cover_path, has_cover, folder_path, is_path_valid
 					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				`, artistID, albumTitle, r.CleanAlbum, r.AlbumArtist, r.Year,
+				`, albumArtistID, albumTitle, r.CleanAlbum, albumArtistName, r.Year,
 					r.TrackTotal, r.CoverPath, r.HasCover, folderPath, r.IsPathValid)
 				if err != nil {
 					return fmt.Errorf("failed to insert album %s: %w", albumTitle, err)
@@ -187,9 +264,15 @@ func (db *DB) SaveTrackBatch(records []TrackAuditRecord) error {
 			} else if err != nil {
 				return err
 			} else {
-				if r.HasCover {
-					_, _ = tx.Exec("UPDATE albums SET has_cover = 1, cover_path = ? WHERE id = ?", r.CoverPath, albumID)
-				}
+				_, _ = tx.Exec(`
+					UPDATE albums SET
+						has_cover = CASE WHEN ? THEN 1 ELSE has_cover END,
+						cover_path = COALESCE(NULLIF(?, ''), cover_path),
+						total_tracks = CASE WHEN ? > total_tracks THEN ? ELSE total_tracks END,
+						year = COALESCE(NULLIF(?, 0), year),
+						album_artist = COALESCE(NULLIF(?, ''), album_artist)
+					WHERE id = ?
+				`, r.HasCover, r.CoverPath, r.TrackTotal, r.TrackTotal, r.Year, albumArtistName, albumID)
 			}
 			albumCache[albumKey] = albumID
 		}
@@ -224,7 +307,7 @@ func (db *DB) SaveTrackBatch(records []TrackAuditRecord) error {
 				suggested_path = excluded.suggested_path,
 				updated_at = CURRENT_TIMESTAMP
 			RETURNING id
-		`, albumID, artistID, r.Title, r.CleanTitle, r.TrackNumber, r.TrackTotal,
+		`, albumID, trackArtistID, r.Title, r.CleanTitle, r.TrackNumber, r.TrackTotal,
 			r.DiscNumber, r.DiscTotal, r.Duration, r.Bitrate, r.RelPath, r.FileSize,
 			r.Mtime, r.HasCover, r.LyricsStatus, r.LyricsPath,
 			r.IsPathValid, r.PathViolationReason, r.SuggestedPath).Scan(&trackID)
@@ -285,20 +368,35 @@ func (db *DB) SaveTrackBatch(records []TrackAuditRecord) error {
 		}
 	}
 
-	// 6. Обновляем счетчики треков альбомов
+	// 6. Обновляем счетчики треков и статус полноты для затронутых альбомов
 	for _, albumID := range albumCache {
 		_, _ = tx.Exec(`
 			UPDATE albums SET
 				present_tracks_count = (SELECT COUNT(*) FROM tracks WHERE album_id = ?),
-				is_complete = CASE
-					WHEN total_tracks > 1 AND (SELECT COUNT(*) FROM tracks WHERE album_id = ?) >= total_tracks THEN 1
-					WHEN (total_tracks <= 1 OR total_tracks IS NULL) AND (SELECT COUNT(*) FROM tracks WHERE album_id = ?) >= 1 THEN 1
-					ELSE 0
+				total_tracks = CASE
+					WHEN total_tracks <= 0 THEN COALESCE((SELECT MAX(track_total) FROM tracks WHERE album_id = ?), 0)
+					ELSE total_tracks
 				END,
 				updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?
-		`, albumID, albumID, albumID, albumID)
+		`, albumID, albumID, albumID)
+
+		_, _ = tx.Exec(`
+			UPDATE albums SET
+				is_complete = CASE
+					WHEN (SELECT COUNT(*) FROM missing_tracks WHERE album_id = ?) > 0 THEN 0
+					WHEN total_tracks > 1 AND present_tracks_count < total_tracks THEN 0
+					WHEN (total_tracks <= 1 OR total_tracks IS NULL) AND present_tracks_count >= 1 THEN 1
+					ELSE 1
+				END,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?
+		`, albumID, albumID)
 	}
+
+	// Очищаем осиротевшие альбомы, у которых больше нет треков
+	_, _ = tx.Exec("DELETE FROM albums WHERE (SELECT COUNT(*) FROM tracks WHERE album_id = albums.id) = 0")
+	_, _ = tx.Exec("DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums)")
 
 	return tx.Commit()
 }
@@ -442,10 +540,6 @@ func (db *DB) UpdateAlbumCatalogInfo(albumID int64, totalTracks int, deezerID st
 
 // SaveMissingTracks сохраняет найденные отсутствующие треки в таблицу missing_tracks.
 func (db *DB) SaveMissingTracks(albumID int64, tracks []MissingTrackRecord) error {
-	if len(tracks) == 0 {
-		return nil
-	}
-
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
@@ -455,37 +549,46 @@ func (db *DB) SaveMissingTracks(albumID int64, tracks []MissingTrackRecord) erro
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`
-		INSERT INTO missing_tracks (
-			album_id, title, artist, track_number, disc_number,
-			expected_duration, deezer_id, deezer_url, spotify_id,
-			genius_url, isrc, status, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'missing', CURRENT_TIMESTAMP)
-		ON CONFLICT(album_id, disc_number, track_number) DO UPDATE SET
-			title = excluded.title,
-			artist = excluded.artist,
-			expected_duration = excluded.expected_duration,
-			deezer_id = excluded.deezer_id,
-			deezer_url = excluded.deezer_url,
-			spotify_id = excluded.spotify_id,
-			genius_url = excluded.genius_url,
-			isrc = excluded.isrc,
-			updated_at = CURRENT_TIMESTAMP
-	`)
-	if err != nil {
+	// 1. Всегда очищаем устаревшие записи missing_tracks для этого альбома
+	if _, err := tx.Exec("DELETE FROM missing_tracks WHERE album_id = ?", albumID); err != nil {
 		return err
 	}
-	defer stmt.Close()
 
-	for _, t := range tracks {
-		_, err := stmt.Exec(
-			albumID, t.Title, t.Artist, t.TrackNumber, t.DiscNumber,
-			t.ExpectedDuration, t.DeezerID, t.DeezerURL, t.SpotifyID,
-			t.GeniusURL, t.ISRC,
-		)
+	if len(tracks) > 0 {
+		stmt, err := tx.Prepare(`
+			INSERT INTO missing_tracks (
+				album_id, title, artist, track_number, disc_number,
+				expected_duration, deezer_id, deezer_url, spotify_id,
+				genius_url, isrc, status, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'missing', CURRENT_TIMESTAMP)
+		`)
 		if err != nil {
 			return err
 		}
+		defer stmt.Close()
+
+		for _, t := range tracks {
+			_, err := stmt.Exec(
+				albumID, t.Title, t.Artist, t.TrackNumber, t.DiscNumber,
+				t.ExpectedDuration, t.DeezerID, t.DeezerURL, t.SpotifyID,
+				t.GeniusURL, t.ISRC,
+			)
+			if err != nil {
+				return err
+			}
+		}
+
+		_, _ = tx.Exec("UPDATE albums SET is_complete = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", albumID)
+	} else {
+		_, _ = tx.Exec(`
+			UPDATE albums SET
+				is_complete = CASE
+					WHEN total_tracks > 1 AND (SELECT COUNT(*) FROM tracks WHERE album_id = ?) < total_tracks THEN 0
+					ELSE 1
+				END,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?
+		`, albumID, albumID)
 	}
 
 	return tx.Commit()

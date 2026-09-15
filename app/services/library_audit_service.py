@@ -925,17 +925,28 @@ class LibraryAuditService:
                                 )
                                 for m in mrows
                             ]
+                            # Если треков достаточно и нет записей в missing_tracks — альбом укомплектован
+                            if (a["total_tracks"] or 0) > 0 and a["present_tracks_count"] >= a["total_tracks"] and len(missing_info) == 0:
+                                continue
+
                             missing_nums = [m.track_number for m in missing_info]
-                            total_missing += len(missing_info)
+                            if not missing_nums and (a["total_tracks"] or 0) > a["present_tracks_count"]:
+                                async with db.execute("SELECT track_number FROM tracks WHERE album_id = ?", (album_id,)) as tcur:
+                                    trows = await tcur.fetchall()
+                                    present_nums = {r["track_number"] for r in trows if r["track_number"] and r["track_number"] > 0}
+                                    total_exp = a["total_tracks"] or (a["present_tracks_count"] + 1)
+                                    missing_nums = [n for n in range(1, total_exp + 1) if n not in present_nums]
+
+                            total_missing += len(missing_nums)
                             incomplete_items.append(
                                 IncompleteAlbumItem(
-                                    path=a["folder_path"],
+                                    path=a["folder_path"] or a["title"],
                                     album=a["title"],
                                     artist=a["artist"],
                                     year=a["year"],
                                     has_cover=bool(a["has_cover"]),
                                     present_count=a["present_tracks_count"],
-                                    expected_count=a["total_tracks"] or (a["present_tracks_count"] + len(missing_info)),
+                                    expected_count=a["total_tracks"] or (a["present_tracks_count"] + len(missing_nums)),
                                     missing_track_numbers=missing_nums,
                                     missing_tracks=missing_info,
                                     is_catalog_matched=bool(a["deezer_id"] or len(missing_info) > 0),
@@ -1410,6 +1421,15 @@ class LibraryAuditService:
                         """,
                         (len(deezer_tracks), deezer_id, len(deezer_tracks), len(deezer_tracks), norm_album_path, album_name),
                     )
+                    if len(missing_tracks) == 0:
+                        await db.execute(
+                            """
+                            DELETE FROM missing_tracks WHERE album_id IN (
+                                SELECT id FROM albums WHERE folder_path = ? OR title = ?
+                            )
+                            """,
+                            (norm_album_path, album_name),
+                        )
                     await db.commit()
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Не удалось обновить total_tracks в SQLite: %s", exc)
