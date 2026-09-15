@@ -158,8 +158,8 @@ def get_download_service(
 
 
 DownloadServiceDep = Annotated[DownloadService, Depends(get_download_service)]
- 
- 
+
+
 def get_tag_service(
     music_sandbox: MusicSandboxDep,
     tmp_sandbox: TmpSandboxDep,
@@ -233,7 +233,7 @@ def get_native_scanner(
 ) -> NativeScannerService:
     """Провайдер синглтона нативного сканера NativeScannerService."""
     global _native_scanner
-    if _native_scanner is None:
+    if _native_scanner is None or _native_scanner._sandbox.root != music_sandbox.root:
         _native_scanner = NativeScannerService(
             music_sandbox=music_sandbox,
             bin_path=settings.MUSIC_SCANNER_BIN_PATH,
@@ -256,7 +256,7 @@ def get_library_audit_service(
 ) -> LibraryAuditService:
     """Провайдер синглтона сервиса аудита и глобального поиска медиатеки."""
     global _library_audit_service
-    if _library_audit_service is None:
+    if _library_audit_service is None or _library_audit_service._music_sandbox.root != music_sandbox.root:
         _library_audit_service = LibraryAuditService(
             music_sandbox=music_sandbox,
             tag_service=tag_service,

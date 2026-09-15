@@ -155,3 +155,161 @@ def test_files_not_found(auth_files_client: TestClient):
     resp = auth_files_client.get("/files", params={"path": "non_existent_folder"})
     assert resp.status_code == 404
     assert resp.json()["error"] == "RESOURCE_NOT_FOUND"
+
+
+def test_auto_retag_genres_endpoint(auth_files_client: TestClient, temp_storage: dict[str, Path]):
+    """Проверка POST /files/audit/retag-genres для автоматической перезаписи тегов."""
+    music_dir = temp_storage["music_dir"]
+    album_dir = music_dir / "Поп Альбом"
+    album_dir.mkdir(parents=True, exist_ok=True)
+
+    t1 = album_dir / "01. Трек.mp3"
+    t1.write_bytes(MINIMAL_MP3)
+
+    tag_svc = TagService(music_sandbox=PathSandbox(music_dir))
+    tag_svc.write_tags(
+        t1,
+        TrackTags(
+            path="Поп Альбом/01. Трек.mp3",
+            title="Трек",
+            artist="Артист",
+            album="Поп Альбом",
+            genre=r"Поп\\Рок",
+        ),
+    )
+
+    # 1. Проверяем обнаружение через GET /files/audit/non-en-genres
+    resp_list = auth_files_client.get("/files/audit/non-en-genres")
+    assert resp_list.status_code == 200
+    items = resp_list.json()
+    assert len(items) == 1
+    assert items[0]["current_genre"] == r"Поп\\Рок"
+    assert items[0]["canonical_genre"] == "Rock"
+
+    # 2. Выполняем автоперезапись через POST /files/audit/retag-genres
+    resp_retag = auth_files_client.post("/files/audit/retag-genres")
+    assert resp_retag.status_code == 200
+    retag_data = resp_retag.json()
+    assert retag_data["success"] is True
+    assert retag_data["updated_count"] == 1
+
+    # 3. Проверяем теги на диске
+    updated_tags = tag_svc.read_tags(t1)
+    assert updated_tags.genre == "Rock"
+
+    # 4. Проверяем, что после перезаписи в GET /files/audit/non-en-genres список пуст
+    resp_list_after = auth_files_client.get("/files/audit/non-en-genres")
+    assert resp_list_after.status_code == 200
+    assert len(resp_list_after.json()) == 0
+
+
+def test_fix_path_endpoint(auth_files_client: TestClient, temp_storage: dict[str, Path]):
+    """Проверка POST /files/audit/fix-path для исправления пути отдельного файла."""
+    music_dir = temp_storage["music_dir"]
+    album_dir = music_dir / "Damn Garden"
+    album_dir.mkdir(parents=True, exist_ok=True)
+
+    # Старый существующий файл
+    existing_file = album_dir / "01. Свет.mp3"
+    existing_file.write_bytes(MINIMAL_MP3)
+
+    # Некорректный файл с суффиксом (2)
+    invalid_file = album_dir / "01. Свет (2).mp3"
+    invalid_file.write_bytes(MINIMAL_MP3)
+    invalid_lrc = album_dir / "01. Свет (2).lrc"
+    invalid_lrc.write_text("[00:01.00]Текст песни", encoding="utf-8")
+
+    tag_svc = TagService(music_sandbox=PathSandbox(music_dir))
+    tag_svc.write_tags(
+        invalid_file,
+        TrackTags(
+            path="Damn Garden/01. Свет (2).mp3",
+            title="Свет",
+            artist="Damn Garden",
+            album="Damn Garden",
+            track_number=1,
+        ),
+    )
+
+    resp = auth_files_client.post(
+        "/files/audit/fix-path",
+        json={"path": "Damn Garden/01. Свет (2).mp3", "overwrite": True},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+    assert data["source_path"] == "Damn Garden/01. Свет (2).mp3"
+    assert data["target_path"] == "Damn Garden/01. Свет.mp3"
+
+    assert existing_file.exists()
+    assert not invalid_file.exists()
+    assert (album_dir / "01. Свет.lrc").exists()
+    assert not invalid_lrc.exists()
+
+
+def test_fix_all_paths_endpoint(auth_files_client: TestClient, temp_storage: dict[str, Path]):
+    """Проверка POST /files/audit/fix-all-paths для пакетного исправления всех путей."""
+    music_dir = temp_storage["music_dir"]
+    bad_dir = music_dir / "OtherFolder"
+    bad_dir.mkdir(parents=True, exist_ok=True)
+
+    bad_track = bad_dir / "bad_name.mp3"
+    bad_track.write_bytes(MINIMAL_MP3)
+
+    tag_svc = TagService(music_sandbox=PathSandbox(music_dir))
+    tag_svc.write_tags(
+        bad_track,
+        TrackTags(
+            path="OtherFolder/bad_name.mp3",
+            title="Proper Title",
+            artist="Artist",
+            album="Clean Album",
+            track_number=2,
+        ),
+    )
+
+    resp = auth_files_client.post("/files/audit/fix-all-paths", json={"overwrite": True})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+    assert data["fixed_count"] >= 1
+
+    expected_path = music_dir / "Clean Album" / "02. Proper Title.mp3"
+    assert expected_path.exists()
+    assert not bad_track.exists()
+
+
+def test_download_missing_tracks_endpoint(auth_files_client: TestClient, temp_storage: dict[str, Path]):
+    """Проверка POST /files/audit/incomplete-albums/download-missing."""
+    music_dir = temp_storage["music_dir"]
+    album_dir = music_dir / "Test Album"
+    album_dir.mkdir(parents=True, exist_ok=True)
+
+    t1 = album_dir / "01. Track.mp3"
+    t1.write_bytes(MINIMAL_MP3)
+
+    tag_svc = TagService(music_sandbox=PathSandbox(music_dir))
+    tag_svc.write_tags(
+        t1,
+        TrackTags(
+            path="Test Album/01. Track.mp3",
+            title="Track 1",
+            artist="Artist",
+            album="Test Album",
+            track_number=1,
+            track_total=2,
+        ),
+    )
+
+    resp = auth_files_client.post(
+        "/files/audit/incomplete-albums/download-missing",
+        json={
+            "path": "Test Album",
+            "track_urls": ["https://www.deezer.com/track/123456"],
+        },
+    )
+    assert resp.status_code == 200
+    jobs = resp.json()
+    assert len(jobs) == 1
+    assert jobs[0]["url"] == "https://www.deezer.com/track/123456"
+

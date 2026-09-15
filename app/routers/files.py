@@ -14,19 +14,26 @@ from fastapi import APIRouter, Query
 
 from app.dependencies import (
     CurrentUserDep,
+    DeezerClientDep,
     DownloadServiceDep,
     FileManagerServiceDep,
     LibraryAuditServiceDep,
     MusicSandboxDep,
     OrganizerServiceDep,
+    SourceResolverDep,
 )
 from app.schemas.download import DownloadJobResponse
 from app.schemas.files import DeleteFileResponse, DirectoryListingResponse
 from app.schemas.library_audit import (
     AuditSummaryResponse,
+    AutoRetagGenresResponse,
     BatchLyricsProgressResponse,
     DownloadMissingTracksRequest,
     DuplicatesResponse,
+    FixAllPathsRequest,
+    FixAllPathsResponse,
+    FixPathRequest,
+    FixPathResponse,
     IncompleteAlbumItem,
     IncompleteAlbumsResponse,
     InvalidPathItem,
@@ -218,6 +225,8 @@ async def download_missing_album_tracks(
     _: CurrentUserDep = ...,
     audit_service: LibraryAuditServiceDep = ...,
     download_service: DownloadServiceDep = ...,
+    deezer_client: DeezerClientDep = ...,
+    source_resolver: SourceResolverDep = ...,
     music_sandbox: MusicSandboxDep = ...,
 ) -> list[DownloadJobResponse]:
     """Запускает скачивание недостающих треков альбома."""
@@ -242,7 +251,31 @@ async def download_missing_album_tracks(
             target_nums = set(request.track_numbers)
             candidates = [t for t in candidates if t.track_number in target_nums]
 
-        urls = [t.deezer_url for t in candidates if t.deezer_url]
+        for t in candidates:
+            if t.deezer_url:
+                urls.append(t.deezer_url)
+            elif t.title:
+                search_query = f"{t.artist or matched.artist} {t.title}".strip()
+                dz_found = False
+                try:
+                    dz_tracks = await deezer_client.search_tracks(search_query, limit=3)
+                    if dz_tracks and dz_tracks[0].get("id"):
+                        urls.append(f"https://www.deezer.com/track/{dz_tracks[0]['id']}")
+                        dz_found = True
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Поиск трека в Deezer не удался (%s): %s", search_query, exc)
+
+                if not dz_found:
+                    try:
+                        matched_url = await source_resolver._matcher.find_best_match(
+                            title=t.title,
+                            artist=t.artist or matched.artist,
+                            expected_duration=t.duration or 0,
+                        )
+                        if matched_url:
+                            urls.append(matched_url)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("AudioMatcher не нашел аудиопоток для %s: %s", search_query, exc)
 
     if not urls:
         return []
@@ -343,3 +376,54 @@ async def get_non_en_genres(
 ) -> list[NonEnGenreItem]:
     """Возвращает треки с неанглийскими жанрами."""
     return await audit_service.get_non_en_genres()
+
+
+@router.post(
+    "/audit/retag-genres",
+    response_model=AutoRetagGenresResponse,
+    summary="Автоматическая перезапись не-EN тегов жанров",
+    description="Пакетно нормализует русскоязычные жанры и перезаписывает теги ID3v2.4 на диске.",
+)
+@router.post(
+    "/audit/auto-retag-genres",
+    response_model=AutoRetagGenresResponse,
+    include_in_schema=False,
+)
+async def auto_retag_genres(
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> AutoRetagGenresResponse:
+    """Пакетно перезаписывает теги не-EN жанров на диске в ID3v2.4."""
+    return await audit_service.auto_retag_genres()
+
+
+@router.post(
+    "/audit/fix-path",
+    response_model=FixPathResponse,
+    summary="Исправление некорректного пути файла",
+    description="Перемещает файл с нарушением структуры в канонический путь согласно метаданным трека.",
+)
+async def fix_path(
+    request: FixPathRequest,
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> FixPathResponse:
+    """Исправляет путь одного некорректного файла."""
+    return await audit_service.fix_path(request.path, overwrite=request.overwrite)
+
+
+@router.post(
+    "/audit/fix-all-paths",
+    response_model=FixAllPathsResponse,
+    summary="Пакетное исправление всех некорректных путей",
+    description="Пакетно перемещает все файлы с нарушением структуры в канонические пути.",
+)
+async def fix_all_paths(
+    request: FixAllPathsRequest | None = None,
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> FixAllPathsResponse:
+    """Пакетно исправляет пути всех некорректных файлов в медиатеке."""
+    req = request or FixAllPathsRequest()
+    return await audit_service.fix_all_paths(overwrite=req.overwrite)
+

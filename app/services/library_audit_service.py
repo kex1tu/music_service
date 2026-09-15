@@ -14,6 +14,7 @@ import asyncio
 import logging
 import os
 import re
+import shutil
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,10 +24,13 @@ from app.core.exceptions import NotFoundError
 from app.core.sandbox import PathSandbox
 from app.schemas.library_audit import (
     AuditSummaryResponse,
+    AutoRetagGenresResponse,
     BatchLyricsProgressResponse,
     DuplicateGroupItem,
     DuplicatesResponse,
     DuplicateTrackItem,
+    FixAllPathsResponse,
+    FixPathResponse,
     IncompleteAlbumItem,
     IncompleteAlbumsResponse,
     IncompleteTrackInfo,
@@ -40,7 +44,10 @@ from app.schemas.library_audit import (
     SearchArtistItem,
     SearchTrackItem,
 )
-from app.schemas.tag import TrackTags
+from app.schemas.tag import (
+    TrackTags,
+    canonicalize_genre,
+)
 from app.services.deezer_client import DeezerClient
 from app.services.lyrics_service import LyricsService
 from app.services.native_scanner import NativeScannerService
@@ -147,6 +154,7 @@ class LibraryAuditService:
         try:
             assert aiosqlite is not None
             async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
+                db.text_factory = lambda b: b.decode("utf-8", errors="replace")
                 db.row_factory = aiosqlite.Row
                 async with db.execute(
                     """
@@ -446,6 +454,7 @@ class LibraryAuditService:
             try:
                 assert aiosqlite is not None
                 async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
+                    db.text_factory = lambda b: b.decode("utf-8", errors="replace")
                     async with db.execute("SELECT COUNT(*) FROM tracks") as cur:
                         row = await cur.fetchone()
                         total_tracks = row[0] if row else 0
@@ -534,6 +543,7 @@ class LibraryAuditService:
             try:
                 assert aiosqlite is not None
                 async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
+                    db.text_factory = lambda b: b.decode("utf-8", errors="replace")
                     db.row_factory = aiosqlite.Row
                     async with db.execute(
                         "SELECT file_path, suggested_path, path_violation_reason FROM tracks WHERE is_path_valid = 0"
@@ -582,14 +592,177 @@ class LibraryAuditService:
                 )
         return invalid_items
 
+    async def fix_path(self, path: str, overwrite: bool = True) -> FixPathResponse:
+        """Перемещает/переименовывает файл с нарушением структуры в канонический путь.
+
+        При overwrite=True безопасно заменяет уже существующий файл по целевому пути.
+        Также переносит ассоциированные тексты (.lrc/.txt), удаляет опустевшие родительские
+        папки и обновляет базу данных SQLite.
+        """
+        await self.ensure_index()
+
+        src_abs = self._music_sandbox.resolve(path)
+        if not src_abs.exists():
+            raise NotFoundError(f"Файл не найден: {path}")
+
+        # Определяем рекомендуемый канонический путь
+        suggested_path = None
+        if self._is_db_available():
+            try:
+                assert aiosqlite is not None
+                async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
+                    db.text_factory = lambda b: b.decode("utf-8", errors="replace")
+                    async with db.execute(
+                        "SELECT suggested_path FROM tracks WHERE file_path = ?", (path,)
+                    ) as cur:
+                        row = await cur.fetchone()
+                        if row and row[0]:
+                            suggested_path = row[0]
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Сбой запроса suggested_path из SQLite: %s", exc)
+
+        if not suggested_path:
+            track_tags = self._tag_service.read_tags(src_abs, rel_path=path)
+            p = Path(path)
+            album_name = track_tags.album or (p.parent.name if str(p.parent) != "." else "Unknown Album")
+            title_name = track_tags.title or p.stem
+            track_num = track_tags.track_number if track_tags.track_number and track_tags.track_number > 0 else 1
+
+            clean_album = re.sub(r"[\\/:\*\?\"<>\|]", "_", album_name).strip(". ") or "Unknown Album"
+            clean_title = re.sub(r"[\\/:\*\?\"<>\|]", "_", title_name).strip(". ") or "Unknown Title"
+            suggested_path = f"{clean_album}/{track_num:02d}. {clean_title}.mp3"
+
+        target_abs = self._music_sandbox.resolve(suggested_path)
+
+        # Если файл уже находится по каноническому пути
+        if src_abs.resolve() == target_abs.resolve():
+            if self._is_db_available():
+                try:
+                    assert aiosqlite is not None
+                    async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
+                        await db.execute(
+                            "UPDATE tracks SET is_path_valid = 1, path_violation_reason = '' WHERE file_path = ?",
+                            (path,),
+                        )
+                        await db.execute(
+                            """
+                            UPDATE audit_issues SET is_resolved = 1
+                            WHERE issue_type = 'invalid_path' AND entity_id IN (SELECT id FROM tracks WHERE file_path = ?)
+                            """,
+                            (path,),
+                        )
+                        await db.commit()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Сбой обновления SQLite для уже канонического пути: %s", exc)
+            return FixPathResponse(
+                success=True,
+                source_path=path,
+                target_path=suggested_path,
+                message="Файл уже находится по каноническому пути",
+            )
+
+        # Если целевой файл уже существует
+        if target_abs.exists():
+            if not overwrite:
+                raise FileExistsError(f"Целевой файл уже существует: {suggested_path}")
+            target_abs.unlink(missing_ok=True)
+            for ext in (".lrc", ".txt"):
+                target_abs.with_suffix(ext).unlink(missing_ok=True)
+
+        target_abs.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src_abs), str(target_abs))
+
+        for ext in (".lrc", ".txt"):
+            src_lyr = src_abs.with_suffix(ext)
+            if src_lyr.exists() and src_lyr.is_file():
+                shutil.move(str(src_lyr), str(target_abs.with_suffix(ext)))
+
+        src_parent = src_abs.parent
+        if src_parent != self._music_sandbox.root and src_parent.is_relative_to(self._music_sandbox.root):
+            try:
+                if src_parent.exists() and not any(src_parent.iterdir()):
+                    src_parent.rmdir()
+            except OSError:
+                pass
+
+        if self._is_db_available():
+            try:
+                assert aiosqlite is not None
+                async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
+                    db.text_factory = lambda b: b.decode("utf-8", errors="replace")
+                    await db.execute("DELETE FROM tracks WHERE file_path = ?", (suggested_path,))
+                    await db.execute(
+                        """
+                        UPDATE tracks SET
+                            file_path = ?,
+                            is_path_valid = 1,
+                            suggested_path = ?,
+                            path_violation_reason = '',
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE file_path = ?
+                        """,
+                        (suggested_path, suggested_path, path),
+                    )
+                    await db.execute(
+                        """
+                        UPDATE audit_issues SET is_resolved = 1
+                        WHERE issue_type = 'invalid_path' AND entity_id IN (SELECT id FROM tracks WHERE file_path = ?)
+                        """,
+                        (suggested_path,),
+                    )
+                    await db.commit()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Сбой синхронизации SQLite после fix_path(%s -> %s): %s", path, suggested_path, exc)
+
+        self.invalidate()
+
+        return FixPathResponse(
+            success=True,
+            source_path=path,
+            target_path=suggested_path,
+            message="Путь успешно исправлен",
+        )
+
+    async def fix_all_paths(self, overwrite: bool = True) -> FixAllPathsResponse:
+        """Пакетно исправляет все файлы с нарушением канонической структуры."""
+        invalid_items = await self.get_invalid_paths()
+        if not invalid_items:
+            return FixAllPathsResponse(
+                success=True,
+                total_invalid=0,
+                fixed_count=0,
+                errors=[],
+            )
+
+        fixed_count = 0
+        errors: list[str] = []
+
+        for item in invalid_items:
+            try:
+                res = await self.fix_path(item.path, overwrite=overwrite)
+                if res.success:
+                    fixed_count += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Ошибка при исправлении пути %s: %s", item.path, exc)
+                errors.append(f"{item.path}: {exc}")
+
+        return FixAllPathsResponse(
+            success=len(errors) == 0,
+            total_invalid=len(invalid_items),
+            fixed_count=fixed_count,
+            errors=errors,
+        )
+
     async def get_non_en_genres(self) -> list[NonEnGenreItem]:
-        """Возвращает список треков с русскоязычными жанрами."""
+        """Возвращает список треков с не-EN или неканоническими жанрами."""
         await self.ensure_index()
         if self._is_db_available():
             try:
                 assert aiosqlite is not None
                 async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
+                    db.text_factory = lambda b: b.decode("utf-8", errors="replace")
                     db.row_factory = aiosqlite.Row
+
                     async with db.execute(
                         """
                         SELECT t.file_path, g.name AS current_genre,
@@ -599,39 +772,158 @@ class LibraryAuditService:
                         JOIN track_genres tg ON t.id = tg.track_id
                         JOIN genres g ON tg.genre_id = g.id
                         LEFT JOIN audit_issues ai ON (ai.entity_id = t.id AND ai.issue_type = 'non_en_genre')
-                        WHERE g.is_valid_en = 0 OR ai.issue_type = 'non_en_genre'
+                        WHERE (g.is_valid_en = 0 OR (g.canonical_en_name IS NOT NULL AND g.canonical_en_name != '' AND g.name != g.canonical_en_name))
+                          AND COALESCE(ai.is_resolved, 0) = 0
                         GROUP BY t.file_path
                         """
                     ) as cur:
                         rows = await cur.fetchall()
-                        if rows:
-                            return [
+                        items: list[NonEnGenreItem] = []
+                        for row in rows:
+                            cur_g = row["current_genre"]
+                            canon_g = row["canonical_genre"] or (canonicalize_genre(cur_g) or "")
+                            if not canon_g or cur_g.strip() == canon_g.strip():
+                                continue
+                            items.append(
                                 NonEnGenreItem(
                                     path=row["file_path"],
-                                    current_genre=row["current_genre"],
-                                    canonical_genre=row["canonical_genre"],
+                                    current_genre=cur_g,
+                                    canonical_genre=canon_g,
                                     is_auto_fixed=bool(row["is_auto_fixed"]),
                                 )
-                                for row in rows
-                            ]
+                            )
+                        return items
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Ошибка получения русскоязычных жанров из SQLite, откат на in-memory: %s", exc)
+                logger.warning("Ошибка получения неканонических жанров из SQLite, откат на in-memory: %s", exc)
 
         # Fallback: вычисляем по self._cache
         non_en_items: list[NonEnGenreItem] = []
-        cyrillic_pattern = re.compile(r"[\u0400-\u04FF]")
         for item in self._cache.values():
             t: TrackTags = item["track"]
-            if t.genre and cyrillic_pattern.search(t.genre):
-                non_en_items.append(
+            if t.genre:
+                canon = canonicalize_genre(t.genre) or ""
+                if canon and t.genre.strip() != canon.strip():
+                    non_en_items.append(
+                        NonEnGenreItem(
+                            path=t.path,
+                            current_genre=t.genre,
+                            canonical_genre=canon,
+                            is_auto_fixed=False,
+                        )
+                    )
+        return non_en_items
+
+    async def auto_retag_genres(self) -> AutoRetagGenresResponse:
+        """Автоматически перезаписывает русскоязычные/неканонические теги жанров на диске в ID3v2.4."""
+        await self.ensure_index()
+
+        non_en_items = await self.get_non_en_genres()
+        if not non_en_items:
+            return AutoRetagGenresResponse(
+                success=True,
+                updated_count=0,
+                total_checked=0,
+                items=[],
+                errors=[],
+            )
+
+        updated_count = 0
+        errors: list[str] = []
+        processed_items: list[NonEnGenreItem] = []
+
+        for item in non_en_items:
+            try:
+                canonical = item.canonical_genre or canonicalize_genre(item.current_genre)
+                if not canonical:
+                    continue
+
+                full_path = self._music_sandbox.resolve(item.path)
+                if not full_path.exists():
+                    continue
+
+                # Считываем текущие теги файла
+                track_tags = self._tag_service.read_tags(full_path, rel_path=item.path)
+                track_tags.genre = canonical
+
+                # Записываем обновленные ID3v2.4 теги с null-separated \x00 фреймами
+                self._tag_service.write_tags(full_path, track_tags)
+
+                # Обновляем локальный кэш
+                st = full_path.stat()
+                self._cache[item.path] = {
+                    "mtime": float(st.st_mtime),
+                    "size": int(st.st_size),
+                    "track": track_tags,
+                }
+
+                updated_count += 1
+                processed_items.append(
                     NonEnGenreItem(
-                        path=t.path,
-                        current_genre=t.genre,
-                        canonical_genre="",
-                        is_auto_fixed=False,
+                        path=item.path,
+                        current_genre=canonical,
+                        canonical_genre=canonical,
+                        is_auto_fixed=True,
                     )
                 )
-        return non_en_items
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Ошибка автоперезаписи тегов жанра для %s: %s", item.path, exc)
+                errors.append(f"{item.path}: {exc}")
+
+        # Синхронизируем изменения с SQLite при наличии БД
+        if self._is_db_available() and updated_count > 0:
+            try:
+                assert aiosqlite is not None
+                async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
+                    db.text_factory = lambda b: b.decode("utf-8", errors="replace")
+                    for p_item in processed_items:
+                        # 1. Помечаем audit_issues как resolved и auto_fixed
+                        await db.execute(
+                            """
+                            UPDATE audit_issues SET
+                                is_auto_fixed = 1,
+                                is_resolved = 1
+                            WHERE issue_type = 'non_en_genre'
+                              AND entity_id IN (SELECT id FROM tracks WHERE file_path = ?)
+                            """,
+                            (p_item.path,),
+                        )
+                        # 2. Обновляем track_genres и genres
+                        async with db.execute("SELECT id FROM tracks WHERE file_path = ?", (p_item.path,)) as tcur:
+                            trow = await tcur.fetchone()
+                            if trow:
+                                tid = trow[0]
+                                # Удаляем старые связи трека с некорректными жанрами
+                                await db.execute("DELETE FROM track_genres WHERE track_id = ?", (tid,))
+                                for g_part in re.split(r"[\x00/;,|]|\s*\\+\s*", p_item.canonical_genre):
+                                    g_clean = g_part.strip()
+                                    if not g_clean:
+                                        continue
+                                    async with db.execute("SELECT id FROM genres WHERE name = ?", (g_clean,)) as gcur:
+                                        grow = await gcur.fetchone()
+                                        if grow:
+                                            gid = grow[0]
+                                            await db.execute("UPDATE genres SET is_valid_en = 1 WHERE id = ?", (gid,))
+                                        else:
+                                            cur_ins = await db.execute(
+                                                "INSERT INTO genres (name, is_valid_en, canonical_en_name) VALUES (?, 1, ?)",
+                                                (g_clean, g_clean),
+                                            )
+                                            gid = cur_ins.lastrowid
+                                        await db.execute(
+                                            "INSERT OR IGNORE INTO track_genres (track_id, genre_id) VALUES (?, ?)",
+                                            (tid, gid),
+                                        )
+                    await db.commit()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Сбой обновления SQLite после auto_retag_genres: %s", exc)
+
+        return AutoRetagGenresResponse(
+            success=len(errors) == 0,
+            updated_count=updated_count,
+            total_checked=len(non_en_items),
+            items=processed_items,
+            errors=errors,
+        )
 
     async def get_missing_lyrics(self) -> list[MissingLyricsItem]:
         """Возвращает список треков без внешних текстов песен (.lrc/.txt)."""
@@ -879,6 +1171,7 @@ class LibraryAuditService:
             try:
                 assert aiosqlite is not None
                 async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
+                    db.text_factory = lambda b: b.decode("utf-8", errors="replace")
                     db.row_factory = aiosqlite.Row
                     async with db.execute(
                         """
@@ -1410,6 +1703,7 @@ class LibraryAuditService:
             try:
                 assert aiosqlite is not None
                 async with aiosqlite.connect(str(self._db_path), timeout=30.0) as db:
+                    db.text_factory = lambda b: b.decode("utf-8", errors="replace")
                     await db.execute(
                         """
                         UPDATE albums SET
@@ -1444,18 +1738,17 @@ class LibraryAuditService:
         2. Запускает безопасную реорганизацию файлов в отдельном потоке.
         3. Сбрасывает кэш индекса и принудительно переиндексирует новую структуру каталогов.
         """
-        async with self._lock:
-            await self.ensure_index()
-            tracks = [item["track"] for item in self._cache.values()]
+        await self.ensure_index()
+        tracks = [item["track"] for item in self._cache.values()]
 
-            result: ReorganizeLibraryResponse = await asyncio.to_thread(
-                organizer.reorganize_library, tracks
-            )
+        result: ReorganizeLibraryResponse = await asyncio.to_thread(
+            organizer.reorganize_library, tracks
+        )
 
-            # Сбрасываем кэш и заново индексируем коллекцию после перемещения
-            self.invalidate()
-            await self.ensure_index(force=True)
+        # Сбрасываем кэш и заново индексируем коллекцию после перемещения
+        self.invalidate()
+        await self.ensure_index()
 
-            return result
+        return result
 
 

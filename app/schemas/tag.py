@@ -9,6 +9,61 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+CYRILLIC_GENRE_REGEX = re.compile(r"[\u0400-\u04FF]")
+
+RUSSIAN_GENRE_MAP: dict[str, str] = {
+    "поп\\рок": "Pop \\\\Rock\\\\Pop-Rock",
+    "поп/рок": "Pop \\\\Rock\\\\Pop-Rock",
+    "поп-рок": "Pop \\\\Rock\\\\Pop-Rock",
+    "поп рок": "Pop \\\\Rock\\\\Pop-Rock",
+    "альтернативная музыка": "Alternative",
+    "альтернатива": "Alternative",
+    "танцевальная музыка": "Dance Music",
+    "танцевальная": "Dance Music",
+    "русский рэп": "Russian Hip-Hop",
+    "рэп": "Hip-Hop",
+    "хип-хоп": "Hip-Hop",
+    "хип хоп": "Hip-Hop",
+    "хипхоп": "Hip-Hop",
+    "русский хип-хоп": "Russian Hip-Hop",
+    "рок": "Rock",
+    "русский рок": "Russian Rock",
+    "альтернативный рок": "Alternative Rock",
+    "поп": "Pop",
+    "поп-музыка": "Pop",
+    "поп музыка": "Pop",
+    "русский поп": "Russian Pop",
+    "электроника": "Electronic",
+    "электронная музыка": "Electronic",
+    "шансон": "Chanson",
+    "русский шансон": "Russian Chanson",
+    "метал": "Metal",
+    "металл": "Metal",
+    "хэви-метал": "Heavy Metal",
+    "тяжелый рок": "Hard Rock",
+    "тяжёлый рок": "Hard Rock",
+    "джаз": "Jazz",
+    "блюз": "Blues",
+    "фонк": "Phonk",
+    "дрилл": "Drill",
+    "панк": "Punk",
+    "панк-рок": "Punk Rock",
+    "панк рок": "Punk Rock",
+    "инди": "Indie",
+    "инди-рок": "Indie Rock",
+    "диско": "Disco",
+    "регги": "Reggae",
+    "классика": "Classical",
+    "классическая музыка": "Classical",
+    "саундтрек": "Soundtrack",
+    "эмбиент": "Ambient",
+    "хаус": "House",
+    "техно": "Techno",
+    "транс": "Trance",
+    "драм-н-бэйс": "Drum and Bass",
+    "дабстеп": "Dubstep",
+}
+
 
 def normalize_genre_item(item: str) -> str:
     """Нормализует отдельный жанр, приводя 'Hip-Hop' к каноническому виду через дефис."""
@@ -19,10 +74,84 @@ def normalize_genre_item(item: str) -> str:
     return re.sub(r"(?i)\b(?:hip[- ]?hop|хип[- ]?хоп)\b", "Hip-Hop", cleaned)
 
 
+ROCK_REGEX = re.compile(
+    r"(?i)(?:^|[\s/\\;,\-|_\(\)\[\]])(rock|рок)(?:$|[\s/\\;,\-|_\(\)\[\]])|rock|рок"
+)
+HIP_POP_RAP_REGEX = re.compile(
+    r"(?i)\b(?:pop|поп|hip[- ]?hop|хип[- ]?хоп|хипхоп|hip|хип|rap|рэп)\b|"
+    r"(?:^|[\s/\\;,\-|_\(\)\[\]])(?:pop|поп|hip|хип|rap|рэп)(?:$|[\s/\\;,\-|_\(\)\[\]])|"
+    r"hip[- ]?hop|хип[- ]?хоп|хипхоп|pop|поп|рэп|\brap\b"
+)
+
+
+def canonicalize_genre(raw: Any) -> str | None:
+    """Канонизирует жанр согласно строгим правилам медиатеки:
+
+    1. Если жанр содержит 'rock' или 'рок' (в любой части/компоненте, case-insensitive,
+       за исключением 'барокко'), он полностью схлопывается в 'Rock'.
+    2. Иначе, если жанр содержит 'pop', 'поп', 'hip', 'хип', 'hip-hop', 'rap', 'рэп',
+       он полностью схлопывается в 'Hip-Hop'.
+    3. Для остальных жанров: переводит русскоязычные термины на английский,
+       удаляет пробелы вокруг разделителей, устраняет дубликаты и склеивает через '\\\\'.
+    """
+    if raw is None:
+        return None
+
+    # Если передан список/множество — объединяем элементы
+    if isinstance(raw, (list, tuple, set)):
+        items: list[str] = []
+        for el in raw:
+            if el is not None:
+                items.extend(re.split(r"[\x00/;,|]|\s*\\+\s*", str(el)))
+        raw_str = "\\\\".join(p.strip() for p in items if p.strip())
+    else:
+        raw_str = str(raw).strip()
+
+    if not raw_str:
+        return None
+
+    raw_lower = raw_str.lower()
+
+    # 1. Проверка на Rock / Рок (барокко исключается)
+    test_str = raw_lower.replace("барокко", "").replace("baroque", "")
+    if ROCK_REGEX.search(test_str):
+        return "Rock"
+
+    # 2. Проверка на Hip-Hop / Pop / Rap
+    if HIP_POP_RAP_REGEX.search(raw_lower):
+        return "Hip-Hop"
+
+    # 3. Остальные жанры: покомпонентный перевод и дедупликация без пробелов вокруг '\\'
+    raw_lower_single = re.sub(r"\\+", r"\\", raw_lower)
+    if raw_lower in RUSSIAN_GENRE_MAP:
+        return RUSSIAN_GENRE_MAP[raw_lower]
+    if raw_lower_single in RUSSIAN_GENRE_MAP:
+        return RUSSIAN_GENRE_MAP[raw_lower_single]
+
+    tokens = [p.strip() for p in re.split(r"[\x00/;,|]|\s*\\+\s*", raw_str) if p.strip()]
+    cleaned_items: list[str] = []
+    seen: set[str] = set()
+
+    for tok in tokens:
+        tok_lower = tok.lower()
+        mapped = RUSSIAN_GENRE_MAP.get(tok_lower, tok)
+        sub_parts = [p.strip() for p in re.split(r"\\+|\x00", mapped) if p.strip()]
+        for sp in sub_parts:
+            part = normalize_genre_item(sp)
+            lower_key = part.lower()
+            if lower_key not in seen:
+                seen.add(lower_key)
+                cleaned_items.append(part)
+
+    if not cleaned_items:
+        return None
+    return "\\\\".join(cleaned_items)
+
+
 def format_genres(raw: Any) -> str | None:
     """Нормализует жанры: разбивает по разделителям (/ ; , | \x00 \\),
 
-    нормализует Hip-Hop к виду 'Hip-Hop', устраняет дубликаты без учета регистра
+    приводит Hip-Hop к каноническому виду, устраняет дубликаты без учета регистра
     и объединяет через '\\\\'.
     """
     if raw is None:

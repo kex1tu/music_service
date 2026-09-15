@@ -171,6 +171,7 @@ async def init_db(db_path: Path | str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     async with aiosqlite.connect(str(path)) as db:
+        db.text_factory = lambda b: b.decode("utf-8", errors="replace")
         db.row_factory = aiosqlite.Row
         await db.executescript(DDL_SCHEMA)
         await db.commit()
@@ -182,6 +183,7 @@ async def get_db_connection(db_path: Path | str) -> AsyncGenerator[aiosqlite.Con
     """Асинхронный контекстный менеджер для работы с SQLite."""
     path = Path(db_path).expanduser().resolve()
     async with aiosqlite.connect(str(path)) as conn:
+        conn.text_factory = lambda b: b.decode("utf-8", errors="replace")
         conn.row_factory = aiosqlite.Row
         await conn.execute("PRAGMA foreign_keys = ON;")
         await conn.execute("PRAGMA busy_timeout = 5000;")

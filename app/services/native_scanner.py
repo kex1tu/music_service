@@ -65,7 +65,7 @@ class NativeScannerService:
             logger.debug("Корневая директория медиатеки не существует: %s", safe_root)
             return
 
-        cmd = [str(self._bin_path), "--root", str(safe_root)]
+        cmd = [str(self._bin_path), "--root", str(safe_root), "--check-missing=false"]
         if db_path:
             cmd.extend(["--db", str(db_path)])
 

@@ -40,7 +40,7 @@ func StartAuditWorkerPool(
 				genreCheck := validator.AnalyzeAndNormalizeGenre(meta.Genre)
 				genreAutoFixed := false
 
-				if genreCheck.HasCyrillic && genreCheck.IsAutoFixable && autoFixGenres {
+				if (genreCheck.HasCyrillic || genreCheck.IsNonCanonical) && genreCheck.IsAutoFixable && autoFixGenres {
 					if err := id3.RewriteGenre(path, genreCheck.CanonicalGenre); err == nil {
 						meta.Genre = genreCheck.CanonicalGenre
 						genreAutoFixed = true
@@ -88,7 +88,7 @@ func StartAuditWorkerPool(
 					PathViolationReason: reason,
 					SuggestedPath:       suggestedPath,
 					Genre:               strings.TrimSpace(meta.Genre),
-					GenreIsNonEn:        genreCheck.HasCyrillic,
+					GenreIsNonEn:        (genreCheck.HasCyrillic || genreCheck.IsNonCanonical) && !genreAutoFixed,
 					GenreCanonical:      genreCheck.CanonicalGenre,
 					GenreIsAutoFixed:    genreAutoFixed,
 				}

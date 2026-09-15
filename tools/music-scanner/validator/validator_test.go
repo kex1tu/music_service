@@ -31,38 +31,63 @@ func TestValidateTrackPath(t *testing.T) {
 }
 
 func TestAnalyzeAndNormalizeGenre(t *testing.T) {
-	// 1. English genre
+	// 1. Clean English canonical genre
 	res := AnalyzeAndNormalizeGenre("Hip-Hop")
-	if res.HasCyrillic || res.CanonicalGenre != "Hip-Hop" {
-		t.Fatalf("expected clean English genre, got %+v", res)
+	if res.HasCyrillic || res.IsNonCanonical || res.CanonicalGenre != "Hip-Hop" {
+		t.Fatalf("expected clean English genre Hip-Hop, got %+v", res)
 	}
 
-	// 2. Russian genre auto-fixable
-	res = AnalyzeAndNormalizeGenre("Русский рэп")
-	if !res.HasCyrillic || !res.IsAutoFixable || res.CanonicalGenre != "Russian Hip-Hop" {
-		t.Fatalf("expected Russian Hip-Hop, got %+v", res)
+	res = AnalyzeAndNormalizeGenre("Rock")
+	if res.HasCyrillic || res.IsNonCanonical || res.CanonicalGenre != "Rock" {
+		t.Fatalf("expected clean English genre Rock, got %+v", res)
 	}
 
-	// 3. Multi-genre with Russian
-	res = AnalyzeAndNormalizeGenre("Рок / Поп")
-	if !res.HasCyrillic || !res.IsAutoFixable || res.CanonicalGenre != "Rock \\\\ Pop" {
-		t.Fatalf("expected Rock \\\\ Pop, got %+v", res)
+	// 2. Rock collapse rules (any rock collapses to Rock)
+	res = AnalyzeAndNormalizeGenre("Alternative \\ Rock")
+	if res.HasCyrillic || !res.IsNonCanonical || res.CanonicalGenre != "Rock" {
+		t.Fatalf("expected Alternative \\ Rock to collapse to Rock, got %+v", res)
 	}
 
-	// 4. Specific new mappings requested
+	res = AnalyzeAndNormalizeGenre("Alternative \\ Indie Rock \\ Rock")
+	if !res.IsNonCanonical || res.CanonicalGenre != "Rock" {
+		t.Fatalf("expected Alternative \\ Indie Rock \\ Rock to collapse to Rock, got %+v", res)
+	}
+
+	res = AnalyzeAndNormalizeGenre("Pop-Rock")
+	if !res.IsNonCanonical || res.CanonicalGenre != "Rock" {
+		t.Fatalf("expected Pop-Rock to collapse to Rock, got %+v", res)
+	}
+
 	res = AnalyzeAndNormalizeGenre("Поп\\Рок")
-	if !res.HasCyrillic || !res.IsAutoFixable || res.CanonicalGenre != "Pop \\Rock\\Pop-Rock" {
-		t.Fatalf("expected Pop \\Rock\\Pop-Rock, got %+v", res)
+	if !res.HasCyrillic || !res.IsAutoFixable || res.CanonicalGenre != "Rock" {
+		t.Fatalf("expected Поп\\Рок to collapse to Rock, got %+v", res)
 	}
 
-	res = AnalyzeAndNormalizeGenre("Альтернативная музыка")
-	if !res.HasCyrillic || !res.IsAutoFixable || res.CanonicalGenre != "Alternative" {
-		t.Fatalf("expected Alternative, got %+v", res)
+	res = AnalyzeAndNormalizeGenre("Рок / Поп")
+	if !res.HasCyrillic || !res.IsAutoFixable || res.CanonicalGenre != "Rock" {
+		t.Fatalf("expected Рок / Поп to collapse to Rock, got %+v", res)
+	}
+
+	// 3. Hip-Hop / Pop / Rap collapse rules (pop/hip/rap collapses to Hip-Hop)
+	res = AnalyzeAndNormalizeGenre("Русский рэп")
+	if !res.HasCyrillic || !res.IsAutoFixable || res.CanonicalGenre != "Hip-Hop" {
+		t.Fatalf("expected Русский рэп to collapse to Hip-Hop, got %+v", res)
 	}
 
 	res = AnalyzeAndNormalizeGenre("Поп")
-	if !res.HasCyrillic || !res.IsAutoFixable || res.CanonicalGenre != "Pop" {
-		t.Fatalf("expected Pop, got %+v", res)
+	if !res.HasCyrillic || !res.IsAutoFixable || res.CanonicalGenre != "Hip-Hop" {
+		t.Fatalf("expected Поп to collapse to Hip-Hop, got %+v", res)
+	}
+
+	res = AnalyzeAndNormalizeGenre("Pop")
+	if res.HasCyrillic || !res.IsNonCanonical || res.CanonicalGenre != "Hip-Hop" {
+		t.Fatalf("expected Pop to collapse to Hip-Hop, got %+v", res)
+	}
+
+	// 4. Other genres mapping and space stripping
+	res = AnalyzeAndNormalizeGenre("Альтернативная музыка")
+	if !res.HasCyrillic || !res.IsAutoFixable || res.CanonicalGenre != "Alternative" {
+		t.Fatalf("expected Alternative, got %+v", res)
 	}
 
 	res = AnalyzeAndNormalizeGenre("Танцевальная музыка")

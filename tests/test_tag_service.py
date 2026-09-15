@@ -826,3 +826,66 @@ def test_genre_schema_validation_and_id3_roundtrip(service_and_paths):
     assert read_back.genre == "Hip-Hop\\\\Rap"
 
 
+def test_genre_canonicalize_rules():
+    """Инвариант: проверка правил канонизации и схлопывания жанров."""
+    from app.schemas.tag import canonicalize_genre
+
+    # 1. Rock collapse: любой rock/рок схлопывается в Rock
+    assert canonicalize_genre("Rock") == "Rock"
+    assert canonicalize_genre("rock") == "Rock"
+    assert canonicalize_genre("Alternative Rock") == "Rock"
+    assert canonicalize_genre("Indie Rock") == "Rock"
+    assert canonicalize_genre("Pop-Rock") == "Rock"
+    assert canonicalize_genre("Alternative \\ Rock") == "Rock"
+    assert canonicalize_genre("Alternative \\\\ Rock") == "Rock"
+    assert canonicalize_genre("Alternative \\ Indie Rock \\ Rock") == "Rock"
+    assert canonicalize_genre("Hard Rock") == "Rock"
+    assert canonicalize_genre("Punk Rock") == "Rock"
+    assert canonicalize_genre("Рок") == "Rock"
+    assert canonicalize_genre("рок") == "Rock"
+    assert canonicalize_genre("Русский рок") == "Rock"
+    assert canonicalize_genre("Альтернативный рок") == "Rock"
+    assert canonicalize_genre("панк-рок") == "Rock"
+    assert canonicalize_genre("тяжелый рок") == "Rock"
+    assert canonicalize_genre(r"Поп\\Рок") == "Rock"
+    assert canonicalize_genre("Рок / Поп") == "Rock"
+
+    # 2. Hip-Hop / Pop / Rap collapse: схлопывается в Hip-Hop
+    assert canonicalize_genre("Hip-Hop") == "Hip-Hop"
+    assert canonicalize_genre("hip hop") == "Hip-Hop"
+    assert canonicalize_genre("хип-хоп") == "Hip-Hop"
+    assert canonicalize_genre("хип хоп") == "Hip-Hop"
+    assert canonicalize_genre("хипхоп") == "Hip-Hop"
+    assert canonicalize_genre("Russian Hip-Hop") == "Hip-Hop"
+    assert canonicalize_genre("русский хип-хоп") == "Hip-Hop"
+    assert canonicalize_genre("Rap") == "Hip-Hop"
+    assert canonicalize_genre("рэп") == "Hip-Hop"
+    assert canonicalize_genre("Русский рэп") == "Hip-Hop"
+    assert canonicalize_genre("Pop") == "Hip-Hop"
+    assert canonicalize_genre("pop") == "Hip-Hop"
+    assert canonicalize_genre("поп") == "Hip-Hop"
+    assert canonicalize_genre("Поп-музыка") == "Hip-Hop"
+    assert canonicalize_genre("русский поп") == "Hip-Hop"
+    assert canonicalize_genre("Synthpop") == "Hip-Hop"
+    assert canonicalize_genre("K-Pop") == "Hip-Hop"
+    assert canonicalize_genre("Rap \\ Hip-Hop") == "Hip-Hop"
+    assert canonicalize_genre("Pop \\ Hip-Hop") == "Hip-Hop"
+
+    # 3. Остальные жанры: маппинг и удаление пробелов вокруг \\
+    assert canonicalize_genre("Джаз") == "Jazz"
+    assert canonicalize_genre("Электроника") == "Electronic"
+    assert canonicalize_genre("Танцевальная музыка") == "Dance Music"
+    assert canonicalize_genre("Electronic \\ Dance") == "Electronic\\\\Dance"
+    assert canonicalize_genre("Electronic \\\\ Dance") == "Electronic\\\\Dance"
+    assert canonicalize_genre(["Jazz", "Blues"]) == "Jazz\\\\Blues"
+
+    # 4. Барокко не считается роком
+    assert canonicalize_genre("Baroque") != "Rock"
+    assert canonicalize_genre("Барокко") != "Rock"
+
+    # 5. Пустые значения
+    assert canonicalize_genre(None) is None
+    assert canonicalize_genre("") is None
+    assert canonicalize_genre("   ") is None
+
+

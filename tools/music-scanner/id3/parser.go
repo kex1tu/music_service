@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 var yearRegex = regexp.MustCompile(`\b(19\d{2}|20\d{2})\b`)
@@ -302,6 +303,17 @@ func applyFrame(frameID string, data []byte, meta *TrackMeta) {
 	}
 }
 
+func decodeISO88591(data []byte) string {
+	if utf8.Valid(data) {
+		return string(data)
+	}
+	runes := make([]rune, len(data))
+	for i, b := range data {
+		runes[i] = rune(b)
+	}
+	return string(runes)
+}
+
 func decodeTextFrame(data []byte) string {
 	if len(data) == 0 {
 		return ""
@@ -313,20 +325,30 @@ func decodeTextFrame(data []byte) string {
 	var parts []string
 
 	switch encoding {
-	case 0: // ISO-8859-1 / ASCII
-		raw := string(payload)
+	case 0: // ISO-8859-1 / ASCII / Windows-1251
+		raw := decodeISO88591(payload)
 		for _, s := range strings.Split(raw, "\x00") {
-			trimmed := strings.TrimSpace(s)
+			trimmed := strings.ToValidUTF8(strings.TrimSpace(s), "")
 			if trimmed != "" {
 				parts = append(parts, trimmed)
 			}
 		}
 	case 1: // UTF-16 with BOM
-		parts = decodeUTF16(payload, true)
+		for _, p := range decodeUTF16(payload, true) {
+			trimmed := strings.ToValidUTF8(strings.TrimSpace(p), "")
+			if trimmed != "" {
+				parts = append(parts, trimmed)
+			}
+		}
 	case 2: // UTF-16BE without BOM
-		parts = decodeUTF16(payload, false)
+		for _, p := range decodeUTF16(payload, false) {
+			trimmed := strings.ToValidUTF8(strings.TrimSpace(p), "")
+			if trimmed != "" {
+				parts = append(parts, trimmed)
+			}
+		}
 	case 3: // UTF-8
-		raw := string(payload)
+		raw := strings.ToValidUTF8(string(payload), "")
 		for _, s := range strings.Split(raw, "\x00") {
 			trimmed := strings.TrimSpace(s)
 			if trimmed != "" {
@@ -334,9 +356,9 @@ func decodeTextFrame(data []byte) string {
 			}
 		}
 	default:
-		raw := string(payload)
+		raw := decodeISO88591(payload)
 		for _, s := range strings.Split(raw, "\x00") {
-			trimmed := strings.TrimSpace(s)
+			trimmed := strings.ToValidUTF8(strings.TrimSpace(s), "")
 			if trimmed != "" {
 				parts = append(parts, trimmed)
 			}

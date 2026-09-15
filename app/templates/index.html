@@ -1922,9 +1922,18 @@
                     <div>
                         <h3 class="text-sm font-semibold text-white">Файлы с нарушением канонической структуры</h3>
                         <p class="text-xs text-gray-400 mt-0.5">
-                            Канонический формат хранения треков: <code class="text-amber-300 font-mono">{Альбом}/{Номер:02d}. {Название}.mp3</code>. Вы можете разложить их по альбомам нажав «Разложить по альбомам».
+                            Канонический формат хранения треков: <code class="text-amber-300 font-mono">{Альбом}/{Номер:02d}. {Название}.mp3</code>. Вы можете исправить пути автоматически кнопкой справа.
                         </p>
                     </div>
+                    <button
+                        @click="fixAllPaths()"
+                        :disabled="isFixingPaths || invalidPaths.length === 0"
+                        class="px-4 py-2 bg-gradient-to-r from-amber-600 to-emerald-600 hover:from-amber-500 hover:to-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-2 shadow-lg shrink-0">
+                        <svg class="w-4 h-4" :class="{'animate-spin': isFixingPaths}" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
+                        </svg>
+                        <span x-text="isFixingPaths ? 'Исправление путей...' : 'Исправить все пути'"></span>
+                    </button>
                 </div>
 
                 <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl">
@@ -1958,7 +1967,13 @@
                                             <td class="p-3 font-mono text-amber-300 max-w-xs truncate" x-text="item.path" :title="item.path"></td>
                                             <td class="p-3 text-gray-400" x-text="item.reason || 'Нарушение формата имени или каталога'"></td>
                                             <td class="p-3 font-mono text-emerald-400 max-w-xs truncate" x-text="item.suggested_path" :title="item.suggested_path"></td>
-                                            <td class="p-3 text-right">
+                                            <td class="p-3 text-right space-x-1.5 whitespace-nowrap">
+                                                <button
+                                                    @click="fixPath(item)"
+                                                    :disabled="item._isFixing"
+                                                    class="px-2.5 py-1 bg-emerald-700/80 hover:bg-emerald-600 text-white rounded text-[11px] font-medium transition disabled:opacity-50">
+                                                    <span x-text="item._isFixing ? '...' : 'Исправить'"></span>
+                                                </button>
                                                 <button
                                                     @click="openDirectory(item.path.split('/').slice(0, -1).join('/'))"
                                                     class="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-[11px] transition">
@@ -1983,6 +1998,15 @@
                             В медиатеке поддерживаются только стандартизированные международные жанры на английском языке.
                         </p>
                     </div>
+                    <button
+                        @click="autoRetagGenres()"
+                        :disabled="isRetaggingGenres || nonEnGenres.length === 0"
+                        class="px-4 py-2 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-2 shadow-lg shrink-0">
+                        <svg class="w-4 h-4" :class="{'animate-spin': isRetaggingGenres}" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
+                        </svg>
+                        <span x-text="isRetaggingGenres ? 'Перезапись тегов...' : 'Переписать теги (авто)'"></span>
+                    </button>
                 </div>
 
                 <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl">
@@ -2014,7 +2038,7 @@
                                     <template x-for="item in nonEnGenres" :key="item.path + item.current_genre">
                                         <tr class="hover:bg-gray-800/40 transition">
                                             <td class="p-3 font-mono text-gray-300 max-w-xs truncate" x-text="item.path" :title="item.path"></td>
-                                            <td class="p-3 font-medium text-rose-400" x-text="item.current_genre"></td>
+                                            <td class="p-3 font-medium" :class="item.is_auto_fixed ? 'text-gray-300' : 'text-rose-400'" x-text="item.current_genre"></td>
                                             <td class="p-3 font-medium text-emerald-400" x-text="item.canonical_genre || '—'"></td>
                                             <td class="p-3">
                                                 <template x-if="item.is_auto_fixed">

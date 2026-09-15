@@ -35,6 +35,7 @@ def test_settings(temp_storage: dict[str, Path]) -> Settings:
         _env_file=None,
         MUSIC_DIR=temp_storage["music_dir"],
         TMP_DIR=temp_storage["tmp_dir"],
+        DATABASE_PATH=temp_storage["music_dir"].parent / "test_library.db",
         SECRET_KEY="test_secret_key_at_least_32_characters_long_12345",
         ADMIN_LOGIN="admin",
         ADMIN_PASSWORD_HASH=TEST_ADMIN_PASSWORD_HASH,

@@ -27,7 +27,7 @@ func main() {
 	dbPath := flag.String("db", "data/library.db", "Path to SQLite database file")
 	workers := flag.Int("workers", runtime.NumCPU()*2, "Number of concurrent workers")
 	daemon := flag.Bool("daemon", false, "Run in background daemon mode with live fsnotify watcher")
-	autoFixGenres := flag.Bool("auto-fix-genres", true, "Automatically replace Russian genres with English canonical counterparts")
+	autoFixGenres := flag.Bool("auto-fix-genres", false, "Automatically replace Russian genres with English canonical counterparts")
 	checkMissing := flag.Bool("check-missing", true, "Check Deezer catalog for missing tracks in incomplete albums")
 	flag.Parse()
 

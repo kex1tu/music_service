@@ -14,6 +14,7 @@ import (
 
 var artistSeparatorRegex = regexp.MustCompile(`(?i)(\\\\+|\x00|/|;|,|\||\s+feat\.?\s+|\s+ft\.?\s+|\s+&\s+|\s+with\s+)`)
 var cleanMetaRegex = regexp.MustCompile(`[\p{P}\s_]+`)
+var cyrillicRegex = regexp.MustCompile(`\p{Cyrillic}`)
 
 func extractPrimaryArtist(raw string) string {
 	raw = strings.TrimSpace(raw)
@@ -315,6 +316,10 @@ func (db *DB) SaveTrackBatch(records []TrackAuditRecord) error {
 			return fmt.Errorf("failed to upsert track %s: %w", r.RelPath, err)
 		}
 
+		// Очищаем предыдущие связи трека с жанрами и неактуальные audit_issues
+		_, _ = tx.Exec("DELETE FROM track_genres WHERE track_id = ?", trackID)
+		_, _ = tx.Exec("DELETE FROM audit_issues WHERE entity_id = ? AND entity_type = 'track'", trackID)
+
 		// 4. Genre
 		genreName := strings.TrimSpace(r.Genre)
 		if genreName != "" {
@@ -329,6 +334,9 @@ func (db *DB) SaveTrackBatch(records []TrackAuditRecord) error {
 						return fmt.Errorf("failed to insert genre %s: %w", genreName, err)
 					}
 					genreID, _ = res.LastInsertId()
+				} else if err == nil {
+					_, _ = tx.Exec("UPDATE genres SET is_valid_en = ?, canonical_en_name = ? WHERE id = ?",
+						!r.GenreIsNonEn, r.GenreCanonical, genreID)
 				} else if err != nil {
 					return err
 				}

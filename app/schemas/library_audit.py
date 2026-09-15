@@ -248,3 +248,45 @@ class ReorganizeLibraryResponse(BaseModel):
     errors: list[str] = Field(default_factory=list, description="Список ошибок при обработке отдельных альбомов")
 
 
+class AutoRetagGenresResponse(BaseModel):
+    """Результат автоматической перезаписи неанглийских тегов жанров."""
+
+    success: bool = Field(default=True, description="Статус успешности операции")
+    updated_count: int = Field(default=0, description="Количество обновленных файлов")
+    total_checked: int = Field(default=0, description="Общее число проверенных треков с не-EN жанрами")
+    items: list[NonEnGenreItem] = Field(default_factory=list, description="Список обработанных треков")
+    errors: list[str] = Field(default_factory=list, description="Список ошибок при перезаписи тегов")
+
+
+class FixPathRequest(BaseModel):
+    """Запрос на исправление некорректного пути файла."""
+
+    path: str = Field(..., description="Относительный путь к файлу с нарушением канонической структуры")
+    overwrite: bool = Field(default=True, description="Перезаписывать целевой файл при совпадении путей")
+
+
+class FixPathResponse(BaseModel):
+    """Результат перемещения/переименования некорректного файла в канонический путь."""
+
+    success: bool = Field(default=True, description="Статус операции")
+    source_path: str = Field(..., description="Исходный путь файла")
+    target_path: str = Field(..., description="Новый канонический путь файла")
+    message: str = Field(default="", description="Сообщение или предупреждение")
+
+
+class FixAllPathsRequest(BaseModel):
+    """Запрос на пакетное исправление всех путей файлов с нарушением структуры."""
+
+    overwrite: bool = Field(default=True, description="Перезаписывать целевые файлы при совпадении путей")
+
+
+class FixAllPathsResponse(BaseModel):
+    """Результат пакетного исправления всех некорректных путей."""
+
+    success: bool = Field(default=True, description="Общий статус успешности операции")
+    total_invalid: int = Field(default=0, description="Всего некорректных путей до исправления")
+    fixed_count: int = Field(default=0, description="Количество успешно исправленных путей")
+    errors: list[str] = Field(default_factory=list, description="Ошибки при исправлении отдельных файлов")
+
+
+
