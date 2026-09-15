@@ -30,9 +30,11 @@ from app.schemas.library_audit import (
     IncompleteAlbumItem,
     IncompleteAlbumsResponse,
     IncompleteTrackInfo,
+    InvalidPathItem,
     LibrarySearchResponse,
     MissingCoverItem,
     MissingLyricsItem,
+    NonEnGenreItem,
     ReorganizeLibraryResponse,
     SearchAlbumItem,
     SearchArtistItem,
@@ -43,6 +45,11 @@ from app.services.deezer_client import DeezerClient
 from app.services.lyrics_service import LyricsService
 from app.services.native_scanner import NativeScannerService
 from app.services.tag_service import TagService
+
+try:
+    import aiosqlite
+except ImportError:
+    aiosqlite = None
 
 logger = logging.getLogger("music_manager.services.library_audit")
 
@@ -72,12 +79,14 @@ class LibraryAuditService:
         lyrics_service: LyricsService | None = None,
         deezer_client: DeezerClient | None = None,
         native_scanner: NativeScannerService | None = None,
+        db_path: Path | None = None,
     ) -> None:
         self._music_sandbox = music_sandbox
         self._tag_service = tag_service
         self._lyrics_service = lyrics_service
         self._deezer_client = deezer_client
         self._native_scanner = native_scanner
+        self._db_path = db_path
         self._lock = asyncio.Lock()
         # Кеш треков: rel_path -> dict(mtime=float, size=int, track=TrackTags)
         self._cache: dict[str, dict[str, Any]] = {}
@@ -86,6 +95,15 @@ class LibraryAuditService:
         # Прогресс пакетного сбора текстов
         self._lyrics_progress = BatchLyricsProgressResponse(is_running=False)
         self._lyrics_task: asyncio.Task | None = None
+
+    def _is_db_available(self) -> bool:
+        """Проверяет доступность и непустоту файла базы данных SQLite."""
+        if not aiosqlite or not self._db_path:
+            return False
+        try:
+            return self._db_path.exists() and self._db_path.is_file() and self._db_path.stat().st_size > 0
+        except OSError:
+            return False
 
     def invalidate(self) -> None:
         """Сбрасывает кеш индекса и каталога."""
@@ -123,7 +141,15 @@ class LibraryAuditService:
         assert self._native_scanner is not None
         found_paths: set[str] = set()
 
-        async for item in self._native_scanner.scan_stream():
+        try:
+            if self._db_path:
+                stream = self._native_scanner.scan_stream(db_path=self._db_path)
+            else:
+                stream = self._native_scanner.scan_stream()
+        except TypeError:
+            stream = self._native_scanner.scan_stream()
+
+        async for item in stream:
             raw_rel = item.get("rel_path")
             if not raw_rel:
                 continue
@@ -357,6 +383,48 @@ class LibraryAuditService:
         """Возвращает агрегированные метрики аудита медиатеки."""
         await self.ensure_index()
 
+        if self._is_db_available():
+            try:
+                assert aiosqlite is not None
+                async with aiosqlite.connect(str(self._db_path)) as db:
+                    async with db.execute("SELECT COUNT(*) FROM tracks") as cur:
+                        row = await cur.fetchone()
+                        total_tracks = row[0] if row else 0
+                    async with db.execute("SELECT COUNT(*) FROM albums") as cur:
+                        row = await cur.fetchone()
+                        total_albums = row[0] if row else 0
+                    async with db.execute("SELECT COUNT(*) FROM tracks WHERE lyrics_status = 'none'") as cur:
+                        row = await cur.fetchone()
+                        missing_lyrics_count = row[0] if row else 0
+                    async with db.execute("SELECT COUNT(*) FROM albums WHERE has_cover = 0") as cur:
+                        row = await cur.fetchone()
+                        missing_covers_count = row[0] if row else 0
+                    async with db.execute("SELECT COUNT(*) FROM albums WHERE is_complete = 0") as cur:
+                        row = await cur.fetchone()
+                        incomplete_albums_count = row[0] if row else 0
+                    async with db.execute("SELECT COUNT(*) FROM tracks WHERE is_path_valid = 0") as cur:
+                        row = await cur.fetchone()
+                        invalid_paths_count = row[0] if row else 0
+                    async with db.execute(
+                        "SELECT COUNT(*) FROM audit_issues WHERE issue_type = 'non_en_genre' AND is_resolved = 0"
+                    ) as cur:
+                        row = await cur.fetchone()
+                        non_en_genres_count = row[0] if row else 0
+
+                    duplicates = await self.find_duplicates()
+                    return AuditSummaryResponse(
+                        total_tracks=total_tracks,
+                        total_albums=total_albums,
+                        missing_lyrics_count=missing_lyrics_count,
+                        missing_covers_count=missing_covers_count,
+                        duplicates_count=duplicates.total_duplicate_files,
+                        incomplete_albums_count=incomplete_albums_count,
+                        invalid_paths_count=invalid_paths_count,
+                        non_en_genres_count=non_en_genres_count,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Ошибка чтения метрик из SQLite, откат на in-memory: %s", exc)
+
         total_tracks = len(self._cache)
         missing_lyrics_count = sum(
             1 for item in self._cache.values() if item["track"].lyrics_status == "none"
@@ -387,7 +455,68 @@ class LibraryAuditService:
             missing_covers_count=missing_covers_count,
             duplicates_count=duplicates_count,
             incomplete_albums_count=incomplete_albums_count,
+            invalid_paths_count=0,
+            non_en_genres_count=0,
         )
+
+    async def get_invalid_paths(self) -> list[InvalidPathItem]:
+        """Возвращает список треков с нарушением канонической структуры путей."""
+        await self.ensure_index()
+        if self._is_db_available():
+            try:
+                assert aiosqlite is not None
+                async with aiosqlite.connect(str(self._db_path)) as db:
+                    db.row_factory = aiosqlite.Row
+                    async with db.execute(
+                        "SELECT file_path, suggested_path, path_violation_reason FROM tracks WHERE is_path_valid = 0"
+                    ) as cur:
+                        rows = await cur.fetchall()
+                        return [
+                            InvalidPathItem(
+                                path=row["file_path"],
+                                suggested_path=row["suggested_path"] or row["file_path"],
+                                reason=row["path_violation_reason"] or "Несоответствие каноническому пути",
+                            )
+                            for row in rows
+                        ]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Ошибка получения некорректных путей из SQLite: %s", exc)
+        return []
+
+    async def get_non_en_genres(self) -> list[NonEnGenreItem]:
+        """Возвращает список треков с русскоязычными жанрами."""
+        await self.ensure_index()
+        if self._is_db_available():
+            try:
+                assert aiosqlite is not None
+                async with aiosqlite.connect(str(self._db_path)) as db:
+                    db.row_factory = aiosqlite.Row
+                    async with db.execute(
+                        """
+                        SELECT t.file_path, g.name AS current_genre,
+                               COALESCE(g.canonical_en_name, '') AS canonical_genre,
+                               COALESCE(ai.is_auto_fixed, 0) AS is_auto_fixed
+                        FROM tracks t
+                        JOIN track_genres tg ON t.id = tg.track_id
+                        JOIN genres g ON tg.genre_id = g.id
+                        LEFT JOIN audit_issues ai ON (ai.entity_id = t.id AND ai.issue_type = 'non_en_genre')
+                        WHERE g.is_valid_en = 0 OR ai.issue_type = 'non_en_genre'
+                        GROUP BY t.file_path
+                        """
+                    ) as cur:
+                        rows = await cur.fetchall()
+                        return [
+                            NonEnGenreItem(
+                                path=row["file_path"],
+                                current_genre=row["current_genre"],
+                                canonical_genre=row["canonical_genre"],
+                                is_auto_fixed=bool(row["is_auto_fixed"]),
+                            )
+                            for row in rows
+                        ]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Ошибка получения русскоязычных жанров из SQLite: %s", exc)
+        return []
 
     async def get_missing_lyrics(self) -> list[MissingLyricsItem]:
         """Возвращает список треков без внешних текстов песен (.lrc/.txt)."""
@@ -630,6 +759,84 @@ class LibraryAuditService:
     async def get_incomplete_albums(self, auto_match: bool = False) -> IncompleteAlbumsResponse:
         """Обнаруживает альбомы с недостающими треками на основе тегов TRCK/TPOS и непрерывности нумерации."""
         await self.ensure_index()
+
+        if self._is_db_available():
+            try:
+                assert aiosqlite is not None
+                async with aiosqlite.connect(str(self._db_path)) as db:
+                    db.row_factory = aiosqlite.Row
+                    async with db.execute(
+                        """
+                        SELECT al.id, al.folder_path, al.title, ar.name AS artist, al.year,
+                               al.has_cover, al.present_tracks_count, al.total_tracks,
+                               al.deezer_id, al.spotify_id, al.youtube_id, al.yandex_id, al.genius_id
+                        FROM albums al
+                        JOIN artists ar ON al.artist_id = ar.id
+                        WHERE al.is_complete = 0 OR al.total_tracks = 0
+                        """
+                    ) as cur:
+                        album_rows = await cur.fetchall()
+
+                    if album_rows:
+                        incomplete_items = []
+                        total_missing = 0
+                        for a in album_rows:
+                            album_id = a["id"]
+                            async with db.execute(
+                                """
+                                SELECT title, artist, track_number, disc_number, expected_duration,
+                                       deezer_id, deezer_url, spotify_id, genius_url, isrc, status
+                                FROM missing_tracks
+                                WHERE album_id = ?
+                                """,
+                                (album_id,),
+                            ) as mcur:
+                                mrows = await mcur.fetchall()
+
+                            missing_info = [
+                                IncompleteTrackInfo(
+                                    track_number=m["track_number"],
+                                    disc_number=m["disc_number"],
+                                    title=m["title"],
+                                    artist=m["artist"],
+                                    duration=int(m["expected_duration"]) if m["expected_duration"] else None,
+                                    is_present=False,
+                                    deezer_id=m["deezer_id"],
+                                    deezer_url=m["deezer_url"],
+                                    spotify_id=m["spotify_id"],
+                                    genius_url=m["genius_url"],
+                                    isrc=m["isrc"],
+                                )
+                                for m in mrows
+                            ]
+                            missing_nums = [m.track_number for m in missing_info]
+                            total_missing += len(missing_info)
+                            incomplete_items.append(
+                                IncompleteAlbumItem(
+                                    path=a["folder_path"],
+                                    album=a["title"],
+                                    artist=a["artist"],
+                                    year=a["year"],
+                                    has_cover=bool(a["has_cover"]),
+                                    present_count=a["present_tracks_count"],
+                                    expected_count=a["total_tracks"] or (a["present_tracks_count"] + len(missing_info)),
+                                    missing_track_numbers=missing_nums,
+                                    missing_tracks=missing_info,
+                                    is_catalog_matched=bool(a["deezer_id"] or len(missing_info) > 0),
+                                    deezer_album_id=a["deezer_id"],
+                                    spotify_id=a["spotify_id"],
+                                    youtube_id=a["youtube_id"],
+                                    yandex_id=a["yandex_id"],
+                                    genius_id=a["genius_id"],
+                                )
+                            )
+                        return IncompleteAlbumsResponse(
+                            albums=incomplete_items,
+                            total_incomplete_albums=len(incomplete_items),
+                            total_missing_tracks=total_missing,
+                        )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Ошибка получения неполных альбомов из SQLite, откат на in-memory: %s", exc)
 
         albums_dict: dict[str, list[TrackTags]] = {}
         for item in self._cache.values():

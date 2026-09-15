@@ -52,6 +52,12 @@ tmp_downloads/
 downloads/
 /downloads/
 scratch/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+*.db
+*.db-wal
+*.db-shm
 
 # Audio & media files (prevent accidental git tracking of audio/lyrics)
 *.mp3

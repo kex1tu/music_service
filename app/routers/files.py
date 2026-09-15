@@ -29,9 +29,11 @@ from app.schemas.library_audit import (
     DuplicatesResponse,
     IncompleteAlbumItem,
     IncompleteAlbumsResponse,
+    InvalidPathItem,
     LibrarySearchResponse,
     MissingCoverItem,
     MissingLyricsItem,
+    NonEnGenreItem,
     ReorganizeLibraryResponse,
 )
 from app.schemas.tag import TrackTags
@@ -313,3 +315,31 @@ def delete_file_or_directory(
     res = file_manager.delete(path)
     audit_service.invalidate()
     return res
+
+
+@router.get(
+    "/audit/invalid-paths",
+    response_model=list[InvalidPathItem],
+    summary="Список треков с некорректной структурой пути",
+    description="Возвращает треки, путь которых на диске не соответствует каноническому шаблону {Album}/{Track:02d}. {Title}.mp3.",
+)
+async def get_invalid_paths(
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> list[InvalidPathItem]:
+    """Возвращает треки с нарушением файловой структуры."""
+    return await audit_service.get_invalid_paths()
+
+
+@router.get(
+    "/audit/non-en-genres",
+    response_model=list[NonEnGenreItem],
+    summary="Список треков с русскоязычными жанрами",
+    description="Возвращает треки, в тегах жанров которых обнаружена кириллица, и статус автозамены.",
+)
+async def get_non_en_genres(
+    _: CurrentUserDep = ...,
+    audit_service: LibraryAuditServiceDep = ...,
+) -> list[NonEnGenreItem]:
+    """Возвращает треки с неанглийскими жанрами."""
+    return await audit_service.get_non_en_genres()

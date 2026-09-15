@@ -1302,8 +1302,8 @@
                 </div>
             </div>
 
-            <!-- Сводка метрик коллекции (5 карточек) -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            <!-- Сводка метрик коллекции (7 карточек) -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7 gap-4">
                 <!-- Карточка 1: Всего треков -->
                 <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
                     <div class="flex items-center justify-between">
@@ -1395,6 +1395,44 @@
                         <span class="text-xs text-gray-500">альбомов</span>
                     </div>
                 </div>
+
+                <!-- Карточка 6: Некорректные пути -->
+                <div
+                    @click="activeSubTab = 'paths'"
+                    class="bg-gray-900 border border-gray-800 rounded-xl p-5 cursor-pointer hover:border-amber-500/50 transition"
+                    :class="{'ring-1 ring-amber-500/50': activeSubTab === 'paths'}">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-amber-400 uppercase tracking-wider">Не по шаблону</span>
+                        <span class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="mt-4 flex items-baseline space-x-2">
+                        <span class="text-2xl font-bold text-amber-300 font-mono" x-text="invalidPaths.length || summary.invalid_paths_count"></span>
+                        <span class="text-xs text-gray-500">путей</span>
+                    </div>
+                </div>
+
+                <!-- Карточка 7: Жанры (не-EN) -->
+                <div
+                    @click="activeSubTab = 'genres'"
+                    class="bg-gray-900 border border-gray-800 rounded-xl p-5 cursor-pointer hover:border-rose-500/50 transition"
+                    :class="{'ring-1 ring-rose-500/50': activeSubTab === 'genres'}">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-rose-400 uppercase tracking-wider">Жанры (не-EN)</span>
+                        <span class="w-8 h-8 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="m21.4 14.25l-7.15 7.15q-.3.3-.675.45t-.75.15t-.75-.15t-.675-.45l-8.825-8.825q-.275-.275-.425-.637T2 11.175V4q0-.825.588-1.412T4 2h7.175q.4 0 .775.163t.65.437l8.8 8.825q.3.3.438.675t.137.75t-.137.738t-.438.662M6.5 8q.625 0 1.063-.437T8 6.5t-.437-1.062T6.5 5t-1.062.438T5 6.5t.438 1.063T6.5 8"/>
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="mt-4 flex items-baseline space-x-2">
+                        <span class="text-2xl font-bold text-rose-300 font-mono" x-text="nonEnGenres.length || summary.non_en_genres_count"></span>
+                        <span class="text-xs text-gray-500">тегов</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Вкладки подразделов аудита -->
@@ -1426,6 +1464,20 @@
                     class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
                     <span>Неполные релизы</span>
                     <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="incompleteAlbums.length"></span>
+                </button>
+                <button
+                    @click="activeSubTab = 'paths'"
+                    :class="activeSubTab === 'paths' ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
+                    class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
+                    <span>Некорректные пути</span>
+                    <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="invalidPaths.length || summary.invalid_paths_count"></span>
+                </button>
+                <button
+                    @click="activeSubTab = 'genres'"
+                    :class="activeSubTab === 'genres' ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
+                    class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
+                    <span>Жанры на проверку</span>
+                    <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="nonEnGenres.length || summary.non_en_genres_count"></span>
                 </button>
             </div>
 
@@ -1838,6 +1890,111 @@
                         </template>
                     </div>
                 </template>
+            </div>
+
+            <!-- СЕКЦИЯ 5: Некорректные пути файлов -->
+            <div x-show="activeSubTab === 'paths'" class="space-y-4">
+                <div class="bg-gray-900/80 border border-amber-800/40 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div>
+                        <h3 class="text-sm font-semibold text-white">Файлы с нарушением канонической структуры</h3>
+                        <p class="text-xs text-gray-400 mt-0.5">
+                            Канонический формат хранения треков: <code class="text-amber-300 font-mono">{Альбом}/{Номер:02d}. {Название}.mp3</code>. Вы можете разложить их по альбомам нажав «Разложить по альбомам».
+                        </p>
+                    </div>
+                </div>
+
+                <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl">
+                    <template x-if="invalidPaths.length === 0">
+                        <div class="p-8 text-center text-gray-500 text-sm">
+                            Отлично! Все файлы медиатеки разложены по каноническому стандарту.
+                        </div>
+                    </template>
+                    <template x-if="invalidPaths.length > 0">
+                        <div class="overflow-x-auto max-h-[600px]">
+                            <table class="w-full text-left border-collapse text-xs">
+                                <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider font-semibold sticky top-0 z-10 border-b border-gray-800">
+                                    <tr>
+                                        <th class="p-3">Текущий путь</th>
+                                        <th class="p-3">Причина нарушения</th>
+                                        <th class="p-3">Рекомендуемый путь</th>
+                                        <th class="p-3 text-right">Действия</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-800/60">
+                                    <template x-for="item in invalidPaths" :key="item.path">
+                                        <tr class="hover:bg-gray-800/40 transition">
+                                            <td class="p-3 font-mono text-amber-300 max-w-xs truncate" x-text="item.path" :title="item.path"></td>
+                                            <td class="p-3 text-gray-400" x-text="item.reason || 'Нарушение формата имени или каталога'"></td>
+                                            <td class="p-3 font-mono text-emerald-400 max-w-xs truncate" x-text="item.suggested_path" :title="item.suggested_path"></td>
+                                            <td class="p-3 text-right">
+                                                <button
+                                                    @click="openDirectory(item.path.split('/').slice(0, -1).join('/'))"
+                                                    class="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-[11px] transition">
+                                                    В папку
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- СЕКЦИЯ 6: Жанры на проверку -->
+            <div x-show="activeSubTab === 'genres'" class="space-y-4">
+                <div class="bg-gray-900/80 border border-rose-800/40 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div>
+                        <h3 class="text-sm font-semibold text-white">Русскоязычные и нелатинские жанры</h3>
+                        <p class="text-xs text-gray-400 mt-0.5">
+                            В медиатеке поддерживаются только стандартизированные международные жанры на английском языке.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl">
+                    <template x-if="nonEnGenres.length === 0">
+                        <div class="p-8 text-center text-gray-500 text-sm">
+                            Все жанры соответствуют международным англоязычным стандартам.
+                        </div>
+                    </template>
+                    <template x-if="nonEnGenres.length > 0">
+                        <div class="overflow-x-auto max-h-[600px]">
+                            <table class="w-full text-left border-collapse text-xs">
+                                <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider font-semibold sticky top-0 z-10 border-b border-gray-800">
+                                    <tr>
+                                        <th class="p-3">Трек</th>
+                                        <th class="p-3">Текущий жанр</th>
+                                        <th class="p-3">Канонический EN жанр</th>
+                                        <th class="p-3">Статус исправления</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-800/60">
+                                    <template x-for="item in nonEnGenres" :key="item.path + item.current_genre">
+                                        <tr class="hover:bg-gray-800/40 transition">
+                                            <td class="p-3 font-mono text-gray-300 max-w-xs truncate" x-text="item.path" :title="item.path"></td>
+                                            <td class="p-3 font-medium text-rose-400" x-text="item.current_genre"></td>
+                                            <td class="p-3 font-medium text-emerald-400" x-text="item.canonical_genre || '—'"></td>
+                                            <td class="p-3">
+                                                <template x-if="item.is_auto_fixed">
+                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                                        Автозаменено
+                                                    </span>
+                                                </template>
+                                                <template x-if="!item.is_auto_fixed">
+                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                                        Требует правки
+                                                    </span>
+                                                </template>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </template>
+                </div>
             </div>
         </section>
 

@@ -462,3 +462,41 @@ Reverse-proxy (nginx/caddy, вне рамок ТЗ) → 127.0.0.1:8010
 | Блок 5 (Деплой) | Раздел 7 (systemd, venv) |
 
 Такое соответствие позволяет генерировать проект теми же блоками, что предложены в ТЗ, но каждый блок теперь имеет чёткие границы модулей, интерфейсы между сервисами и точки, которые обязаны проходить через `PathSandbox`.
+
+---
+
+## 9. Подсистема аудита и каталогизации медиатеки (Go Auditor + SQLite)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Файловая система                        │
+│  MUSIC_DIR (MP3, LRC, TXT, Cover Art)                       │
+│  └── data/library.db (SQLite: WAL, busy_timeout=5000)       │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ inotify / fsnotify
+┌───────────────────────────▼─────────────────────────────────┐
+│              Go Daemon (music-auditor.service)              │
+│  • fsnotify Watcher (recursive, 500ms debounce)             │
+│  • ID3v2.4 Mutagen-compatible Parser                        │
+│  • Path Validator ({Album}/{Track:02d}. {Title}.mp3)        │
+│  • Genre Normalizer (\p{Cyrillic} -> En Canonical Auto-Fix) │
+│  • Catalog Matcher (Deezer + Genius) -> missing_tracks      │
+│  • Pure Go SQLite Batch Writer (modernc.org/sqlite)         │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ Read-only async access (aiosqlite)
+┌───────────────────────────▼─────────────────────────────────┐
+│               FastAPI LibraryAuditService                   │
+│  • GET /files/audit/summary                                 │
+│  • GET /files/audit/invalid-paths                           │
+│  • GET /files/audit/non-en-genres                           │
+│  • GET /files/audit/incomplete-albums                       │
+│  • POST /files/audit/incomplete-albums/download-missing     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+1. **Модель демона:** Фоновый systemd-сервис (`music-auditor.service`) с низким потреблением памяти (~15-20 МБ RAM). Отслеживает изменения в `MUSIC_DIR` через `fsnotify` с дебаунсингом (500 мс) для исключения гонок при скачивании треков.
+2. **База данных SQLite:** Локальное файловое хранилище `data/library.db` в режиме WAL (`PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;`). Содержит нормализованную схему: `artists`, `albums`, `tracks`, `genres`, `track_genres`, `missing_tracks`, `audit_issues`. Источником истины для воспроизведения треков по-прежнему остаются файлы на диске, а SQLite выступает в роли индексного кэша и журнала аудита.
+3. **Платформенные ID:** Хранение идентификаторов артистов и альбомов для внешних платформ: Deezer, Spotify, YouTube Music, Яндекс Музыка, Genius.
+4. **Валидация путей:** Проверка соответствия каноническому стандарту `{Album}/{TrackNumber:02d}. {Title}.mp3`.
+5. **Нормализация жанров:** Автоматическое обнаружение кириллических жанров (`\p{Cyrillic}`), словарь нормализации и автозамена ID3v2.4 TCON фреймов на стандартизированные английские жанры.
+6. **Сверка треклистов:** Выявление недостающих дорожек релизов с сохранением в `missing_tracks` и поддержкой дозагрузки в один клик через веб-интерфейс.

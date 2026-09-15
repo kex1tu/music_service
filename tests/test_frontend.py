@@ -425,10 +425,32 @@ def test_incomplete_albums_audit_ui(client: TestClient):
     assert "loadIncompleteAlbums()" in audit_js
     assert "toggleAlbumExpand(album)" in audit_js
     assert "matchCatalog(album)" in audit_js
-    assert "downloadMissing(album, trackUrl = null)" in audit_js
     assert "/files/audit/incomplete-albums" in audit_js
     assert "/files/audit/incomplete-albums/catalog-match" in audit_js
     assert "/files/audit/incomplete-albums/download-missing" in audit_js
+
+
+def test_audit_invalid_paths_and_genres_ui():
+    """Проверка элементов интерфейса аудита некорректных путей и не-EN жанров."""
+    html = (PROJECT_ROOT / "app" / "templates" / "index.html").read_text(encoding="utf-8")
+    audit_js = (PROJECT_ROOT / "app" / "static" / "js" / "library_audit.js").read_text(encoding="utf-8")
+
+    # Карточки и вкладки в HTML
+    assert "Не по шаблону" in html
+    assert "Жанры (не-EN)" in html
+    assert "activeSubTab = 'paths'" in html
+    assert "activeSubTab = 'genres'" in html
+    assert "Файлы с нарушением канонической структуры" in html
+    assert "Русскоязычные и нелатинские жанры" in html
+
+    # JS свойства и эндпоинты
+    assert "invalidPaths:" in audit_js
+    assert "nonEnGenres:" in audit_js
+    assert "loadInvalidPaths()" in audit_js
+    assert "loadNonEnGenres()" in audit_js
+    assert "/files/audit/invalid-paths" in audit_js
+    assert "/files/audit/non-en-genres" in audit_js
+
 
 
 

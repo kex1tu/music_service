@@ -54,7 +54,7 @@ class NativeScannerService:
         except OSError:
             return False
 
-    async def scan_stream(self) -> AsyncGenerator[dict[str, Any], None]:
+    async def scan_stream(self, db_path: Path | None = None) -> AsyncGenerator[dict[str, Any], None]:
         """Асинхронно запускает процесс music-scanner и стримит распарсенные метаданные треков."""
         if not self.is_available:
             logger.debug("Нативный Go-сканер недоступен по пути %s", self._bin_path)
@@ -65,13 +65,15 @@ class NativeScannerService:
             logger.debug("Корневая директория медиатеки не существует: %s", safe_root)
             return
 
-        logger.info("Запуск нативного Go-сканера: %s --root %s", self._bin_path, safe_root)
+        cmd = [str(self._bin_path), "--root", str(safe_root)]
+        if db_path:
+            cmd.extend(["--db", str(db_path)])
+
+        logger.info("Запуск нативного Go-сканера: %s", " ".join(cmd))
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                str(self._bin_path),
-                "--root",
-                str(safe_root),
+                *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

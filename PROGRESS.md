@@ -2,8 +2,8 @@
 
 ## Текущий статус проекта
 - **Текущий статус проекта:** 100% готовность, все проверки и тесты пройдены.
-- **Активный этап:** Пакетная реорганизация существующих файлов медиатеки по кнопке «Разложить по альбомам» во вкладке Аудит (`POST /files/audit/reorganize`): безопасный перенос в `MUSIC_DIR/{Album}/{TrackNumber:02d}. {Title}.mp3`, перенос обложек и текстов песен, удаление пустых каталогов исполнителей.
-- **Результаты тестов:** 550/550 passed (`pytest`), ruff linter — 0 замечаний (All checks passed!).
+- **Активный этап:** Подсистема аудита и каталогизации медиатеки на Go (Daemon + fsnotify) + SQLite: фоновый демон `music-scanner --daemon`, отслеживание изменений через `fsnotify` (500 мс дебаунс), SQLite (`data/library.db`) в WAL-режиме, валидация путей `{Album}/{TrackNumber:02d}. {Title}.mp3`, автозамена русских жанров на английские в ID3v2.4, платформа внешних ID (Deezer, Spotify, YouTube Music, Яндекс Музыка, Genius), детекция `missing_tracks`, новые карточки и таблицы в веб-интерфейсе.
+- **Результаты тестов:** 553/553 passed (`pytest`), Go unit tests passed (100% pass), ruff linter — 0 замечаний (All checks passed!).
 
 ---
 
@@ -432,6 +432,19 @@
 |---|---|---|---|
 | **R1: Устранение массовых запросов к Deezer в `get_incomplete_albums`** | `app/services/library_audit_service.py`, `app/routers/files.py` | **DONE** | 1. Параметр `auto_match` по умолчанию переведен в `False` как в сигнатуре `get_incomplete_albums(auto_match: bool = False)`, так и в роутере `GET /files/audit/incomplete-albums`.<br>2. Устранена блокировка интерфейса: вместо 110-секундных зависаний с ошибками `Quota limit exceeded [4]` от Deezer API при открытии вкладки, аудит выполняется мгновенно (~0.4 сек) на базе локальных ID3-тегов TRCK/TPOS.<br>3. Добавлена защита `quota_exceeded`: при обнаружении лимита запросов внешние вызовы немедленно прерываются.<br>4. Точечная каталожная сверка Deezer по-прежнему доступна по клику на раскрытие конкретного релиза (`toggleAlbumExpand`). |
 | **R2: Оптимизация кнопки реорганизации и кэширования статики** | `app/static/js/library_audit.js`, `app/templates/index.html` | **DONE** | 1. Кнопка «Разложить по альбомам» отвязана от `isLoading`: теперь ее можно нажать в любой момент без ожидания завершения фонового обновления других вкладок.<br>2. В модальном окне подтверждения реорганизации добавлено мгновенное скрытие модала при клике (`$store.app.activeModal = null`).<br>3. После реорганизации на бэкенде вызывается быстрый опрос `loadAll(false)` вместо полного сброса индекса.<br>4. Обновлена версия скрипта `library_audit.js?v=20260915_03` для гарантированного сброса кэша браузеров на клиентах. |
+
+---
+
+## Блок 26: Подсистема аудита и каталогизации медиатеки на Go (Daemon + fsnotify) + SQLite (2026-09-15T16:50:00Z)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **R1: Архитектура хранилища SQLite и конфигурация** | `app/core/database.py`, `app/config.py`, `.env.example`, `requirements.txt` | **DONE** | 1. Добавлен параметр `DATABASE_PATH` (по умолчанию `data/library.db`) в `Settings`.<br>2. Реализована схема DDL с WAL-режимом (`PRAGMA journal_mode = WAL; busy_timeout = 5000; synchronous = NORMAL; foreign_keys = ON;`).<br>3. Таблицы: `artists`, `albums` (с поддержкой `youtube_id`, `deezer_id`, `spotify_id`, `yandex_id`, `genius_id`), `tracks`, `genres`, `track_genres`, `missing_tracks`, `audit_issues`.<br>4. Асинхронное подключение `aiosqlite` в FastAPI. |
+| **R2: Go Auditor Core (`tools/music-scanner`)** | `tools/music-scanner/` | **DONE** | 1. **Валидатор путей:** проверка `{Album}/{TrackNumber:02d}. {Title}.mp3` в `validator/path.go`.<br>2. **Нормализатор жанров:** проверка `\p{Cyrillic}` и словарь нормализации в `validator/genre.go`, ID3v2.4 TCON rewriter в `id3/writer.go`.<br>3. **Хранилище SQLite (Go):** Pure Go `modernc.org/sqlite` с WAL-режимом и батч-транзакциями в `db/sqlite.go`, `db/schema.go`.<br>4. **Сверка каталога:** поиск и сопоставление альбомов Deezer и фиксация `missing_tracks` в `catalog/deezer.go` и `catalog/matcher.go`.<br>5. **Фоновый демон:** рекурсивный `fsnotify` watcher с дебаунсингом (500 мс) в `watcher/fsnotify.go`.<br>6. Сборка бинарника `bin/music-scanner` (`CGO_ENABLED=0`, `-ldflags="-s -w"`). |
+| **R3: Интеграция с FastAPI бэкендом** | `app/schemas/library_audit.py`, `app/services/library_audit_service.py`, `app/routers/files.py`, `app/dependencies.py` | **DONE** | 1. Добавлены схемы `InvalidPathItem`, `NonEnGenreItem`, поля `invalid_paths_count`, `non_en_genres_count` в `AuditSummaryResponse`, внешние платформенные ID в `IncompleteAlbumItem` и `IncompleteTrackInfo`.<br>2. Роуты `GET /files/audit/invalid-paths` и `GET /files/audit/non-en-genres`.<br>3. Чтение сводки, некорректных путей, жанров и недостающих треков из SQLite в `LibraryAuditService`. |
+| **R4: Пользовательский интерфейс (Frontend No-Build)** | `app/templates/index.html`, `app/static/js/library_audit.js` | **DONE** | 1. Добавлены карточки «Не по шаблону» и «Жанры (не-EN)» в дашборд сводки аудита.<br>2. Добавлены подразделы (subtabs) «Некорректные пути» и «Жанры на проверку» с таблицами, статусами автоисправлений и переходами в файловый менеджер.<br>3. В `library_audit.js` добавлены методы `loadInvalidPaths()` и `loadNonEnGenres()`. |
+| **R5: Системная интеграция и тестирование** | `music-auditor.service`, `tests/test_audit_sqlite.py`, `tests/test_frontend.py` | **DONE** | 1. Создан systemd unit `music-auditor.service` для запуска Go-демона в фоне с параметрами `--daemon --auto-fix-genres --check-missing`.<br>2. Написаны модульные и интеграционные тесты для базы данных, сервиса аудита, эндпоинтов API и UI.<br>3. Все 553 теста пройдены успешно (`pytest`), Go unit tests зелёные, ruff линтер чист. |
+
 
 
 

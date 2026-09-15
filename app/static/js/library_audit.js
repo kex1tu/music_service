@@ -6,7 +6,7 @@
 
 function libraryAuditComponent() {
     return {
-        activeSubTab: 'lyrics', // 'lyrics' | 'covers' | 'duplicates' | 'incomplete'
+        activeSubTab: 'lyrics', // 'lyrics' | 'covers' | 'duplicates' | 'incomplete' | 'paths' | 'genres'
         isLoading: false,
         isReorganizing: false,
         summary: {
@@ -16,11 +16,15 @@ function libraryAuditComponent() {
             missing_covers_count: 0,
             duplicates_count: 0,
             incomplete_albums_count: 0,
+            invalid_paths_count: 0,
+            non_en_genres_count: 0,
         },
         missingLyrics: [],
         missingCovers: [],
         duplicatesData: { groups: [], total_duplicate_files: 0 },
         incompleteAlbums: [],
+        invalidPaths: [],
+        nonEnGenres: [],
         incompleteLoading: false,
         expandedAlbums: {},
         catalogMatchLoading: {},
@@ -78,6 +82,8 @@ function libraryAuditComponent() {
                     this.loadMissingCovers(),
                     this.loadDuplicates(),
                     this.loadIncompleteAlbums(),
+                    this.loadInvalidPaths(),
+                    this.loadNonEnGenres(),
                 ]);
             } finally {
                 this.isLoading = false;
@@ -125,6 +131,28 @@ function libraryAuditComponent() {
                 }
             } catch (e) {
                 console.error('Ошибка загрузки дубликатов:', e);
+            }
+        },
+
+        async loadInvalidPaths() {
+            try {
+                const res = await fetch(`/files/audit/invalid-paths?_t=${Date.now()}`);
+                if (res.ok) {
+                    this.invalidPaths = await res.json();
+                }
+            } catch (e) {
+                console.error('Ошибка загрузки некорректных путей:', e);
+            }
+        },
+
+        async loadNonEnGenres() {
+            try {
+                const res = await fetch(`/files/audit/non-en-genres?_t=${Date.now()}`);
+                if (res.ok) {
+                    this.nonEnGenres = await res.json();
+                }
+            } catch (e) {
+                console.error('Ошибка загрузки не-EN жанров:', e);
             }
         },
 

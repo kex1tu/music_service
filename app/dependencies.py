@@ -252,6 +252,7 @@ def get_library_audit_service(
     lyrics_service: LyricsServiceDep,
     deezer_client: DeezerClientDep,
     native_scanner: NativeScannerDep,
+    settings: SettingsDep,
 ) -> LibraryAuditService:
     """Провайдер синглтона сервиса аудита и глобального поиска медиатеки."""
     global _library_audit_service
@@ -262,6 +263,7 @@ def get_library_audit_service(
             lyrics_service=lyrics_service,
             deezer_client=deezer_client,
             native_scanner=native_scanner,
+            db_path=settings.DATABASE_PATH,
         )
     return _library_audit_service
 

@@ -63,6 +63,25 @@ class AuditSummaryResponse(BaseModel):
     missing_covers_count: int = Field(default=0, description="Количество альбомов/треков без обложек")
     duplicates_count: int = Field(default=0, description="Количество потенциальных дубликатов")
     incomplete_albums_count: int = Field(default=0, description="Количество неполных альбомов в медиатеке")
+    invalid_paths_count: int = Field(default=0, description="Количество треков с нарушением структуры путей")
+    non_en_genres_count: int = Field(default=0, description="Количество треков с русскоязычными жанрами")
+
+
+class InvalidPathItem(BaseModel):
+    """Трек с нарушением структуры пути."""
+
+    path: str = Field(..., description="Текущий относительный путь")
+    suggested_path: str = Field(..., description="Канонический рекомендуемый путь")
+    reason: str = Field(default="", description="Причина нарушения")
+
+
+class NonEnGenreItem(BaseModel):
+    """Трек с русскоязычным или нелатинским жанром."""
+
+    path: str = Field(..., description="Путь к треку")
+    current_genre: str = Field(..., description="Текущий жанр")
+    canonical_genre: str = Field(default="", description="Рекомендуемый английский жанр")
+    is_auto_fixed: bool = Field(default=False, description="Был ли жанр автоматически исправлен")
 
 
 class MissingLyricsItem(BaseModel):
@@ -141,6 +160,9 @@ class IncompleteTrackInfo(BaseModel):
     )
     deezer_id: str | None = Field(default=None, description="ID трека в каталоге Deezer")
     deezer_url: str | None = Field(default=None, description="Прямой URL трека в Deezer")
+    spotify_id: str | None = Field(default=None, description="ID трека в Spotify")
+    genius_url: str | None = Field(default=None, description="Ссылка на трек в Genius")
+    isrc: str | None = Field(default=None, description="ISRC код трека")
 
 
 class IncompleteAlbumItem(BaseModel):
@@ -168,9 +190,13 @@ class IncompleteAlbumItem(BaseModel):
     )
     is_catalog_matched: bool = Field(
         default=False,
-        description="Флаг успешной сверки с каталогом Deezer",
+        description="Флаг успешной сверки с каталогом",
     )
     deezer_album_id: str | None = Field(default=None, description="ID альбома в Deezer")
+    spotify_id: str | None = Field(default=None, description="ID альбома в Spotify")
+    youtube_id: str | None = Field(default=None, description="ID в YouTube Music")
+    yandex_id: str | None = Field(default=None, description="ID в Яндекс Музыке")
+    genius_id: str | None = Field(default=None, description="ID альбома в Genius")
 
 
 class IncompleteAlbumsResponse(BaseModel):

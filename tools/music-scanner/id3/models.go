@@ -14,8 +14,12 @@ type TrackMeta struct {
 	DiscNumber   int     `json:"disc_number"`
 	DiscTotal    int     `json:"disc_total"`
 	Duration     float64 `json:"duration"`
+	Bitrate      int     `json:"bitrate"`
 	HasCover     bool    `json:"has_cover"`
+	CoverPath    string  `json:"cover_path"`
 	LyricsStatus string  `json:"lyrics_status"` // "lrc" | "txt" | "none"
+	LyricsPath   string  `json:"lyrics_path"`
 	Size         int64   `json:"size"`
 	Mtime        float64 `json:"mtime"`
+	FullPath     string  `json:"full_path,omitempty"`
 }

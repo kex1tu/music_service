@@ -25,6 +25,10 @@ class Settings(BaseSettings):
         default=Path("tmp_downloads"),
         description="Каталог временного буфера загрузок",
     )
+    DATABASE_PATH: Path = Field(
+        default=Path("data/library.db"),
+        description="Путь к файлу SQLite базы данных медиатеки",
+    )
 
     # Файлы аутентификации yt-dlp
     YTDLP_COOKIES_PATH: Path | None = Field(
@@ -212,7 +216,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    @field_validator("MUSIC_DIR", "TMP_DIR", mode="after")
+    @field_validator("MUSIC_DIR", "TMP_DIR", "DATABASE_PATH", mode="after")
     @classmethod
     def normalize_paths(cls, value: Path) -> Path:
         """Нормализует путь и преобразует его в абсолютный."""
