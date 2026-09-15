@@ -172,24 +172,26 @@ func runScanCycle(
 	log.Printf("[music-auditor] Incremental scan completed in %v. Processed: %d, Deleted: %d, Total tracked: %d",
 		duration, totalProcessed, deletedCount, len(existingRelPaths))
 
-	// Сверка неполных альбомов с каталогом Deezer
+	// Сверка неполных альбомов с каталогом Deezer в фоновом режиме
 	if checkMissing {
-		incompleteAlbums, err := database.GetIncompleteAlbums()
-		if err == nil && len(incompleteAlbums) > 0 {
-			log.Printf("[music-auditor] Checking catalog for %d incomplete albums...", len(incompleteAlbums))
-			for _, album := range incompleteAlbums {
-				remoteAlbum, err := catalog.FetchDeezerAlbumTracks(album.Artist, album.Title)
-				if err != nil {
-					continue
-				}
+		go func() {
+			incompleteAlbums, err := database.GetIncompleteAlbums()
+			if err == nil && len(incompleteAlbums) > 0 {
+				log.Printf("[music-auditor] Checking catalog for %d incomplete albums in background...", len(incompleteAlbums))
+				for _, album := range incompleteAlbums {
+					remoteAlbum, err := catalog.FetchDeezerAlbumTracks(album.Artist, album.Title)
+					if err != nil {
+						continue
+					}
 
-				missing := catalog.FindMissingTracks(album.ID, nil, remoteAlbum)
-				if len(missing) > 0 {
-					_ = database.SaveMissingTracks(album.ID, missing)
-					log.Printf("[music-auditor] Album '%s - %s': found %d missing tracks",
-						album.Artist, album.Title, len(missing))
+					missing := catalog.FindMissingTracks(album.ID, nil, remoteAlbum)
+					if len(missing) > 0 {
+						_ = database.SaveMissingTracks(album.ID, missing)
+						log.Printf("[music-auditor] Album '%s - %s': found %d missing tracks",
+							album.Artist, album.Title, len(missing))
+					}
 				}
 			}
-		}
+		}()
 	}
 }

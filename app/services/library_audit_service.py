@@ -125,6 +125,10 @@ class LibraryAuditService:
                 self._cache.clear()
                 return
 
+            # 0. Если доступна локальная SQLite база — мгновенно читаем кэш из БД
+            if not force and self._is_db_available() and await self._ensure_index_from_db():
+                return
+
             # 1. Если доступен сверхбыстрый нативный Go-сканер — используем его
             if self._native_scanner and self._native_scanner.is_available:
                 try:
@@ -135,6 +139,61 @@ class LibraryAuditService:
 
             # 2. Fallback на стандартный Python os.walk + mutagen
             await self._ensure_index_python()
+
+    async def _ensure_index_from_db(self) -> bool:
+        """Мгновенно заполняет in-memory кэш из локальной базы данных SQLite."""
+        if not self._is_db_available():
+            return False
+        try:
+            assert aiosqlite is not None
+            async with aiosqlite.connect(str(self._db_path)) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(
+                    """
+                    SELECT t.file_path, t.title, t.track_number, t.track_total,
+                           t.disc_number, t.disc_total, t.duration, t.file_size,
+                           t.mtime, t.has_embedded_cover, t.lyrics_status,
+                           al.title AS album_title, al.year, al.has_cover, al.album_artist,
+                           ar.name AS artist_name,
+                           GROUP_CONCAT(g.name, '\\\\') AS genres
+                    FROM tracks t
+                    JOIN albums al ON t.album_id = al.id
+                    JOIN artists ar ON t.artist_id = ar.id
+                    LEFT JOIN track_genres tg ON t.id = tg.track_id
+                    LEFT JOIN genres g ON tg.genre_id = g.id
+                    GROUP BY t.id
+                    """
+                ) as cur:
+                    rows = await cur.fetchall()
+                    if not rows:
+                        return False
+                    for row in rows:
+                        rel_path = row["file_path"].replace("\\", "/")
+                        track_tags = TrackTags(
+                            path=rel_path,
+                            title=row["title"] or Path(rel_path).stem,
+                            artist=row["artist_name"] or "",
+                            album=row["album_title"] or "",
+                            album_artist=row["album_artist"] or "",
+                            year=row["year"],
+                            track_number=row["track_number"],
+                            track_total=row["track_total"],
+                            disc_number=row["disc_number"],
+                            disc_total=row["disc_total"],
+                            duration=round(row["duration"]) if row["duration"] else None,
+                            genre=row["genres"],
+                            has_cover=bool(row["has_cover"] or row["has_embedded_cover"]),
+                            lyrics_status=row["lyrics_status"] or "none",
+                        )
+                        self._cache[rel_path] = {
+                            "mtime": row["mtime"],
+                            "size": row["file_size"],
+                            "track": track_tags,
+                        }
+                    return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Ошибка быстрого чтения кэша из SQLite: %s", exc)
+            return False
 
     async def _ensure_index_native(self) -> None:
         """Быстрое потоковое обновление индекса медиатеки через Go CLI-сканер."""
