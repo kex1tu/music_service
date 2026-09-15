@@ -25,11 +25,13 @@ from app.core.sandbox import PathSandbox
 from app.schemas.library_audit import (
     AuditSummaryResponse,
     AutoRetagGenresResponse,
+    BackfillEditorDataResponse,
     BatchLyricsProgressResponse,
     DuplicateGroupItem,
     DuplicatesResponse,
     DuplicateTrackItem,
     FixAllPathsResponse,
+    FixDuplicatesResponse,
     FixPathResponse,
     IncompleteAlbumItem,
     IncompleteAlbumsResponse,
@@ -87,6 +89,7 @@ class LibraryAuditService:
         deezer_client: DeezerClient | None = None,
         native_scanner: NativeScannerService | None = None,
         db_path: Path | None = None,
+        tmp_sandbox: PathSandbox | None = None,
     ) -> None:
         self._music_sandbox = music_sandbox
         self._tag_service = tag_service
@@ -94,6 +97,7 @@ class LibraryAuditService:
         self._deezer_client = deezer_client
         self._native_scanner = native_scanner
         self._db_path = db_path
+        self._tmp_sandbox = tmp_sandbox or getattr(tag_service, "_tmp_sandbox", None)
         self._lock = asyncio.Lock()
         # Кеш треков: rel_path -> dict(mtime=float, size=int, track=TrackTags)
         self._cache: dict[str, dict[str, Any]] = {}
@@ -592,14 +596,21 @@ class LibraryAuditService:
                 )
         return invalid_items
 
-    async def fix_path(self, path: str, overwrite: bool = True) -> FixPathResponse:
+    async def fix_path(
+        self,
+        path: str,
+        overwrite: bool = True,
+        invalidate: bool = True,
+        ensure_idx: bool = True,
+    ) -> FixPathResponse:
         """Перемещает/переименовывает файл с нарушением структуры в канонический путь.
 
         При overwrite=True безопасно заменяет уже существующий файл по целевому пути.
         Также переносит ассоциированные тексты (.lrc/.txt), удаляет опустевшие родительские
         папки и обновляет базу данных SQLite.
         """
-        await self.ensure_index()
+        if ensure_idx:
+            await self.ensure_index()
 
         src_abs = self._music_sandbox.resolve(path)
         if not src_abs.exists():
@@ -714,7 +725,8 @@ class LibraryAuditService:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Сбой синхронизации SQLite после fix_path(%s -> %s): %s", path, suggested_path, exc)
 
-        self.invalidate()
+        if invalidate:
+            self.invalidate()
 
         return FixPathResponse(
             success=True,
@@ -737,14 +749,23 @@ class LibraryAuditService:
         fixed_count = 0
         errors: list[str] = []
 
+        await self.ensure_index()
+
         for item in invalid_items:
             try:
-                res = await self.fix_path(item.path, overwrite=overwrite)
+                res = await self.fix_path(
+                    item.path,
+                    overwrite=overwrite,
+                    invalidate=False,
+                    ensure_idx=False,
+                )
                 if res.success:
                     fixed_count += 1
             except Exception as exc:  # noqa: BLE001
                 logger.error("Ошибка при исправлении пути %s: %s", item.path, exc)
                 errors.append(f"{item.path}: {exc}")
+
+        self.invalidate()
 
         return FixAllPathsResponse(
             success=len(errors) == 0,
@@ -1083,13 +1104,16 @@ class LibraryAuditService:
 
         for rel_path, item in self._cache.items():
             t: TrackTags = item["track"]
-            clean_art = normalize_clean_string(t.artist or t.album_artist or "")
             clean_tit = normalize_clean_string(t.title or Path(rel_path).stem)
 
             if not clean_tit:
                 continue
 
-            composite_key = f"{clean_art}::{clean_tit}" if clean_art else clean_tit
+            album_dir = str(Path(rel_path).parent).replace("\\", "/")
+            if album_dir == ".":
+                album_dir = ""
+            album_name = t.album or (Path(rel_path).parent.name if album_dir else "")
+            composite_key = f"{album_dir}::{clean_tit}"
             groups_raw.setdefault(composite_key, []).append(
                 {
                     "path": rel_path,
@@ -1099,6 +1123,8 @@ class LibraryAuditService:
                     "mtime": item.get("mtime", 0),
                     "title": t.title or Path(rel_path).stem,
                     "artist": t.artist or "Неизвестный исполнитель",
+                    "album_dir": album_dir,
+                    "album": album_name,
                 }
             )
 
@@ -1120,15 +1146,11 @@ class LibraryAuditService:
 
                     d1, d2 = tr1["duration"], tr2["duration"]
                     if d1 is not None and d2 is not None:
-                        if abs(d1 - d2) <= 2:
-                            is_match = True
-                            break
-                    elif tr1["size"] is not None and tr2["size"] is not None:
-                        if tr1["size"] == tr2["size"]:
+                        if abs(d1 - d2) <= 3:
                             is_match = True
                             break
                     else:
-                        # Если нет длительности, то совпадение нормализованных названия и автора уже является кандидатом
+                        # Если длительность не определена у одного из файлов, совпадение названия в рамках релиза достаточно
                         is_match = True
                         break
 
@@ -1153,6 +1175,8 @@ class LibraryAuditService:
                         key=key,
                         title=verified_tracks[0]["title"],
                         artist=verified_tracks[0]["artist"],
+                        album_dir=verified_tracks[0].get("album_dir", ""),
+                        album=verified_tracks[0].get("album", ""),
                         tracks=items,
                     )
                 )
@@ -1162,6 +1186,89 @@ class LibraryAuditService:
             groups=duplicate_groups,
             total_duplicate_files=total_dup_files,
         )
+
+    async def fix_duplicates(
+        self,
+        group_key: str | None = None,
+        album_path: str | None = None,
+        paths_to_delete: list[str] | None = None,
+    ) -> FixDuplicatesResponse:
+        """Удаляет дубликаты треков, сохраняя наиболее канонический файл в рамках одного релиза."""
+        deleted_files: list[str] = []
+        errors: list[str] = []
+
+        if paths_to_delete:
+            for p in paths_to_delete:
+                try:
+                    f = self._music_sandbox.resolve(p)
+                    if f.is_file():
+                        f.unlink()
+                        deleted_files.append(p)
+                        for ext in (".lrc", ".txt"):
+                            lyr = f.with_suffix(ext)
+                            if lyr.exists() and lyr.is_file():
+                                lyr.unlink()
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"{p}: {exc}")
+
+            if deleted_files:
+                self.invalidate()
+
+            return FixDuplicatesResponse(
+                success=len(errors) == 0,
+                deleted_count=len(deleted_files),
+                deleted_files=deleted_files,
+                errors=errors,
+            )
+
+        dup_res = await self.find_duplicates()
+        target_groups = dup_res.groups
+        if group_key:
+            target_groups = [g for g in target_groups if g.key == group_key]
+        elif album_path:
+            norm_alb = album_path.strip("/").replace("\\", "/")
+            target_groups = [g for g in target_groups if g.album_dir.strip("/").replace("\\", "/") == norm_alb]
+
+        for group in target_groups:
+            if len(group.tracks) < 2:
+                continue
+
+            def score_track(tr: DuplicateTrackItem) -> tuple[int, int, int]:
+                stem = Path(tr.path).stem
+                has_dup_marker = 1 if re.search(r"(\s*\(\d+\)|\s*-\s*копия|\s*_dup|\s*copy)", stem, re.IGNORECASE) else 0
+                is_canonical_format = 0 if re.match(r"^\d{2,}\.\s+.+", Path(tr.path).name) else 1
+                neg_size = -(tr.size or 0)
+                return (has_dup_marker, is_canonical_format, neg_size)
+
+            sorted_tracks = sorted(group.tracks, key=score_track)
+            duplicates = sorted_tracks[1:]
+
+            for dup in duplicates:
+                try:
+                    f = self._music_sandbox.resolve(dup.path)
+                    if f.is_file():
+                        f.unlink()
+                        deleted_files.append(dup.path)
+                        for ext in (".lrc", ".txt"):
+                            lyr = f.with_suffix(ext)
+                            if lyr.exists() and lyr.is_file():
+                                lyr.unlink()
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"{dup.path}: {exc}")
+
+        if deleted_files:
+            self.invalidate()
+
+        return FixDuplicatesResponse(
+            success=len(errors) == 0,
+            deleted_count=len(deleted_files),
+            deleted_files=deleted_files,
+            errors=errors,
+        )
+
+    async def fix_all_duplicates(self) -> FixDuplicatesResponse:
+        """Удаляет все найденные дубликаты во всей медиатеке в рамках их релизов."""
+        return await self.fix_duplicates()
 
     async def get_incomplete_albums(self, auto_match: bool = False) -> IncompleteAlbumsResponse:
         """Обнаруживает альбомы с недостающими треками на основе тегов TRCK/TPOS и непрерывности нумерации."""
@@ -1488,7 +1595,7 @@ class LibraryAuditService:
                 local_tracks.append(t)
 
         if not local_tracks and dir_path.is_dir():
-            for f in dir_path.glob("*.mp3"):
+            for f in dir_path.rglob("*.mp3"):
                 try:
                     rel = str(self._music_sandbox.to_relative(f)).replace("\\", "/")
                     local_tracks.append(self._tag_service.read_tags(f, rel_path=rel))
@@ -1750,5 +1857,72 @@ class LibraryAuditService:
         await self.ensure_index()
 
         return result
+
+    async def get_backfill_editor_data(
+        self,
+        album_path: str,
+        job_id: str | None = None,
+    ) -> BackfillEditorDataResponse:
+        """Объединяет существующие треки альбома в MUSIC_DIR и дозагруженные треки из TMP_DIR для Tag Editor."""
+        local_details = self._tag_service.read_album_details(album_path)
+
+        downloaded_tracks: list[TrackTags] = []
+        job_cover_rel: str | None = None
+        has_job_cover = False
+
+        if job_id and self._tmp_sandbox:
+            tmp_converted = self._tmp_sandbox.resolve(f"{job_id}/converted")
+            if tmp_converted.exists() and tmp_converted.is_dir():
+                mp3_files = sorted(
+                    [f for f in tmp_converted.iterdir() if f.is_file() and f.suffix.lower() == ".mp3"],
+                    key=lambda f: f.name.lower(),
+                )
+                for f in mp3_files:
+                    rel_tmp = f"tmp_downloads/{self._tmp_sandbox.to_relative(f)}".replace("\\", "/")
+                    t = self._tag_service.read_tags(f, rel_path=rel_tmp)
+                    downloaded_tracks.append(t)
+
+            tmp_cover = self._tmp_sandbox.resolve(f"{job_id}/cover.jpg")
+            if tmp_cover.exists() and tmp_cover.is_file() and tmp_cover.stat().st_size > 0:
+                job_cover_rel = f"tmp_downloads/{job_id}/cover.jpg"
+                has_job_cover = True
+
+        # Объединяем существующие треки и дозагруженные
+        all_tracks = list(local_details.tracks) + downloaded_tracks
+
+        # Сортируем строго по диску и номеру дорожки
+        all_tracks.sort(
+            key=lambda t: (
+                t.disc_number if t.disc_number and t.disc_number > 0 else 1,
+                t.track_number if t.track_number and t.track_number > 0 else 999,
+                (t.title or "").lower(),
+            )
+        )
+
+        album_meta = local_details.album.model_copy()
+        if not album_meta.album:
+            album_meta.album = next((t.album for t in all_tracks if t.album), Path(album_path).name)
+        if not album_meta.album_artist:
+            album_meta.album_artist = next(
+                (t.album_artist or t.artist for t in all_tracks if t.album_artist or t.artist), ""
+            )
+        if not album_meta.year:
+            album_meta.year = next((t.year for t in all_tracks if t.year), None)
+        if not album_meta.genre:
+            album_meta.genre = next((t.genre for t in all_tracks if t.genre), None)
+
+        effective_cover_path = local_details.cover_path or (job_cover_rel if has_job_cover else None)
+        effective_has_cover = local_details.has_cover or has_job_cover
+
+        return BackfillEditorDataResponse(
+            album=album_meta,
+            tracks=all_tracks,
+            source_dir=album_path,
+            cover_path=effective_cover_path,
+            has_cover=effective_has_cover,
+            job_ids=[job_id] if job_id else [],
+            missing_count=len(downloaded_tracks),
+            backfilled_count=len(downloaded_tracks),
+        )
 
 

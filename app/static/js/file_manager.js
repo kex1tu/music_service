@@ -166,6 +166,11 @@ function fileManagerComponent() {
             Alpine.store('app').deleteConfirmData = null;
         },
 
+        matchInAudit(item) {
+            Alpine.store('app').activeTab = 'audit';
+            window.dispatchEvent(new CustomEvent('match-album-audit', { detail: { path: item.path } }));
+        },
+
         formatDuration(seconds) {
             if (!seconds) return '--:--';
             const mins = Math.floor(seconds / 60);

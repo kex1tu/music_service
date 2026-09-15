@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.tag import AlbumTags, TrackTags
+
 
 class SearchArtistItem(BaseModel):
     """Элемент поиска: Артист."""
@@ -121,9 +123,11 @@ class DuplicateTrackItem(BaseModel):
 class DuplicateGroupItem(BaseModel):
     """Группа треков, признанных дубликатами."""
 
-    key: str = Field(..., description="Ключ группировки (clean_artist::clean_title)")
+    key: str = Field(..., description="Ключ группировки (album_dir::clean_title)")
     title: str = Field(..., description="Название песни")
     artist: str = Field(..., description="Исполнитель")
+    album_dir: str = Field(default="", description="Относительный путь к папке альбома/релиза")
+    album: str = Field(default="", description="Название альбома")
     tracks: list[DuplicateTrackItem] = Field(..., description="Список файлов-копий")
 
 
@@ -287,6 +291,36 @@ class FixAllPathsResponse(BaseModel):
     total_invalid: int = Field(default=0, description="Всего некорректных путей до исправления")
     fixed_count: int = Field(default=0, description="Количество успешно исправленных путей")
     errors: list[str] = Field(default_factory=list, description="Ошибки при исправлении отдельных файлов")
+
+
+class FixDuplicatesRequest(BaseModel):
+    """Запрос на удаление дубликатов файлов."""
+
+    group_key: str | None = Field(default=None, description="Ключ конкретной группы дубликатов (album_dir::title)")
+    album_path: str | None = Field(default=None, description="Относительный путь к папке релиза")
+    paths_to_delete: list[str] | None = Field(default=None, description="Явный список путей файлов для удаления")
+
+
+class FixDuplicatesResponse(BaseModel):
+    """Результат удаления дубликатов файлов."""
+
+    success: bool = Field(default=True, description="Статус операции")
+    deleted_count: int = Field(default=0, description="Количество удаленных дубликатов")
+    deleted_files: list[str] = Field(default_factory=list, description="Список путей удаленных файлов")
+    errors: list[str] = Field(default_factory=list, description="Ошибки при удалении файлов")
+
+
+class BackfillEditorDataResponse(BaseModel):
+    """Данные объединенного релиза для открытия в Tag Editor."""
+
+    album: AlbumTags = Field(..., description="Метаданные альбома")
+    tracks: list[TrackTags] = Field(..., description="Полный объединенный список треков релиза")
+    source_dir: str = Field(..., description="Каталог релиза в медиатеке")
+    cover_path: str | None = Field(default=None, description="Путь к файлу обложки")
+    has_cover: bool = Field(default=False, description="Наличие обложки")
+    job_ids: list[str] = Field(default_factory=list, description="Идентификаторы связанных задач загрузки")
+    missing_count: int = Field(default=0, description="Сколько треков отсутствовало изначально")
+    backfilled_count: int = Field(default=0, description="Сколько треков было дозагружено")
 
 
 

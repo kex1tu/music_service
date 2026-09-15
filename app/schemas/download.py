@@ -183,6 +183,22 @@ class DownloadJobResponse(BaseModel):
         default=None,
         description="Текст фатальной ошибки задачи, если статус ERROR",
     )
+    target_album_path: str | None = Field(
+        default=None,
+        description="Относительный путь к каталогу альбома в MUSIC_DIR (для задач дозагрузки)",
+    )
+    is_backfill: bool = Field(
+        default=False,
+        description="Флаг: является ли задача дозагрузкой недостающих треков в существующий релиз",
+    )
+    album_title: str | None = Field(
+        default=None,
+        description="Название целевого альбома",
+    )
+    artist_name: str | None = Field(
+        default=None,
+        description="Имя исполнителя целевого альбома",
+    )
     created_at: str = Field(
         ...,
         description="ISO-таймстемп создания задачи",

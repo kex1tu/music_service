@@ -7,23 +7,22 @@ import (
 
 var (
 	cyrillicRegex   = regexp.MustCompile(`\p{Cyrillic}`)
-	genreSplitRegex = regexp.MustCompile(`(\\\\+|\x00|/|;|,|\|)`)
-	rockRegex       = regexp.MustCompile(`(?i)(?:^|[\s/\\;,\-|_\(\)\[\]])(rock|рок)(?:$|[\s/\\;,\-|_\(\)\[\]])|rock|рок`)
-	hipPopRapRegex  = regexp.MustCompile(`(?i)\b(?:pop|поп|hip[- ]?hop|хип[- ]?хоп|хипхоп|hip|хип|rap|рэп)\b|(?:^|[\s/\\;,\-|_\(\)\[\]])(?:pop|поп|hip|хип|rap|рэп)(?:$|[\s/\\;,\-|_\(\)\[\]])|hip[- ]?hop|хип[- ]?хоп|хипхоп|pop|поп|рэп|\brap\b`)
+	genreSplitRegex = regexp.MustCompile(`(\s*\\+\s*|\x00|\s*[/;,|]\s*)`)
+	hipHopRegex     = regexp.MustCompile(`(?i)\b(?:hip[- ]?hop|хип[- ]?хоп|hiphop)\b`)
 )
 
 var RussianGenreMap = map[string]string{
-	"поп\\рок":              "Pop \\\\Rock\\\\Pop-Rock",
-	"поп\\\\рок":            "Pop \\\\Rock\\\\Pop-Rock",
-	"поп/рок":               "Pop \\\\Rock\\\\Pop-Rock",
-	"поп-рок":               "Pop \\\\Rock\\\\Pop-Rock",
-	"поп рок":               "Pop \\\\Rock\\\\Pop-Rock",
+	"поп\\рок":              "Pop\\\\Rock",
+	"поп\\\\рок":            "Pop\\\\Rock",
+	"поп/рок":               "Pop\\\\Rock",
+	"поп-рок":               "Pop-Rock",
+	"поп рок":               "Pop-Rock",
 	"альтернативная музыка": "Alternative",
 	"альтернатива":          "Alternative",
 	"танцевальная музыка":   "Dance Music",
 	"танцевальная":          "Dance Music",
 	"русский рэп":          "Russian Hip-Hop",
-	"рэп":                  "Hip-Hop",
+	"рэп":                  "Rap",
 	"хип-хоп":              "Hip-Hop",
 	"хип хоп":              "Hip-Hop",
 	"хипхоп":               "Hip-Hop",
@@ -66,17 +65,93 @@ var RussianGenreMap = map[string]string{
 	"дабстеп":              "Dubstep",
 }
 
-
-func isRock(s string) bool {
-	lower := strings.ToLower(s)
-	lower = strings.ReplaceAll(lower, "барокко", "")
-	lower = strings.ReplaceAll(lower, "baroque", "")
-	return rockRegex.MatchString(lower)
+var CanonicalGenreMap = map[string]string{
+	"hip-hop":             "Hip-Hop",
+	"hip hop":             "Hip-Hop",
+	"hiphop":              "Hip-Hop",
+	"rap":                 "Rap",
+	"rock":                "Rock",
+	"pop":                 "Pop",
+	"alternative":         "Alternative",
+	"alternative rock":    "Alternative Rock",
+	"indie":               "Indie",
+	"indie rock":          "Indie Rock",
+	"pop-rock":            "Pop-Rock",
+	"pop rock":            "Pop-Rock",
+	"hard rock":           "Hard Rock",
+	"punk":                "Punk",
+	"punk rock":           "Punk Rock",
+	"metal":               "Metal",
+	"heavy metal":         "Heavy Metal",
+	"jazz":                "Jazz",
+	"blues":               "Blues",
+	"electronic":          "Electronic",
+	"dance":               "Dance",
+	"dance music":         "Dance Music",
+	"house":               "House",
+	"techno":              "Techno",
+	"trance":              "Trance",
+	"dubstep":             "Dubstep",
+	"drum and bass":       "Drum and Bass",
+	"drum & bass":         "Drum and Bass",
+	"dnb":                 "Drum and Bass",
+	"phonk":               "Phonk",
+	"drill":               "Drill",
+	"classical":           "Classical",
+	"soundtrack":          "Soundtrack",
+	"ambient":             "Ambient",
+	"disco":               "Disco",
+	"reggae":              "Reggae",
+	"chanson":             "Chanson",
+	"folk":                "Folk",
+	"soul":                "Soul",
+	"funk":                "Funk",
+	"r&b":                 "R&B",
+	"rnb":                 "R&B",
+	"r and b":             "R&B",
+	"k-pop":               "K-Pop",
+	"kpop":                "K-Pop",
+	"j-pop":               "J-Pop",
+	"jpop":                "J-Pop",
+	"lo-fi":               "Lo-Fi",
+	"lofi":                "Lo-Fi",
+	"edm":                 "EDM",
+	"synthpop":            "Synthpop",
+	"synth-pop":           "Synthpop",
+	"russian rock":        "Russian Rock",
+	"russian rap":         "Russian Rap",
+	"russian hip-hop":     "Russian Hip-Hop",
+	"russian pop":         "Russian Pop",
+	"russian chanson":     "Russian Chanson",
 }
 
-func isHipPopRap(s string) bool {
-	lower := strings.ToLower(s)
-	return hipPopRapRegex.MatchString(lower)
+func NormalizeSingleGenre(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return ""
+	}
+	lower := strings.ToLower(trimmed)
+	if canon, ok := CanonicalGenreMap[lower]; ok {
+		return canon
+	}
+	replaced := hipHopRegex.ReplaceAllString(trimmed, "Hip-Hop")
+	if replaced != trimmed {
+		return replaced
+	}
+	if strings.ToLower(trimmed) == trimmed && !cyrillicRegex.MatchString(trimmed) {
+		words := strings.Fields(trimmed)
+		for i, w := range words {
+			subWords := strings.Split(w, "-")
+			for j, sw := range subWords {
+				if len(sw) > 0 {
+					subWords[j] = strings.ToUpper(sw[:1]) + sw[1:]
+				}
+			}
+			words[i] = strings.Join(subWords, "-")
+		}
+		return strings.Join(words, " ")
+	}
+	return trimmed
 }
 
 // GenreCheckResult содержит результат анализа тега жанра.
@@ -103,53 +178,6 @@ func AnalyzeAndNormalizeGenre(rawGenre string) GenreCheckResult {
 
 	hasCyrillic := cyrillicRegex.MatchString(trimmed)
 
-	// 1. Rock / Рок (барокко исключается)
-	if isRock(trimmed) {
-		isCanonical := (trimmed == "Rock")
-		return GenreCheckResult{
-			OriginalGenre:  trimmed,
-			HasCyrillic:    hasCyrillic,
-			IsNonCanonical: !isCanonical,
-			IsAutoFixable:  !isCanonical,
-			CanonicalGenre: "Rock",
-		}
-	}
-
-	// 2. Hip-Hop / Pop / Rap
-	if isHipPopRap(trimmed) {
-		isCanonical := (trimmed == "Hip-Hop")
-		return GenreCheckResult{
-			OriginalGenre:  trimmed,
-			HasCyrillic:    hasCyrillic,
-			IsNonCanonical: !isCanonical,
-			IsAutoFixable:  !isCanonical,
-			CanonicalGenre: "Hip-Hop",
-		}
-	}
-
-	// 3. Прямое совпадение всей строки (для устойчивых составных жанров)
-	trimmedLower := strings.ToLower(trimmed)
-	trimmedSingle := strings.ReplaceAll(trimmedLower, "\\\\", "\\")
-	if directEn, ok := RussianGenreMap[trimmedLower]; ok {
-		return GenreCheckResult{
-			OriginalGenre:  trimmed,
-			HasCyrillic:    hasCyrillic,
-			IsNonCanonical: true,
-			IsAutoFixable:  true,
-			CanonicalGenre: directEn,
-		}
-	}
-	if directEn, ok := RussianGenreMap[trimmedSingle]; ok {
-		return GenreCheckResult{
-			OriginalGenre:  trimmed,
-			HasCyrillic:    hasCyrillic,
-			IsNonCanonical: true,
-			IsAutoFixable:  true,
-			CanonicalGenre: directEn,
-		}
-	}
-
-	// 4. Покомпонентная нормализация
 	parts := genreSplitRegex.Split(trimmed, -1)
 	var normalizedParts []string
 	seen := make(map[string]bool)
@@ -165,21 +193,30 @@ func AnalyzeAndNormalizeGenre(rawGenre string) GenreCheckResult {
 			subParts := genreSplitRegex.Split(en, -1)
 			for _, sp := range subParts {
 				spClean := strings.TrimSpace(sp)
-				if spClean != "" && !seen[strings.ToLower(spClean)] {
-					seen[strings.ToLower(spClean)] = true
-					normalizedParts = append(normalizedParts, spClean)
+				if spClean == "" {
+					continue
+				}
+				norm := NormalizeSingleGenre(spClean)
+				lowerNorm := strings.ToLower(norm)
+				if !seen[lowerNorm] {
+					seen[lowerNorm] = true
+					normalizedParts = append(normalizedParts, norm)
 				}
 			}
 		} else if !cyrillicRegex.MatchString(sub) {
-			if !seen[subLower] {
-				seen[subLower] = true
-				normalizedParts = append(normalizedParts, sub)
+			norm := NormalizeSingleGenre(sub)
+			lowerNorm := strings.ToLower(norm)
+			if !seen[lowerNorm] {
+				seen[lowerNorm] = true
+				normalizedParts = append(normalizedParts, norm)
 			}
 		} else {
 			allMapped = false
-			if !seen[subLower] {
-				seen[subLower] = true
-				normalizedParts = append(normalizedParts, sub)
+			norm := NormalizeSingleGenre(sub)
+			lowerNorm := strings.ToLower(norm)
+			if !seen[lowerNorm] {
+				seen[lowerNorm] = true
+				normalizedParts = append(normalizedParts, norm)
 			}
 		}
 	}

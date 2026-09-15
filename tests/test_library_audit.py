@@ -67,16 +67,16 @@ def populated_audit_service(tmp_path: Path):
                 lyrics_status="lrc",
             ),
         },
-        # 3. Дубликат трека: Тот же исполнитель и песня в другой папке с той же длительностью
-        "Singles/Artist A - Track Without Lyrics (Radio Edit).mp3": {
+        # 3. Дубликат трека в рамках того же релиза
+        "AlbumA/01. Track Without Lyrics (1).mp3": {
             "mtime": 1000.0,
             "size": 5000100,
             "track": TrackTags(
-                path="Singles/Artist A - Track Without Lyrics (Radio Edit).mp3",
+                path="AlbumA/01. Track Without Lyrics (1).mp3",
                 track_number=1,
                 title="Track Without Lyrics",
                 artist="Artist A",
-                album="Singles",
+                album="AlbumA",
                 album_artist="Artist A",
                 duration=181,  # ±1 секунда разницы
                 has_cover=False,
@@ -748,5 +748,241 @@ def test_audit_reorganize_endpoint(authenticated_client: TestClient, tmp_path: P
         authenticated_client.app.dependency_overrides.pop(get_organizer_service, None)
 
 
+@pytest.mark.asyncio
+async def test_duplicate_scoping_strictly_within_release(tmp_path: Path):
+    """Дубликаты треков ищутся ТОЛЬКО в рамках одного релиза (директории)."""
+    sandbox = PathSandbox(tmp_path)
+    audit_svc = LibraryAuditService(music_sandbox=sandbox, tag_service=MagicMock())
+    audit_svc.ensure_index = AsyncMock()
+
+    # Одинаковые треки в РАЗНЫХ альбомах НЕ должны быть дубликатами
+    audit_svc._cache = {
+        "Album One/01. Intro.mp3": {
+            "mtime": 1000.0,
+            "size": 5000000,
+            "track": TrackTags(
+                path="Album One/01. Intro.mp3",
+                track_number=1,
+                title="Intro",
+                artist="Band",
+                album="Album One",
+            ),
+        },
+        "Album Two/01. Intro.mp3": {
+            "mtime": 1000.0,
+            "size": 5000000,
+            "track": TrackTags(
+                path="Album Two/01. Intro.mp3",
+                track_number=1,
+                title="Intro",
+                artist="Band",
+                album="Album Two",
+            ),
+        },
+    }
+
+    result = await audit_svc.find_duplicates()
+    assert result.total_duplicate_files == 0
+    assert len(result.groups) == 0
+
+    # Два одинаковых трека в ОДНОМ альбоме ДОЛЖНЫ быть найдены
+    audit_svc._cache["Album One/01. Intro (2).mp3"] = {
+        "mtime": 1000.0,
+        "size": 4900000,
+        "track": TrackTags(
+            path="Album One/01. Intro (2).mp3",
+            track_number=1,
+            title="Intro",
+            artist="Band",
+            album="Album One",
+        ),
+    }
+
+    result2 = await audit_svc.find_duplicates()
+    assert result2.total_duplicate_files == 1
+    assert len(result2.groups) == 1
+    assert len(result2.groups[0].tracks) == 2
+    assert result2.groups[0].album_dir == "Album One"
 
 
+def test_fix_duplicate_group_and_all_endpoints(authenticated_client: TestClient, tmp_path: Path):
+    """Проверка POST /files/audit/duplicates/fix и POST /files/audit/duplicates/fix-all."""
+    sandbox = PathSandbox(tmp_path)
+    album_dir = tmp_path / "My Album"
+    album_dir.mkdir(parents=True, exist_ok=True)
+
+    good_track = album_dir / "01. Song.mp3"
+    dup_track = album_dir / "01. Song (2).mp3"
+    dup_lrc = album_dir / "01. Song (2).lrc"
+
+    good_track.write_bytes(b"\xff\xfb\x90\x00" + b"\x00" * 500)
+    dup_track.write_bytes(b"\xff\xfb\x90\x00" + b"\x00" * 300)
+    dup_lrc.write_text("[00:01.00] test lyrics", encoding="utf-8")
+
+    from app.services.tag_service import TagService
+    tag_svc = TagService(music_sandbox=sandbox)
+    audit_svc = LibraryAuditService(music_sandbox=sandbox, tag_service=tag_svc)
+
+    audit_svc._cache = {
+        "My Album/01. Song.mp3": {
+            "mtime": 1000.0,
+            "size": 504,
+            "track": TrackTags(
+                path="My Album/01. Song.mp3",
+                track_number=1,
+                title="Song",
+                artist="Artist",
+                album="My Album",
+            ),
+        },
+        "My Album/01. Song (2).mp3": {
+            "mtime": 1000.0,
+            "size": 304,
+            "track": TrackTags(
+                path="My Album/01. Song (2).mp3",
+                track_number=1,
+                title="Song",
+                artist="Artist",
+                album="My Album",
+            ),
+        },
+    }
+    audit_svc.ensure_index = AsyncMock()
+
+    authenticated_client.app.dependency_overrides[get_library_audit_service] = lambda: audit_svc
+    try:
+        # 1. Проверяем fix отдельной группы
+        resp = authenticated_client.post(
+            "/files/audit/duplicates/fix",
+            json={"group_key": "My Album::song", "album_path": "My Album"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["deleted_count"] == 1
+        assert "My Album/01. Song (2).mp3" in data["deleted_files"]
+
+        assert good_track.exists()
+        assert not dup_track.exists()
+        assert not dup_lrc.exists()
+
+        # 2. Создаем еще дубликат для проверки fix-all
+        dup2 = album_dir / "01. Song (copy).mp3"
+        dup2.write_bytes(b"\xff\xfb\x90\x00" + b"\x00" * 200)
+        audit_svc._cache = {
+            "My Album/01. Song.mp3": {
+                "mtime": 1000.0,
+                "size": 504,
+                "track": TrackTags(
+                    path="My Album/01. Song.mp3",
+                    track_number=1,
+                    title="Song",
+                    artist="Artist",
+                    album="My Album",
+                ),
+            },
+            "My Album/01. Song (copy).mp3": {
+                "mtime": 1000.0,
+                "size": 204,
+                "track": TrackTags(
+                    path="My Album/01. Song (copy).mp3",
+                    track_number=1,
+                    title="Song",
+                    artist="Artist",
+                    album="My Album",
+                ),
+            },
+        }
+
+        resp_all = authenticated_client.post("/files/audit/duplicates/fix-all")
+        assert resp_all.status_code == 200
+        data_all = resp_all.json()
+        assert data_all["success"] is True
+        assert data_all["deleted_count"] == 1
+        assert not dup2.exists()
+        assert good_track.exists()
+    finally:
+        authenticated_client.app.dependency_overrides.pop(get_library_audit_service, None)
+
+
+def test_incomplete_album_editor_data_endpoint(authenticated_client: TestClient, tmp_path: Path):
+    """Проверка GET /files/audit/incomplete-albums/editor-data."""
+    from app.services.tag_service import TagService
+    music_dir = tmp_path / "music_test"
+    tmp_downloads_dir = tmp_path / "tmp_test"
+    music_dir.mkdir(parents=True, exist_ok=True)
+    tmp_downloads_dir.mkdir(parents=True, exist_ok=True)
+
+    music_sandbox = PathSandbox(music_dir)
+    tmp_sandbox = PathSandbox(tmp_downloads_dir)
+    tag_svc = TagService(music_sandbox=music_sandbox)
+    audit_svc = LibraryAuditService(
+        music_sandbox=music_sandbox,
+        tag_service=tag_svc,
+        tmp_sandbox=tmp_sandbox,
+    )
+
+    # 1. Трек в библиотеке
+    album_dir = music_dir / "Pink Floyd" / "The Wall"
+    album_dir.mkdir(parents=True)
+    lib_track = album_dir / "01. In the Flesh.mp3"
+    lib_track.write_bytes(b"\xff\xfb\x90\x00" + b"\x00" * 300)
+    cover_file = album_dir / "cover.jpg"
+    cover_file.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 50)
+
+    # 2. Дозагруженный трек в tmp_downloads/{job_id}/converted/
+    job_id = "job_123"
+    job_converted = tmp_downloads_dir / job_id / "converted"
+    job_converted.mkdir(parents=True)
+    tmp_track = job_converted / "02. The Thin Ice.mp3"
+    tmp_track.write_bytes(b"\xff\xfb\x90\x00" + b"\x00" * 300)
+
+    tag_svc.write_tags(
+        lib_track,
+        TrackTags(
+            path="Pink Floyd/The Wall/01. In the Flesh.mp3",
+            title="In the Flesh?",
+            artist="Pink Floyd",
+            album="The Wall",
+            album_artist="Pink Floyd",
+            track_number=1,
+            track_total=2,
+            year=1979,
+            genre="Progressive Rock",
+        ),
+    )
+    tag_svc.write_tags(
+        tmp_track,
+        TrackTags(
+            path="02. The Thin Ice.mp3",
+            title="The Thin Ice",
+            artist="Pink Floyd",
+            album="The Wall",
+            album_artist="Pink Floyd",
+            track_number=2,
+            track_total=2,
+            year=1979,
+            genre="Progressive Rock",
+        ),
+    )
+
+    authenticated_client.app.dependency_overrides[get_library_audit_service] = lambda: audit_svc
+    try:
+        resp = authenticated_client.get(
+            f"/files/audit/incomplete-albums/editor-data?path=Pink Floyd/The Wall&job_id={job_id}"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["album"]["album"] == "The Wall"
+        assert data["album"]["album_artist"] == "Pink Floyd"
+        assert data["has_cover"] is True
+        assert len(data["tracks"]) == 2
+        # Проверяем правильность источников и сортировку
+        assert data["tracks"][0]["track_number"] == 1
+        assert data["tracks"][0]["path"] == "Pink Floyd/The Wall/01. In the Flesh.mp3"
+        assert data["tracks"][1]["track_number"] == 2
+        assert data["tracks"][1]["path"] == f"tmp_downloads/{job_id}/converted/02. The Thin Ice.mp3"
+        assert data["missing_count"] == 1
+        assert data["backfilled_count"] == 1
+    finally:
+        authenticated_client.app.dependency_overrides.pop(get_library_audit_service, None)

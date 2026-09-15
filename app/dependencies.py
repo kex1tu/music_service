@@ -253,6 +253,7 @@ def get_library_audit_service(
     deezer_client: DeezerClientDep,
     native_scanner: NativeScannerDep,
     settings: SettingsDep,
+    tmp_sandbox: TmpSandboxDep,
 ) -> LibraryAuditService:
     """Провайдер синглтона сервиса аудита и глобального поиска медиатеки."""
     global _library_audit_service
@@ -264,6 +265,7 @@ def get_library_audit_service(
             deezer_client=deezer_client,
             native_scanner=native_scanner,
             db_path=settings.DATABASE_PATH,
+            tmp_sandbox=tmp_sandbox,
         )
     return _library_audit_service
 

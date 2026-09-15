@@ -28,6 +28,7 @@ function libraryAuditComponent() {
         invalidPaths: [],
         nonEnGenres: [],
         incompleteLoading: false,
+        isFixingDuplicates: false,
         expandedAlbums: {},
         catalogMatchLoading: {},
         downloadingTracks: {},
@@ -48,6 +49,22 @@ function libraryAuditComponent() {
             // Слушаем событие подтверждения реорганизации
             window.addEventListener('confirm-reorganize-library', () => {
                 this.reorganizeLibrary();
+            });
+
+            // Слушаем переход к сверке альбома из файлового менеджера
+            window.addEventListener('match-album-audit', (e) => {
+                const path = e?.detail?.path;
+                if (path) {
+                    this.activeSubTab = 'incomplete';
+                    this.$nextTick(async () => {
+                        const alb = this.incompleteAlbums.find((a) => a.path === path) || {
+                            path,
+                            album: path.split('/').pop() || path,
+                        };
+                        this.expandedAlbums[path] = true;
+                        await this.matchCatalog(alb);
+                    });
+                }
             });
 
             // Слушаем событие обновления при переключении на вкладку или клике
@@ -315,11 +332,6 @@ function libraryAuditComponent() {
             let trackUrls = null;
             if (directUrl) {
                 trackUrls = [directUrl];
-            } else if (!trackNumber && currentAlbum.missing_tracks && currentAlbum.missing_tracks.length > 0) {
-                const availableUrls = currentAlbum.missing_tracks.map(t => t.deezer_url).filter(Boolean);
-                if (availableUrls.length > 0) {
-                    trackUrls = availableUrls;
-                }
             }
 
             const trackKey = directUrl || (trackNumber ? `track_${trackNumber}` : null);
@@ -510,6 +522,95 @@ function libraryAuditComponent() {
                 Alpine.store('app').toast('Сбой сетевого запроса при исправлении путей', 'error');
             } finally {
                 this.isFixingPaths = false;
+            }
+        },
+
+        getBackfillJobForAlbum(albumPath) {
+            const norm = (albumPath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+            return (Alpine.store('app').queue?.jobs || []).find((j) => {
+                if (!j.is_backfill || !j.target_album_path) return false;
+                const jNorm = j.target_album_path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+                return jNorm === norm && j.status === 'READY';
+            });
+        },
+
+        async openBackfillJob(albumPath) {
+            const job = this.getBackfillJobForAlbum(albumPath);
+            if (job) {
+                await Alpine.store('app').queue.openBackfillJobInTagEditor(job);
+            } else {
+                try {
+                    const res = await fetch(`/files/audit/incomplete-albums/editor-data?path=${encodeURIComponent(albumPath)}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        Alpine.store('app').openTagEditor(data);
+                    }
+                } catch (e) {
+                    Alpine.store('app').toast('Не удалось открыть релиз в редакторе тегов', 'error');
+                }
+            }
+        },
+
+        async fixDuplicateGroup(grp) {
+            if (grp._isFixing) return;
+            grp._isFixing = true;
+            Alpine.store('app').toast(`Удаление дубликатов для "${grp.artist} — ${grp.title}"...`, 'info');
+            try {
+                const res = await fetch('/files/audit/duplicates/fix', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ group_key: grp.key, album_path: grp.album_dir || null }),
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    Alpine.store('app').toast(`Успешно удалено дубликатов: ${data.deleted_count}`, 'success');
+                    await this.loadDuplicates();
+                    await this.loadSummary();
+                    window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
+                } else {
+                    let msg = 'Ошибка при удалении дубликатов';
+                    try {
+                        const err = await res.json();
+                        if (err && err.detail) msg = err.detail;
+                    } catch (_) {}
+                    Alpine.store('app').toast(msg, 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                Alpine.store('app').toast('Сетевая ошибка при удалении дубликатов', 'error');
+            } finally {
+                grp._isFixing = false;
+            }
+        },
+
+        async fixAllDuplicates() {
+            if (this.isFixingDuplicates) return;
+            this.isFixingDuplicates = true;
+            Alpine.store('app').toast('Удаление всех дубликатов в медиатеке...', 'info');
+            try {
+                const res = await fetch('/files/audit/duplicates/fix-all', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    Alpine.store('app').toast(`Успешно удалено избыточных файлов: ${data.deleted_count}`, 'success');
+                    await this.loadDuplicates();
+                    await this.loadSummary();
+                    window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
+                } else {
+                    let msg = 'Ошибка при удалении дубликатов';
+                    try {
+                        const err = await res.json();
+                        if (err && err.detail) msg = err.detail;
+                    } catch (_) {}
+                    Alpine.store('app').toast(msg, 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                Alpine.store('app').toast('Сетевая ошибка при удалении всех дубликатов', 'error');
+            } finally {
+                this.isFixingDuplicates = false;
             }
         },
     };

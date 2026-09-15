@@ -184,7 +184,7 @@ def test_auto_retag_genres_endpoint(auth_files_client: TestClient, temp_storage:
     items = resp_list.json()
     assert len(items) == 1
     assert items[0]["current_genre"] == r"Поп\\Рок"
-    assert items[0]["canonical_genre"] == "Rock"
+    assert items[0]["canonical_genre"] == r"Pop\\Rock"
 
     # 2. Выполняем автоперезапись через POST /files/audit/retag-genres
     resp_retag = auth_files_client.post("/files/audit/retag-genres")
@@ -195,7 +195,7 @@ def test_auto_retag_genres_endpoint(auth_files_client: TestClient, temp_storage:
 
     # 3. Проверяем теги на диске
     updated_tags = tag_svc.read_tags(t1)
-    assert updated_tags.genre == "Rock"
+    assert updated_tags.genre == r"Pop\\Rock"
 
     # 4. Проверяем, что после перезаписи в GET /files/audit/non-en-genres список пуст
     resp_list_after = auth_files_client.get("/files/audit/non-en-genres")

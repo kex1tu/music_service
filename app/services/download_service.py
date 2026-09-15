@@ -47,10 +47,23 @@ ANSI_ESCAPE_REGEX = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 class DownloadJob:
     """Представление отдельной задачи на скачивание и конвертацию релиза."""
 
-    def __init__(self, job_id: str, url: str, source: str) -> None:
+    def __init__(
+        self,
+        job_id: str,
+        url: str,
+        source: str,
+        target_album_path: str | None = None,
+        is_backfill: bool = False,
+        album_title: str | None = None,
+        artist_name: str | None = None,
+    ) -> None:
         self.id = job_id
         self.url = url
         self.source = source
+        self.target_album_path = target_album_path
+        self.is_backfill = is_backfill
+        self.album_title = album_title
+        self.artist_name = artist_name
         self.status = JobStatus.QUEUED
         self.progress: float = 0.0
         self.current_step: str = "Задача ожидает очереди"
@@ -74,6 +87,10 @@ class DownloadJob:
             total_tracks=len(self.tracks),
             completed_tracks=self.completed_tracks,
             error=self.error,
+            target_album_path=self.target_album_path,
+            is_backfill=self.is_backfill,
+            album_title=self.album_title,
+            artist_name=self.artist_name,
             created_at=self.created_at.isoformat(),
         )
 
@@ -230,18 +247,69 @@ class DownloadService:
             tracks=job.tracks,
         )
 
-    async def create_job(self, url: str, source: str = "auto") -> DownloadJob:
+    async def create_job(
+        self,
+        url: str,
+        source: str = "auto",
+        target_album_path: str | None = None,
+        is_backfill: bool = False,
+        album_title: str | None = None,
+        artist_name: str | None = None,
+    ) -> DownloadJob:
         """Создает новую задачу загрузки, регистрирует ее и запускает фоновый конвейер."""
         detected_source = (
             self._resolver.detect_source(url) if source == "auto" else source
         )
         job_id = uuid.uuid4().hex
-        job = DownloadJob(job_id=job_id, url=url, source=detected_source)
+        job = DownloadJob(
+            job_id=job_id,
+            url=url,
+            source=detected_source,
+            target_album_path=target_album_path,
+            is_backfill=is_backfill,
+            album_title=album_title,
+            artist_name=artist_name,
+        )
 
         async with self._lock:
             self._jobs[job_id] = job
 
         # Запускаем фоновый конвейер
+        asyncio.create_task(self._execute_pipeline(job_id))
+        return job
+
+    async def create_backfill_job(
+        self,
+        target_album_path: str,
+        album_title: str,
+        artist_name: str,
+        tracks: list[ResolvedTrack],
+        cover_url: str | None = None,
+    ) -> DownloadJob:
+        """Создает объединенную задачу дозагрузки недостающих треков для существующего альбома."""
+        if not tracks:
+            raise DownloadError("Нет треков для дозагрузки")
+
+        job_id = uuid.uuid4().hex
+        job = DownloadJob(
+            job_id=job_id,
+            url=f"backfill://{target_album_path}",
+            source="backfill",
+            target_album_path=target_album_path,
+            is_backfill=True,
+            album_title=album_title,
+            artist_name=artist_name,
+        )
+        job.tracks = tracks
+        job.album_metadata = {
+            "album": album_title,
+            "album_artist": artist_name,
+            "cover_url": cover_url,
+        }
+
+        async with self._lock:
+            self._jobs[job_id] = job
+
         asyncio.create_task(self._execute_pipeline(job_id))
         return job
 
@@ -362,9 +430,30 @@ class DownloadService:
                     await self._execute_torrent_pipeline(job, raw_dir, converted_dir)
                     return
 
-                album_meta, tracks = await self._resolver.resolve(job.url, job.source)
-                job.album_metadata = album_meta
-                job.tracks = tracks
+                if job.is_backfill:
+                    album_meta = job.album_metadata
+                    tracks = job.tracks
+                    for t in tracks:
+                        if not t.audio_source_url or "deezer.com" in t.audio_source_url:
+                            try:
+                                matched_url = await self._resolver._matcher.find_best_match(
+                                    title=t.title,
+                                    artist=t.artist.replace("\\\\", " "),
+                                    duration=t.duration,
+                                    cobalt_fallback_url=self._resolver._cobalt_api_url,
+                                )
+                                if matched_url:
+                                    t.audio_source_url = matched_url
+                                else:
+                                    t.status = "error"
+                                    t.error = "Не удалось найти аудиопоток"
+                            except Exception as exc:  # noqa: BLE001
+                                t.status = "error"
+                                t.error = str(exc)
+                else:
+                    album_meta, tracks = await self._resolver.resolve(job.url, job.source)
+                    job.album_metadata = album_meta
+                    job.tracks = tracks
 
                 if not tracks:
                     raise DownloadError("Источник не содержит аудиодорожек для загрузки")
