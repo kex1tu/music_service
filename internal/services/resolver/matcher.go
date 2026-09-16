@@ -78,6 +78,15 @@ func (m *AudioMatcher) FindBestMatch(ctx context.Context, title, artist string, 
 	}
 
 	// Step 2: YouTube Search Fallback
+	return m.FindYouTubeMatch(ctx, title, artist, duration)
+}
+
+// FindYouTubeMatch specifically searches YouTube streams with scoring.
+func (m *AudioMatcher) FindYouTubeMatch(ctx context.Context, title, artist string, duration int) (string, error) {
+	cleanArt := CleanQueryText(artist)
+	cleanTit := CleanQueryText(title)
+	cleanTitFull := CleanQueryTextFull(title)
+
 	queries := []string{}
 	if cleanTitFull != "" && cleanTitFull != cleanTit {
 		queries = append(queries, fmt.Sprintf("ytsearch5:%s %s", cleanArt, cleanTitFull))

@@ -312,6 +312,21 @@ func (s *Service) processTracksPipeline(
 				job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
 			})
 			if dErr != nil {
+				// Fallback to YouTube if initial stream (e.g. SoundCloud DRM / 403) failed
+				if s.resolver != nil && s.resolver.Matcher() != nil && !strings.Contains(track.AudioSourceURL, "youtube.com") && !strings.Contains(track.AudioSourceURL, "youtu.be") {
+					job.SetCurrentStep(fmt.Sprintf("Резервный поиск YouTube %d/%d: %s", trackIdx, total, track.Title))
+					if ytURL, ytErr := s.resolver.Matcher().FindYouTubeMatch(ctx, track.Title, track.Artist, track.Duration); ytErr == nil && ytURL != "" {
+						job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+							tr.AudioSourceURL = ytURL
+						})
+						track.AudioSourceURL = ytURL
+						rawAudioFile, dErr = s.downloadRawStream(ctx, ytURL, rawOutTemplate, func(p float64) {
+							job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
+						})
+					}
+				}
+			}
+			if dErr != nil {
 				errStr := dErr.Error()
 				job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
 					tr.Status = "error"
