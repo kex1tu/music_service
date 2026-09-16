@@ -163,11 +163,29 @@ func (s *Service) runBackfillPipeline(jobID, deezerAlbumID string, trackURLs []s
 	if meta == nil {
 		meta = &resolver.ReleaseMetadata{}
 	}
-	if job.AlbumTitle != nil && *job.AlbumTitle != "" && meta.AlbumTitle == "" {
-		meta.AlbumTitle = *job.AlbumTitle
+	targetArtist := ""
+	if job.ArtistName != nil && *job.ArtistName != "" {
+		targetArtist = strings.TrimSpace(*job.ArtistName)
+		meta.AlbumArtist = targetArtist
 	}
-	if job.ArtistName != nil && *job.ArtistName != "" && meta.AlbumArtist == "" {
-		meta.AlbumArtist = *job.ArtistName
+	targetAlbum := ""
+	if job.AlbumTitle != nil && *job.AlbumTitle != "" {
+		targetAlbum = strings.TrimSpace(*job.AlbumTitle)
+		meta.AlbumTitle = targetAlbum
+	}
+
+	for i := range tracks {
+		if targetArtist != "" {
+			if tracks[i].Artist == "" || tracks[i].Artist == meta.AlbumArtist || resolver.AreArtistsEquivalent(tracks[i].Artist, targetArtist) || resolver.AreArtistsEquivalent(tracks[i].AlbumArtist, targetArtist) {
+				tracks[i].Artist = targetArtist
+			} else if strings.HasPrefix(strings.ToLower(tracks[i].Artist), strings.ToLower(meta.AlbumArtist)) {
+				tracks[i].Artist = strings.Replace(tracks[i].Artist, meta.AlbumArtist, targetArtist, 1)
+			}
+			tracks[i].AlbumArtist = targetArtist
+		}
+		if targetAlbum != "" && (tracks[i].Album == "" || resolver.CleanQueryText(tracks[i].Album) == resolver.CleanQueryText(targetAlbum)) {
+			tracks[i].Album = targetAlbum
+		}
 	}
 
 	// Create temporary working directories inside TMP_DIR sandbox
@@ -356,17 +374,30 @@ func (s *Service) processTracksPipeline(
 			// Write ID3v2.4 tags
 			job.SetStepAndStatus(fmt.Sprintf("Запись ID3v2.4 тегов %d/%d: %s", trackIdx, total, track.Title), StatusTagging)
 
+			art := strings.TrimSpace(track.Artist)
+			albArt := strings.TrimSpace(track.AlbumArtist)
 			alb := strings.TrimSpace(track.Album)
 			if (alb == "" || strings.EqualFold(alb, "single") || strings.EqualFold(alb, "singles")) && strings.TrimSpace(track.Title) != "" {
 				alb = strings.TrimSpace(track.Title)
 			}
 
+			if job.IsBackfill && job.ArtistName != nil && *job.ArtistName != "" {
+				targetArt := strings.TrimSpace(*job.ArtistName)
+				if art == "" || resolver.AreArtistsEquivalent(art, targetArt) {
+					art = targetArt
+				}
+				albArt = targetArt
+			}
+			if job.IsBackfill && job.AlbumTitle != nil && *job.AlbumTitle != "" {
+				alb = strings.TrimSpace(*job.AlbumTitle)
+			}
+
 			tagData := id3.TrackTags{
 				Path:        mp3Path,
 				Title:       track.Title,
-				Artist:      track.Artist,
+				Artist:      art,
 				Album:       alb,
-				AlbumArtist: track.AlbumArtist,
+				AlbumArtist: albArt,
 				TrackNumber: track.TrackNumber,
 				DiscNumber:  track.DiscNumber,
 				Duration:    float64(track.Duration),

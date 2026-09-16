@@ -231,6 +231,42 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 	var missingNums []int
 	presentCount := 0
 
+	// Determine canonical local artist & album
+	canonicalArtist := dbArtist
+	canonicalAlbum := dbAlbum
+
+	if canonicalArtist == "" || canonicalAlbum == "" {
+		for _, lt := range localTracks {
+			if fullPath, err := h.musicSandbox.Resolve(lt.Path, false); err == nil {
+				if t, err := id3.ReadTags(fullPath, lt.Path); err == nil {
+					if canonicalArtist == "" {
+						if t.AlbumArtist != "" {
+							canonicalArtist = t.AlbumArtist
+						} else if t.Artist != "" {
+							canonicalArtist = t.Artist
+						}
+					}
+					if canonicalAlbum == "" && t.Album != "" {
+						canonicalAlbum = t.Album
+					}
+					if canonicalArtist != "" && canonicalAlbum != "" {
+						break
+					}
+				}
+			}
+		}
+	}
+
+	finalArtist := matchedAlbum.Artist.Name
+	if canonicalArtist != "" && (finalArtist == "" || resolver.AreArtistsEquivalent(finalArtist, canonicalArtist)) {
+		finalArtist = canonicalArtist
+	}
+
+	finalAlbumTitle := matchedAlbum.Title
+	if canonicalAlbum != "" && (finalAlbumTitle == "" || resolver.CleanQueryText(finalAlbumTitle) == resolver.CleanQueryText(canonicalAlbum)) {
+		finalAlbumTitle = canonicalAlbum
+	}
+
 	if matchedAlbum.Tracks != nil {
 		for i, t := range matchedAlbum.Tracks.Data {
 			pos := t.TrackPosition
@@ -307,8 +343,10 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 			}
 
 			tArtist := t.Artist.Name
-			if tArtist == "" {
-				tArtist = matchedAlbum.Artist.Name
+			if tArtist == "" || tArtist == matchedAlbum.Artist.Name || resolver.AreArtistsEquivalent(tArtist, finalArtist) {
+				tArtist = finalArtist
+			} else if matchedAlbum.Artist.Name != "" && strings.HasPrefix(strings.ToLower(tArtist), strings.ToLower(matchedAlbum.Artist.Name)) {
+				tArtist = strings.Replace(tArtist, matchedAlbum.Artist.Name, finalArtist, 1)
 			}
 
 			discNum := t.DiskNumber
@@ -386,8 +424,8 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{
 		"path":                  albumPath,
-		"album":                 matchedAlbum.Title,
-		"artist":                matchedAlbum.Artist.Name,
+		"album":                 finalAlbumTitle,
+		"artist":                finalArtist,
 		"year":                  year,
 		"has_cover":             cover != "",
 		"cover_url":             cover,

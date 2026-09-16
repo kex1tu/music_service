@@ -157,3 +157,27 @@ func TestCalculateScore_RemixMatch(t *testing.T) {
 		t.Errorf("expected score >= 70.0 for remix match, got %.1f", remixScore)
 	}
 }
+
+func TestAreArtistsEquivalent(t *testing.T) {
+	tests := []struct {
+		a    string
+		b    string
+		want bool
+	}{
+		{"Макс Корж", "Max Korzh", true},
+		{"Макс Корж", "Maks Korzh", true},
+		{"Max Korzh", "Макс Корж", true},
+		{"Lil Peep", "lil peep", true},
+		{"1.Kla$", "1.Kla$", true},
+		{"Макс Корж", "Oxxxymiron", false},
+		{"Lil Peep", "Lil Pump", false},
+	}
+
+	for _, tt := range tests {
+		got := AreArtistsEquivalent(tt.a, tt.b)
+		if got != tt.want {
+			t.Errorf("AreArtistsEquivalent(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
+

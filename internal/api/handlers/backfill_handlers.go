@@ -9,13 +9,15 @@ import (
 	"strings"
 
 	"music-manager/internal/id3"
+	"music-manager/internal/services/resolver"
 )
 
 func (h *FileHandler) BackfillEditorData(w http.ResponseWriter, r *http.Request) {
 	albumPath := r.URL.Query().Get("path")
 	jobID := r.URL.Query().Get("job_id")
 
-	var tracks []id3.TrackTags
+	var localTracks []id3.TrackTags
+	var backfillTracks []id3.TrackTags
 
 	// 1. Read existing library tracks
 	if albumPath != "" {
@@ -26,10 +28,71 @@ func (h *FileHandler) BackfillEditorData(w http.ResponseWriter, r *http.Request)
 					itemRel := filepath.Join(albumPath, e.Name())
 					itemFull := filepath.Join(fullPath, e.Name())
 					if t, err := id3.ReadTags(itemFull, itemRel); err == nil {
-						tracks = append(tracks, *t)
+						localTracks = append(localTracks, *t)
 					}
 				}
 			}
+		}
+	}
+
+	// Determine canonical artist and album from existing library files or database
+	canonicalArtist := ""
+	canonicalAlbum := ""
+	canonicalGenre := ""
+	canonicalYear := 0
+
+	for _, t := range localTracks {
+		if canonicalArtist == "" {
+			if t.AlbumArtist != "" {
+				canonicalArtist = t.AlbumArtist
+			} else if t.Artist != "" {
+				canonicalArtist = t.Artist
+			}
+		}
+		if canonicalAlbum == "" && t.Album != "" {
+			canonicalAlbum = t.Album
+		}
+		if canonicalGenre == "" && t.Genre != "" {
+			canonicalGenre = t.Genre
+		}
+		if canonicalYear == 0 && t.Year > 0 {
+			canonicalYear = t.Year
+		}
+	}
+
+	if canonicalArtist == "" || canonicalAlbum == "" {
+		if albumPath != "" {
+			var dbArtist, dbAlbum string
+			var dbYear int
+			_ = h.database.Conn().QueryRowContext(r.Context(), `
+				SELECT ar.name, al.title, COALESCE(al.year, 0)
+				FROM albums al
+				JOIN artists ar ON al.artist_id = ar.id
+				WHERE al.folder_path = ? OR al.folder_path = ? OR al.title = ?
+				LIMIT 1
+			`, albumPath, filepath.Clean(albumPath), filepath.Base(albumPath)).Scan(&dbArtist, &dbAlbum, &dbYear)
+
+			if canonicalArtist == "" && dbArtist != "" {
+				canonicalArtist = dbArtist
+			}
+			if canonicalAlbum == "" && dbAlbum != "" {
+				canonicalAlbum = dbAlbum
+			}
+			if canonicalYear == 0 && dbYear > 0 {
+				canonicalYear = dbYear
+			}
+		}
+	}
+
+	if canonicalAlbum == "" && albumPath != "" {
+		canonicalAlbum = filepath.Base(albumPath)
+	}
+	if canonicalArtist == "" && albumPath != "" {
+		if parts := strings.Split(canonicalAlbum, " - "); len(parts) >= 2 {
+			canonicalAlbum = strings.TrimSpace(parts[0])
+			canonicalArtist = strings.TrimSpace(parts[1])
+		} else if parent := filepath.Base(filepath.Dir(albumPath)); parent != "" && parent != "." && parent != "/" {
+			canonicalArtist = parent
 		}
 	}
 
@@ -43,12 +106,32 @@ func (h *FileHandler) BackfillEditorData(w http.ResponseWriter, r *http.Request)
 					itemRel := filepath.Join("tmp_downloads", jobID, "converted", e.Name())
 					itemFull := filepath.Join(fullJobDir, e.Name())
 					if t, err := id3.ReadTags(itemFull, itemRel); err == nil {
-						tracks = append(tracks, *t)
+						// Normalize backfilled track artist & album to match canonical local release
+						if canonicalArtist != "" {
+							if t.Artist == "" || t.AlbumArtist == "" || resolver.AreArtistsEquivalent(t.Artist, canonicalArtist) || resolver.AreArtistsEquivalent(t.AlbumArtist, canonicalArtist) {
+								t.Artist = canonicalArtist
+								t.AlbumArtist = canonicalArtist
+							}
+						}
+						if canonicalAlbum != "" {
+							if t.Album == "" || resolver.CleanQueryText(t.Album) == resolver.CleanQueryText(canonicalAlbum) {
+								t.Album = canonicalAlbum
+							}
+						}
+						if canonicalGenre != "" && t.Genre == "" {
+							t.Genre = canonicalGenre
+						}
+						if canonicalYear > 0 && t.Year == 0 {
+							t.Year = canonicalYear
+						}
+						backfillTracks = append(backfillTracks, *t)
 					}
 				}
 			}
 		}
 	}
+
+	tracks := append(localTracks, backfillTracks...)
 
 	// Deterministic sort by DiscNumber ASC, TrackNumber ASC, Title ASC
 	sort.SliceStable(tracks, func(i, j int) bool {
@@ -61,10 +144,10 @@ func (h *FileHandler) BackfillEditorData(w http.ResponseWriter, r *http.Request)
 		return tracks[i].Title < tracks[j].Title
 	})
 
-	albumArtist := ""
-	albumTitle := filepath.Base(albumPath)
-	albumGenre := ""
-	albumYear := 0
+	albumArtist := canonicalArtist
+	albumTitle := canonicalAlbum
+	albumGenre := canonicalGenre
+	albumYear := canonicalYear
 
 	for _, t := range tracks {
 		if t.AlbumArtist != "" && albumArtist == "" {

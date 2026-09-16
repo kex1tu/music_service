@@ -73,3 +73,29 @@ func CleanQueryTextFull(s string) string {
 	s = multiSpaceReg.ReplaceAllString(s, " ")
 	return strings.TrimSpace(s)
 }
+
+// AreArtistsEquivalent checks if two artist names are equivalent (e.g. "Макс Корж" and "Max Korzh", or "Lil Peep" and "lil peep").
+func AreArtistsEquivalent(a, b string) bool {
+	aNorm := strings.ToLower(CleanQueryText(a))
+	bNorm := strings.ToLower(CleanQueryText(b))
+	if aNorm == "" || bNorm == "" {
+		return false
+	}
+	if aNorm == bNorm {
+		return true
+	}
+	for _, vA := range TransliterateArtist(aNorm) {
+		vAClean := strings.ToLower(CleanQueryText(vA))
+		if vAClean == bNorm || vA == bNorm {
+			return true
+		}
+	}
+	for _, vB := range TransliterateArtist(bNorm) {
+		vBClean := strings.ToLower(CleanQueryText(vB))
+		if vBClean == aNorm || vB == aNorm {
+			return true
+		}
+	}
+	return false
+}
+

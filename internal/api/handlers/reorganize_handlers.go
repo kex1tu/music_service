@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -47,6 +48,33 @@ func (h *FileHandler) DownloadMissing(w http.ResponseWriter, r *http.Request) {
 		LIMIT 1
 	`, req.Path, filepath.Clean(req.Path), filepath.Base(req.Path)).Scan(&albumID, &albumTitle, &artistName, &dbDeezerID, &expCount, &presentCount, &totTracks)
 
+	if artistName == "" || albumTitle == "" {
+		if fullPath, err := h.musicSandbox.Resolve(req.Path, false); err == nil {
+			entries, _ := os.ReadDir(fullPath)
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".mp3") {
+					itemRel := filepath.Join(req.Path, e.Name())
+					itemFull := filepath.Join(fullPath, e.Name())
+					if t, err := id3.ReadTags(itemFull, itemRel); err == nil {
+						if artistName == "" {
+							if t.AlbumArtist != "" {
+								artistName = t.AlbumArtist
+							} else if t.Artist != "" {
+								artistName = t.Artist
+							}
+						}
+						if albumTitle == "" && t.Album != "" {
+							albumTitle = t.Album
+						}
+						if artistName != "" && albumTitle != "" {
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
 	if albumTitle == "" {
 		albumTitle = filepath.Base(req.Path)
 	}
@@ -54,6 +82,8 @@ func (h *FileHandler) DownloadMissing(w http.ResponseWriter, r *http.Request) {
 		if parts := strings.Split(albumTitle, " - "); len(parts) >= 2 {
 			albumTitle = strings.TrimSpace(parts[0])
 			artistName = strings.TrimSpace(parts[1])
+		} else if parent := filepath.Base(filepath.Dir(req.Path)); parent != "" && parent != "." && parent != "/" {
+			artistName = parent
 		}
 	}
 

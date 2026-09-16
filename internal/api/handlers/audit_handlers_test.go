@@ -301,3 +301,85 @@ func TestFileHandler_BackfillEditorData(t *testing.T) {
 		t.Errorf("expected album 'Greatest Hits', got %s", resp.Album.Album)
 	}
 }
+
+func TestFileHandler_BackfillEditorData_ArtistNormalization(t *testing.T) {
+	h, _, tmpSb, database, musicDir, tmpDir := setupTestFileHandler(t)
+	defer database.Close()
+
+	// Local album: "Животный мир - Макс Корж" with track 1 tagged as "Макс Корж"
+	localAlbumDir := filepath.Join(musicDir, "Животный мир - Макс Корж")
+	_ = os.MkdirAll(localAlbumDir, 0755)
+	t1Path := filepath.Join(localAlbumDir, "01. Мир моих снов.mp3")
+	_ = os.WriteFile(t1Path, []byte("track 1 audio"), 0644)
+	tags1 := id3.TrackTags{
+		Title:       "Мир моих снов",
+		Artist:      "Макс Корж",
+		AlbumArtist: "Макс Корж",
+		Album:       "Животный мир",
+		TrackNumber: 1,
+		Year:        2012,
+		Genre:       "Hip-Hop",
+	}
+	_ = id3.WriteTags(t1Path, tags1, nil)
+
+	// Backfilled track from Deezer with English transliteration "Max Korzh"
+	jobID := "job-korzh-backfill"
+	jobConvertedDir := filepath.Join(tmpDir, jobID, "converted")
+	_ = os.MkdirAll(jobConvertedDir, 0755)
+
+	t2Path := filepath.Join(jobConvertedDir, "02. Оля.mp3")
+	_ = os.WriteFile(t2Path, []byte("track 2 audio"), 0644)
+	tags2 := id3.TrackTags{
+		Title:       "Оля",
+		Artist:      "Max Korzh",
+		AlbumArtist: "Max Korzh",
+		Album:       "Животный мир",
+		TrackNumber: 2,
+		Year:        2012,
+		Genre:       "Hip-Hop",
+	}
+	_ = id3.WriteTags(t2Path, tags2, nil)
+
+	_ = tmpSb
+
+	req := httptest.NewRequest(http.MethodGet, "/files/audit/incomplete-albums/backfill-editor-data?path=%D0%96%D0%B8%D0%B2%D0%BE%D1%82%D0%BD%D1%8B%D0%B9%20%D0%BC%D0%B8%D1%80%20-%20%D0%9C%D0%B0%D0%BA%D1%81%20%D0%9A%D0%BE%D1%80%D0%B6&job_id="+jobID, nil)
+	w := httptest.NewRecorder()
+	h.BackfillEditorData(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Tracks []id3.TrackTags `json:"tracks"`
+		Album  struct {
+			AlbumArtist string `json:"album_artist"`
+			Album       string `json:"album"`
+		} `json:"album"`
+	}
+
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(resp.Tracks) != 2 {
+		t.Fatalf("expected 2 tracks merged, got %d", len(resp.Tracks))
+	}
+
+	// Verify both tracks and album use canonical "Макс Корж"
+	if resp.Album.AlbumArtist != "Макс Корж" {
+		t.Errorf("expected album artist 'Макс Корж', got %q", resp.Album.AlbumArtist)
+	}
+	if resp.Album.Album != "Животный мир" {
+		t.Errorf("expected album title 'Животный мир', got %q", resp.Album.Album)
+	}
+	for i, tr := range resp.Tracks {
+		if tr.Artist != "Макс Корж" {
+			t.Errorf("track %d artist should be 'Макс Корж', got %q", i+1, tr.Artist)
+		}
+		if tr.AlbumArtist != "Макс Корж" {
+			t.Errorf("track %d album artist should be 'Макс Корж', got %q", i+1, tr.AlbumArtist)
+		}
+	}
+}
+
