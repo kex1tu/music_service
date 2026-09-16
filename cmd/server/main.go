@@ -68,7 +68,7 @@ func main() {
 
 	organizerService := organizer.NewService(musicSandbox, tmpSandbox)
 	lyricsService := lyrics.NewService(musicSandbox)
-	scannerService := scanner.NewScanner(musicSandbox, database)
+	scannerService := scanner.NewScanner(musicSandbox, database, deezerClient)
 
 	// 5. Start background scanner and fsnotify watcher
 	appCtx, appCancel := context.WithCancel(context.Background())
@@ -91,7 +91,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(cfg)
 	downloadHandler := handlers.NewDownloadHandler(downloadService, deezerClient)
 	tagHandler := handlers.NewTagHandler(musicSandbox, tmpSandbox, organizerService, deezerClient)
-	fileHandler := handlers.NewFileHandler(musicSandbox, tmpSandbox, database, downloadService, organizerService, deezerClient)
+	fileHandler := handlers.NewFileHandler(musicSandbox, tmpSandbox, database, downloadService, organizerService, deezerClient, lyricsService)
 	lyricsHandler := handlers.NewLyricsHandler(lyricsService)
 
 	// 7. Initialize Router

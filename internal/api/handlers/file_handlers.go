@@ -1,21 +1,38 @@
 package handlers
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/downloader"
+	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/organizer"
 	"music-manager/internal/services/resolver"
 )
+
+type lyricsBatchState struct {
+	sync.Mutex
+	isRunning    bool
+	total        int
+	current      int
+	found        int
+	failed       int
+	currentTrack string
+	cancel       context.CancelFunc
+}
 
 type FileHandler struct {
 	musicSandbox *sandbox.PathSandbox
@@ -24,6 +41,8 @@ type FileHandler struct {
 	downloader   *downloader.Service
 	organizer    *organizer.Service
 	deezer       *resolver.DeezerClient
+	lyrics       *lyrics.Service
+	lyricsState  lyricsBatchState
 }
 
 func NewFileHandler(
@@ -33,6 +52,7 @@ func NewFileHandler(
 	downloader *downloader.Service,
 	organizer *organizer.Service,
 	deezer *resolver.DeezerClient,
+	lyrics *lyrics.Service,
 ) *FileHandler {
 	return &FileHandler{
 		musicSandbox: musicSandbox,
@@ -41,6 +61,7 @@ func NewFileHandler(
 		downloader:   downloader,
 		organizer:    organizer,
 		deezer:       deezer,
+		lyrics:       lyrics,
 	}
 }
 
@@ -774,13 +795,121 @@ func (h *FileHandler) FixDuplicates(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *FileHandler) FixAllDuplicates(w http.ResponseWriter, r *http.Request) {
-	// Re-run duplicates detection and keep the canonical file for each group
+	type trackRow struct {
+		Path        string
+		Title       string
+		Artist      string
+		Album       string
+		Duration    int
+		Size        int64
+		TrackNumber int
+		Bitrate     int
+	}
+
+	rows, err := h.database.Conn().QueryContext(r.Context(), `
+		SELECT t.file_path, t.title, COALESCE(ar.name, ''), COALESCE(al.title, ''), t.duration, t.file_size, t.track_number, COALESCE(t.bitrate, 0)
+		FROM tracks t
+		LEFT JOIN artists ar ON t.artist_id = ar.id
+		LEFT JOIN albums al ON t.album_id = al.id
+		ORDER BY t.file_path
+	`)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success":       false,
+			"deleted_count": 0,
+			"deleted_files": []string{},
+			"errors":        []string{err.Error()},
+		})
+		return
+	}
+	defer rows.Close()
+
+	groupsMap := make(map[string][]trackRow)
+	for rows.Next() {
+		var tr trackRow
+		var dur, sz, trk, br sqlInt
+		var tit, art, alb sqlStr
+		if err := rows.Scan(&tr.Path, &tit, &art, &alb, &dur, &sz, &trk, &br); err == nil {
+			tr.Title = tit.String
+			tr.Artist = art.String
+			tr.Album = alb.String
+			tr.Duration = int(dur.Int64)
+			tr.Size = sz.Int64
+			tr.TrackNumber = int(trk.Int64)
+			tr.Bitrate = int(br.Int64)
+
+			albumDir := filepath.Dir(tr.Path)
+			cleanTit := strings.ToLower(strings.TrimSpace(id3.CleanTitle(tr.Title, "")))
+			key := fmt.Sprintf("%s::%s", albumDir, cleanTit)
+			groupsMap[key] = append(groupsMap[key], tr)
+		}
+	}
+
+	var deleted []string
+	var errs []string
+
+	for _, trList := range groupsMap {
+		if len(trList) < 2 {
+			continue
+		}
+
+		// Sort to pick canonical track at index 0
+		sort.SliceStable(trList, func(i, j int) bool {
+			aName := strings.ToLower(filepath.Base(trList[i].Path))
+			bName := strings.ToLower(filepath.Base(trList[j].Path))
+
+			aIsDup := strings.Contains(aName, " (1)") || strings.Contains(aName, " (2)") ||
+				strings.Contains(aName, "_dup") || strings.Contains(aName, " copy") || strings.Contains(aName, " - копия")
+			bIsDup := strings.Contains(bName, " (1)") || strings.Contains(bName, " (2)") ||
+				strings.Contains(bName, "_dup") || strings.Contains(bName, " copy") || strings.Contains(bName, " - копия")
+
+			// Non-duplicate naming is preferred
+			if aIsDup != bIsDup {
+				return !aIsDup
+			}
+
+			// Higher bitrate preferred
+			if trList[i].Bitrate != trList[j].Bitrate {
+				return trList[i].Bitrate > trList[j].Bitrate
+			}
+
+			// Larger size preferred
+			if trList[i].Size != trList[j].Size {
+				return trList[i].Size > trList[j].Size
+			}
+
+			// Shorter filename preferred
+			return len(aName) < len(bName)
+		})
+
+		// Keep index 0, delete indices 1..len-1
+		for i := 1; i < len(trList); i++ {
+			p := trList[i].Path
+			fullPath, err := h.musicSandbox.Resolve(p, false)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("invalid path %s: %v", p, err))
+				continue
+			}
+
+			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+				errs = append(errs, fmt.Sprintf("failed to remove %s: %v", p, err))
+			} else {
+				deleted = append(deleted, p)
+				baseNoExt := strings.TrimSuffix(fullPath, filepath.Ext(fullPath))
+				_ = os.Remove(baseNoExt + ".lrc")
+				_ = os.Remove(baseNoExt + ".txt")
+				_ = h.database.DeleteTrack(r.Context(), p)
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"success":       true,
-		"deleted_count": 0,
-		"deleted_files": []string{},
-		"errors":        []string{},
+		"success":       len(errs) == 0,
+		"deleted_count": len(deleted),
+		"deleted_files": deleted,
+		"errors":        errs,
 	})
 }
 
@@ -826,13 +955,103 @@ func (h *FileHandler) NonEnGenres(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *FileHandler) RetagGenres(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.database.Conn().QueryContext(r.Context(), `
+		SELECT t.id, t.file_path, g.id, g.name, COALESCE(g.canonical_en_name, '')
+		FROM tracks t
+		JOIN track_genres tg ON t.id = tg.track_id
+		JOIN genres g ON tg.genre_id = g.id
+		WHERE g.is_valid_en = 0
+		ORDER BY t.file_path
+	`)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success":       false,
+			"updated_count": 0,
+			"total_checked": 0,
+			"items":         []nonEnGenreItem{},
+			"errors":        []string{err.Error()},
+		})
+		return
+	}
+	defer rows.Close()
+
+	type targetItem struct {
+		trackID      int64
+		filePath     string
+		genreID      int64
+		currentGenre string
+		canonical    string
+	}
+	var targets []targetItem
+	for rows.Next() {
+		var it targetItem
+		if err := rows.Scan(&it.trackID, &it.filePath, &it.genreID, &it.currentGenre, &it.canonical); err == nil {
+			targets = append(targets, it)
+		}
+	}
+
+	var updatedItems []nonEnGenreItem
+	var errs []string
+	updatedCount := 0
+
+	for _, t := range targets {
+		canon := t.canonical
+		if canon == "" {
+			normRes := id3.AnalyzeAndNormalizeGenre(t.currentGenre)
+			canon = normRes.CanonicalGenre
+		}
+		if canon == "" {
+			canon = t.currentGenre
+		}
+
+		fullPath, err := h.musicSandbox.Resolve(t.filePath, false)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("invalid path %s: %v", t.filePath, err))
+			continue
+		}
+
+		currentTags, err := id3.ReadTags(fullPath, t.filePath)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("read tags error %s: %v", t.filePath, err))
+			continue
+		}
+
+		currentTags.Genre = canon
+		if err := id3.WriteTags(fullPath, *currentTags, nil); err != nil {
+			errs = append(errs, fmt.Sprintf("write tags error %s: %v", t.filePath, err))
+			continue
+		}
+
+		var canonID int64
+		err = h.database.Conn().QueryRow("SELECT id FROM genres WHERE name = ?", canon).Scan(&canonID)
+		if err == sql.ErrNoRows {
+			res, insErr := h.database.Conn().Exec("INSERT INTO genres (name, is_valid_en, canonical_en_name) VALUES (?, 1, ?)", canon, canon)
+			if insErr == nil {
+				canonID, _ = res.LastInsertId()
+			}
+		}
+		if canonID > 0 {
+			_, _ = h.database.Conn().Exec("UPDATE track_genres SET genre_id = ? WHERE track_id = ? AND genre_id = ?", canonID, t.trackID, t.genreID)
+		}
+		_, _ = h.database.Conn().Exec("UPDATE audit_issues SET is_resolved = 1, is_auto_fixed = 1 WHERE entity_type = 'track' AND entity_id = ? AND issue_type = 'non_en_genre'", t.trackID)
+
+		updatedCount++
+		updatedItems = append(updatedItems, nonEnGenreItem{
+			Path:           t.filePath,
+			CurrentGenre:   t.currentGenre,
+			CanonicalGenre: canon,
+			IsAutoFixed:    true,
+		})
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"success":       true,
-		"updated_count": 0,
-		"total_checked": 0,
-		"items":         []nonEnGenreItem{},
-		"errors":        []string{},
+		"success":       len(errs) == 0,
+		"updated_count": updatedCount,
+		"total_checked": len(targets),
+		"items":         updatedItems,
+		"errors":        errs,
 	})
 }
 
@@ -874,10 +1093,136 @@ func (h *FileHandler) ReorganizeLibrary(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *FileHandler) BatchLyricsFetch(w http.ResponseWriter, r *http.Request) {
+	h.lyricsState.Lock()
+	if h.lyricsState.isRunning {
+		resp := map[string]any{
+			"is_running":    true,
+			"total":         h.lyricsState.total,
+			"current":       h.lyricsState.current,
+			"found":         h.lyricsState.found,
+			"failed":        h.lyricsState.failed,
+			"current_track": h.lyricsState.currentTrack,
+		}
+		h.lyricsState.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	type lyricsJobTrack struct {
+		path     string
+		title    string
+		artist   string
+		album    string
+		duration int
+	}
+
+	rows, err := h.database.Conn().QueryContext(r.Context(), `
+		SELECT t.file_path, t.title, COALESCE(ar.name, ''), COALESCE(al.title, ''), COALESCE(t.duration, 0)
+		FROM tracks t
+		LEFT JOIN artists ar ON t.artist_id = ar.id
+		LEFT JOIN albums al ON t.album_id = al.id
+		WHERE t.lyrics_status = 'none'
+		ORDER BY t.id
+	`)
+	if err != nil {
+		h.lyricsState.Unlock()
+		http.Error(w, `{"error":"failed to query tracks"}`, http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var tracks []lyricsJobTrack
+	for rows.Next() {
+		var tr lyricsJobTrack
+		var dur sql.NullFloat64
+		if err := rows.Scan(&tr.path, &tr.title, &tr.artist, &tr.album, &dur); err == nil {
+			if dur.Valid {
+				tr.duration = int(dur.Float64)
+			}
+			tracks = append(tracks, tr)
+		}
+	}
+
+	if len(tracks) == 0 {
+		h.lyricsState.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"is_running":    false,
+			"total":         0,
+			"current":       0,
+			"found":         0,
+			"failed":        0,
+			"current_track": "",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	h.lyricsState.isRunning = true
+	h.lyricsState.total = len(tracks)
+	h.lyricsState.current = 0
+	h.lyricsState.found = 0
+	h.lyricsState.failed = 0
+	h.lyricsState.currentTrack = ""
+	h.lyricsState.cancel = cancel
+	h.lyricsState.Unlock()
+
+	go func() {
+		defer func() {
+			h.lyricsState.Lock()
+			h.lyricsState.isRunning = false
+			h.lyricsState.currentTrack = ""
+			h.lyricsState.Unlock()
+		}()
+
+		for i, tr := range tracks {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			h.lyricsState.Lock()
+			h.lyricsState.current = i + 1
+			h.lyricsState.currentTrack = fmt.Sprintf("%s - %s", tr.artist, tr.title)
+			h.lyricsState.Unlock()
+
+			if h.lyrics != nil {
+				res, err := h.lyrics.SearchLyrics(ctx, tr.artist, tr.title, tr.album, tr.duration)
+				if err == nil && res != nil && res.Lyrics != "" {
+					saveErr := h.lyrics.SaveLyrics(tr.path, res.Lyrics, "auto")
+					if saveErr == nil {
+						kind := "txt"
+						if res.Synced {
+							kind = "lrc"
+						}
+						_, _ = h.database.Conn().Exec("UPDATE tracks SET lyrics_status = ?, updated_at = CURRENT_TIMESTAMP WHERE file_path = ?", kind, tr.path)
+						_, _ = h.database.Conn().Exec("UPDATE audit_issues SET is_resolved = 1 WHERE entity_type = 'track' AND file_path = ? AND issue_type = 'missing_lyrics'", tr.path)
+
+						h.lyricsState.Lock()
+						h.lyricsState.found++
+						h.lyricsState.Unlock()
+					} else {
+						h.lyricsState.Lock()
+						h.lyricsState.failed++
+						h.lyricsState.Unlock()
+					}
+				} else {
+					h.lyricsState.Lock()
+					h.lyricsState.failed++
+					h.lyricsState.Unlock()
+				}
+			}
+
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"is_running":    false,
-		"total":         0,
+		"is_running":    true,
+		"total":         len(tracks),
 		"current":       0,
 		"found":         0,
 		"failed":        0,
@@ -886,15 +1231,19 @@ func (h *FileHandler) BatchLyricsFetch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *FileHandler) BatchLyricsProgress(w http.ResponseWriter, r *http.Request) {
+	h.lyricsState.Lock()
+	resp := map[string]any{
+		"is_running":    h.lyricsState.isRunning,
+		"total":         h.lyricsState.total,
+		"current":       h.lyricsState.current,
+		"found":         h.lyricsState.found,
+		"failed":        h.lyricsState.failed,
+		"current_track": h.lyricsState.currentTrack,
+	}
+	h.lyricsState.Unlock()
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"is_running":    false,
-		"total":         0,
-		"current":       0,
-		"found":         0,
-		"failed":        0,
-		"current_track": "",
-	})
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {

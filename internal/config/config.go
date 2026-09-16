@@ -25,8 +25,6 @@ type Config struct {
 	SessionTTL             int
 	SessionCookieSecure    bool
 	MaxConcurrentDownloads int
-	GeniusAPIToken         string
-	CobaltAPIURL           string
 	CookiesFile            string
 	Debug                  bool
 }
@@ -59,8 +57,6 @@ func Load() (*Config, error) {
 		SessionTTL:             sessionTTL,
 		SessionCookieSecure:    cookieSecure,
 		MaxConcurrentDownloads: maxDownloads,
-		GeniusAPIToken:         getEnv("GENIUS_API_TOKEN", ""),
-		CobaltAPIURL:           getEnv("COBALT_API_URL", ""),
 		CookiesFile:            getEnv("YTDLP_COOKIES_PATH", "cookies.txt"),
 		Debug:                  debug,
 	}

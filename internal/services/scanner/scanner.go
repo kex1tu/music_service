@@ -8,6 +8,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,22 +19,32 @@ import (
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	"music-manager/internal/id3"
+	"music-manager/internal/services/resolver"
 )
+
+var cleanMetaRegex = regexp.MustCompile(`[\p{P}\s_]+`)
+
+func cleanString(s string) string {
+	s = strings.ToLower(s)
+	return cleanMetaRegex.ReplaceAllString(s, "")
+}
 
 // Scanner scans the music library filesystem and keeps SQLite database in sync.
 type Scanner struct {
 	musicSandbox *sandbox.PathSandbox
 	database     *db.DB
+	deezerClient *resolver.DeezerClient
 	watcher      *fsnotify.Watcher
 	isScanning   bool
 	mu           sync.Mutex
 }
 
 // NewScanner creates a new library Scanner.
-func NewScanner(musicSandbox *sandbox.PathSandbox, database *db.DB) *Scanner {
+func NewScanner(musicSandbox *sandbox.PathSandbox, database *db.DB, deezerClient *resolver.DeezerClient) *Scanner {
 	return &Scanner{
 		musicSandbox: musicSandbox,
 		database:     database,
+		deezerClient: deezerClient,
 	}
 }
 
@@ -61,6 +73,7 @@ func (s *Scanner) ScanAll(ctx context.Context) (int, error) {
 
 	root := s.musicSandbox.Root()
 	count := 0
+	seenPaths := make(map[string]bool)
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -89,11 +102,23 @@ func (s *Scanner) ScanAll(ctx context.Context) (int, error) {
 			return nil
 		}
 
+		seenPaths[relPath] = true
+
 		if err := s.indexFile(path, relPath); err == nil {
 			count++
 		}
 		return nil
 	})
+
+	if err == nil {
+		// Clean up files that no longer exist on disk
+		s.deleteMissingFiles(ctx, seenPaths)
+
+		// Check Deezer catalog for incomplete albums in background
+		if s.deezerClient != nil {
+			go s.CheckIncompleteAlbums(context.Background())
+		}
+	}
 
 	return count, err
 }
@@ -163,10 +188,12 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		file_size = excluded.file_size,
 		mtime = excluded.mtime,
 		has_embedded_cover = excluded.has_embedded_cover,
-		lyrics_status = excluded.lyrics_status;
+		lyrics_status = excluded.lyrics_status
+	RETURNING id;
 	`
 
-	_, err = s.database.Conn().Exec(
+	var trackID int64
+	err = s.database.Conn().QueryRow(
 		query,
 		albumID,
 		artistID,
@@ -183,9 +210,266 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		float64(st.ModTime().Unix()),
 		tags.HasCover,
 		tags.LyricsStatus,
-	)
+	).Scan(&trackID)
+	if err != nil {
+		return err
+	}
 
-	return err
+	// 3. Clear old issues for this track and re-populate
+	_, _ = s.database.Conn().Exec("DELETE FROM audit_issues WHERE entity_id = ? AND entity_type = 'track'", trackID)
+	_, _ = s.database.Conn().Exec("DELETE FROM track_genres WHERE track_id = ?", trackID)
+
+	// 4. Genre handling & normalization
+	genreStr := strings.TrimSpace(tags.Genre)
+	if genreStr != "" {
+		genreRes := id3.AnalyzeAndNormalizeGenre(genreStr)
+		var genreID int64
+		err := s.database.Conn().QueryRow("SELECT id FROM genres WHERE name = ?", genreStr).Scan(&genreID)
+		if err == sql.ErrNoRows {
+			isValidEn := !genreRes.HasCyrillic && !genreRes.IsNonCanonical
+			res, insErr := s.database.Conn().Exec(
+				"INSERT INTO genres (name, is_valid_en, canonical_en_name) VALUES (?, ?, ?)",
+				genreStr, isValidEn, genreRes.CanonicalGenre,
+			)
+			if insErr == nil {
+				genreID, _ = res.LastInsertId()
+			}
+		} else if err == nil {
+			_, _ = s.database.Conn().Exec(
+				"UPDATE genres SET is_valid_en = ?, canonical_en_name = ? WHERE id = ?",
+				!genreRes.HasCyrillic && !genreRes.IsNonCanonical, genreRes.CanonicalGenre, genreID,
+			)
+		}
+
+		if genreID > 0 {
+			_, _ = s.database.Conn().Exec("INSERT OR IGNORE INTO track_genres (track_id, genre_id) VALUES (?, ?)", trackID, genreID)
+		}
+
+		if genreRes.HasCyrillic || genreRes.IsNonCanonical {
+			isAutoFixed := 0
+			if genreRes.IsAutoFixable {
+				isAutoFixed = 1
+			}
+			_, _ = s.database.Conn().Exec(`
+				INSERT INTO audit_issues (issue_type, entity_type, entity_id, file_path, details, is_auto_fixed, is_resolved)
+				VALUES ('non_en_genre', 'track', ?, ?, ?, ?, ?)
+			`, trackID, relPath, "Русскоязычный / неканонический жанр: "+genreStr+" -> "+genreRes.CanonicalGenre, isAutoFixed, isAutoFixed)
+		}
+	}
+
+	// 5. Audit issues for cover & lyrics
+	if !tags.HasCover {
+		_, _ = s.database.Conn().Exec(`
+			INSERT INTO audit_issues (issue_type, entity_type, entity_id, file_path, details)
+			VALUES ('missing_cover', 'track', ?, ?, 'Отсутствует графическая обложка')
+		`, trackID, relPath)
+	}
+	if tags.LyricsStatus == "none" {
+		_, _ = s.database.Conn().Exec(`
+			INSERT INTO audit_issues (issue_type, entity_type, entity_id, file_path, details)
+			VALUES ('missing_lyrics', 'track', ?, ?, 'Отсутствует текст песни (.lrc/.txt)')
+		`, trackID, relPath)
+	}
+
+	// 6. Update album statistics
+	_, _ = s.database.Conn().Exec(`
+		UPDATE albums SET
+			present_tracks_count = (SELECT COUNT(*) FROM tracks WHERE album_id = ?),
+			total_tracks = CASE
+				WHEN total_tracks <= 0 THEN COALESCE((SELECT MAX(track_total) FROM tracks WHERE album_id = ?), 0)
+				ELSE total_tracks
+			END,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, albumID, albumID, albumID)
+
+	_, _ = s.database.Conn().Exec(`
+		UPDATE albums SET
+			is_complete = CASE
+				WHEN (SELECT COUNT(*) FROM missing_tracks WHERE album_id = ?) > 0 THEN 0
+				WHEN total_tracks > 1 AND present_tracks_count < total_tracks THEN 0
+				WHEN (total_tracks <= 1 OR total_tracks IS NULL) AND present_tracks_count >= 1 THEN 1
+				ELSE 1
+			END,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, albumID, albumID)
+
+	return nil
+}
+
+func (s *Scanner) deleteMissingFiles(ctx context.Context, seenPaths map[string]bool) {
+	rows, err := s.database.Conn().QueryContext(ctx, "SELECT id, file_path FROM tracks")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	var toDelete []int64
+	for rows.Next() {
+		var id int64
+		var path string
+		if err := rows.Scan(&id, &path); err == nil {
+			if !seenPaths[path] {
+				toDelete = append(toDelete, id)
+			}
+		}
+	}
+
+	for _, id := range toDelete {
+		_, _ = s.database.Conn().ExecContext(ctx, "DELETE FROM tracks WHERE id = ?", id)
+		_, _ = s.database.Conn().ExecContext(ctx, "DELETE FROM audit_issues WHERE entity_type = 'track' AND entity_id = ?", id)
+	}
+
+	if len(toDelete) > 0 {
+		// Clean orphaned albums and artists
+		_, _ = s.database.Conn().ExecContext(ctx, "DELETE FROM albums WHERE (SELECT COUNT(*) FROM tracks WHERE album_id = albums.id) = 0")
+		_, _ = s.database.Conn().ExecContext(ctx, "DELETE FROM artists WHERE (SELECT COUNT(*) FROM albums WHERE artist_id = artists.id) = 0")
+		_, _ = s.database.Conn().ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums)")
+	}
+}
+
+type incompleteAlbum struct {
+	ID          int64
+	Artist      string
+	Title       string
+	TotalTracks int
+	DeezerID    string
+}
+
+type localTrackItem struct {
+	TrackNumber int
+	Title       string
+}
+
+// CheckIncompleteAlbums checks Deezer for missing tracks in incomplete albums.
+func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
+	if s.deezerClient == nil {
+		return
+	}
+
+	rows, err := s.database.Conn().QueryContext(ctx, `
+		SELECT al.id, ar.name, al.title, COALESCE(al.total_tracks, 0), COALESCE(al.deezer_id, '')
+		FROM albums al
+		JOIN artists ar ON al.artist_id = ar.id
+		WHERE (al.is_complete = 0 AND al.total_tracks > 1)
+		   OR (SELECT COUNT(*) FROM missing_tracks WHERE album_id = al.id) > 0
+		   OR al.total_tracks = 0
+	`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	var albums []incompleteAlbum
+	for rows.Next() {
+		var a incompleteAlbum
+		if err := rows.Scan(&a.ID, &a.Artist, &a.Title, &a.TotalTracks, &a.DeezerID); err == nil {
+			albums = append(albums, a)
+		}
+	}
+
+	for _, album := range albums {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		var remoteAlbum *resolver.DeezerAlbum
+		var fetchErr error
+
+		if album.DeezerID != "" {
+			remoteAlbum, fetchErr = s.deezerClient.GetAlbum(ctx, album.DeezerID)
+		} else {
+			query := fmt.Sprintf(`artist:"%s" album:"%s"`, album.Artist, album.Title)
+			searchResults, searchErr := s.deezerClient.SearchAlbums(ctx, query)
+			if searchErr == nil && len(searchResults) > 0 {
+				dzID := strconv.FormatInt(searchResults[0].ID, 10)
+				remoteAlbum, fetchErr = s.deezerClient.GetAlbum(ctx, dzID)
+			}
+		}
+
+		if fetchErr != nil || remoteAlbum == nil || remoteAlbum.Tracks == nil {
+			continue
+		}
+
+		// Update album total tracks and Deezer ID
+		if album.TotalTracks <= 0 && remoteAlbum.NbTracks > 0 {
+			_, _ = s.database.Conn().ExecContext(ctx, `
+				UPDATE albums SET total_tracks = ?, deezer_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+			`, remoteAlbum.NbTracks, strconv.FormatInt(remoteAlbum.ID, 10), album.ID)
+		}
+
+		// Fetch local tracks
+		tRows, err := s.database.Conn().QueryContext(ctx, `
+			SELECT track_number, title FROM tracks WHERE album_id = ?
+		`, album.ID)
+		if err != nil {
+			continue
+		}
+
+		var localTracks []localTrackItem
+		for tRows.Next() {
+			var lt localTrackItem
+			if err := tRows.Scan(&lt.TrackNumber, &lt.Title); err == nil {
+				localTracks = append(localTracks, lt)
+			}
+		}
+		tRows.Close()
+
+		presentByNum := make(map[int]bool)
+		presentByTitle := make(map[string]bool)
+		for _, lt := range localTracks {
+			if lt.TrackNumber > 0 {
+				presentByNum[lt.TrackNumber] = true
+			}
+			cl := cleanString(lt.Title)
+			if cl != "" {
+				presentByTitle[cl] = true
+			}
+		}
+
+		// Clear previous missing tracks
+		_, _ = s.database.Conn().ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id = ?", album.ID)
+
+		missingCount := 0
+		for _, rt := range remoteAlbum.Tracks.Data {
+			pos := rt.TrackPosition
+			cleanRt := cleanString(rt.Title)
+
+			isMatch := false
+			if pos > 0 && presentByNum[pos] {
+				isMatch = true
+			} else if presentByTitle[cleanRt] {
+				isMatch = true
+			}
+
+			if !isMatch {
+				missingCount++
+				artistName := rt.Artist.Name
+				if artistName == "" {
+					artistName = album.Artist
+				}
+				_, _ = s.database.Conn().ExecContext(ctx, `
+					INSERT INTO missing_tracks (
+						album_id, title, artist, track_number, disc_number,
+						expected_duration, deezer_id, deezer_url, isrc, status, updated_at
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'missing', CURRENT_TIMESTAMP)
+					ON CONFLICT(album_id, track_number, disc_number) DO NOTHING
+				`, album.ID, rt.Title, artistName, pos, rt.DiskNumber, rt.Duration,
+					strconv.FormatInt(rt.ID, 10), rt.Link, rt.ISRC)
+			}
+		}
+
+		isComplete := 1
+		if missingCount > 0 || (remoteAlbum.NbTracks > 1 && len(localTracks) < remoteAlbum.NbTracks) {
+			isComplete = 0
+		}
+		_, _ = s.database.Conn().ExecContext(ctx, `
+			UPDATE albums SET is_complete = ?, expected_tracks_count = ?, present_tracks_count = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+		`, isComplete, remoteAlbum.NbTracks, len(localTracks), album.ID)
+	}
 }
 
 func (s *Scanner) getOrCreateArtist(name string) (int64, error) {

@@ -68,7 +68,7 @@ func setupTestRouter(t *testing.T) (http.Handler, *config.Config) {
 	authHandler := handlers.NewAuthHandler(cfg)
 	downHandler := handlers.NewDownloadHandler(downSvc, deezerClient)
 	tagHandler := handlers.NewTagHandler(musicSb, tmpSb, orgSvc, deezerClient)
-	fileHandler := handlers.NewFileHandler(musicSb, tmpSb, database, downSvc, orgSvc, deezerClient)
+	fileHandler := handlers.NewFileHandler(musicSb, tmpSb, database, downSvc, orgSvc, deezerClient, lyrSvc)
 	lyrHandler := handlers.NewLyricsHandler(lyrSvc)
 
 	router := NewRouter(RouterParams{
