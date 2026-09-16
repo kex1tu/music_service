@@ -2,6 +2,36 @@
  * Модуль сверки неполных альбомов с каталогом Deezer и докачки треков (Audit Catalog Matcher).
  */
 window.AuditCatalogMatcher = {
+    getAlbumTracks(album) {
+        if (!album) return [];
+        if (Array.isArray(album.all_tracks) && album.all_tracks.length > 0) {
+            return album.all_tracks;
+        }
+        if (Array.isArray(album.missing_tracks) && album.missing_tracks.length > 0) {
+            return album.missing_tracks;
+        }
+        return [];
+    },
+
+    isDownloading(album, track = null) {
+        if (!album || !album.path) return false;
+        const path = album.path;
+        if (!track) {
+            return !!this.downloadingTracks[path];
+        }
+        let directUrl = null;
+        let trackNumber = null;
+        if (typeof track === 'string') {
+            directUrl = track;
+        } else if (track && typeof track === 'object') {
+            directUrl = track.deezer_url || null;
+            trackNumber = track.track_number || null;
+        }
+        const trackKey = directUrl || (trackNumber ? `track_${trackNumber}` : null);
+        const key = trackKey ? `${path}:::${trackKey}` : path;
+        return !!this.downloadingTracks[key] || !!this.downloadingTracks[path];
+    },
+
     async loadIncompleteAlbums() {
         this.incompleteLoading = true;
         try {
@@ -18,16 +48,18 @@ window.AuditCatalogMatcher = {
     },
 
     async toggleAlbumExpand(album) {
+        if (!album || !album.path) return;
         const path = album.path;
-        this.expandedAlbums[path] = !this.expandedAlbums[path];
+        this.expandedAlbums = { ...this.expandedAlbums, [path]: !this.expandedAlbums[path] };
         if (this.expandedAlbums[path] && !album.is_catalog_matched && !this.catalogMatchLoading[path]) {
             await this.matchCatalog(album);
         }
     },
 
     async matchCatalog(album) {
+        if (!album || !album.path) return null;
         const path = album.path;
-        this.catalogMatchLoading[path] = true;
+        this.catalogMatchLoading = { ...this.catalogMatchLoading, [path]: true };
         try {
             const url = `/files/audit/incomplete-albums/catalog-match?path=${encodeURIComponent(path)}&_t=${Date.now()}`;
             const res = await fetch(url);
@@ -45,74 +77,66 @@ window.AuditCatalogMatcher = {
             console.error('Ошибка сверки релиза с Deezer:', e);
             Alpine.store('app').toast('Ошибка при сверке с Deezer', 'error');
         } finally {
-            this.catalogMatchLoading[path] = false;
+            this.catalogMatchLoading = { ...this.catalogMatchLoading, [path]: false };
         }
         return null;
     },
 
-    async downloadMissing(album, trackUrl = null) {
-        if (!album || !album.path) return;
+    async downloadMissing(album, track = null) {
+        if (!album || !album.path) {
+            console.warn('[Audit] downloadMissing called with invalid album:', album);
+            return;
+        }
         const path = album.path;
+        console.log('[Audit] downloadMissing triggered for:', { path, album, track });
 
         let directUrl = null;
         let trackNumber = null;
-        if (typeof trackUrl === 'string') {
-            directUrl = trackUrl;
-        } else if (trackUrl && typeof trackUrl === 'object') {
-            directUrl = trackUrl.deezer_url || null;
-            trackNumber = trackUrl.track_number || null;
+        if (typeof track === 'string') {
+            directUrl = track;
+        } else if (track && typeof track === 'object') {
+            directUrl = track.deezer_url || null;
+            trackNumber = track.track_number || null;
         }
 
         const trackKey = directUrl || (trackNumber ? `track_${trackNumber}` : null);
         const key = trackKey ? `${path}:::${trackKey}` : path;
 
-        // 1. Мгновенно включаем спиннер/индикатор загрузки на кнопке
-        this.downloadingTracks[key] = true;
+        // Включаем спиннер реактивно
+        this.downloadingTracks = { ...this.downloadingTracks, [key]: true };
 
         try {
-            let currentAlbum = album;
-
-            // Если трек не указан индивидуально и альбом не сверен, пробуем фоновую сверку
-            if (!trackNumber && !directUrl && (!currentAlbum.is_catalog_matched || !currentAlbum.missing_tracks || currentAlbum.missing_tracks.length === 0)) {
-                try {
-                    const matched = await this.matchCatalog(currentAlbum);
-                    if (matched) {
-                        currentAlbum = matched;
-                    } else {
-                        const idx = this.incompleteAlbums.findIndex(a => a.path === path);
-                        if (idx !== -1) currentAlbum = this.incompleteAlbums[idx];
-                    }
-                } catch (err) {
-                    console.warn('Фоновая сверка каталога завершилась с предупреждением:', err);
-                }
-            }
-
             let trackUrls = null;
             let trackNumbers = null;
+
             if (directUrl || trackNumber) {
                 if (directUrl) trackUrls = [directUrl];
                 if (trackNumber) trackNumbers = [trackNumber];
             } else {
-                if (currentAlbum.missing_tracks && currentAlbum.missing_tracks.length > 0) {
-                    trackNumbers = currentAlbum.missing_tracks.map(t => t.track_number).filter(n => n > 0);
-                    trackUrls = currentAlbum.missing_tracks.map(t => t.deezer_url).filter(Boolean);
-                } else if (currentAlbum.missing_track_numbers && currentAlbum.missing_track_numbers.length > 0) {
-                    trackNumbers = currentAlbum.missing_track_numbers;
+                if (album.missing_tracks && album.missing_tracks.length > 0) {
+                    trackNumbers = album.missing_tracks.map(t => t.track_number).filter(n => n > 0);
+                    trackUrls = album.missing_tracks.map(t => t.deezer_url).filter(Boolean);
+                } else if (album.missing_track_numbers && album.missing_track_numbers.length > 0) {
+                    trackNumbers = album.missing_track_numbers;
                 }
             }
 
             const payload = {
-                path: currentAlbum.path,
-                deezer_album_id: currentAlbum.deezer_album_id || null,
+                path: album.path,
+                deezer_album_id: album.deezer_album_id || null,
                 track_urls: trackUrls && trackUrls.length > 0 ? trackUrls : null,
                 track_numbers: trackNumbers && trackNumbers.length > 0 ? trackNumbers : null,
             };
+
+            console.log('[Audit] Sending POST /files/audit/incomplete-albums/download-missing:', payload);
 
             const res = await fetch('/files/audit/incomplete-albums/download-missing', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
+
+            console.log('[Audit] Response status:', res.status);
 
             if (res.ok) {
                 const jobs = await res.json();
@@ -141,10 +165,10 @@ window.AuditCatalogMatcher = {
                 Alpine.store('app').toast(errText, 'error');
             }
         } catch (e) {
-            console.error('Ошибка дозагрузки треков:', e);
+            console.error('[Audit] Ошибка дозагрузки треков:', e);
             Alpine.store('app').toast('Сбой при запуске загрузки: ' + (e.message || e), 'error');
         } finally {
-            this.downloadingTracks[key] = false;
+            this.downloadingTracks = { ...this.downloadingTracks, [key]: false };
         }
     },
 

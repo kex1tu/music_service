@@ -1,0 +1,55 @@
+{{ define "downloader_sources" }}
+<!-- Информационные карточки поддерживаемых источников -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="bg-gray-900/60 border border-gray-800/80 rounded-xl p-5">
+        <div class="flex items-center space-x-3 mb-2">
+            <span class="w-8 h-8 rounded-lg bg-yellow-500/10 text-yellow-400 flex items-center justify-center font-bold text-xs">
+                ЯМ
+            </span>
+            <h3 class="text-sm font-semibold text-white">Яндекс & Стриминги</h3>
+        </div>
+        <p class="text-xs text-gray-400 leading-relaxed">
+            Импорт плейлистов из Яндекс Музыки, Spotify и Apple Music. Обложки высокого разрешения до 1400×1400.
+        </p>
+    </div>
+    <div class="bg-gray-900/60 border border-gray-800/80 rounded-xl p-5">
+        <div class="flex items-center space-x-3 mb-2">
+            <span class="w-8 h-8 rounded-lg bg-pink-500/10 text-pink-400 flex items-center justify-center">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M7 17V7q0-.425.288-.712T8 6t.713.288T9 7v10q0 .425-.288.713T8 18t-.712-.288T7 17m4 4V3q0-.425.288-.712T12 2t.713.288T13 3v18q0 .425-.288.713T12 22t-.712-.288T11 21m-8-8v-2q0-.425.288-.712T4 10t.713.288T5 11v2q0 .425-.288.713T4 14t-.712-.288T3 13m12 4V7q0-.425.288-.712T16 6t.713.288T17 7v10q0 .425-.288.713T16 18t-.712-.288T15 17m4-4v-2q0-.425.288-.712T20 10t.713.288T21 11v2q0 .425-.288.713T20 14t-.712-.288T19 13"/>
+                </svg>
+            </span>
+            <h3 class="text-sm font-semibold text-white">Deezer API</h3>
+        </div>
+        <p class="text-xs text-gray-400 leading-relaxed">
+            Студийные метаданные альбомов, треков, номера дорожек, ISRC и несжатые обложки 1400×1400.
+        </p>
+    </div>
+    <div class="bg-gray-900/60 border border-gray-800/80 rounded-xl p-5">
+        <div class="flex items-center space-x-3 mb-2">
+            <span class="w-8 h-8 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 17.175V6.825q0-.425.3-.713t.7-.287q.125 0 .263.037t.262.113l8.15 5.175q.225.15.338.375t.112.475t-.112.475t-.338.375l-8.15 5.175q-.125.075-.262.113T9 18.175q-.4 0-.7-.288t-.3-.712"/>
+                </svg>
+            </span>
+            <h3 class="text-sm font-semibold text-white">YouTube & YT Music</h3>
+        </div>
+        <p class="text-xs text-gray-400 leading-relaxed">
+            Интеллектуальный поиск AudioMatcher с проверкой таймингов ±2с и официальных релиз-каналов.
+        </p>
+    </div>
+    <div class="bg-gray-900/60 border border-gray-800/80 rounded-xl p-5">
+        <div class="flex items-center space-x-3 mb-2">
+            <span class="w-8 h-8 rounded-lg bg-orange-500/10 text-orange-400 flex items-center justify-center">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6.5 20q-2.275 0-3.887-1.575T1 14.575q0-1.95 1.175-3.475T5.25 9.15q.625-2.3 2.5-3.725T12 4q2.925 0 4.963 2.038T19 11q1.725.2 2.863 1.488T23 15.5q0 1.875-1.312 3.188T18.5 20zm0-2h12q1.05 0 1.775-.725T21 15.5t-.725-1.775T18.5 13H17v-2q0-2.075-1.463-3.538T12 6T8.463 7.463T7 11h-.5q-1.45 0-2.475 1.025T3 14.5t1.025 2.475T6.5 18m5.5-6"/>
+                </svg>
+            </span>
+            <h3 class="text-sm font-semibold text-white">SoundCloud</h3>
+        </div>
+        <p class="text-xs text-gray-400 leading-relaxed">
+            Прямая загрузка оригинального аудиопотока и транскодирование в MP3 320 kbps через ffmpeg.
+        </p>
+    </div>
+</div>
+{{ end }}

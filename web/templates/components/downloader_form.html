@@ -1,0 +1,162 @@
+{{ define "downloader_form" }}
+<!-- Карточка формы загрузки -->
+<div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl"
+     @drop="handleTorrentDrop($event)"
+     @dragover="handleTorrentDragOver($event)">
+    <h2 class="text-lg font-semibold text-white mb-2">Загрузка музыки</h2>
+    <p class="text-sm text-gray-400 mb-6">
+        Вставьте ссылку на трек, альбом или плейлист (Яндекс Музыка, Spotify, Apple Music, Deezer, YouTube, SoundCloud), либо Magnet-ссылку или .torrent файл.
+    </p>
+
+    <form @submit.prevent="submitDownload()" class="space-y-4" novalidate>
+        <!-- Переключатель режима: Одна ссылка / Список ссылок / Загрузка .torrent -->
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-3">
+            <div class="flex items-center space-x-2">
+                <button
+                    type="button"
+                    @click="inputMode = 'single'; setMode('single')"
+                    :class="inputMode !== 'batch' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40' : 'text-gray-400 hover:text-gray-200 border-transparent'"
+                    class="px-3 py-1.5 rounded-md text-xs font-medium border transition flex items-center space-x-1.5">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M7 17q-2.075 0-3.537-1.463T2 12t1.463-3.537T7 7h3q.425 0 .713.288T11 8t-.288.713T10 9H7q-1.25 0-2.125.875T4 12t.875 2.125T7 15h3q.425 0 .713.288T11 16t-.288.713T10 17zm2-4q-.425 0-.712-.288T8 12t.288-.712T9 11h6q.425 0 .713.288T16 12t-.288.713T15 13zm5 4q-.425 0-.712-.288T13 16t.288-.712T14 15h3q1.25 0 2.125-.875T20 12t-.875-2.125T17 9h-3q-.425 0-.712-.288T13 8t.288-.712T14 7h3q2.075 0 3.538 1.463T22 12t-1.463 3.538T17 17z"/>
+                    </svg>
+                    <span>Одна ссылка / Magnet</span>
+                </button>
+                <button
+                    type="button"
+                    @click="inputMode = 'batch'; setMode('batch')"
+                    :class="inputMode === 'batch' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40' : 'text-gray-400 hover:text-gray-200 border-transparent'"
+                    class="px-3 py-1.5 rounded-md text-xs font-medium border transition flex items-center space-x-1.5">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M4 18q-.825 0-1.412-.587T2 16V4q0-.825.588-1.412T4 2h12q.825 0 1.413.588T18 4v12q0 .825-.587 1.413T16 18zm16 4q-.825 0-1.412-.587T18 20V7q0-.425.288-.712T19 6t.713.288T20 7v13h-13q-.425 0-.712-.288T6 19t.288-.712T7 18h13z"/>
+                    </svg>
+                    <span>Список ссылок (пакетно)</span>
+                    <template x-if="getParsedBatchUrls().length > 0">
+                        <span class="px-1.5 py-0.2 bg-emerald-500 text-gray-950 rounded-full text-[10px] font-bold" x-text="parsedBatchUrls.length"></span>
+                    </template>
+                </button>
+            </div>
+
+            <!-- Кнопка загрузки .torrent файла -->
+            <label class="cursor-pointer px-3 py-1.5 rounded-md text-xs font-medium border border-gray-700 hover:border-emerald-500/40 bg-gray-950/60 text-gray-300 hover:text-emerald-400 transition flex items-center space-x-1.5" title="Перетащите сюда или выберите .torrent файл">
+                <svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M11 16V7.85l-2.6 2.6L7 9l5-5l5 5l-1.4 1.45l-2.6-2.6V16zm-7 4q-.825 0-1.412-.587T2 18v-3h2v3h16v-3h2v3q0 .825-.587 1.413T20 20z"/>
+                </svg>
+                <span>Загрузить .torrent</span>
+                <input type="file" accept=".torrent" @change="uploadTorrentFile($event)" class="hidden">
+            </label>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+            <!-- Поле ввода URL (одиночный режим) -->
+            <div x-show="inputMode !== 'batch'" class="flex-1 relative">
+                <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-500">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M7 17q-2.075 0-3.537-1.463T2 12t1.463-3.537T7 7h3q.425 0 .713.288T11 8t-.288.713T10 9H7q-1.25 0-2.125.875T4 12t.875 2.125T7 15h3q.425 0 .713.288T11 16t-.288.713T10 17zm2-4q-.425 0-.712-.288T8 12t.288-.712T9 11h6q.425 0 .713.288T16 12t-.288.713T15 13zm5 4q-.425 0-.712-.288T13 16t.288-.712T14 15h3q1.25 0 2.125-.875T20 12t-.875-2.125T17 9h-3q-.425 0-.712-.288T13 8t.288-.712T14 7h3q2.075 0 3.538 1.463T22 12t-1.463 3.538T17 17z"/>
+                    </svg>
+                </div>
+                <input
+                    type="text"
+                    inputmode="url"
+                    x-model="url"
+                    placeholder="https://... или magnet:?xt=urn:btih:..."
+                    class="w-full bg-gray-950 border border-gray-700 rounded-lg pl-10 pr-24 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition text-sm">
+                <div class="absolute inset-y-0 right-0 pr-2 flex items-center space-x-1.5">
+                    <button
+                        type="button"
+                        x-show="url"
+                        @click="url = ''"
+                        class="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition"
+                        title="Очистить поле">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="m12 13.4l2.9 2.9q.275.275.7.275t.7-.275t.275-.7t-.275-.7L13.4 12l2.9-2.9q.275-.275.275-.7t-.275-.7t-.7-.275t-.7.275L12 10.6L9.1 7.7q-.275-.275-.7-.275t-.7.275t-.275.7t.275.7l2.9 2.9l-2.9 2.9q-.275.275-.275.7t.275.7t.7.275t.7-.275zm0 8.6q-2.075 0-3.9-.788t-3.175-2.137T2.788 15.9T2 12t.788-3.9t2.137-3.175T8.1 2.788T12 2t3.9.788t3.175 2.137T21.213 8.1T22 12t-.788 3.9t-2.137 3.175t-3.175 2.138T12 22"/>
+                        </svg>
+                    </button>
+                    <button
+                        type="button"
+                        x-show="checkIsArtistUrl(url)"
+                        @click="openDiscographyModal(url)"
+                        class="px-2 py-1 rounded text-xs bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 transition flex items-center space-x-1 animate-pulse"
+                        title="Открыть выбор релизов дискографии">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4s-4 1.79-4 4s1.79 4 4 4m0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4"/>
+                        </svg>
+                        <span>Дискография</span>
+                    </button>
+                    <button
+                        type="button"
+                        @click="pasteUrl()"
+                        class="px-2 py-1 rounded text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white transition flex items-center space-x-1"
+                        title="Вставить из буфера">
+                        <span>Вставить</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Поле ввода списка URL (пакетный режим) -->
+            <div x-show="inputMode === 'batch'" class="flex-1 relative">
+                <textarea
+                    x-model="batchUrlsText"
+                    rows="3"
+                    placeholder="Вставьте по одной ссылке на строку (от 1 до 20):&#10;https://music.yandex.ru/album/...&#10;https://open.spotify.com/album/...&#10;magnet:?xt=urn:btih:..."
+                    class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 pr-24 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition text-xs font-mono"></textarea>
+                <div class="absolute top-2 right-2 flex items-center space-x-1.5">
+                    <button
+                        type="button"
+                        x-show="batchUrlsText"
+                        @click="batchUrlsText = ''"
+                        class="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition"
+                        title="Очистить список">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="m12 13.4l2.9 2.9q.275.275.7.275t.7-.275t.275-.7t-.275-.7L13.4 12l2.9-2.9q.275-.275.275-.7t-.275-.7t-.7-.275t-.7.275L12 10.6L9.1 7.7q-.275-.275-.7-.275t-.7.275t-.275.7t.275.7l2.9 2.9l-2.9 2.9q-.275.275-.275.7t.275.7t.7.275t.7-.275zm0 8.6q-2.075 0-3.9-.788t-3.175-2.137T2.788 15.9T2 12t.788-3.9t2.137-3.175T8.1 2.788T12 2t3.9.788t3.175 2.137T21.213 8.1T22 12t-.788 3.9t-2.137 3.175t-3.175 2.138T12 22"/>
+                        </svg>
+                    </button>
+                    <button
+                        type="button"
+                        @click="pasteBatchUrls()"
+                        class="px-2 py-1 rounded text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white transition flex items-center space-x-1"
+                        title="Вставить из буфера">
+                        <span>Вставить</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Выбор источника -->
+            <div class="sm:w-48">
+                <select
+                    x-model="source"
+                    class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-3 text-gray-200 focus:outline-none focus:border-emerald-500 text-sm">
+                    <option value="auto">Автоопределение</option>
+                    <option value="torrent">Торрент / Magnet</option>
+                    <option value="yandex">Яндекс Музыка</option>
+                    <option value="spotify">Spotify</option>
+                    <option value="applemusic">Apple Music</option>
+                    <option value="deezer">Deezer</option>
+                    <option value="youtube">YouTube / YT Music</option>
+                    <option value="soundcloud">SoundCloud</option>
+                </select>
+            </div>
+
+            <!-- Кнопка запуска -->
+            <button
+                type="submit"
+                :disabled="isSubmitting || (job && job.status !== 'READY' && job.status !== 'ERROR' && inputMode === 'single')"
+                class="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-medium rounded-lg text-sm transition flex items-center justify-center space-x-2 shadow-lg shadow-emerald-600/20">
+                <template x-if="isSubmitting">
+                    <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
+                    </svg>
+                </template>
+                <template x-if="!isSubmitting">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M11.625 15.513q-.175-.063-.325-.213l-3.6-3.6q-.3-.3-.288-.7t.288-.7q.3-.3.713-.312t.712.287L11 12.15V5q0-.425.288-.712T12 4t.713.288T13 5v7.15l1.875-1.875q.3-.3.713-.288t.712.313q.275.3.288.7t-.288.7l-3.6 3.6q-.15.15-.325.213t-.375.062t-.375-.062M6 20q-.825 0-1.412-.587T4 18v-2q0-.425.288-.712T5 15t.713.288T6 16v2h12v-2q0-.425.288-.712T19 15t.713.288T20 16v2q0 .825-.587 1.413T18 20z"/>
+                    </svg>
+                </template>
+                <span x-text="isSubmitting ? 'Обработка...' : (inputMode === 'batch' ? 'Добавить в очередь' : 'Скачать')">Скачать</span>
+            </button>
+        </div>
+    </form>
+
+    {{ template "downloader_active" . }}
+</div>
+{{ end }}
