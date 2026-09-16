@@ -3,10 +3,12 @@
     <div
         x-show="$store.app.activeModal === 'tag_editor'"
         x-cloak
+        @click.self="close()"
+        @keydown.escape.window="close()"
         class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4 overflow-y-auto"
         x-data="tagEditorComponent()">
         <div
-            @click.outside="close()"
+            @click.stop
             class="bg-gray-900 border border-gray-700 rounded-2xl max-w-5xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-fade-in">
             
             <!-- Заголовок модального окна -->
@@ -681,10 +683,11 @@
             <div
                 x-show="showDeezerModal"
                 x-cloak
-                class="fixed inset-0 z-[60] flex items-center justify-center modal-backdrop p-4"
-                @keydown.escape.window="closeDeezerSearch()">
+                @click.self="closeDeezerSearch()"
+                @keydown.escape.window="closeDeezerSearch()"
+                class="fixed inset-0 z-[60] flex items-center justify-center modal-backdrop p-4">
                 <div
-                    @click.outside="closeDeezerSearch()"
+                    @click.stop
                     class="bg-gray-900 border border-gray-700 rounded-2xl max-w-xl w-full max-h-[80vh] flex flex-col shadow-2xl overflow-hidden animate-fade-in">
                     <!-- Заголовок -->
                     <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-950/60">
@@ -779,10 +782,11 @@
             <div
                 x-show="showCoverGalleryModal"
                 x-cloak
-                class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-                @keydown.escape.window="closeCoverGallery()">
+                @click.self="closeCoverGallery()"
+                @keydown.escape.window="closeCoverGallery()"
+                class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
                 <div
-                    @click.outside="closeCoverGallery()"
+                    @click.stop
                     class="bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-fade-in">
                     <!-- Шапка модального окна -->
                     <div class="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-950">

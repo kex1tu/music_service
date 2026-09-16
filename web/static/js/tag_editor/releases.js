@@ -14,16 +14,17 @@ window.TagReleases = {
         (this.tracks || []).forEach((track, originalIndex) => {
             const albumName = (track.album || '').trim();
             const isSingle = !albumName || this.singlesMode;
-            const albumArtistKey = (track.album_artist || track.artist || this.album.album_artist || '').trim().toLowerCase();
-            const key = isSingle ? '__singles__' : `${albumArtistKey}:::${albumName.toLowerCase()}`;
+            const artistName = (track.album_artist || track.artist || this.album.album_artist || 'Unknown Artist').trim();
+            const albumArtistKey = artistName.toLowerCase();
+            const key = isSingle ? `__singles__:::${albumArtistKey}` : `${albumArtistKey}:::${albumName.toLowerCase()}`;
 
             if (!groupsMap[key]) {
                 groupsMap[key] = {
                     id: key,
                     isSingles: isSingle,
-                    title: isSingle ? 'Синглы и отдельные треки' : (track.album || 'Неизвестный альбом'),
-                    albumTitle: isSingle ? '' : (track.album || ''),
-                    albumArtist: track.album_artist || track.artist || this.album.album_artist || '',
+                    title: isSingle ? (artistName ? `Синглы — ${artistName}` : 'Синглы и отдельные треки') : (track.album || 'Неизвестный альбом'),
+                    albumTitle: isSingle ? (track.album || 'Singles') : (track.album || ''),
+                    albumArtist: artistName,
                     year: track.year || this.album.year || null,
                     discTotal: track.disc_total || this.album.disc_total || 1,
                     genre: this.formatGenres ? this.formatGenres(track.genre || this.album.genre || '') : (track.genre || ''),
@@ -112,7 +113,13 @@ window.TagReleases = {
 
         group.items.forEach((itemObj) => {
             const track = itemObj.track;
-            if (group.albumTitle) track.album = group.albumTitle;
+            if (group.isSingles) {
+                if (!track.album || track.album.toLowerCase() === 'single' || track.album.toLowerCase() === 'singles') {
+                    track.album = track.title || 'Single';
+                }
+            } else if (group.albumTitle) {
+                track.album = group.albumTitle;
+            }
             if (group.albumArtist) track.album_artist = group.albumArtist;
             if (group.year !== null && group.year !== undefined && group.year !== '') {
                 track.year = parseInt(group.year, 10);

@@ -371,7 +371,13 @@ func (h *FileHandler) FixPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, targetRel := h.organizer.ComputeTargetPath(tags.Album, tags.TrackNumber, tags.Title, filepath.Base(fullPath))
+	album := strings.TrimSpace(tags.Album)
+	if album == "" || strings.EqualFold(album, "single") || strings.EqualFold(album, "singles") {
+		if strings.TrimSpace(tags.Title) != "" {
+			album = strings.TrimSpace(tags.Title)
+		}
+	}
+	_, targetRel := h.organizer.ComputeTargetPath(album, tags.TrackNumber, tags.Title, filepath.Base(fullPath))
 	targetFull, err := h.musicSandbox.Resolve(targetRel, true)
 	if err != nil {
 		http.Error(w, `{"error":"failed to resolve target"}`, http.StatusBadRequest)

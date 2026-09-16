@@ -121,19 +121,27 @@ func (h *TagHandler) BatchSaveTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Apply album fields to tracks if missing
+	// Apply album fields to tracks ONLY if track's corresponding field is empty
 	for i := range req.Tracks {
-		if req.Tracks[i].Album == "" {
-			req.Tracks[i].Album = req.Album.Album
+		if strings.TrimSpace(req.Tracks[i].Album) == "" {
+			if strings.TrimSpace(req.Album.Album) != "" && !strings.EqualFold(req.Album.Album, "singles") && !strings.EqualFold(req.Album.Album, "single") {
+				req.Tracks[i].Album = strings.TrimSpace(req.Album.Album)
+			} else if strings.TrimSpace(req.Tracks[i].Title) != "" {
+				req.Tracks[i].Album = strings.TrimSpace(req.Tracks[i].Title)
+			}
+		} else if strings.EqualFold(req.Tracks[i].Album, "single") || strings.EqualFold(req.Tracks[i].Album, "singles") {
+			if strings.TrimSpace(req.Tracks[i].Title) != "" {
+				req.Tracks[i].Album = strings.TrimSpace(req.Tracks[i].Title)
+			}
 		}
-		if req.Tracks[i].AlbumArtist == "" {
-			req.Tracks[i].AlbumArtist = req.Album.AlbumArtist
+		if strings.TrimSpace(req.Tracks[i].AlbumArtist) == "" {
+			req.Tracks[i].AlbumArtist = strings.TrimSpace(req.Album.AlbumArtist)
 		}
-		if req.Album.Year != nil && req.Tracks[i].Year == 0 {
+		if req.Album.Year != nil && *req.Album.Year > 0 && req.Tracks[i].Year == 0 {
 			req.Tracks[i].Year = *req.Album.Year
 		}
-		if req.Album.Genre != "" && req.Tracks[i].Genre == "" {
-			req.Tracks[i].Genre = req.Album.Genre
+		if strings.TrimSpace(req.Album.Genre) != "" && strings.TrimSpace(req.Tracks[i].Genre) == "" {
+			req.Tracks[i].Genre = strings.TrimSpace(req.Album.Genre)
 		}
 	}
 

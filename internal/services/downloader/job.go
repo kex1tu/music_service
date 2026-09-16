@@ -116,7 +116,9 @@ func (j *DownloadJob) notifyUpdate() {
 
 func (j *DownloadJob) UpdateProgress(progress float64, step string) {
 	j.mu.Lock()
-	j.Progress = progress
+	if progress > j.Progress {
+		j.Progress = progress
+	}
 	j.CurrentStep = step
 	j.UpdatedAt = time.Now().UTC()
 	j.mu.Unlock()
@@ -126,7 +128,9 @@ func (j *DownloadJob) UpdateProgress(progress float64, step string) {
 func (j *DownloadJob) UpdateTrackProgress(trackIdx int, pct float64, step string) {
 	j.mu.Lock()
 	if trackIdx >= 0 && trackIdx < len(j.trackProgress) {
-		j.trackProgress[trackIdx] = pct
+		if pct > j.trackProgress[trackIdx] {
+			j.trackProgress[trackIdx] = pct
+		}
 	}
 	sum := 0.0
 	for _, p := range j.trackProgress {
@@ -143,7 +147,11 @@ func (j *DownloadJob) UpdateTrackProgress(trackIdx int, pct float64, step string
 	if j.Progress > 99.0 && j.Status != StatusReady {
 		j.Progress = 99.0
 	}
-	j.CurrentStep = step
+	if len(j.Tracks) > 1 {
+		j.CurrentStep = fmt.Sprintf("Загрузка треков (%d/%d готово, %.0f%%)", j.CompletedTracks, len(j.Tracks), j.Progress)
+	} else {
+		j.CurrentStep = step
+	}
 	j.UpdatedAt = time.Now().UTC()
 	j.mu.Unlock()
 
@@ -170,7 +178,11 @@ func (j *DownloadJob) SetError(errMsg string) {
 
 func (j *DownloadJob) SetCurrentStep(step string) {
 	j.mu.Lock()
-	j.CurrentStep = step
+	if len(j.Tracks) > 1 && (j.Status == StatusDownloading || j.Status == StatusConverting || j.Status == StatusTagging) {
+		j.CurrentStep = fmt.Sprintf("Загрузка треков (%d/%d готово, %.0f%%)", j.CompletedTracks, len(j.Tracks), j.Progress)
+	} else {
+		j.CurrentStep = step
+	}
 	j.UpdatedAt = time.Now().UTC()
 	j.mu.Unlock()
 	j.notifyUpdate()
@@ -178,8 +190,12 @@ func (j *DownloadJob) SetCurrentStep(step string) {
 
 func (j *DownloadJob) SetStepAndStatus(step string, status JobStatus) {
 	j.mu.Lock()
-	j.CurrentStep = step
 	j.Status = status
+	if len(j.Tracks) > 1 && (status == StatusDownloading || status == StatusConverting || status == StatusTagging) {
+		j.CurrentStep = fmt.Sprintf("Обработка треков (%d/%d готово, %.0f%%)", j.CompletedTracks, len(j.Tracks), j.Progress)
+	} else {
+		j.CurrentStep = step
+	}
 	j.UpdatedAt = time.Now().UTC()
 	j.mu.Unlock()
 	j.notifyUpdate()
@@ -201,6 +217,9 @@ func (j *DownloadJob) IncrementCompleted(total int) {
 	calcProgress := 10.0 + (float64(j.CompletedTracks)/float64(total))*85.0
 	if calcProgress > j.Progress {
 		j.Progress = calcProgress
+	}
+	if total > 1 {
+		j.CurrentStep = fmt.Sprintf("Загрузка треков (%d/%d готово, %.0f%%)", j.CompletedTracks, total, j.Progress)
 	}
 	j.UpdatedAt = time.Now().UTC()
 	j.mu.Unlock()
@@ -307,7 +326,7 @@ func NewJobManager(database *db.DB) *JobManager {
 					IsBackfill:      e.IsBackfill,
 					AlbumTitle:      e.AlbumTitle,
 					ArtistName:      e.ArtistName,
-					CreatedAt:       e.CreatedAt.UTC().Format(time.RFC3339),
+					CreatedAt:       e.CreatedAt.UTC().Format(time.RFC3339Nano),
 					UpdatedAt:       e.UpdatedAt,
 				}
 				job.SetOnUpdate(func() {
@@ -431,7 +450,8 @@ func (m *JobManager) GetSummary() QueueSummaryResponse {
 	defer m.mu.RUnlock()
 
 	var summary QueueSummaryResponse
-	totalProg := 0.0
+	weightedProg := 0.0
+	weightedTotal := 0.0
 
 	for _, j := range m.jobs {
 		j.mu.RLock()
@@ -457,11 +477,17 @@ func (m *JobManager) GetSummary() QueueSummaryResponse {
 		}
 		summary.TotalTracks += tCount
 		summary.CompletedTracks += cTracks
-		totalProg += prog
+
+		weight := float64(tCount)
+		if weight <= 0 {
+			weight = 1.0
+		}
+		weightedProg += prog * weight
+		weightedTotal += weight
 	}
 
-	if len(m.jobs) > 0 {
-		summary.OverallProgress = totalProg / float64(len(m.jobs))
+	if weightedTotal > 0 {
+		summary.OverallProgress = weightedProg / weightedTotal
 		if summary.OverallProgress > 100 {
 			summary.OverallProgress = 100
 		}
@@ -469,3 +495,4 @@ func (m *JobManager) GetSummary() QueueSummaryResponse {
 
 	return summary
 }
+

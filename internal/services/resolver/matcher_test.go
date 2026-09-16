@@ -122,3 +122,38 @@ func TestTransliterateArtist(t *testing.T) {
 		t.Errorf("expected max korzh in transliterated variants, got %v", variants)
 	}
 }
+
+func TestCleanQueryTextFull(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Малолетка (Розочка Remix)", "Малолетка Розочка Remix"},
+		{"Song [feat. Artist]", "Song feat Artist"},
+		{"Track (Official Audio)", "Track Official Audio"},
+	}
+
+	for _, tt := range tests {
+		got := CleanQueryTextFull(tt.input)
+		if got != tt.want {
+			t.Errorf("CleanQueryTextFull(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestCalculateScore_RemixMatch(t *testing.T) {
+	m := NewAudioMatcher("")
+
+	// Remix target should match remix candidate without penalty
+	remixScore := m.CalculateScore(
+		"Малолетка (Розочка Remix)",
+		"Макс Корж",
+		196,
+		"Макс Корж - Малолетка (Розочка Remix)",
+		"Remix Sound",
+		196,
+	)
+	if remixScore < 70.0 {
+		t.Errorf("expected score >= 70.0 for remix match, got %.1f", remixScore)
+	}
+}

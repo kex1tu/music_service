@@ -110,6 +110,7 @@ flowchart TD
 | **4** | **Downloader Engine** | `internal/services/downloader/job.go`, `downloader.go` | `[MODIFY]` Синхронизация с SQLite, `RetryJob`, монотонный прогресс, TTL очистка |
 | **5** | **HTTP API** | `internal/api/handlers/download_handlers.go`, `internal/api/router.go` | `[MODIFY]` Эндпоинт `POST /downloads/{id}/retry`, статус 202, фикс Whitelist |
 | **6** | **Frontend UI** | `web/static/js/downloader/downloader.js`, `web/static/js/store/queue_manager.js` | `[MODIFY]` Кнопка «Повторить» в карточках и в очереди |
+| **7** | **Queue & Progress Stabilization** | `internal/services/downloader/job.go`, `internal/api/handlers/download_handlers.go`, `web/static/js/store/queue_manager.js` | `[MODIFY]` Наносекундный таймстамп, детерминированный tie-breaker по ID в сортировке, монотонный прогресс треков и агрегированный CurrentStep |
 
 ---
 
@@ -119,6 +120,7 @@ flowchart TD
 2. Трек «Макс Корж — 2 типа людей» успешно находит трек на SoundCloud (или fallback YouTube) и скачивается в MP3 320k без ошибок.
 3. При блокировке Deezer API (403 Forbidden) система не падает, а автоматически подтягивает метаданные и скачивает трек через fallback.
 4. Очередь задач сохраняется в SQLite: после перезапуска сервиса история задач сохраняется, а упавшие задачи можно перезапустить нажатием одной кнопки «Повторить» (`POST /downloads/{id}/retry`).
-5. Полоса прогресса релиза монотонно движется от 0% до 100% без скачков назад.
-6. Обход белого списка доменов через `"source": "youtube"` надежно заблокирован тестами.
-7. `go test -v ./...` и `go test -race ./...` проходят на 100%.
+5. Полоса прогресса релиза монотонно движется от 0% до 100% без скачков назад, а строка `CurrentStep` не дергается между параллельными треками.
+6. Сортировка очереди в UI строго детерминирована: карточки задач не меняются местами при периодическом опросе `/downloads`.
+7. Обход белого списка доменов через `"source": "youtube"` надежно заблокирован тестами.
+8. `go test -v ./...` и `go test -race ./...` проходят на 100%.

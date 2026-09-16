@@ -3,10 +3,12 @@
     <div
         x-show="$store.app.activeModal === 'lyrics'"
         x-cloak
+        @click.self="close()"
+        @keydown.escape.window="close()"
         class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4"
         x-data="lyricsModalComponent()">
         <div
-            @click.outside="close()"
+            @click.stop
             class="bg-gray-900 border border-gray-700 rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-fade-in">
             
             <!-- Заголовок -->

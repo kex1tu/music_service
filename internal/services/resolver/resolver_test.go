@@ -57,3 +57,15 @@ func TestResolve_TorrentNotFound(t *testing.T) {
 		t.Errorf("expected error for non-existent torrent release, got nil")
 	}
 }
+
+func TestFindBestMatch_MaloletkaRemix(t *testing.T) {
+	m := NewAudioMatcher("")
+	matchURL, err := m.FindBestMatch(context.Background(), "Малолетка (Розочка Remix)", "Макс Корж", 196)
+	if err != nil {
+		t.Fatalf("FindBestMatch failed: %v", err)
+	}
+	if matchURL == "" {
+		t.Fatalf("expected non-empty matchURL, got empty")
+	}
+	t.Logf("Found match URL: %s", matchURL)
+}

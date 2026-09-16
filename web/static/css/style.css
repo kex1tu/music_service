@@ -1,5 +1,9 @@
 /* Стилизация интерфейса Music Downloader & Tag Manager */
 
+[x-cloak] {
+    display: none !important;
+}
+
 /* Плавный скроллбар в темной теме */
 ::-webkit-scrollbar {
     width: 8px;

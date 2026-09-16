@@ -97,13 +97,14 @@ func (t *browserHeadersTransport) RoundTrip(req *http.Request) (*http.Response, 
 	return base.RoundTrip(req)
 }
 
-// DeezerClient handles HTTP requests to api.deezer.com.
+// DeezerClient handles HTTP requests to api.deezer.com with proxy and fallback support.
 type DeezerClient struct {
-	httpClient *http.Client
-	baseURL    string
+	httpClient      *http.Client
+	baseURL         string
+	fallbackBaseURL string
 }
 
-// NewDeezerClient creates a new DeezerClient with anti-bot headers and proxy support.
+// NewDeezerClient creates a new DeezerClient with anti-bot headers and proxy/fallback support.
 func NewDeezerClient() *DeezerClient {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
@@ -113,13 +114,88 @@ func NewDeezerClient() *DeezerClient {
 			transport.Proxy = http.ProxyURL(pURL)
 		}
 	}
+
+	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("DEEZER_API_BASE")), "/")
+	if baseURL == "" {
+		baseURL = "https://api.deezer.com"
+	}
+
+	fallbackBase := strings.TrimRight(strings.TrimSpace(os.Getenv("DEEZER_FALLBACK_API_BASE")), "/")
+	if fallbackBase == "" {
+		fallbackBase = "https://musicdownloader.verymad.net/deezer-api"
+	}
+
 	return &DeezerClient{
 		httpClient: &http.Client{
 			Timeout:   15 * time.Second,
 			Transport: &browserHeadersTransport{base: transport},
 		},
-		baseURL: "https://api.deezer.com",
+		baseURL:         baseURL,
+		fallbackBaseURL: fallbackBase,
 	}
+}
+
+// fetchDeezerJSON performs an HTTP request to Deezer API with automatic fallback mirror upon 403 or network error.
+func (c *DeezerClient) fetchDeezerJSON(ctx context.Context, path string, target any) error {
+	path = "/" + strings.TrimPrefix(path, "/")
+	urls := []string{c.baseURL + path}
+	if c.fallbackBaseURL != "" && c.fallbackBaseURL != c.baseURL {
+		urls = append(urls, c.fallbackBaseURL+path)
+	}
+
+	var lastErr error
+	for _, targetURL := range urls {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("status %d", resp.StatusCode)
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		// Verify Deezer didn't return an internal error JSON like {"error": {"type": "...", "message": "..."}}
+		var errCheck struct {
+			Error *struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(body, &errCheck)
+		if errCheck.Error != nil {
+			lastErr = fmt.Errorf("deezer api error: %s", errCheck.Error.Message)
+			continue
+		}
+
+		if err := json.Unmarshal(body, target); err != nil {
+			lastErr = err
+			continue
+		}
+
+		return nil
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("deezer api error: %w", lastErr)
+	}
+	return fmt.Errorf("deezer api request failed")
 }
 
 // ParseURL parses a Deezer URL into resource type ("track", "album", "artist", "playlist") and ID.
@@ -154,160 +230,79 @@ func (c *DeezerClient) ParseURL(ctx context.Context, rawURL string) (resourceTyp
 
 // GetAlbum retrieves album metadata and its tracks.
 func (c *DeezerClient) GetAlbum(ctx context.Context, albumID string) (*DeezerAlbum, error) {
-	reqURL := fmt.Sprintf("%s/album/%s", c.baseURL, albumID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		// Try fallback if Deezer is unreachable
-		if itunesAlb, itErr := c.getAlbumItunes(ctx, albumID); itErr == nil {
-			return itunesAlb, nil
-		}
-		return nil, fmt.Errorf("deezer request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusForbidden {
-			if itunesAlb, itErr := c.getAlbumItunes(ctx, albumID); itErr == nil {
-				return itunesAlb, nil
-			}
-			return nil, fmt.Errorf("deezer api returned status 403 (доступ заблокирован Cloudflare/Akamai; настройте DEEZER_PROXY в .env)")
-		}
-		return nil, fmt.Errorf("deezer api returned status %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
 	var album DeezerAlbum
-	if err := json.Unmarshal(body, &album); err != nil {
-		return nil, err
-	}
-
-	// Fetch all tracks if paginated
-	if album.Tracks != nil && album.Tracks.Next != "" {
-		nextURL := album.Tracks.Next
-		for nextURL != "" {
-			nReq, nErr := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
-			if nErr != nil {
+	if err := c.fetchDeezerJSON(ctx, fmt.Sprintf("/album/%s", albumID), &album); err == nil && album.ID > 0 {
+		// Fetch paginated tracks if needed
+		if album.Tracks != nil && album.Tracks.Next != "" {
+			nextURL := album.Tracks.Next
+			for nextURL != "" {
+				var nList DeezerTrackList
+				if u, pErr := url.Parse(nextURL); pErr == nil {
+					if decErr := c.fetchDeezerJSON(ctx, u.RequestURI(), &nList); decErr == nil {
+						album.Tracks.Data = append(album.Tracks.Data, nList.Data...)
+						nextURL = nList.Next
+						continue
+					}
+				}
 				break
 			}
-			nResp, nErr := c.httpClient.Do(nReq)
-			if nErr != nil {
-				break
-			}
-			var nList DeezerTrackList
-			decErr := json.NewDecoder(nResp.Body).Decode(&nList)
-			_ = nResp.Body.Close()
-			if decErr != nil {
-				break
-			}
-			album.Tracks.Data = append(album.Tracks.Data, nList.Data...)
-			nextURL = nList.Next
 		}
+		return &album, nil
 	}
 
-	return &album, nil
+	// Fallback to iTunes if Deezer is unreachable
+	if itunesAlb, itErr := c.getAlbumItunes(ctx, albumID); itErr == nil {
+		return itunesAlb, nil
+	}
+	return nil, fmt.Errorf("deezer api returned status 403 (доступ заблокирован Cloudflare/Akamai; настройте DEEZER_PROXY в .env)")
 }
 
 // GetTrack retrieves track metadata by track ID.
 func (c *DeezerClient) GetTrack(ctx context.Context, trackID string) (*DeezerTrack, error) {
-	reqURL := fmt.Sprintf("%s/track/%s", c.baseURL, trackID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusForbidden {
-			return nil, fmt.Errorf("deezer api returned status 403 (доступ заблокирован Cloudflare/Akamai; настройте DEEZER_PROXY в .env)")
-		}
-		return nil, fmt.Errorf("deezer api returned status %d", resp.StatusCode)
-	}
-
 	var track DeezerTrack
-	if err := json.NewDecoder(resp.Body).Decode(&track); err != nil {
-		return nil, err
+	if err := c.fetchDeezerJSON(ctx, fmt.Sprintf("/track/%s", trackID), &track); err == nil && track.ID > 0 {
+		return &track, nil
 	}
-	return &track, nil
+	return nil, fmt.Errorf("deezer api returned status 403 (доступ заблокирован Cloudflare/Akamai; настройте DEEZER_PROXY в .env)")
 }
 
 // GetArtist retrieves artist metadata by artist ID.
 func (c *DeezerClient) GetArtist(ctx context.Context, artistID string) (*DeezerArtist, error) {
-	reqURL := fmt.Sprintf("%s/artist/%s", c.baseURL, artistID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusForbidden {
-			return nil, fmt.Errorf("deezer api returned status 403 (доступ заблокирован Cloudflare/Akamai; настройте DEEZER_PROXY в .env)")
-		}
-		return nil, fmt.Errorf("deezer api returned status %d", resp.StatusCode)
-	}
-
 	var artist DeezerArtist
-	if err := json.NewDecoder(resp.Body).Decode(&artist); err != nil {
-		return nil, err
+	if err := c.fetchDeezerJSON(ctx, fmt.Sprintf("/artist/%s", artistID), &artist); err == nil && artist.ID > 0 {
+		return &artist, nil
 	}
-	return &artist, nil
+	return nil, fmt.Errorf("deezer api returned status 403 (доступ заблокирован Cloudflare/Akamai; настройте DEEZER_PROXY в .env)")
 }
 
 // GetArtistAlbums retrieves all albums for an artist, handling pagination.
 func (c *DeezerClient) GetArtistAlbums(ctx context.Context, artistID string) ([]DeezerAlbum, error) {
-	reqURL := fmt.Sprintf("%s/artist/%s/albums?limit=100", c.baseURL, artistID)
 	var allAlbums []DeezerAlbum
+	nextPath := fmt.Sprintf("/artist/%s/albums?limit=100", artistID)
 
-	for reqURL != "" {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-		if err != nil {
-			return nil, err
-		}
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			return nil, err
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusForbidden {
-				return nil, fmt.Errorf("deezer api returned status 403 (доступ заблокирован Cloudflare/Akamai; настройте DEEZER_PROXY в .env)")
-			}
-			return nil, fmt.Errorf("deezer api returned status %d", resp.StatusCode)
-		}
-
+	for nextPath != "" {
 		var res struct {
 			Data  []DeezerAlbum `json:"data"`
 			Next  string        `json:"next"`
 			Total int           `json:"total"`
 		}
-		decErr := json.NewDecoder(resp.Body).Decode(&res)
-		_ = resp.Body.Close()
-		if decErr != nil {
-			return nil, decErr
+		if err := c.fetchDeezerJSON(ctx, nextPath, &res); err != nil {
+			if len(allAlbums) > 0 {
+				return allAlbums, nil
+			}
+			return nil, fmt.Errorf("deezer api returned status 403 (доступ заблокирован Cloudflare/Akamai; настройте DEEZER_PROXY в .env)")
 		}
 
 		allAlbums = append(allAlbums, res.Data...)
-		reqURL = res.Next
+		if res.Next != "" {
+			if u, pErr := url.Parse(res.Next); pErr == nil {
+				nextPath = u.RequestURI()
+			} else {
+				break
+			}
+		} else {
+			break
+		}
 	}
 
 	return allAlbums, nil
@@ -315,21 +310,11 @@ func (c *DeezerClient) GetArtistAlbums(ctx context.Context, artistID string) ([]
 
 // SearchAlbums searches albums by query text with iTunes fallback.
 func (c *DeezerClient) SearchAlbums(ctx context.Context, query string) ([]DeezerAlbum, error) {
-	reqURL := fmt.Sprintf("%s/search/album?q=%s&limit=25", c.baseURL, url.QueryEscape(query))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err == nil {
-		resp, rErr := c.httpClient.Do(req)
-		if rErr == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				var res struct {
-					Data []DeezerAlbum `json:"data"`
-				}
-				if decErr := json.NewDecoder(resp.Body).Decode(&res); decErr == nil && len(res.Data) > 0 {
-					return res.Data, nil
-				}
-			}
-		}
+	var res struct {
+		Data []DeezerAlbum `json:"data"`
+	}
+	if err := c.fetchDeezerJSON(ctx, fmt.Sprintf("/search/album?q=%s&limit=25", url.QueryEscape(query)), &res); err == nil && len(res.Data) > 0 {
+		return res.Data, nil
 	}
 
 	// Fallback to iTunes Search API if Deezer is blocked (403) or fails

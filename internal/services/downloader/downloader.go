@@ -99,7 +99,7 @@ func (s *Service) CreateJob(rawURL, source string) (*DownloadJob, error) {
 		URL:         cleanURL,
 		Progress:    0.0,
 		CurrentStep: "Задача ожидает очереди",
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
+		CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
 		UpdatedAt:   time.Now().UTC(),
 	}
 
@@ -289,11 +289,16 @@ func (s *Service) runPipeline(jobID string) {
 			// Write ID3v2.4 tags
 			job.SetStepAndStatus(fmt.Sprintf("Запись ID3v2.4 тегов %d/%d: %s", trackIdx, total, track.Title), StatusTagging)
 
+			alb := strings.TrimSpace(track.Album)
+			if (alb == "" || strings.EqualFold(alb, "single") || strings.EqualFold(alb, "singles")) && strings.TrimSpace(track.Title) != "" {
+				alb = strings.TrimSpace(track.Title)
+			}
+
 			tagData := id3.TrackTags{
 				Path:        mp3Path,
 				Title:       track.Title,
 				Artist:      track.Artist,
-				Album:       track.Album,
+				Album:       alb,
 				AlbumArtist: track.AlbumArtist,
 				TrackNumber: track.TrackNumber,
 				DiscNumber:  track.DiscNumber,
@@ -383,11 +388,7 @@ func (s *Service) downloadRawStream(ctx context.Context, sourceURL, outputTempla
 	if s.cookiesPath != "" {
 		if _, err := os.Stat(s.cookiesPath); err == nil {
 			args = append(args, "--cookies", s.cookiesPath)
-		} else {
-			args = append(args, "--extractor-args", "youtube:player_client=ios,visionos")
 		}
-	} else {
-		args = append(args, "--extractor-args", "youtube:player_client=ios,visionos")
 	}
 	args = append(args, sourceURL)
 

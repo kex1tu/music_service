@@ -8,6 +8,10 @@ function loginModalComponent() {
         isLoggingIn: false,
         error: null,
 
+        close() {
+            Alpine.store('app').closeLoginModal();
+        },
+
         async doLogin() {
             this.isLoggingIn = true;
             this.error = null;
@@ -23,7 +27,11 @@ function loginModalComponent() {
                 }
                 Alpine.store('app').user = this.loginUser;
                 Alpine.store('app').toast('Авторизация успешна', 'success');
-                Alpine.store('app').activeModal = null;
+                this.close();
+                if (Alpine.store('app').queue) {
+                    Alpine.store('app').queue.wakeUpPolling();
+                }
+                window.dispatchEvent(new CustomEvent('refresh-file-manager'));
             } catch (e) {
                 this.error = e.message;
             } finally {

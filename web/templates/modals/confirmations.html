@@ -3,9 +3,11 @@
     <div
         x-show="$store.app.activeModal === 'delete_confirm'"
         x-cloak
+        @click.self="$store.app.activeModal = null"
+        @keydown.escape.window="$store.app.activeModal = null"
         class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
         <div
-            @click.outside="$store.app.activeModal = null"
+            @click.stop
             class="bg-gray-900 border border-red-800/50 rounded-xl max-w-md w-full p-6 shadow-2xl animate-fade-in space-y-4">
             <div class="flex items-center space-x-3 text-red-400">
                 <div class="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
@@ -70,9 +72,11 @@
     <div
         x-show="$store.app.activeModal === 'reorganize_confirm'"
         x-cloak
+        @click.self="$store.app.activeModal = null"
+        @keydown.escape.window="$store.app.activeModal = null"
         class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
         <div
-            @click.outside="$store.app.activeModal = null"
+            @click.stop
             class="bg-gray-900 border border-indigo-800/50 rounded-xl max-w-md w-full p-6 shadow-2xl animate-fade-in space-y-4">
             <div class="flex items-center space-x-3 text-indigo-400">
                 <div class="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center">

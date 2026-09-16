@@ -89,10 +89,20 @@ func TransliterateArtist(s string) []string {
 	return []string{t1, t2}
 }
 
-// CleanQueryText normalizes text for search queries and matching.
+// CleanQueryText normalizes text for search queries and matching (stripping parentheses/brackets).
 func CleanQueryText(s string) string {
 	s = NormalizeUnicodeText(s)
 	s = parenRegex.ReplaceAllString(s, " ")
+	s = strings.ReplaceAll(s, "ё", "е")
+	s = strings.ReplaceAll(s, "Ё", "Е")
+	s = nonAlnumReg.ReplaceAllString(s, " ")
+	s = multiSpaceReg.ReplaceAllString(s, " ")
+	return strings.TrimSpace(s)
+}
+
+// CleanQueryTextFull normalizes text for search queries while keeping parenthetical content (e.g. Remix, Feat).
+func CleanQueryTextFull(s string) string {
+	s = NormalizeUnicodeText(s)
 	s = strings.ReplaceAll(s, "ё", "е")
 	s = strings.ReplaceAll(s, "Ё", "Е")
 	s = nonAlnumReg.ReplaceAllString(s, " ")
@@ -217,41 +227,55 @@ func (m *AudioMatcher) CalculateScore(targetTitle, targetArtist string, targetDu
 func (m *AudioMatcher) FindBestMatch(ctx context.Context, title, artist string, duration int) (string, error) {
 	cleanArt := CleanQueryText(artist)
 	cleanTit := CleanQueryText(title)
+	cleanTitFull := CleanQueryTextFull(title)
 
 	// Step 1: SoundCloud Search (priority for explicit/original audio)
-	scQuery := fmt.Sprintf("scsearch3:%s %s", cleanArt, cleanTit)
-	scCandidates, scErr := m.runSearch(ctx, scQuery)
-	if scErr == nil && len(scCandidates) > 0 {
-		var bestScCandidate *YtCandidate
-		bestScScore := -1.0
-		for _, cand := range scCandidates {
-			candChan := cand.Channel
-			if candChan == "" {
-				candChan = cand.Uploader
+	scQueries := []string{}
+	if cleanTitFull != "" && cleanTitFull != cleanTit {
+		scQueries = append(scQueries, fmt.Sprintf("scsearch3:%s %s", cleanArt, cleanTitFull))
+	}
+	if cleanTit != "" {
+		scQueries = append(scQueries, fmt.Sprintf("scsearch3:%s %s", cleanArt, cleanTit))
+	}
+
+	for _, scQ := range scQueries {
+		scCandidates, scErr := m.runSearch(ctx, scQ)
+		if scErr == nil && len(scCandidates) > 0 {
+			var bestScCandidate *YtCandidate
+			bestScScore := -1.0
+			for _, cand := range scCandidates {
+				candChan := cand.Channel
+				if candChan == "" {
+					candChan = cand.Uploader
+				}
+				score := m.CalculateScore(title, artist, duration, cand.Title, candChan, int(cand.Duration))
+				if score > bestScScore {
+					bestScScore = score
+					cCopy := cand
+					bestScCandidate = &cCopy
+				}
 			}
-			score := m.CalculateScore(title, artist, duration, cand.Title, candChan, int(cand.Duration))
-			if score > bestScScore {
-				bestScScore = score
-				cCopy := cand
-				bestScCandidate = &cCopy
-			}
-		}
-		if bestScCandidate != nil && bestScScore >= 65.0 {
-			if bestScCandidate.URL != "" {
-				return bestScCandidate.URL, nil
-			}
-			if bestScCandidate.ID != "" {
-				return fmt.Sprintf("https://soundcloud.com/%s", bestScCandidate.ID), nil
+			if bestScCandidate != nil && bestScScore >= 65.0 {
+				if bestScCandidate.URL != "" {
+					return bestScCandidate.URL, nil
+				}
+				if bestScCandidate.ID != "" {
+					return fmt.Sprintf("https://soundcloud.com/%s", bestScCandidate.ID), nil
+				}
 			}
 		}
 	}
 
 	// Step 2: YouTube Search Fallback
-	queries := []string{
+	queries := []string{}
+	if cleanTitFull != "" && cleanTitFull != cleanTit {
+		queries = append(queries, fmt.Sprintf("ytsearch5:%s %s", cleanArt, cleanTitFull))
+	}
+	queries = append(queries,
 		fmt.Sprintf("ytsearch5:%s %s Official Audio", cleanArt, cleanTit),
 		fmt.Sprintf("ytsearch5:%s %s Topic", cleanArt, cleanTit),
 		fmt.Sprintf("ytsearch5:%s %s", cleanArt, cleanTit),
-	}
+	)
 
 	var bestCandidate *YtCandidate
 	bestScore := -1.0
@@ -308,6 +332,7 @@ func (m *AudioMatcher) runSearch(ctx context.Context, query string) ([]YtCandida
 		"--ignore-config",
 		"--no-download-archive",
 		"--dump-json",
+		"--flat-playlist",
 		"--default-search", defaultSearch,
 		"--no-playlist",
 		"--no-warnings",
@@ -317,11 +342,7 @@ func (m *AudioMatcher) runSearch(ctx context.Context, query string) ([]YtCandida
 	if m.cookiesPath != "" {
 		if _, err := os.Stat(m.cookiesPath); err == nil {
 			args = append(args, "--cookies", m.cookiesPath)
-		} else {
-			args = append(args, "--extractor-args", "youtube:player_client=ios,visionos")
 		}
-	} else {
-		args = append(args, "--extractor-args", "youtube:player_client=ios,visionos")
 	}
 
 	cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

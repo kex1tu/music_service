@@ -160,8 +160,8 @@ function tagEditorComponent() {
                     track_total: t.track_total || (data.album?.track_total || null),
                     disc_number: t.disc_number !== undefined && t.disc_number !== null ? t.disc_number : 1,
                     disc_total: t.disc_total || (data.album?.disc_total || null),
-                    album: (t.album !== undefined && t.album !== null && t.album !== '') ? t.album : (this.album.album || ''),
-                    album_artist: (t.album_artist !== undefined && t.album_artist !== null && t.album_artist !== '') ? t.album_artist : (this.album.album_artist || ''),
+                    album: (t.album !== undefined && t.album !== null && t.album !== '') ? t.album : '',
+                    album_artist: (t.album_artist !== undefined && t.album_artist !== null && t.album_artist !== '') ? t.album_artist : (t.artist || ''),
                     year: (t.year !== undefined && t.year !== null && t.year !== '') ? t.year : (this.album.year || null),
                     genre: formatGenres((t.genre !== undefined && t.genre !== null && t.genre !== '') ? t.genre : (this.album.genre || '')),
                     cover_url: t.cover_url || null,
@@ -201,7 +201,11 @@ function tagEditorComponent() {
                     this.releases.forEach((group) => {
                         group.items.forEach((itemObj) => {
                             const trk = itemObj.track;
-                            if (group.albumTitle !== undefined && group.albumTitle !== null) {
+                            if (group.isSingles) {
+                                if (!trk.album || trk.album.toLowerCase() === 'single' || trk.album.toLowerCase() === 'singles') {
+                                    trk.album = trk.title || 'Single';
+                                }
+                            } else if (group.albumTitle !== undefined && group.albumTitle !== null) {
                                 trk.album = group.albumTitle;
                             }
                             if (group.albumArtist !== undefined && group.albumArtist !== null) {
@@ -252,6 +256,10 @@ function tagEditorComponent() {
                         const parsedDiscNum = parseInt(t.disc_number, 10);
                         const parsedDiscTotal = parseInt(t.disc_total, 10);
                         const parsedYear = parseInt(t.year, 10);
+                        let trkAlbum = (t.album || '').trim();
+                        if (!trkAlbum || trkAlbum.toLowerCase() === 'single' || trkAlbum.toLowerCase() === 'singles') {
+                            trkAlbum = (t.title || '').trim() || 'Single';
+                        }
                         return {
                             path: t.path,
                             track_number: !isNaN(parsedTrackNum) && parsedTrackNum >= 1 ? parsedTrackNum : 1,
@@ -260,7 +268,7 @@ function tagEditorComponent() {
                             disc_total: !isNaN(parsedDiscTotal) && parsedDiscTotal >= 1 ? parsedDiscTotal : null,
                             title: t.title || '',
                             artist: t.artist || '',
-                            album: t.album || '',
+                            album: trkAlbum,
                             album_artist: t.album_artist || '',
                             year: !isNaN(parsedYear) && parsedYear >= 1000 && parsedYear <= 2999 ? parsedYear : null,
                             genre: formatGenres(t.genre || ''),

@@ -37,13 +37,72 @@ window.createQueueManager = function() {
         },
 
         async fetchQueue() {
+            if (!Alpine.store('app')?.user) {
+                return;
+            }
             try {
                 const [sumRes, jobsRes] = await Promise.all([
                     fetch('/downloads/queue/summary'),
                     fetch('/downloads'),
                 ]);
+                if (sumRes.status === 401 || jobsRes.status === 401) {
+                    Alpine.store('app').user = null;
+                    return;
+                }
                 if (sumRes.ok) this.summary = await sumRes.json();
-                if (jobsRes.ok) this.jobs = await jobsRes.json();
+                if (jobsRes.ok) {
+                    const getStatusPriority = (st) => {
+                        switch (st) {
+                            case 'QUEUED':
+                                return 1; // Ожидают
+                            case 'RESOLVING':
+                            case 'DOWNLOADING':
+                            case 'CONVERTING':
+                            case 'TAGGING':
+                                return 2; // Скачиваются / обрабатываются
+                            case 'READY':
+                                return 3; // Скачаны
+                            case 'ERROR':
+                                return 4; // Ошибки
+                            case 'CANCELLED':
+                                return 5; // Отменены
+                            default:
+                                return 6;
+                        }
+                    };
+
+                    newJobs.sort((a, b) => {
+                        const pA = getStatusPriority(a.status);
+                        const pB = getStatusPriority(b.status);
+                        if (pA !== pB) {
+                            return pA - pB;
+                        }
+                        const ca = a.created_at || '';
+                        const cb = b.created_at || '';
+                        if (ca !== cb) {
+                            return ca > cb ? -1 : 1;
+                        }
+                        return (a.id || '').localeCompare(b.id || '');
+                    });
+
+                    if (!this.jobs || this.jobs.length === 0) {
+                        this.jobs = newJobs;
+                    } else {
+                        const currentIds = this.jobs.map((j) => j.id).join(',');
+                        const newIds = newJobs.map((j) => j.id).join(',');
+                        if (currentIds !== newIds) {
+                            this.jobs = newJobs;
+                        } else {
+                            const newMap = new Map(newJobs.map((j) => [j.id, j]));
+                            for (let i = 0; i < this.jobs.length; i++) {
+                                const fresh = newMap.get(this.jobs[i].id);
+                                if (fresh) {
+                                    Object.assign(this.jobs[i], fresh);
+                                }
+                            }
+                        }
+                    }
+                }
             } catch (e) {
                 console.error('Ошибка опроса очереди:', e);
             }

@@ -27,7 +27,11 @@ document.addEventListener('alpine:init', () => {
                 const res = await fetch('/api/auth/me');
                 if (res.ok) {
                     const data = await res.json();
-                    this.user = data.user || data.login || 'admin';
+                    if (data.authenticated && data.login) {
+                        this.user = data.login;
+                    } else {
+                        this.user = null;
+                    }
                 } else {
                     this.user = null;
                 }
@@ -78,6 +82,16 @@ document.addEventListener('alpine:init', () => {
                 } else {
                     this.activeModal = null;
                 }
+            }
+        },
+
+        openLoginModal() {
+            this.activeModal = 'login';
+        },
+
+        closeLoginModal() {
+            if (this.activeModal === 'login') {
+                this.activeModal = null;
             }
         }
     });

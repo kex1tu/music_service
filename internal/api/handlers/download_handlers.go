@@ -82,11 +82,37 @@ func (h *DownloadHandler) CreateBatchDownload(w http.ResponseWriter, r *http.Req
 	})
 }
 
+func jobStatusPriority(s downloader.JobStatus) int {
+	switch s {
+	case downloader.StatusQueued:
+		return 1 // Ожидают
+	case downloader.StatusResolving, downloader.StatusDownloading, downloader.StatusConverting, downloader.StatusTagging:
+		return 2 // Скачиваются / в процессе
+	case downloader.StatusReady:
+		return 3 // Скачаны
+	case downloader.StatusError:
+		return 4 // Ошибки
+	case downloader.StatusCancelled:
+		return 5 // Отменены
+	default:
+		return 6
+	}
+}
+
 func (h *DownloadHandler) ListDownloads(w http.ResponseWriter, r *http.Request) {
 	jobs := h.service.Jobs().GetAll()
-	// Sort newest first
+	// Sort by status priority: Queued (1) -> Downloading/Converting/Tagging (2) -> Ready (3) -> Error/Cancelled (4/5)
+	// Within the same status, sort by CreatedAt DESC, then ID ASC
 	sort.Slice(jobs, func(i, j int) bool {
-		return jobs[i].CreatedAt > jobs[j].CreatedAt
+		pI := jobStatusPriority(jobs[i].Status)
+		pJ := jobStatusPriority(jobs[j].Status)
+		if pI != pJ {
+			return pI < pJ
+		}
+		if jobs[i].CreatedAt != jobs[j].CreatedAt {
+			return jobs[i].CreatedAt > jobs[j].CreatedAt
+		}
+		return jobs[i].ID < jobs[j].ID
 	})
 
 	w.Header().Set("Content-Type", "application/json")
