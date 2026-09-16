@@ -51,6 +51,8 @@ window.createQueueManager = function() {
                 }
                 if (sumRes.ok) this.summary = await sumRes.json();
                 if (jobsRes.ok) {
+                    const data = await jobsRes.json();
+                    let newJobs = Array.isArray(data) ? data : (data?.jobs || []);
                     const getStatusPriority = (st) => {
                         switch (st) {
                             case 'QUEUED':

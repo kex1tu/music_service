@@ -131,3 +131,79 @@ func TestScanner_GenreAndCompleteness(t *testing.T) {
 	}
 }
 
+func TestScanner_InvalidPathDetection(t *testing.T) {
+	tempDir := t.TempDir()
+	musicDir := filepath.Join(tempDir, "music")
+	_ = os.MkdirAll(filepath.Join(musicDir, "CustomFolder"), 0755)
+
+	sb, err := sandbox.NewPathSandbox(musicDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dbPath := filepath.Join(tempDir, "test3.db")
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	// Track in folder "CustomFolder", but tag Album is "OfficialAlbum"
+	mp3Path := filepath.Join(musicDir, "CustomFolder", "Track1.mp3")
+	_ = os.WriteFile(mp3Path, []byte("mp3data"), 0644)
+	tags := id3.TrackTags{
+		Title:       "My Song",
+		Artist:      "Artist",
+		Album:       "OfficialAlbum",
+		TrackNumber: 1,
+	}
+	_ = id3.WriteTags(mp3Path, tags, nil)
+
+	s := NewScanner(sb, database, nil)
+	scanned, err := s.ScanAll(context.Background())
+	if err != nil {
+		t.Fatalf("ScanAll failed: %v", err)
+	}
+	if scanned != 1 {
+		t.Errorf("expected 1 scanned file, got %d", scanned)
+	}
+
+	// Verify tracks table has is_path_valid = 0 and suggested_path = "OfficialAlbum/01. My Song.mp3"
+	var isPathValid bool
+	var suggestedPath, reason string
+	err = database.Conn().QueryRow("SELECT is_path_valid, suggested_path, path_violation_reason FROM tracks WHERE title = 'My Song'").
+		Scan(&isPathValid, &suggestedPath, &reason)
+	if err != nil {
+		t.Fatalf("failed to query track: %v", err)
+	}
+	if isPathValid {
+		t.Errorf("expected is_path_valid = false for non-canonical folder, got true")
+	}
+	expectedSug := "OfficialAlbum - Artist/01. My Song.mp3"
+	if suggestedPath != expectedSug {
+		t.Errorf("expected suggested_path %q, got %q", expectedSug, suggestedPath)
+	}
+	if reason == "" {
+		t.Errorf("expected non-empty path_violation_reason")
+	}
+
+	// Verify GetInvalidPaths returns it
+	invPaths, err := database.GetInvalidPaths(context.Background())
+	if err != nil {
+		t.Fatalf("GetInvalidPaths failed: %v", err)
+	}
+	if len(invPaths) != 1 {
+		t.Fatalf("expected 1 invalid path, got %d", len(invPaths))
+	}
+	if invPaths[0].SuggestedPath != expectedSug {
+		t.Errorf("expected suggested path %q, got %q", expectedSug, invPaths[0].SuggestedPath)
+	}
+
+	// Verify audit_issues table has invalid_path
+	var auditCount int
+	err = database.Conn().QueryRow("SELECT COUNT(*) FROM audit_issues WHERE issue_type = 'invalid_path'").Scan(&auditCount)
+	if err != nil || auditCount != 1 {
+		t.Errorf("expected 1 invalid_path audit issue, got %d, err: %v", auditCount, err)
+	}
+}
+

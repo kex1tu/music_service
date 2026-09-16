@@ -83,8 +83,8 @@ window.TagCleaner = {
 
         let artists = track.artist ? this.parseArtistsString(track.artist) : [];
 
-        // 1. Ведущие порядковые номера: "01. ", "01 - ", "01 "
-        rawTitle = rawTitle.replace(/^\s*\d{1,3}\s*[\.\-–—]\s*/, '').replace(/^\s*\d{1,3}\s+/, '');
+        // 1. Ведущие порядковые номера: "01. ", "01 - ", "01. 01. " (требуется разделитель с пробелом после цифр)
+        rawTitle = rawTitle.replace(/^(?:\d{1,3}\s*[\.\-_–—]\s+)+/, '');
 
         // 2. Артист в начале названия: "Artist - Title"
         const artistMatch = rawTitle.match(/^([^\-–—]+?)\s*[-–—]\s*(.+)$/);

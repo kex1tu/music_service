@@ -19,6 +19,7 @@ import (
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	"music-manager/internal/id3"
+	"music-manager/internal/services/organizer"
 	"music-manager/internal/services/resolver"
 )
 
@@ -167,13 +168,40 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		return err
 	}
 
+	// 3. Compute canonical path and validate path conformity
+	effAlbum := strings.TrimSpace(tags.Album)
+	if effAlbum == "" || strings.EqualFold(effAlbum, "single") || strings.EqualFold(effAlbum, "singles") {
+		if strings.TrimSpace(tags.Title) != "" {
+			effAlbum = strings.TrimSpace(tags.Title)
+		} else {
+			effAlbum = "Unknown Album"
+		}
+	}
+	effArtist := strings.TrimSpace(tags.AlbumArtist)
+	if effArtist == "" {
+		effArtist = strings.TrimSpace(tags.Artist)
+	}
+	if effArtist == "" {
+		effArtist = "Unknown Artist"
+	}
+	_, suggestedPath := organizer.ComputeTargetPath(effArtist, effAlbum, tags.TrackNumber, tags.Title, filepath.Base(fullPath))
+
+	isPathValid := true
+	pathViolationReason := ""
+	cleanRel := filepath.Clean(filepath.ToSlash(relPath))
+	cleanSug := filepath.Clean(filepath.ToSlash(suggestedPath))
+	if cleanRel != cleanSug {
+		isPathValid = false
+		pathViolationReason = fmt.Sprintf("Путь не соответствует каноническому шаблону (текущий: '%s', ожидается: '%s')", cleanRel, cleanSug)
+	}
+
 	cleanTitle := strings.ToLower(tags.Title)
 	query := `
 	INSERT INTO tracks (
 		album_id, artist_id, title, clean_title, track_number, track_total,
 		disc_number, disc_total, duration, bitrate, file_path, file_size,
-		mtime, has_embedded_cover, lyrics_status
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		mtime, has_embedded_cover, lyrics_status, is_path_valid, path_violation_reason, suggested_path
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(file_path) DO UPDATE SET
 		album_id = excluded.album_id,
 		artist_id = excluded.artist_id,
@@ -188,7 +216,10 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		file_size = excluded.file_size,
 		mtime = excluded.mtime,
 		has_embedded_cover = excluded.has_embedded_cover,
-		lyrics_status = excluded.lyrics_status
+		lyrics_status = excluded.lyrics_status,
+		is_path_valid = excluded.is_path_valid,
+		path_violation_reason = excluded.path_violation_reason,
+		suggested_path = excluded.suggested_path
 	RETURNING id;
 	`
 
@@ -210,50 +241,88 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		float64(st.ModTime().Unix()),
 		tags.HasCover,
 		tags.LyricsStatus,
+		isPathValid,
+		pathViolationReason,
+		suggestedPath,
 	).Scan(&trackID)
 	if err != nil {
 		return err
 	}
 
-	// 3. Clear old issues for this track and re-populate
+	// 4. Clear old issues for this track and re-populate
 	_, _ = s.database.Conn().Exec("DELETE FROM audit_issues WHERE entity_id = ? AND entity_type = 'track'", trackID)
 	_, _ = s.database.Conn().Exec("DELETE FROM track_genres WHERE track_id = ?", trackID)
+
+	if !isPathValid {
+		_, _ = s.database.Conn().Exec(`
+			INSERT INTO audit_issues (issue_type, entity_type, entity_id, file_path, details)
+			VALUES ('invalid_path', 'track', ?, ?, ?)
+		`, trackID, relPath, pathViolationReason)
+	}
 
 	// 4. Genre handling & normalization
 	genreStr := strings.TrimSpace(tags.Genre)
 	if genreStr != "" {
-		genreRes := id3.AnalyzeAndNormalizeGenre(genreStr)
-		var genreID int64
-		err := s.database.Conn().QueryRow("SELECT id FROM genres WHERE name = ?", genreStr).Scan(&genreID)
-		if err == sql.ErrNoRows {
-			isValidEn := !genreRes.HasCyrillic && !genreRes.IsNonCanonical
-			res, insErr := s.database.Conn().Exec(
-				"INSERT INTO genres (name, is_valid_en, canonical_en_name) VALUES (?, ?, ?)",
-				genreStr, isValidEn, genreRes.CanonicalGenre,
-			)
-			if insErr == nil {
-				genreID, _ = res.LastInsertId()
+		genres := id3.ParseGenres(genreStr)
+		if len(genres) == 0 {
+			genres = []string{genreStr}
+		}
+
+		hasAnyCyrillic := false
+		hasAnyNonCanonical := false
+		isAllAutoFixable := true
+
+		for _, g := range genres {
+			genreRes := id3.AnalyzeAndNormalizeGenre(g)
+			if genreRes.HasCyrillic {
+				hasAnyCyrillic = true
 			}
-		} else if err == nil {
-			_, _ = s.database.Conn().Exec(
-				"UPDATE genres SET is_valid_en = ?, canonical_en_name = ? WHERE id = ?",
-				!genreRes.HasCyrillic && !genreRes.IsNonCanonical, genreRes.CanonicalGenre, genreID,
-			)
+			if genreRes.IsNonCanonical {
+				hasAnyNonCanonical = true
+			}
+			if !genreRes.IsAutoFixable && genreRes.IsNonCanonical {
+				isAllAutoFixable = false
+			}
+
+			rawName := g
+			canonName := genreRes.CanonicalGenre
+			if canonName == "" {
+				canonName = g
+			}
+			isValidEn := !genreRes.HasCyrillic && !genreRes.IsNonCanonical
+
+			var genreID int64
+			err := s.database.Conn().QueryRow("SELECT id FROM genres WHERE name = ?", rawName).Scan(&genreID)
+			if err == sql.ErrNoRows {
+				res, insErr := s.database.Conn().Exec(
+					"INSERT INTO genres (name, is_valid_en, canonical_en_name) VALUES (?, ?, ?)",
+					rawName, isValidEn, canonName,
+				)
+				if insErr == nil {
+					genreID, _ = res.LastInsertId()
+				}
+			} else if err == nil {
+				_, _ = s.database.Conn().Exec(
+					"UPDATE genres SET is_valid_en = ?, canonical_en_name = ? WHERE id = ?",
+					isValidEn, canonName, genreID,
+				)
+			}
+
+			if genreID > 0 {
+				_, _ = s.database.Conn().Exec("INSERT OR IGNORE INTO track_genres (track_id, genre_id) VALUES (?, ?)", trackID, genreID)
+			}
 		}
 
-		if genreID > 0 {
-			_, _ = s.database.Conn().Exec("INSERT OR IGNORE INTO track_genres (track_id, genre_id) VALUES (?, ?)", trackID, genreID)
-		}
-
-		if genreRes.HasCyrillic || genreRes.IsNonCanonical {
+		if hasAnyCyrillic || hasAnyNonCanonical {
+			fullRes := id3.AnalyzeAndNormalizeGenre(genreStr)
 			isAutoFixed := 0
-			if genreRes.IsAutoFixable {
+			if isAllAutoFixable && fullRes.IsAutoFixable {
 				isAutoFixed = 1
 			}
 			_, _ = s.database.Conn().Exec(`
 				INSERT INTO audit_issues (issue_type, entity_type, entity_id, file_path, details, is_auto_fixed, is_resolved)
 				VALUES ('non_en_genre', 'track', ?, ?, ?, ?, ?)
-			`, trackID, relPath, "Русскоязычный / неканонический жанр: "+genreStr+" -> "+genreRes.CanonicalGenre, isAutoFixed, isAutoFixed)
+			`, trackID, relPath, "Русскоязычный / неканонический жанр: "+genreStr+" -> "+fullRes.CanonicalGenre, isAutoFixed, isAutoFixed)
 		}
 	}
 
@@ -518,10 +587,36 @@ func (s *Scanner) getOrCreateAlbum(title string, artistID int64, year int, album
 	return res.LastInsertId()
 }
 
-// RemoveFile removes a deleted file record from the database.
+// RemoveFile removes a deleted file record from the database and cleans orphaned entities.
 func (s *Scanner) RemoveFile(relPath string) error {
-	_, err := s.database.Conn().Exec("DELETE FROM tracks WHERE file_path = ?", relPath)
-	return err
+	var trackID, albumID int64
+	err := s.database.Conn().QueryRow("SELECT id, album_id FROM tracks WHERE file_path = ?", relPath).Scan(&trackID, &albumID)
+	if err == nil {
+		_, _ = s.database.Conn().Exec("DELETE FROM tracks WHERE id = ?", trackID)
+		_, _ = s.database.Conn().Exec("DELETE FROM audit_issues WHERE (entity_type = 'track' AND entity_id = ?) OR file_path = ?", trackID, relPath)
+		_, _ = s.database.Conn().Exec("DELETE FROM track_genres WHERE track_id = ?", trackID)
+
+		if albumID > 0 {
+			var count int
+			_ = s.database.Conn().QueryRow("SELECT COUNT(*) FROM tracks WHERE album_id = ?", albumID).Scan(&count)
+			if count == 0 {
+				_, _ = s.database.Conn().Exec("DELETE FROM albums WHERE id = ?", albumID)
+				_, _ = s.database.Conn().Exec("DELETE FROM missing_tracks WHERE album_id = ?", albumID)
+			} else {
+				_, _ = s.database.Conn().Exec(`
+					UPDATE albums SET
+						present_tracks_count = ?,
+						updated_at = CURRENT_TIMESTAMP
+					WHERE id = ?
+				`, count, albumID)
+			}
+		}
+
+		// Clean orphaned artists and missing tracks
+		_, _ = s.database.Conn().Exec("DELETE FROM artists WHERE (SELECT COUNT(*) FROM albums WHERE artist_id = artists.id) = 0")
+		_, _ = s.database.Conn().Exec("DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums)")
+	}
+	return nil
 }
 
 // StartWatcher starts the background fsnotify filesystem watcher on MUSIC_DIR.

@@ -51,6 +51,12 @@ func main() {
 	}
 	defer database.Close()
 
+	// Reset library cache tables on startup (preserving download_jobs) and rebuild from filesystem
+	log.Println("[Main] Resetting library metadata cache tables on startup (preserving download_jobs)...")
+	if err := database.ResetLibraryTables(context.Background()); err != nil {
+		log.Printf("[Main] Warning: Failed to reset library cache tables: %v", err)
+	}
+
 	// 4. Initialize services
 	deezerClient := resolver.NewDeezerClient()
 	audioMatcher := resolver.NewAudioMatcher(cfg.CookiesFile)
@@ -91,7 +97,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(cfg)
 	downloadHandler := handlers.NewDownloadHandler(downloadService, deezerClient)
 	tagHandler := handlers.NewTagHandler(musicSandbox, tmpSandbox, organizerService, deezerClient)
-	fileHandler := handlers.NewFileHandler(musicSandbox, tmpSandbox, database, downloadService, organizerService, deezerClient, lyricsService)
+	fileHandler := handlers.NewFileHandler(musicSandbox, tmpSandbox, database, downloadService, organizerService, deezerClient, lyricsService, scannerService)
 	lyricsHandler := handlers.NewLyricsHandler(lyricsService)
 
 	// 7. Initialize Router

@@ -1,10 +1,15 @@
 # PROGRESS.md — Матрица статусов реализации Music Downloader & Tag Manager
 
 ## Текущий статус проекта
-- **Текущий статус проекта:** 100% готовность. Стабилизирован Downloader Engine (персистентность очереди задач в SQLite WAL, механизм Retry, приоритет SoundCloud-First для аудио без цензуры, обход Deezer 403 с fallback на iTunes API, монотонный прогресс и детальная диагностика ошибок). Полностью устранены баги вложенности HTML-тегов (`<template>` / `<div>` в шаблонах UI) и подтверждена работа модального окна входа через headless Chrome. Все сервисы объединены в единый Pure Go бинарник `bin/music-manager`.
-- **Активный этап:** Высокопроизводительный монолитный сервис на Pure Go (15 МБ, память в рантайме ~4-24 МБ, старт за 2 мс, встроенный UI без сборки, полнотекстовый поиск SQLite WAL, ID3v2.4 Engine, автоматическая нормализация жанров, фоновый чекер неполных альбомов в Deezer, фоновый воркер LRCLIB, yt-dlp + ffmpeg).
-- **Результаты тестов:** 100% Go unit & integration tests pass (`go test -v ./...`, `go test -race ./...` — все 12 пакетов зеленые, 0 гонок). Проведена валидация через реальный Chromium/Chrome DevTools Protocol (CDP): модальное окно авторизации переходит в `display: flex`, `visibility: visible`, `z-index: 50`.
-- **Деплой:** Развернут единый статический бинарник `bin/music-manager` под systemd `music-manager.service` на обоих боевых серверах (`nl_vpn`, `nl_music`), публичный HTTPS healthcheck (`https://apiv1.all4you.ru/api/health`) отдает 200 OK. Отдельный демон `music-scanner` (`music-auditor.service`) полностью выведен из эксплуатации.
+- **Текущий статус проекта:** 100% готовность. 
+  1) **Каноническая файловая структура:** переведена на `MUSIC_DIR/{Album} - {Album Artist}/{TrackNumber:02d}. {Title}.mp3` (и `MUSIC_DIR/{Title} - {Artist}/01. {Title}.mp3` для синглов).
+  2) **Синхронизация БД при удалении файлов/папок:** удаление треков, папок релизов, обложек (`cover.jpg`/`png`) и текстов (`.lrc`/`.txt`) синхронизирует все таблицы SQLite (`tracks`, `albums`, `track_genres`, `audit_issues`, `missing_tracks`), обновляет статусы (`lyrics_status`, `has_cover`) и очищает осиротевшие альбомы/артисты.
+  3) **Сброс кэша медиатеки при старте сервера:** на старте очищаются таблицы кэша медиатеки при сохранении `download_jobs`, и запускается актуальный перескан файловой системы.
+  4) **Очередь загрузок в веб-интерфейсе:** исправлен `ReferenceError: newJobs is not defined` в `queue_manager.js`, обеспечен безопасный парсинг массива и объекта, обеспечен не-nil срез `[]` в Go-хендлере `ListDownloads`, и на страницу «Загрузчик» добавлена детальная таблица очереди задач загрузки.
+  5) Все тесты (`go test -v -race ./...`) пройдены на 100%, статический бинарник собран и раскатан на оба боевых сервера (`nl_vpn`, `nl_music`).
+- **Активный этап:** Высокопроизводительный монолитный сервис на Pure Go (15 МБ, память в рантайме ~4-24 МБ, старт за 2 мс, встроенный UI без сборки, полнотекстовый поиск SQLite WAL, ID3v2.4 Engine, автоматическая нормализация жанров, аудит и исправление неканонических путей, фоновый чекер неполных альбомов в Deezer, фоновый воркер LRCLIB, yt-dlp + ffmpeg).
+- **Результаты тестов:** 100% Go unit & integration tests pass (`go test -v ./...`, `go test -race ./...` — 0 гонок, все 12 пакетов зеленые).
+- **Деплой:** Развернут единый статический бинарник `bin/music-manager` под systemd `music-manager.service` на обоих боевых серверах (`nl_vpn`, `nl_music`), публичный HTTPS healthcheck (`https://apiv1.all4you.ru/api/health` и `https://musicdownloader.verymad.net/api/health`) отдает 200 OK.
 
 ---
 
@@ -581,3 +586,23 @@
 | Компонент | Пути | Статус | Описание и контрольные точки |
 |---|---|---|---|
 | **O1: Multi-Release Batch Move & 1-Level Album Layout** | `internal/services/organizer/organizer.go`, `internal/services/organizer/organizer_test.go`, `internal/api/handlers/tag_handlers.go`, `internal/api/handlers/file_handlers.go`, `web/static/js/tag_editor/releases.js`, `web/static/js/tag_editor/tag_editor.js` | **DONE** | 1. Каноническая одноуровневая структура каталогов: `music_library/{Album}/{TrackNumber:02d}. {Title}.mp3`.<br>2. Автоматическое назначение названия альбома для синглов: если трек является синглом (или поле альбома пустое/«Single»/«Singles»), тег альбома и директория выставляются равными названию трека (`album = title`).<br>3. В `MoveAlbum` внедрена динамическая маршрутизация каждого трека в его собственный каталог альбома с сохранением обложек и текстов.<br>4. Внедрена детерминированная сортировка и последовательная блокировка мьютексов целевых папок для предотвращения взаимных блокировок.<br>5. В `releases.js` и `tag_editor.js` обеспечена независимая группировка синглов и корректное сохранение тегов без перезаписи.<br>6. Написаны модульные тесты `TestMoveAlbum_MultipleReleasesSeparation`, `TestMoveAlbum_SingleTrackAlbumEqualsTitle` и `TestMoveAlbum_Base64Cover`, все тесты `go test -race ./...` (100% GREEN). |
+
+---
+
+## Блок 36: Исправление очистки префиксов (1.Kla$) и мульти-жанровое кодирование ID3v2.4 для Navidrome (2026-09-17)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **M1: Сохранение префиксов названий треков и артистов (`1.Kla$`)** | `internal/id3/tag.go`, `web/static/js/tag_editor/cleaner.js`, `internal/id3/id3_test.go`, `internal/services/organizer/organizer_test.go` | **DONE** | 1. Регулярное выражение `trackPrefixRegex` в Go (`CleanTitle`) и JS (`cleanTrackTitle`) обновлено на `^(?:\d{1,3}\s*[\.\-_–—]\s+)+`: строго требуется пробел после разделителя трек-номера.<br>2. Имена и названия вроде `1.Kla$`, `1.Царь`, `3.14`, `21 Guns`, `1979`, `505` сохраняются без искажений (`1.Kla$/01. 1.Kla$.mp3`).<br>3. Каскадные трек-номера (`01. 01. 1.Kla$`, `05. 05. 05. Song`) по-прежнему очищаются без остатка. |
+| **M2: Строгое ID3v2.4 UTF-8 мульти-жанровое кодирование для Navidrome** | `internal/id3/tag.go`, `internal/id3/writer.go`, `internal/id3/genre.go`, `internal/services/scanner/scanner.go`, `internal/api/handlers/file_handlers.go`, `internal/id3/id3_test.go` | **DONE** | 1. Реализован метод `id3.ParseGenres` с поддержкой всех разделителей (`\x00`, `\\+`, `[/;,|]`, `\n`) и нормализацией регистра.<br>2. В `id3.WriteTags` запись фрейма `TCON` (Genre) и `TPE1` (Artist) строго формирует ID3v2.4 UTF-8 с нативным разделением значений через null-байт `\x00`, что распознается Navidrome и TagLib как отдельные независимые жанры/артисты.<br>3. В `Scanner.ScanFile` и `FileHandler.RetagGenres` множественные жанры трека разбиваются и привязываются индивидуально в таблице связей `track_genres`.<br>4. Добавлен тест `TestWriteAndReadTags_MultiGenre_NullSeparated` с бинарной валидацией полезной нагрузки фреймов `TCON` и `TPE1`. 100% тестов `go test -v -race ./...` пройдены успешно. |
+
+---
+
+## Блок 37: Сохранение обложек по имени трека ({TrackBaseName}.jpg) и извлечение embedded APIC (2026-09-17)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **C1: Дублирование обложки по имени трека (`{TrackBaseName}.jpg`) и `cover.jpg`** | `internal/services/organizer/organizer.go`, `internal/services/organizer/organizer_test.go` | **DONE** | 1. При реорганизации треков и синглов (`MoveAlbum`) метод `syncTrackNamedCovers` автоматически создает как `cover.jpg` (для директорий и скрейперов), так и `{TrackBaseName}.jpg` (например, `01. Title.jpg`) для каждого трека в целевой папке.<br>2. Позволяет плеерам (Foobar2000, AIMP, Poweramp, VLC, Navidrome) корректно подхватывать индивидуальную обложку трека даже в синглах.<br>3. `moveCompanionFiles` расширен на форматы изображений (`.jpg`, `.jpeg`, `.png`, `.webp`), благодаря чему кастомные обложки треков переносятся вместе с аудиофайлом. |
+| **C2: Автоматическое извлечение встроенного ID3 APIC при отсутствии файла обложки** | `internal/services/organizer/organizer.go`, `internal/api/handlers/tag_handlers.go`, `internal/api/handlers/file_handlers.go`, `internal/services/organizer/organizer_test.go` | **DONE** | 1. Если на диске отсутствует файл обложки, функция `extractCoverFromTracks` считывает embedded APIC через `id3.ReadCover` из перемещаемых MP3 и сохраняет `cover.jpg` и `{TrackBaseName}.jpg`.<br>2. `GetTags` и `GetCover` в API проверяют кандидаты обложек по имени конкретного трека (`{trackBase}.jpg`, `.png`, `.jpeg`, `.webp`), если в папке нет общего `cover.jpg`.<br>3. `DeleteFile` удаляет связанные файлы обложек (`{trackBase}.jpg/png/webp`) при удалении аудиофайла.<br>4. Написаны тесты `TestMoveAlbum_Single_TrackNamedCover`, `TestMoveAlbum_Single_EmbeddedCoverExtraction`, `TestMoveTrackWithCompanions_ImageAndLyrics`. 100% тестов пройдены успешно. |
+
+

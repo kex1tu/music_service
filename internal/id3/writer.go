@@ -60,7 +60,7 @@ func WriteTags(filePath string, tags TrackTags, cover *CoverInfo) error {
 
 	// TCON: Жанр (поддержка null-separated \x00)
 	if strings.TrimSpace(tags.Genre) != "" {
-		writeMultiTextFrame(&framesBuf, "TCON", tags.Genre)
+		writeGenreFrame(&framesBuf, tags.Genre)
 	}
 
 	// TRCK: Номер дорожки
@@ -198,6 +198,29 @@ func writeMultiTextFrame(w io.Writer, frameID string, multiVal string) {
 	}
 
 	writeFrameHeader(w, frameID, len(payload))
+	w.Write(payload)
+}
+
+func writeGenreFrame(w io.Writer, genreStr string) {
+	items := ParseGenres(genreStr)
+	if len(items) == 0 {
+		trimmed := strings.TrimSpace(genreStr)
+		if trimmed != "" {
+			writeTextFrame(w, "TCON", trimmed)
+		}
+		return
+	}
+
+	var payload []byte
+	payload = append(payload, 3) // UTF-8
+	for i, item := range items {
+		if i > 0 {
+			payload = append(payload, 0) // \x00 разделитель стандарта ID3v2.4
+		}
+		payload = append(payload, []byte(item)...)
+	}
+
+	writeFrameHeader(w, "TCON", len(payload))
 	w.Write(payload)
 }
 

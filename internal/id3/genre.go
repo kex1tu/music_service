@@ -7,7 +7,7 @@ import (
 
 var (
 	cyrillicRegex   = regexp.MustCompile(`\p{Cyrillic}`)
-	genreSplitRegex = regexp.MustCompile(`(\s*\\+\s*|\x00|\s*[/;,|]\s*)`)
+	genreSplitRegex = regexp.MustCompile(`(?:\s*\\+\s*|\x00|\s*[/;,|]\s*|\r?\n)`)
 	hipHopRegex     = regexp.MustCompile(`(?i)\b(?:hip[- ]?hop|хип[- ]?хоп|hiphop)\b`)
 )
 

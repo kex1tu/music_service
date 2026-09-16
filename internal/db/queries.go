@@ -282,3 +282,22 @@ func (db *DB) DeleteJob(ctx context.Context, id string) error {
 func CleanString(s string) string {
 	return fmt.Sprintf("%s", s)
 }
+
+// ResetLibraryTables очищает все таблицы кэша медиатеки при запуске сервиса, сохраняя таблицу download_jobs.
+func (db *DB) ResetLibraryTables(ctx context.Context) error {
+	queries := []string{
+		"DELETE FROM track_genres;",
+		"DELETE FROM audit_issues;",
+		"DELETE FROM missing_tracks;",
+		"DELETE FROM tracks;",
+		"DELETE FROM albums;",
+		"DELETE FROM artists;",
+		"DELETE FROM genres;",
+	}
+	for _, q := range queries {
+		if _, err := db.conn.ExecContext(ctx, q); err != nil {
+			return fmt.Errorf("ошибка очистки таблицы (%s): %w", q, err)
+		}
+	}
+	return nil
+}

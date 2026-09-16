@@ -8,8 +8,15 @@ import (
 var (
 	// Регулярка для детекции утекших заголовков ID3-фреймов
 	leakedFrameHeaderRegex = regexp.MustCompile(`(?i)\b(TALB|TIT2|TPE1|TPE2|TCON|TRCK|TPOS|COMM|APIC)\b`)
-	// Регулярка для отсечения повторяющихся префиксов дорожек (05. 05. 05. -> '')
-	trackPrefixRegex = regexp.MustCompile(`^(?:\d{1,3}[\s._-]+)+`)
+	// Регулярка для отсечения повторяющихся префиксов номеров дорожек (05. 05. 05. -> '')
+	// Требует разделитель (., -, _, – или —) и обязательно хотя бы один пробел после него (\s+),
+	// чтобы не срезать префиксы у исполнителей и названий вида "1.Kla$", "1.Царь", "3.14", "21 Guns", "1979", "505".
+	trackPrefixRegex = regexp.MustCompile(`^(?:\d{1,3}\s*[\.\-_–—]\s+)+`)
+
+	// Разделители для множественных значений артистов (null-byte, 1+ backslashes, ;, |)
+	multiValueSplitRegex = regexp.MustCompile(`(?:\s*\\+\s*|\x00|\s*[;|]\s*)`)
+	// Разделители для жанров (null-byte, 1+ backslashes, /, ;, |, ,)
+	genreMultiSplitRegex = regexp.MustCompile(`(?:\s*\\+\s*|\x00|\s*[/;,|]\s*|\r?\n)`)
 )
 
 // TrackTags представляет полные метаданные аудиодорожки.
@@ -61,6 +68,7 @@ func CleanTitle(title string, fallbackFileName string) string {
 		// Если после очистки ничего не осталось, берем fallback
 		cleanFallback := trackPrefixRegex.ReplaceAllString(fallbackFileName, "")
 		cleanFallback = strings.TrimSuffix(cleanFallback, ".mp3")
+		cleanFallback = strings.TrimSuffix(cleanFallback, ".MP3")
 		cleanFallback = strings.TrimSpace(cleanFallback)
 		if cleanFallback != "" {
 			return cleanFallback
@@ -71,18 +79,50 @@ func CleanTitle(title string, fallbackFileName string) string {
 	return t
 }
 
-// ParseMultiValue разбивает строку вида "Pop\\Rock" или с разделителями в слайс.
+// ParseMultiValue разбивает строку вида "Artist 1\\Artist 2" или с разделителями в слайс.
 func ParseMultiValue(val string) []string {
-	if strings.TrimSpace(val) == "" {
+	trimmed := strings.TrimSpace(val)
+	if trimmed == "" {
 		return nil
 	}
-	raw := strings.ReplaceAll(val, "\x00", "\\\\")
-	parts := strings.Split(raw, "\\\\")
+	parts := multiValueSplitRegex.Split(trimmed, -1)
 	var res []string
+	seen := make(map[string]bool)
 	for _, p := range parts {
-		trimmed := strings.TrimSpace(p)
-		if trimmed != "" {
-			res = append(res, trimmed)
+		t := strings.TrimSpace(p)
+		if t != "" {
+			lower := strings.ToLower(t)
+			if !seen[lower] {
+				seen[lower] = true
+				res = append(res, t)
+			}
+		}
+	}
+	return res
+}
+
+// ParseGenres разбивает строку жанров вида "Alternative\\Rock" или "Rap/Hip Hop" в нормализованный слайс жанров.
+func ParseGenres(val string) []string {
+	trimmed := strings.TrimSpace(val)
+	if trimmed == "" {
+		return nil
+	}
+	parts := genreMultiSplitRegex.Split(trimmed, -1)
+	var res []string
+	seen := make(map[string]bool)
+	for _, p := range parts {
+		t := strings.TrimSpace(p)
+		if t == "" {
+			continue
+		}
+		norm := NormalizeSingleGenre(t)
+		if norm == "" {
+			norm = t
+		}
+		lower := strings.ToLower(norm)
+		if !seen[lower] {
+			seen[lower] = true
+			res = append(res, norm)
 		}
 	}
 	return res
@@ -91,10 +131,36 @@ func ParseMultiValue(val string) []string {
 // FormatMultiValue объединяет слайс значений в строку с разделителем '\\' для UI.
 func FormatMultiValue(items []string) string {
 	var clean []string
+	seen := make(map[string]bool)
 	for _, it := range items {
 		t := strings.TrimSpace(it)
 		if t != "" {
-			clean = append(clean, t)
+			lower := strings.ToLower(t)
+			if !seen[lower] {
+				seen[lower] = true
+				clean = append(clean, t)
+			}
+		}
+	}
+	return strings.Join(clean, "\\\\")
+}
+
+// FormatGenres объединяет слайс жанров в каноническую строку с разделителем '\\' для UI.
+func FormatGenres(items []string) string {
+	var clean []string
+	seen := make(map[string]bool)
+	for _, it := range items {
+		t := strings.TrimSpace(it)
+		if t != "" {
+			norm := NormalizeSingleGenre(t)
+			if norm == "" {
+				norm = t
+			}
+			lower := strings.ToLower(norm)
+			if !seen[lower] {
+				seen[lower] = true
+				clean = append(clean, norm)
+			}
 		}
 	}
 	return strings.Join(clean, "\\\\")

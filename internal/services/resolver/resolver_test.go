@@ -69,3 +69,22 @@ func TestFindBestMatch_MaloletkaRemix(t *testing.T) {
 	}
 	t.Logf("Found match URL: %s", matchURL)
 }
+
+func TestDetectSource_YouTubeMusicArtist(t *testing.T) {
+	r := NewSourceResolver(nil, nil, "")
+
+	urls := []string{
+		"https://music.youtube.com/channel/UC2XdaAVUannpujzv32jcouQ",
+		"https://music.youtube.com/channel/UC2XdaAVUannpujzv32jcouQ/releases",
+	}
+
+	for _, u := range urls {
+		src, err := r.DetectSource(u)
+		if err != nil {
+			t.Fatalf("DetectSource(%q) failed: %v", u, err)
+		}
+		if src != "youtube" {
+			t.Errorf("expected source 'youtube', got %q", src)
+		}
+	}
+}

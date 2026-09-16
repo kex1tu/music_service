@@ -19,6 +19,7 @@ import (
 	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/organizer"
 	"music-manager/internal/services/resolver"
+	"music-manager/internal/services/scanner"
 )
 
 func setupTestRouter(t *testing.T) (http.Handler, *config.Config) {
@@ -64,11 +65,12 @@ func setupTestRouter(t *testing.T) (http.Handler, *config.Config) {
 	downSvc := downloader.NewService(jobMgr, res, tmpSb, musicSb, "", 2)
 	orgSvc := organizer.NewService(musicSb, tmpSb)
 	lyrSvc := lyrics.NewService(musicSb)
+	scannerSvc := scanner.NewScanner(musicSb, database, deezerClient)
 
 	authHandler := handlers.NewAuthHandler(cfg)
 	downHandler := handlers.NewDownloadHandler(downSvc, deezerClient)
 	tagHandler := handlers.NewTagHandler(musicSb, tmpSb, orgSvc, deezerClient)
-	fileHandler := handlers.NewFileHandler(musicSb, tmpSb, database, downSvc, orgSvc, deezerClient, lyrSvc)
+	fileHandler := handlers.NewFileHandler(musicSb, tmpSb, database, downSvc, orgSvc, deezerClient, lyrSvc, scannerSvc)
 	lyrHandler := handlers.NewLyricsHandler(lyrSvc)
 
 	router := NewRouter(RouterParams{

@@ -1,17 +1,21 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/lyrics"
+	"music-manager/internal/services/organizer"
+	"music-manager/internal/services/scanner"
 )
 
 func setupTestFileHandler(t *testing.T) (*FileHandler, *sandbox.PathSandbox, *db.DB, string) {
@@ -37,7 +41,9 @@ func setupTestFileHandler(t *testing.T) (*FileHandler, *sandbox.PathSandbox, *db
 	}
 
 	lyrSvc := lyrics.NewService(musicSb)
-	handler := NewFileHandler(musicSb, tmpSb, database, nil, nil, nil, lyrSvc)
+	orgSvc := organizer.NewService(musicSb, tmpSb)
+	scannerSvc := scanner.NewScanner(musicSb, database, nil)
+	handler := NewFileHandler(musicSb, tmpSb, database, nil, orgSvc, nil, lyrSvc, scannerSvc)
 
 	return handler, musicSb, database, musicDir
 }
@@ -219,5 +225,91 @@ func TestFileHandler_BatchLyricsProgress_Empty(t *testing.T) {
 	}
 	if resp.IsRunning {
 		t.Errorf("expected is_running false")
+	}
+}
+
+func TestFileHandler_RefreshAudit_DetectsRenamedFolder(t *testing.T) {
+	h, _, database, musicDir := setupTestFileHandler(t)
+	defer database.Close()
+
+	// Create a track in a non-canonical folder
+	wrongDir := filepath.Join(musicDir, "Wrong Album Folder")
+	_ = os.MkdirAll(wrongDir, 0755)
+	mp3Path := filepath.Join(wrongDir, "01. Hit Song.mp3")
+	_ = os.WriteFile(mp3Path, []byte("audio payload data"), 0644)
+
+	tags := id3.TrackTags{
+		Title:       "Hit Song",
+		Artist:      "Cool Artist",
+		Album:       "Canonical Album",
+		TrackNumber: 1,
+	}
+	if err := id3.WriteTags(mp3Path, tags, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Trigger RefreshAudit
+	req := httptest.NewRequest(http.MethodPost, "/files/audit/refresh", nil)
+	w := httptest.NewRecorder()
+	h.RefreshAudit(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var summary map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&summary); err != nil {
+		t.Fatal(err)
+	}
+
+	if summary["invalid_paths_count"] != float64(1) {
+		t.Errorf("expected invalid_paths_count 1, got %v", summary["invalid_paths_count"])
+	}
+
+	// Query InvalidPaths
+	reqInv := httptest.NewRequest(http.MethodGet, "/files/audit/invalid-paths", nil)
+	wInv := httptest.NewRecorder()
+	h.InvalidPaths(wInv, reqInv)
+
+	var invList []db.InvalidPathRecord
+	if err := json.NewDecoder(wInv.Body).Decode(&invList); err != nil {
+		t.Fatal(err)
+	}
+	if len(invList) != 1 {
+		t.Fatalf("expected 1 invalid path record, got %d", len(invList))
+	}
+	if invList[0].FilePath != "Wrong Album Folder/01. Hit Song.mp3" {
+		t.Errorf("expected FilePath 'Wrong Album Folder/01. Hit Song.mp3', got %q", invList[0].FilePath)
+	}
+	if invList[0].SuggestedPath != "Canonical Album - Cool Artist/01. Hit Song.mp3" {
+		t.Errorf("expected SuggestedPath 'Canonical Album - Cool Artist/01. Hit Song.mp3', got %q", invList[0].SuggestedPath)
+	}
+
+	// FixPath
+	body := strings.NewReader(`{"path":"Wrong Album Folder/01. Hit Song.mp3"}`)
+	reqFix := httptest.NewRequest(http.MethodPost, "/files/audit/fix-path", body)
+	wFix := httptest.NewRecorder()
+	h.FixPath(wFix, reqFix)
+
+	if wFix.Code != http.StatusOK {
+		t.Fatalf("expected status 200 from FixPath, got %d", wFix.Code)
+	}
+
+	// Verify moved on disk
+	newDiskPath := filepath.Join(musicDir, "Canonical Album - Cool Artist", "01. Hit Song.mp3")
+	if _, err := os.Stat(newDiskPath); os.IsNotExist(err) {
+		t.Fatalf("file not found at canonical location: %s", newDiskPath)
+	}
+	if _, err := os.Stat(mp3Path); !os.IsNotExist(err) {
+		t.Errorf("file still exists at old location: %s", mp3Path)
+	}
+
+	// Verify database no longer has invalid paths
+	remaining, err := database.GetInvalidPaths(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 0 {
+		t.Errorf("expected 0 invalid paths after FixPath, got %d", len(remaining))
 	}
 }

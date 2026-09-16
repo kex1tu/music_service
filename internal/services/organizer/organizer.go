@@ -1,6 +1,7 @@
 package organizer
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -8,9 +9,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
@@ -19,6 +22,10 @@ import (
 var (
 	albumLocksMu sync.Mutex
 	albumLocks   = make(map[string]*sync.Mutex)
+
+	// dangerousFsChars matches filesystem forbidden chars: / \ : * ? " < > | \x00 and ASCII control codes (0-31)
+	dangerousFsChars = regexp.MustCompile(`[\x00-\x1f/\\:*?"<>|]`)
+	multiSepRegex    = regexp.MustCompile(`(\\+|\x00)`)
 )
 
 func getAlbumLock(albumDir string) *sync.Mutex {
@@ -32,10 +39,29 @@ func getAlbumLock(albumDir string) *sync.Mutex {
 	return lock
 }
 
-// OrganizerResult contains details of the organized album files.
+// TrackTags represents audio metadata for an individual track.
+type TrackTags = id3.TrackTags
+
+// AlbumMeta contains top-level album metadata from submission forms.
+type AlbumMeta struct {
+	AlbumArtist string `json:"album_artist"`
+	Album       string `json:"album"`
+	Year        *int   `json:"year,omitempty"`
+	Genre       string `json:"genre,omitempty"`
+}
+
+// BatchSaveRequest defines the payload for batch saving and organizing tracks.
+type BatchSaveRequest struct {
+	SourceDir   string      `json:"source_dir"`   // e.g. "tmp_downloads/job-uuid" or "music_library/..."
+	Album       AlbumMeta   `json:"album"`        // High-level release metadata
+	Tracks      []TrackTags `json:"tracks"`       // List of tracks to organize
+	CoverBase64 string      `json:"cover_base64"` // Base64-encoded cover art (optional)
+}
+
+// OrganizerResult contains details of the organized files and destination directory.
 type OrganizerResult struct {
-	DestinationDir string          `json:"destination_dir"`
-	Tracks         []id3.TrackTags `json:"tracks"`
+	DestinationDir string      `json:"destination_dir"` // Canonical relative directory (e.g. "Album Name")
+	Tracks         []TrackTags `json:"tracks"`          // List of tracks with updated paths and tags
 }
 
 type targetAlbumInfo struct {
@@ -44,13 +70,13 @@ type targetAlbumInfo struct {
 	sourceDirs map[string]bool
 }
 
-// Service manages organizing and moving files in the music library.
+// Service manages organizing and moving files in the music library with strict sandbox isolation.
 type Service struct {
 	musicSandbox *sandbox.PathSandbox
 	tmpSandbox   *sandbox.PathSandbox
 }
 
-// NewService creates a new OrganizerService.
+// NewService creates a new Organizer Service instance.
 func NewService(musicSandbox, tmpSandbox *sandbox.PathSandbox) *Service {
 	return &Service{
 		musicSandbox: musicSandbox,
@@ -58,50 +84,76 @@ func NewService(musicSandbox, tmpSandbox *sandbox.PathSandbox) *Service {
 	}
 }
 
-// SanitizeComponent sanitizes a directory or filename component.
-func (s *Service) SanitizeComponent(name, fallback string, maxLength int) string {
+// SanitizeComponent sanitizes a directory or filename component:
+// - Removes illegal filesystem characters (/, \, :, *, ?, ", <, >, |, \x00, control ASCII 0-31).
+// - Replaces multiple separators (\\, \x00) with " & ".
+// - Restricts length to maxLength (default 180) with clean rune boundary slicing.
+// - Removes trailing dots and spaces to prevent Windows/crossplatform issues.
+func SanitizeComponent(name, fallback string, maxLength int) string {
 	if maxLength <= 0 {
 		maxLength = 180
 	}
 	clean := strings.TrimSpace(name)
 	if clean == "" {
-		clean = fallback
+		return fallback
 	}
 
-	// Normalize multiple separators
-	clean = strings.ReplaceAll(clean, "\\\\", " & ")
-	clean = strings.ReplaceAll(clean, "\x00", " & ")
+	// 1. Replace artist/genre multi-value separators
+	clean = multiSepRegex.ReplaceAllString(clean, " & ")
 
-	// Sanitize through sandbox
-	sanitized := sandbox.SanitizeFilename(clean, fallback)
-	if len(sanitized) > maxLength {
-		sanitized = strings.TrimRight(sanitized[:maxLength], ". ")
+	// 2. Replace illegal filesystem and control characters with underscore
+	clean = dangerousFsChars.ReplaceAllString(clean, "_")
+
+	// 3. Trim leading/trailing dots and spaces
+	clean = strings.Trim(clean, ". ")
+
+	// 4. Truncate safely by rune count without breaking UTF-8 sequences
+	if utf8.RuneCountInString(clean) > maxLength {
+		runes := []rune(clean)
+		clean = strings.TrimRight(string(runes[:maxLength]), ". ")
 	}
-	if sanitized == "" {
-		sanitized = fallback
+
+	if clean == "" {
+		return fallback
 	}
-	return sanitized
+	return clean
 }
 
-// ComputeAlbumDir calculates canonical album directory name: {Album}.
-func (s *Service) ComputeAlbumDir(albumTitle string) string {
+// CleanTitle removes duplicate leading track number prefixes (e.g. "01. 01. Song" -> "Song").
+func CleanTitle(title string, origFilename string) string {
+	return id3.CleanTitle(title, origFilename)
+}
+
+// ComputeAlbumDir calculates canonical album directory name: {Album} - {Album Artist}.
+func ComputeAlbumDir(albumArtist, albumTitle string) string {
+	artist := strings.TrimSpace(albumArtist)
 	album := strings.TrimSpace(albumTitle)
+
+	if artist == "" {
+		artist = "Unknown Artist"
+	}
 	if album == "" {
 		album = "Unknown Album"
 	}
-	safeAlbum := s.SanitizeComponent(album, "Unknown Album", 180)
-	return safeAlbum
+
+	safeAlbum := SanitizeComponent(album, "Unknown Album", 100)
+	safeArtist := SanitizeComponent(artist, "Unknown Artist", 100)
+
+	return fmt.Sprintf("%s - %s", safeAlbum, safeArtist)
 }
 
-// ComputeTargetPath calculates destination paths: {Album}/{TrackNumber:02d}. {CleanTitle}.mp3.
-// If albumTitle is empty or indicates a single, album is set to title.
-func (s *Service) ComputeTargetPath(albumTitle string, trackNum int, title, origFilename string) (albumDir, trackRelPath string) {
-	cleanTitle := id3.CleanTitle(title, origFilename)
+// ComputeTargetPath calculates destination paths: {Album} - {Album Artist}/{TrackNumber:02d}. {CleanTitle}.mp3.
+// If albumTitle is empty or indicates a single ("Single"/"Singles"), album is set to track title.
+func ComputeTargetPath(albumArtist, albumTitle string, trackNum int, title, origFilename string) (albumDir, trackRelPath string) {
+	cleanTitle := CleanTitle(title, origFilename)
 	if trackNum <= 0 {
 		trackNum = 1
 	}
 
+	artist := strings.TrimSpace(albumArtist)
 	album := strings.TrimSpace(albumTitle)
+
+	// Single track logic: if album is empty or equal to "Single"/"Singles", album = track title
 	if album == "" || strings.EqualFold(album, "single") || strings.EqualFold(album, "singles") {
 		if cleanTitle != "" {
 			album = cleanTitle
@@ -110,9 +162,8 @@ func (s *Service) ComputeTargetPath(albumTitle string, trackNum int, title, orig
 		}
 	}
 
-	albumDir = s.ComputeAlbumDir(album)
-
-	safeTitle := s.SanitizeComponent(cleanTitle, fmt.Sprintf("Track_%02d", trackNum), 180)
+	albumDir = ComputeAlbumDir(artist, album)
+	safeTitle := SanitizeComponent(cleanTitle, fmt.Sprintf("Track_%02d", trackNum), 180)
 	safeTitle = strings.TrimSuffix(safeTitle, ".mp3")
 	safeTitle = strings.TrimSuffix(safeTitle, ".MP3")
 	if safeTitle == "" {
@@ -124,12 +175,60 @@ func (s *Service) ComputeTargetPath(albumTitle string, trackNum int, title, orig
 	return albumDir, trackRelPath
 }
 
-// MoveAlbum moves album files from sourceDir (TMP_DIR or MUSIC_DIR) into canonical MUSIC_DIR structure.
-// Canonical structure: music_library / {Album} / {TrackNumber:02d}. {Title}.mp3.
+// SanitizeComponent receiver method on Service.
+func (s *Service) SanitizeComponent(name, fallback string, maxLength int) string {
+	return SanitizeComponent(name, fallback, maxLength)
+}
+
+// ComputeAlbumDir receiver method on Service.
+func (s *Service) ComputeAlbumDir(albumArtist, albumTitle string) string {
+	return ComputeAlbumDir(albumArtist, albumTitle)
+}
+
+// ComputeTargetPath receiver method on Service.
+func (s *Service) ComputeTargetPath(albumArtist, albumTitle string, trackNum int, title, origFilename string) (albumDir, trackRelPath string) {
+	return ComputeTargetPath(albumArtist, albumTitle, trackNum, title, origFilename)
+}
+
+// SaveBatch organizes and saves a batch of tracks according to the BatchSaveRequest specification.
+func (s *Service) SaveBatch(req BatchSaveRequest) (*OrganizerResult, error) {
+	fallbackAlbum := req.Album.Album
+	fallbackAlbumArtist := req.Album.AlbumArtist
+
+	// Apply high-level album fields to tracks when individual track field is omitted
+	for i := range req.Tracks {
+		if strings.TrimSpace(req.Tracks[i].Album) == "" {
+			if strings.TrimSpace(fallbackAlbum) != "" && !strings.EqualFold(fallbackAlbum, "singles") && !strings.EqualFold(fallbackAlbum, "single") {
+				req.Tracks[i].Album = strings.TrimSpace(fallbackAlbum)
+			} else if strings.TrimSpace(req.Tracks[i].Title) != "" {
+				req.Tracks[i].Album = strings.TrimSpace(req.Tracks[i].Title)
+			}
+		} else if strings.EqualFold(req.Tracks[i].Album, "single") || strings.EqualFold(req.Tracks[i].Album, "singles") {
+			if strings.TrimSpace(req.Tracks[i].Title) != "" {
+				req.Tracks[i].Album = strings.TrimSpace(req.Tracks[i].Title)
+			}
+		}
+
+		if strings.TrimSpace(req.Tracks[i].AlbumArtist) == "" && strings.TrimSpace(fallbackAlbumArtist) != "" {
+			req.Tracks[i].AlbumArtist = strings.TrimSpace(fallbackAlbumArtist)
+		}
+		if req.Album.Year != nil && *req.Album.Year > 0 && req.Tracks[i].Year == 0 {
+			req.Tracks[i].Year = *req.Album.Year
+		}
+		if strings.TrimSpace(req.Album.Genre) != "" && strings.TrimSpace(req.Tracks[i].Genre) == "" {
+			req.Tracks[i].Genre = strings.TrimSpace(req.Album.Genre)
+		}
+	}
+
+	return s.MoveAlbum(req.SourceDir, fallbackAlbum, fallbackAlbumArtist, req.Tracks, req.CoverBase64)
+}
+
+// MoveAlbum moves audio files from sourceDir (TMP_DIR or MUSIC_DIR) into canonical MUSIC_DIR structure.
+// Canonical structure: music_library / {Album} - {Album Artist} / {TrackNumber:02d}. {Title}.mp3.
 // For singles without an explicit album, album name is set to the track's title.
-func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist string, tracks []id3.TrackTags, coverBase64 string) (*OrganizerResult, error) {
+func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist string, tracks []TrackTags, coverBase64 string) (*OrganizerResult, error) {
 	if len(tracks) == 0 {
-		defaultDir := s.ComputeAlbumDir(fallbackAlbum)
+		defaultDir := s.ComputeAlbumDir(fallbackAlbumArtist, fallbackAlbum)
 		return &OrganizerResult{
 			DestinationDir: defaultDir,
 			Tracks:         nil,
@@ -139,7 +238,7 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 	// 1. Identify all unique target album directories needed by the tracks
 	uniqueAlbumDirsMap := make(map[string]bool)
 	for _, tr := range tracks {
-		trTitle := id3.CleanTitle(tr.Title, filepath.Base(tr.Path))
+		trTitle := CleanTitle(tr.Title, filepath.Base(tr.Path))
 		trAlbum := strings.TrimSpace(tr.Album)
 		if trAlbum == "" {
 			trAlbum = strings.TrimSpace(fallbackAlbum)
@@ -151,7 +250,19 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 				trAlbum = "Unknown Album"
 			}
 		}
-		targetDir := s.ComputeAlbumDir(trAlbum)
+
+		trArtist := strings.TrimSpace(tr.AlbumArtist)
+		if trArtist == "" {
+			trArtist = strings.TrimSpace(fallbackAlbumArtist)
+		}
+		if trArtist == "" {
+			trArtist = strings.TrimSpace(tr.Artist)
+		}
+		if trArtist == "" {
+			trArtist = "Unknown Artist"
+		}
+
+		targetDir := s.ComputeAlbumDir(trArtist, trAlbum)
 		uniqueAlbumDirsMap[targetDir] = true
 	}
 
@@ -159,9 +270,10 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 	for dir := range uniqueAlbumDirsMap {
 		uniqueAlbumDirs = append(uniqueAlbumDirs, dir)
 	}
+	// Sort directory keys to ensure deadlock-free locking
 	sort.Strings(uniqueAlbumDirs)
 
-	// 2. Acquire directory mutex locks in deterministic sorted order (prevents deadlocks)
+	// 2. Acquire directory mutex locks in deterministic sorted order
 	var locks []*sync.Mutex
 	for _, dir := range uniqueAlbumDirs {
 		l := getAlbumLock(dir)
@@ -192,7 +304,7 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 	}
 
 	isTmp := strings.HasPrefix(sourceDir, "tmp_downloads") || strings.HasPrefix(sourceDir, "tmp/") || (strings.Contains(sourceDir, "-") && len(sourceDir) == 36)
-	var updatedTracks []id3.TrackTags
+	var updatedTracks []TrackTags
 	var movedSourceDirs []string
 
 	// 4. Move and tag each track
@@ -223,14 +335,14 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 		}
 
 		if srcFullPath == "" || !fileExists(srcFullPath) {
-			continue // skip missing files
+			continue // skip missing files safely
 		}
 
 		srcDir := filepath.Dir(srcFullPath)
 		movedSourceDirs = append(movedSourceDirs, srcDir)
 
 		// Determine target metadata per track
-		trTitle := id3.CleanTitle(tr.Title, filepath.Base(srcFullPath))
+		trTitle := CleanTitle(tr.Title, filepath.Base(srcFullPath))
 		if trTitle == "" {
 			trTitle = fmt.Sprintf("Track_%02d", tr.TrackNumber)
 		}
@@ -258,7 +370,7 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 			trAlbumArtist = "Unknown Artist"
 		}
 
-		albumDir, targetRel := s.ComputeTargetPath(trAlbum, tr.TrackNumber, trTitle, filepath.Base(srcFullPath))
+		albumDir, targetRel := s.ComputeTargetPath(trAlbumArtist, trAlbum, tr.TrackNumber, trTitle, filepath.Base(srcFullPath))
 
 		if info, ok := albumInfoMap[albumDir]; ok {
 			info.sourceDirs[srcDir] = true
@@ -273,7 +385,7 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 			return nil, fmt.Errorf("failed to resolve destination track path: %w", err)
 		}
 
-		// Safely move MP3 file with collision detection and companion lyrics
+		// Safely move MP3 file with collision detection, deduplication, and companion lyrics
 		actualDestFull, err := MoveTrackWithCompanions(srcFullPath, destFullPath, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to move audio file %s to %s: %w", srcFullPath, destFullPath, err)
@@ -292,13 +404,13 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 			trCopy.TrackNumber = 1
 		}
 
-		// Update tags via ID3 writer
+		// Write ID3v2.4 tags to disk
 		_ = id3.WriteTags(actualDestFull, trCopy, nil)
 
 		updatedTracks = append(updatedTracks, trCopy)
 	}
 
-	// 5. Handle cover art for each album directory
+	// 5. Handle cover art for each album directory and its tracks
 	for _, info := range albumInfoMap {
 		// Save base64 cover if provided and not yet created
 		if coverBase64 != "" {
@@ -310,6 +422,14 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 
 		// Fallback to top-level sourceDir cover
 		s.moveSourceCover(sourceDir, info.fullDir)
+
+		// Fallback to extracting embedded APIC cover from moved tracks if no directory cover exists
+		if !hasCoverInDir(info.fullDir) {
+			extractCoverFromTracks(info.fullDir)
+		}
+
+		// Ensure track-named covers ({TrackBaseName}.jpg) exist for all tracks in this directory
+		syncTrackNamedCovers(info.fullDir)
 	}
 
 	// 6. Clean up empty source directories
@@ -321,19 +441,23 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 		}
 	}
 
-	if !isTmp && sourceDir != "" && sourceDir != "." {
+	if isTmp && sourceDir != "" && s.tmpSandbox != nil {
+		cleanRel := strings.TrimPrefix(sourceDir, "tmp_downloads/")
+		cleanRel = strings.TrimPrefix(cleanRel, "tmp/")
+		if jobFull, err := s.tmpSandbox.Resolve(cleanRel, false); err == nil {
+			_ = os.RemoveAll(jobFull)
+		}
+	} else if !isTmp && sourceDir != "" && sourceDir != "." {
 		if srcDirFull, err := s.musicSandbox.Resolve(sourceDir, false); err == nil {
 			removeIfEmpty(srcDirFull)
 		}
 	}
 
 	destinationDir := ""
-	if len(uniqueAlbumDirs) == 1 {
-		destinationDir = uniqueAlbumDirs[0]
-	} else if len(uniqueAlbumDirs) > 1 {
+	if len(uniqueAlbumDirs) >= 1 {
 		destinationDir = uniqueAlbumDirs[0]
 	} else {
-		destinationDir = s.ComputeAlbumDir(fallbackAlbum)
+		destinationDir = s.ComputeAlbumDir(fallbackAlbumArtist, fallbackAlbum)
 	}
 
 	return &OrganizerResult{
@@ -357,11 +481,13 @@ func FileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// MoveTrackWithCompanions moves an audio track and any accompanying lyrics (.lrc, .txt).
+var companionExtensions = []string{".lrc", ".txt", ".jpg", ".jpeg", ".png", ".webp"}
+
+// MoveTrackWithCompanions moves an audio track and any accompanying lyrics (.lrc, .txt) and images (.jpg, .png).
 // If destMP3 already exists and overwrite is false:
-// - if identical (size and SHA-256 match), srcMP3 is safely removed (deduplication) and destMP3 is returned.
-// - if different, a unique canonical path "{base} ({N}).mp3" is selected.
-// Any companion .lrc/.txt files are moved along with the matching suffix.
+// - If identical (size and SHA-256 match), srcMP3 is safely removed (deduplication) and destMP3 is returned.
+// - If different, a unique canonical path "{base} ({N}).mp3" is selected.
+// Any companion files are moved along with the matching suffix.
 func MoveTrackWithCompanions(srcMP3, destMP3 string, overwrite bool) (string, error) {
 	if srcMP3 == destMP3 {
 		return destMP3, nil
@@ -382,7 +508,7 @@ func MoveTrackWithCompanions(srcMP3, destMP3 string, overwrite bool) (string, er
 			if hErr1 == nil && hErr2 == nil && srcHash == destHash {
 				// Files are identical! Deduplicate: remove source
 				_ = os.Remove(srcMP3)
-				cleanCompanionLyrics(srcMP3, targetMP3)
+				cleanCompanionFiles(srcMP3, targetMP3)
 				return targetMP3, nil
 			}
 		}
@@ -413,25 +539,138 @@ func MoveTrackWithCompanions(srcMP3, destMP3 string, overwrite bool) (string, er
 		return "", fmt.Errorf("failed to move audio file %s to %s: %w", srcMP3, targetMP3, err)
 	}
 
-	// Move companion lyrics (.lrc, .txt)
-	moveCompanionLyrics(srcMP3, targetMP3)
+	// Move companion files (.lrc, .txt, .jpg, .png, etc.)
+	moveCompanionFiles(srcMP3, targetMP3)
 
 	return targetMP3, nil
 }
 
-func cleanCompanionLyrics(srcAudio, destAudio string) {
+func cleanCompanionFiles(srcAudio, destAudio string) {
 	srcBase := strings.TrimSuffix(srcAudio, filepath.Ext(srcAudio))
 	destBase := strings.TrimSuffix(destAudio, filepath.Ext(destAudio))
 
-	for _, ext := range []string{".lrc", ".txt"} {
-		srcLyric := srcBase + ext
-		destLyric := destBase + ext
-		if fileExists(srcLyric) {
-			if fileExists(destLyric) {
-				_ = os.Remove(srcLyric)
+	for _, ext := range companionExtensions {
+		srcComp := srcBase + ext
+		destComp := destBase + ext
+		if fileExists(srcComp) {
+			if fileExists(destComp) {
+				_ = os.Remove(srcComp)
 			} else {
-				_ = moveFile(srcLyric, destLyric)
+				_ = moveFile(srcComp, destComp)
 			}
+		}
+	}
+}
+
+func moveCompanionFiles(srcAudio, destAudio string) {
+	srcBase := strings.TrimSuffix(srcAudio, filepath.Ext(srcAudio))
+	destBase := strings.TrimSuffix(destAudio, filepath.Ext(destAudio))
+
+	for _, ext := range companionExtensions {
+		srcComp := srcBase + ext
+		destComp := destBase + ext
+		if fileExists(srcComp) && srcComp != destComp {
+			_ = moveFile(srcComp, destComp)
+		}
+	}
+}
+
+func hasCoverInDir(dir string) bool {
+	for _, name := range []string{"cover.jpg", "cover.png", "cover.jpeg", "folder.jpg", "folder.png"} {
+		if fileExists(filepath.Join(dir, name)) {
+			return true
+		}
+	}
+	return false
+}
+
+func extractCoverFromTracks(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".mp3") {
+			continue
+		}
+		mp3Path := filepath.Join(dir, e.Name())
+		cover, err := id3.ReadCover(mp3Path)
+		if err == nil && cover != nil && len(cover.Data) > 0 {
+			ext := ".jpg"
+			if cover.MimeType == "image/png" || bytes.HasPrefix(cover.Data, []byte("\x89PNG")) {
+				ext = ".png"
+			}
+			coverPath := filepath.Join(dir, "cover"+ext)
+			if !fileExists(coverPath) {
+				_ = os.WriteFile(coverPath, cover.Data, 0644)
+			}
+			trackCoverPath := filepath.Join(dir, strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))+ext)
+			if !fileExists(trackCoverPath) {
+				_ = os.WriteFile(trackCoverPath, cover.Data, 0644)
+			}
+			return
+		}
+	}
+}
+
+func syncTrackNamedCovers(dir string) {
+	// Find directory-level cover file (cover.jpg, cover.png, folder.jpg, etc.)
+	var dirCoverPath string
+	for _, name := range []string{"cover.jpg", "cover.png", "cover.jpeg", "folder.jpg", "folder.png"} {
+		p := filepath.Join(dir, name)
+		if fileExists(p) {
+			dirCoverPath = p
+			break
+		}
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+
+	// For every MP3 track in the directory:
+	for _, e := range entries {
+		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".mp3") {
+			continue
+		}
+		trackBase := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
+
+		// Check if track-specific cover exists
+		hasTrackCover := false
+		var existingTrackCover string
+		for _, imgExt := range []string{".jpg", ".jpeg", ".png", ".webp"} {
+			tp := filepath.Join(dir, trackBase+imgExt)
+			if fileExists(tp) {
+				hasTrackCover = true
+				existingTrackCover = tp
+				break
+			}
+		}
+
+		if !hasTrackCover {
+			if dirCoverPath != "" {
+				covExt := filepath.Ext(dirCoverPath)
+				_ = copyFile(dirCoverPath, filepath.Join(dir, trackBase+covExt))
+			} else {
+				mp3Path := filepath.Join(dir, e.Name())
+				cover, err := id3.ReadCover(mp3Path)
+				if err == nil && cover != nil && len(cover.Data) > 0 {
+					ext := ".jpg"
+					if cover.MimeType == "image/png" || bytes.HasPrefix(cover.Data, []byte("\x89PNG")) {
+						ext = ".png"
+					}
+					_ = os.WriteFile(filepath.Join(dir, trackBase+ext), cover.Data, 0644)
+					if dirCoverPath == "" {
+						dirCoverPath = filepath.Join(dir, "cover"+ext)
+						_ = os.WriteFile(dirCoverPath, cover.Data, 0644)
+					}
+				}
+			}
+		} else if dirCoverPath == "" && existingTrackCover != "" {
+			covExt := filepath.Ext(existingTrackCover)
+			dirCoverPath = filepath.Join(dir, "cover"+covExt)
+			_ = copyFile(existingTrackCover, dirCoverPath)
 		}
 	}
 }
@@ -453,16 +692,23 @@ func (s *Service) moveSourceCover(sourceDir, targetFullDir string) {
 			candidates = append(candidates,
 				filepath.Join(p, "cover.jpg"),
 				filepath.Join(p, "cover.png"),
+				filepath.Join(p, "cover.jpeg"),
+				filepath.Join(p, "folder.jpg"),
+				filepath.Join(p, "folder.png"),
 				filepath.Join(p, "raw", "cover.jpg"),
 				filepath.Join(p, "raw", "cover.png"),
+				filepath.Join(p, "converted", "cover.jpg"),
+				filepath.Join(p, "converted", "cover.png"),
 			)
 		}
 	}
 	if p, err := s.musicSandbox.Resolve(sourceDir, false); err == nil {
 		candidates = append(candidates,
 			filepath.Join(p, "cover.jpg"),
-			filepath.Join(p, "folder.jpg"),
 			filepath.Join(p, "cover.png"),
+			filepath.Join(p, "cover.jpeg"),
+			filepath.Join(p, "folder.jpg"),
+			filepath.Join(p, "folder.png"),
 		)
 	}
 
@@ -520,18 +766,6 @@ func saveBase64Cover(targetCoverPath string, base64Data string) error {
 	return os.WriteFile(targetCoverPath, data, 0644)
 }
 
-func moveCompanionLyrics(srcAudio, destAudio string) {
-	srcBase := strings.TrimSuffix(srcAudio, filepath.Ext(srcAudio))
-	destBase := strings.TrimSuffix(destAudio, filepath.Ext(destAudio))
-
-	for _, ext := range []string{".lrc", ".txt"} {
-		srcLyric := srcBase + ext
-		destLyric := destBase + ext
-		if fileExists(srcLyric) && srcLyric != destLyric {
-			_ = moveFile(srcLyric, destLyric)
-		}
-	}
-}
 
 func fileExists(path string) bool {
 	st, err := os.Stat(path)
@@ -542,7 +776,7 @@ func moveFile(src, dest string) error {
 	if err := os.Rename(src, dest); err == nil {
 		return nil
 	}
-	// Fallback to copy and delete across different mount points
+	// Fallback to streaming copy and delete across different mount points (EXDEV)
 	if err := copyFile(src, dest); err != nil {
 		return err
 	}
@@ -567,10 +801,43 @@ func copyFile(src, dest string) error {
 	}
 	return out.Sync()
 }
-
-func removeIfEmpty(dir string) {
+// RemoveIfEmpty удаляет папку, если в ней нет файлов.
+func RemoveIfEmpty(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err == nil && len(entries) == 0 {
 		_ = os.Remove(dir)
 	}
 }
+
+// CleanEmptyParents рекурсивно удаляет пустые директории вверх по дереву до rootDir (не включая сам rootDir).
+func CleanEmptyParents(startDir, rootDir string) {
+	cleanStart := filepath.Clean(startDir)
+	cleanRoot := filepath.Clean(rootDir)
+
+	curr := cleanStart
+	for curr != "" && curr != "." && curr != "/" && curr != cleanRoot {
+		// Проверяем, что curr находится внутри rootDir
+		rel, err := filepath.Rel(cleanRoot, curr)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			break
+		}
+
+		entries, err := os.ReadDir(curr)
+		if err != nil || len(entries) > 0 {
+			// В директории еще остались файлы/папки — останавливаем подъем
+			break
+		}
+
+		// Удаляем пустую директорию
+		if err := os.Remove(curr); err != nil {
+			break
+		}
+
+		curr = filepath.Dir(curr)
+	}
+}
+
+func removeIfEmpty(dir string) {
+	RemoveIfEmpty(dir)
+}
+

@@ -312,6 +312,22 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 }
 
 func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*ReleaseMetadata, []ResolvedTrack, error) {
+	targetURL := rawURL
+
+	// Нормализация ссылок на артиста в YouTube Music:
+	// https://music.youtube.com/channel/UC... -> автоматически переходим в раздел /releases
+	if strings.Contains(targetURL, "music.youtube.com/channel/") {
+		parsedU, pErr := url.Parse(targetURL)
+		if pErr == nil {
+			path := strings.TrimRight(parsedU.Path, "/")
+			// Если ссылка ведет прямо на корень канала артиста, добавляем /releases
+			if strings.Count(path, "/") == 2 { // /channel/UCxxxx
+				parsedU.Path = path + "/releases"
+				targetURL = parsedU.String()
+			}
+		}
+	}
+
 	args := []string{
 		"--ignore-config",
 		"--no-download-archive",
@@ -319,13 +335,19 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 		"--flat-playlist",
 		"--no-warnings",
 		"--ignore-errors",
-		rawURL,
+		targetURL,
 	}
 	if r.cookiesPath != "" {
 		args = append(args, "--cookies", r.cookiesPath)
 	}
 
-	cmdCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	// Увеличиваем таймаут для дискографий исполнителей (может быть много релизов)
+	timeout := 60 * time.Second
+	if strings.Contains(targetURL, "/channel/") || strings.Contains(targetURL, "/releases") {
+		timeout = 3 * time.Minute
+	}
+
+	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, "yt-dlp", args...)
@@ -344,6 +366,7 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 		Channel     string  `json:"channel"`
 		Duration    float64 `json:"duration"`
 		WebpageURL  string  `json:"webpage_url"`
+		URL         string  `json:"url"` // иногда плоские плейлисты кладут URL сюда
 		Thumbnail   string  `json:"thumbnail"`
 		TrackNumber any     `json:"track_number"`
 		Album       string  `json:"album"`
@@ -354,25 +377,26 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 
 	var entries []YtEntry
 	scanner := bufio.NewScanner(&stdout)
+	// Увеличиваем буфер сканера, так как JSON от yt-dlp может быть очень длинным
+	buf := make([]byte, 1024*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
 		}
 		var e YtEntry
-		if err := json.Unmarshal(line, &e); err == nil && e.ID != "" {
+		if err := json.Unmarshal(line, &e); err == nil && (e.ID != "" || e.URL != "") {
 			entries = append(entries, e)
 		}
 	}
 
 	if len(entries) == 0 {
-		return nil, nil, fmt.Errorf("no tracks found at URL %s", rawURL)
+		return nil, nil, fmt.Errorf("не найдено треков по ссылке %s", rawURL)
 	}
 
-	albumTitle := entries[0].Album
-	if albumTitle == "" {
-		albumTitle = entries[0].Title
-	}
+	// Определяем имя исполнителя
 	artistName := entries[0].Artist
 	if artistName == "" {
 		artistName = entries[0].Channel
@@ -380,6 +404,21 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 			artistName = entries[0].Uploader
 		}
 	}
+
+	// Если это страница артиста, название релиза называем именем артиста (или "Дискография"),
+	// а треки ниже сохранят свои индивидуальные альбомы!
+	isArtistPage := strings.Contains(rawURL, "/channel/")
+	albumTitle := entries[0].Album
+	if albumTitle == "" || isArtistPage {
+		if isArtistPage && artistName != "" {
+			albumTitle = artistName
+		} else if entries[0].Title != "" {
+			albumTitle = entries[0].Title
+		} else {
+			albumTitle = "Unknown Album"
+		}
+	}
+
 	coverURL := entries[0].Thumbnail
 	year := entries[0].ReleaseYear
 
@@ -411,18 +450,37 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 		}
 
 		trURL := e.WebpageURL
-		if trURL == "" {
-			trURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", e.ID)
+		if trURL == "" && e.URL != "" {
+			trURL = e.URL
+		}
+		if trURL == "" && e.ID != "" {
+			trURL = fmt.Sprintf("https://music.youtube.com/watch?v=%s", e.ID)
+		}
+
+		// Для страницы артиста критично сохранять собственный альбом каждого трека,
+		// если же альбом не указан yt-dlp, используем название трека как сингл
+		trAlbum := strings.TrimSpace(e.Album)
+		if trAlbum == "" {
+			if !isArtistPage {
+				trAlbum = albumTitle
+			} else {
+				trAlbum = title // Сингл
+			}
+		}
+
+		trID := e.ID
+		if trID == "" {
+			trID = fmt.Sprintf("yt_%d", i+1)
 		}
 
 		tr := ResolvedTrack{
-			TrackID:        fmt.Sprintf("yt_%s", e.ID),
+			TrackID:        fmt.Sprintf("yt_%s", trID),
 			TrackNumber:    pos,
 			TrackTotal:     &total,
 			DiscNumber:     1,
 			Title:          id3.CleanTitle(title, filepath.Base(title)),
 			Artist:         cleanArt,
-			Album:          albumTitle,
+			Album:          trAlbum,
 			AlbumArtist:    artistName,
 			Duration:       int(e.Duration),
 			AudioSourceURL: trURL,
@@ -432,7 +490,10 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 			tCover := e.Thumbnail
 			tr.CoverURL = &tCover
 		}
-		if year > 0 {
+		if e.ReleaseYear > 0 {
+			y := e.ReleaseYear
+			tr.Year = &y
+		} else if year > 0 {
 			tr.Year = &year
 		}
 		tracks = append(tracks, tr)

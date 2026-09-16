@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/organizer"
 	"music-manager/internal/services/resolver"
+	"music-manager/internal/services/scanner"
 )
 
 type lyricsBatchState struct {
@@ -42,6 +44,7 @@ type FileHandler struct {
 	organizer    *organizer.Service
 	deezer       *resolver.DeezerClient
 	lyrics       *lyrics.Service
+	scanner      *scanner.Scanner
 	lyricsState  lyricsBatchState
 }
 
@@ -53,6 +56,7 @@ func NewFileHandler(
 	organizer *organizer.Service,
 	deezer *resolver.DeezerClient,
 	lyrics *lyrics.Service,
+	scanner *scanner.Scanner,
 ) *FileHandler {
 	return &FileHandler{
 		musicSandbox: musicSandbox,
@@ -62,6 +66,7 @@ func NewFileHandler(
 		organizer:    organizer,
 		deezer:       deezer,
 		lyrics:       lyrics,
+		scanner:      scanner,
 	}
 }
 
@@ -234,18 +239,117 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"failed to delete directory"}`, http.StatusInternalServerError)
 			return
 		}
+
+		// Синхронизация БД при удалении директории
+		cleanDir := filepath.Clean(filepath.ToSlash(relPath))
+		_, _ = h.database.Conn().Exec(`
+			DELETE FROM audit_issues 
+			WHERE file_path = ? OR file_path LIKE ? || '/%' 
+			   OR entity_id IN (SELECT id FROM tracks WHERE file_path = ? OR file_path LIKE ? || '/%');
+		`, cleanDir, cleanDir, cleanDir, cleanDir)
+
+		_, _ = h.database.Conn().Exec(`
+			DELETE FROM track_genres 
+			WHERE track_id IN (SELECT id FROM tracks WHERE file_path = ? OR file_path LIKE ? || '/%');
+		`, cleanDir, cleanDir)
+
+		_, _ = h.database.Conn().Exec(`
+			DELETE FROM tracks WHERE file_path = ? OR file_path LIKE ? || '/%';
+		`, cleanDir, cleanDir)
+
+		_, _ = h.database.Conn().Exec(`
+			DELETE FROM albums 
+			WHERE folder_path = ? OR folder_path LIKE ? || '/%' 
+			   OR (SELECT COUNT(*) FROM tracks WHERE album_id = albums.id) = 0;
+		`, cleanDir, cleanDir)
+
+		_, _ = h.database.Conn().Exec(`
+			DELETE FROM artists WHERE (SELECT COUNT(*) FROM albums WHERE artist_id = artists.id) = 0;
+		`)
+		_, _ = h.database.Conn().Exec(`
+			DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums);
+		`)
 	} else {
+		ext := strings.ToLower(filepath.Ext(fullPath))
+
 		if err := os.Remove(fullPath); err != nil {
 			http.Error(w, `{"error":"failed to delete file"}`, http.StatusInternalServerError)
 			return
 		}
-		// Also delete lyrics if exist
-		base := strings.TrimSuffix(fullPath, filepath.Ext(fullPath))
-		_ = os.Remove(base + ".lrc")
-		_ = os.Remove(base + ".txt")
 
-		// Remove from database
-		_, _ = h.database.Conn().Exec("DELETE FROM tracks WHERE file_path = ?", relPath)
+		if ext == ".mp3" {
+			// Удаляем сопутствующие тексты и обложки трека
+			base := strings.TrimSuffix(fullPath, filepath.Ext(fullPath))
+			_ = os.Remove(base + ".lrc")
+			_ = os.Remove(base + ".txt")
+			_ = os.Remove(base + ".jpg")
+			_ = os.Remove(base + ".jpeg")
+			_ = os.Remove(base + ".png")
+			_ = os.Remove(base + ".webp")
+
+			// Синхронизация БД при удалении MP3
+			var trackID, albumID int64
+			err := h.database.Conn().QueryRow("SELECT id, album_id FROM tracks WHERE file_path = ?", relPath).Scan(&trackID, &albumID)
+			if err == nil {
+				_, _ = h.database.Conn().Exec("DELETE FROM audit_issues WHERE (entity_type = 'track' AND entity_id = ?) OR file_path = ?", trackID, relPath)
+				_, _ = h.database.Conn().Exec("DELETE FROM track_genres WHERE track_id = ?", trackID)
+				_, _ = h.database.Conn().Exec("DELETE FROM tracks WHERE id = ?", trackID)
+
+				if albumID > 0 {
+					var count int
+					_ = h.database.Conn().QueryRow("SELECT COUNT(*) FROM tracks WHERE album_id = ?", albumID).Scan(&count)
+					if count == 0 {
+						_, _ = h.database.Conn().Exec("DELETE FROM albums WHERE id = ?", albumID)
+						_, _ = h.database.Conn().Exec("DELETE FROM missing_tracks WHERE album_id = ?", albumID)
+					} else {
+						_, _ = h.database.Conn().Exec(`
+							UPDATE albums SET
+								present_tracks_count = ?,
+								updated_at = CURRENT_TIMESTAMP
+							WHERE id = ?
+						`, count, albumID)
+					}
+				}
+
+				_, _ = h.database.Conn().Exec("DELETE FROM artists WHERE (SELECT COUNT(*) FROM albums WHERE artist_id = artists.id) = 0")
+				_, _ = h.database.Conn().Exec("DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums)")
+			}
+		} else if ext == ".lrc" || ext == ".txt" {
+			// Синхронизация БД при удалении текста песни
+			audioRel := strings.TrimSuffix(relPath, ext) + ".mp3"
+			audioFull := strings.TrimSuffix(fullPath, ext) + ".mp3"
+			lrcFull := strings.TrimSuffix(fullPath, ext) + ".lrc"
+			txtFull := strings.TrimSuffix(fullPath, ext) + ".txt"
+
+			if !fileExists(lrcFull) && !fileExists(txtFull) {
+				_, _ = h.database.Conn().Exec("UPDATE tracks SET lyrics_status = 'none' WHERE file_path = ?", audioRel)
+				var trackID int64
+				if err := h.database.Conn().QueryRow("SELECT id FROM tracks WHERE file_path = ?", audioRel).Scan(&trackID); err == nil {
+					_, _ = h.database.Conn().Exec(`
+						INSERT INTO audit_issues (issue_type, entity_type, entity_id, file_path, details)
+						VALUES ('missing_lyrics', 'track', ?, ?, 'Отсутствует текст песни (.lrc/.txt)')
+					`, trackID, audioRel)
+				}
+			}
+			_ = audioFull
+		} else if ext == ".jpg" || ext == ".jpeg" || ext == ".png" {
+			// Синхронизация БД при удалении обложки
+			albumDir := filepath.Dir(relPath)
+			if albumDir == "." {
+				albumDir = ""
+			}
+			fullAlbumDir := filepath.Dir(fullPath)
+			hasCover := fileExists(filepath.Join(fullAlbumDir, "cover.jpg")) ||
+				fileExists(filepath.Join(fullAlbumDir, "cover.png")) ||
+				fileExists(filepath.Join(fullAlbumDir, "cover.jpeg")) ||
+				fileExists(filepath.Join(fullAlbumDir, "folder.jpg")) ||
+				fileExists(filepath.Join(fullAlbumDir, "folder.png"))
+
+			if !hasCover {
+				_, _ = h.database.Conn().Exec("UPDATE albums SET has_cover = 0, cover_path = NULL WHERE folder_path = ?", albumDir)
+				_, _ = h.database.Conn().Exec("UPDATE tracks SET has_embedded_cover = 0 WHERE album_id IN (SELECT id FROM albums WHERE folder_path = ?)", albumDir)
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -377,7 +481,14 @@ func (h *FileHandler) FixPath(w http.ResponseWriter, r *http.Request) {
 			album = strings.TrimSpace(tags.Title)
 		}
 	}
-	_, targetRel := h.organizer.ComputeTargetPath(album, tags.TrackNumber, tags.Title, filepath.Base(fullPath))
+	artist := strings.TrimSpace(tags.AlbumArtist)
+	if artist == "" {
+		artist = strings.TrimSpace(tags.Artist)
+	}
+	if artist == "" {
+		artist = "Unknown Artist"
+	}
+	_, targetRel := h.organizer.ComputeTargetPath(artist, album, tags.TrackNumber, tags.Title, filepath.Base(fullPath))
 	targetFull, err := h.musicSandbox.Resolve(targetRel, true)
 	if err != nil {
 		http.Error(w, `{"error":"failed to resolve target"}`, http.StatusBadRequest)
@@ -385,6 +496,8 @@ func (h *FileHandler) FixPath(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if fullPath != targetFull {
+		oldDir := filepath.Dir(fullPath)
+
 		actualDest, err := organizer.MoveTrackWithCompanions(fullPath, targetFull, req.Overwrite)
 		if err != nil {
 			http.Error(w, fmt.Sprintf(`{"error":"failed to move file: %v"}`, err), http.StatusInternalServerError)
@@ -392,7 +505,11 @@ func (h *FileHandler) FixPath(w http.ResponseWriter, r *http.Request) {
 		}
 		actualRel, _ := h.musicSandbox.ToRelative(actualDest)
 		_ = h.database.UpdateTrackPath(r.Context(), req.Path, actualRel)
+		_, _ = h.database.Conn().ExecContext(r.Context(), "DELETE FROM audit_issues WHERE file_path = ? AND issue_type = 'invalid_path'", req.Path)
 		targetRel = actualRel
+
+		// Очищаем старую папку и её пустых родителей (например, папку артиста)
+		organizer.CleanEmptyParents(oldDir, h.musicSandbox.Root())
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -413,6 +530,7 @@ func (h *FileHandler) FixAllPaths(w http.ResponseWriter, r *http.Request) {
 
 	fixed := 0
 	var errs []string
+	oldDirs := make(map[string]bool)
 
 	for _, p := range paths {
 		fullPath, err := h.musicSandbox.Resolve(p.FilePath, false)
@@ -423,13 +541,24 @@ func (h *FileHandler) FixAllPaths(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
+
+		oldDir := filepath.Dir(fullPath)
+
 		if actualDest, err := organizer.MoveTrackWithCompanions(fullPath, targetFull, false); err == nil {
 			actualRel, _ := h.musicSandbox.ToRelative(actualDest)
 			_ = h.database.UpdateTrackPath(r.Context(), p.FilePath, actualRel)
+			_, _ = h.database.Conn().ExecContext(r.Context(), "DELETE FROM audit_issues WHERE file_path = ? AND issue_type = 'invalid_path'", p.FilePath)
 			fixed++
+			oldDirs[oldDir] = true
 		} else {
 			errs = append(errs, fmt.Sprintf("%s: %v", p.FilePath, err))
 		}
+	}
+
+	// Удаляем все опустевшие старые папки
+	root := h.musicSandbox.Root()
+	for dir := range oldDirs {
+		organizer.CleanEmptyParents(dir, root)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -440,7 +569,6 @@ func (h *FileHandler) FixAllPaths(w http.ResponseWriter, r *http.Request) {
 		"errors":        errs,
 	})
 }
-
 func (h *FileHandler) MissingLyrics(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.database.Conn().Query(`
 		SELECT t.file_path, t.title, a.name, al.title
@@ -651,6 +779,9 @@ func (s *sqlStr) Scan(value any) error {
 }
 
 func (h *FileHandler) RefreshAudit(w http.ResponseWriter, r *http.Request) {
+	if h.scanner != nil {
+		_, _ = h.scanner.ScanAll(r.Context())
+	}
 	h.AuditSummary(w, r)
 }
 
@@ -1029,16 +1160,20 @@ func (h *FileHandler) RetagGenres(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		var canonID int64
-		err = h.database.Conn().QueryRow("SELECT id FROM genres WHERE name = ?", canon).Scan(&canonID)
-		if err == sql.ErrNoRows {
-			res, insErr := h.database.Conn().Exec("INSERT INTO genres (name, is_valid_en, canonical_en_name) VALUES (?, 1, ?)", canon, canon)
-			if insErr == nil {
-				canonID, _ = res.LastInsertId()
+		// Обновляем связи в SQLite для каждого канонического жанра
+		_, _ = h.database.Conn().Exec("DELETE FROM track_genres WHERE track_id = ?", t.trackID)
+		for _, cg := range id3.ParseGenres(canon) {
+			var canonID int64
+			err = h.database.Conn().QueryRow("SELECT id FROM genres WHERE name = ?", cg).Scan(&canonID)
+			if err == sql.ErrNoRows {
+				res, insErr := h.database.Conn().Exec("INSERT INTO genres (name, is_valid_en, canonical_en_name) VALUES (?, 1, ?)", cg, cg)
+				if insErr == nil {
+					canonID, _ = res.LastInsertId()
+				}
 			}
-		}
-		if canonID > 0 {
-			_, _ = h.database.Conn().Exec("UPDATE track_genres SET genre_id = ? WHERE track_id = ? AND genre_id = ?", canonID, t.trackID, t.genreID)
+			if canonID > 0 {
+				_, _ = h.database.Conn().Exec("INSERT OR IGNORE INTO track_genres (track_id, genre_id) VALUES (?, ?)", t.trackID, canonID)
+			}
 		}
 		_, _ = h.database.Conn().Exec("UPDATE audit_issues SET is_resolved = 1, is_auto_fixed = 1 WHERE entity_type = 'track' AND entity_id = ? AND issue_type = 'non_en_genre'", t.trackID)
 
@@ -1062,7 +1197,7 @@ func (h *FileHandler) RetagGenres(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *FileHandler) ReorganizeLibrary(w http.ResponseWriter, r *http.Request) {
-	// Query all tracks and reorganize canonical paths
+	// 1. Получаем все неканонические треки
 	tracks, err := h.database.GetInvalidPaths(r.Context())
 	if err != nil {
 		http.Error(w, `{"error":"failed to query tracks"}`, http.StatusInternalServerError)
@@ -1070,22 +1205,43 @@ func (h *FileHandler) ReorganizeLibrary(w http.ResponseWriter, r *http.Request) 
 	}
 
 	moved := 0
+	oldDirs := make(map[string]bool)
+
 	for _, tr := range tracks {
 		if tr.SuggestedPath != tr.FilePath {
 			srcFull, err := h.musicSandbox.Resolve(tr.FilePath, false)
 			if err != nil {
 				continue
 			}
-			dstFull, err := h.musicSandbox.Resolve(tr.SuggestedPath, false)
+			dstFull, err := h.musicSandbox.Resolve(tr.SuggestedPath, true)
 			if err != nil {
 				continue
 			}
+
+			oldDir := filepath.Dir(srcFull)
+
 			if actualDest, err := organizer.MoveTrackWithCompanions(srcFull, dstFull, false); err == nil {
 				actualRel, _ := h.musicSandbox.ToRelative(actualDest)
 				moved++
 				_ = h.database.UpdateTrackPath(r.Context(), tr.FilePath, actualRel)
+				_, _ = h.database.Conn().ExecContext(r.Context(), "DELETE FROM audit_issues WHERE file_path = ? AND issue_type = 'invalid_path'", tr.FilePath)
+				oldDirs[oldDir] = true
 			}
 		}
+	}
+
+	// 2. Рекурсивно очищаем все опустевшие каталоги (папки исполнителей и старые альбомы)
+	root := h.musicSandbox.Root()
+	for dir := range oldDirs {
+		organizer.CleanEmptyParents(dir, root)
+	}
+
+	// Дополнительный проход по всем подпапкам медиатеки на случай пустых папок, оставшихся ранее
+	cleanAllEmptyDirs(root)
+
+	// 3. Запускаем полное пересканирование медиатеки для обновления дерева в БД
+	if h.scanner != nil {
+		_, _ = h.scanner.ScanAll(r.Context())
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1098,6 +1254,36 @@ func (h *FileHandler) ReorganizeLibrary(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// cleanAllEmptyDirs рекурсивно обходит дерево директорий снизу вверх и удаляет пустые папки
+func cleanAllEmptyDirs(root string) {
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d == nil || !d.IsDir() || path == root {
+			return nil
+		}
+		// Пропускаем служебные папки
+		name := d.Name()
+		if strings.HasPrefix(name, ".") || name == "tmp" || name == "tmp_downloads" {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+
+	// Обход в обратном порядке (от листьев к корню), чтобы удалить вложенные пустые папки
+	var dirs []string
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && d != nil && d.IsDir() && path != root {
+			name := d.Name()
+			if !strings.HasPrefix(name, ".") && name != "tmp" && name != "tmp_downloads" {
+				dirs = append(dirs, path)
+			}
+		}
+		return nil
+	})
+
+	for i := len(dirs) - 1; i >= 0; i-- {
+		organizer.RemoveIfEmpty(dirs[i])
+	}
+}
 func (h *FileHandler) BatchLyricsFetch(w http.ResponseWriter, r *http.Request) {
 	h.lyricsState.Lock()
 	if h.lyricsState.isRunning {
