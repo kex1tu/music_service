@@ -79,8 +79,17 @@ window.AuditCatalogMatcher = {
         }
 
         let trackUrls = null;
+        let trackNumbers = null;
         if (directUrl) {
             trackUrls = [directUrl];
+            if (trackNumber) trackNumbers = [trackNumber];
+        } else {
+            if (currentAlbum.missing_tracks && currentAlbum.missing_tracks.length > 0) {
+                trackNumbers = currentAlbum.missing_tracks.map(t => t.track_number).filter(n => n > 0);
+                trackUrls = currentAlbum.missing_tracks.map(t => t.deezer_url).filter(Boolean);
+            } else if (currentAlbum.missing_track_numbers && currentAlbum.missing_track_numbers.length > 0) {
+                trackNumbers = currentAlbum.missing_track_numbers;
+            }
         }
 
         const trackKey = directUrl || (trackNumber ? `track_${trackNumber}` : null);
@@ -90,8 +99,8 @@ window.AuditCatalogMatcher = {
             const payload = {
                 path: currentAlbum.path,
                 deezer_album_id: currentAlbum.deezer_album_id || null,
-                track_urls: trackUrls,
-                track_numbers: trackNumber ? [trackNumber] : null,
+                track_urls: trackUrls && trackUrls.length > 0 ? trackUrls : null,
+                track_numbers: trackNumbers && trackNumbers.length > 0 ? trackNumbers : null,
             };
             const res = await fetch('/files/audit/incomplete-albums/download-missing', {
                 method: 'POST',
@@ -101,7 +110,7 @@ window.AuditCatalogMatcher = {
             if (res.ok) {
                 const jobs = await res.json();
                 if (jobs && jobs.length > 0) {
-                    Alpine.store('app').toast(`Поставлено в очередь загрузок: ${jobs.length}`, 'success');
+                    Alpine.store('app').toast(`Дозагрузка поставлена в очередь (${jobs.length} задач)`, 'success');
                     if (Alpine.store('app').queue) {
                         if (Alpine.store('app').queue.wakeUpPolling) {
                             Alpine.store('app').queue.wakeUpPolling();

@@ -1,0 +1,377 @@
+package downloader
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+
+	"music-manager/internal/core/sandbox"
+	"music-manager/internal/id3"
+	"music-manager/internal/services/resolver"
+)
+
+func (s *Service) runBackfillPipeline(jobID, deezerAlbumID string, trackURLs []string, trackNumbers []int) {
+	job, ok := s.jobs.Get(jobID)
+	if !ok {
+		return
+	}
+
+	// Acquire concurrency slot
+	s.sem <- struct{}{}
+	defer func() { <-s.sem }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	job.SetCancelFunc(cancel)
+	defer cancel()
+
+	// Step 1: Resolving
+	job.SetStatus(StatusResolving)
+	job.UpdateProgress(5.0, "Определение недостающих треков и получение метаданных")
+
+	var meta *resolver.ReleaseMetadata
+	var tracks []resolver.ResolvedTrack
+
+	if s.resolver != nil && deezerAlbumID != "" {
+		m, allTracks, err := s.resolver.Resolve(ctx, fmt.Sprintf("https://www.deezer.com/album/%s", deezerAlbumID), "deezer")
+		if err == nil && len(allTracks) > 0 {
+			meta = m
+			reqNums := make(map[int]bool)
+			for _, n := range trackNumbers {
+				reqNums[n] = true
+			}
+			reqURLs := make(map[string]bool)
+			for _, u := range trackURLs {
+				reqURLs[strings.ToLower(strings.TrimSpace(u))] = true
+			}
+
+			if len(reqNums) > 0 || len(reqURLs) > 0 {
+				for _, t := range allTracks {
+					trackURL := fmt.Sprintf("https://www.deezer.com/track/%s", strings.TrimPrefix(t.TrackID, "dz_"))
+					if reqNums[t.TrackNumber] || reqURLs[strings.ToLower(trackURL)] {
+						tracks = append(tracks, t)
+					}
+				}
+			} else {
+				tracks = allTracks
+			}
+		}
+	}
+
+	if s.resolver != nil && len(tracks) == 0 && len(trackURLs) > 0 {
+		for _, u := range trackURLs {
+			m, trs, err := s.resolver.Resolve(ctx, u, "deezer")
+			if err == nil && len(trs) > 0 {
+				tracks = append(tracks, trs[0])
+				if meta == nil {
+					meta = m
+				}
+			}
+		}
+	}
+
+	if len(tracks) == 0 && s.jobs != nil && s.jobs.Database() != nil && job.TargetAlbumPath != nil {
+		rows, qErr := s.jobs.Database().Conn().QueryContext(ctx, `
+			SELECT mt.title, mt.artist, mt.track_number, COALESCE(mt.expected_duration, 0), COALESCE(mt.deezer_url, '')
+			FROM missing_tracks mt
+			JOIN albums al ON mt.album_id = al.id
+			WHERE (al.folder_path = ? OR al.folder_path = ?)
+		`, *job.TargetAlbumPath, filepath.Clean(*job.TargetAlbumPath))
+		if qErr == nil {
+			for rows.Next() {
+				var tit, art, dzURL string
+				var num, dur int
+				if err := rows.Scan(&tit, &art, &num, &dur, &dzURL); err == nil {
+					reqNumMatch := len(trackNumbers) == 0
+					for _, rn := range trackNumbers {
+						if rn == num {
+							reqNumMatch = true
+							break
+						}
+					}
+					if reqNumMatch {
+						aTit := ""
+						if job.AlbumTitle != nil {
+							aTit = *job.AlbumTitle
+						}
+						aArt := ""
+						if job.ArtistName != nil {
+							aArt = *job.ArtistName
+						}
+						tracks = append(tracks, resolver.ResolvedTrack{
+							TrackNumber:    num,
+							Title:          tit,
+							Artist:         art,
+							Album:          aTit,
+							AlbumArtist:    aArt,
+							Duration:       dur,
+							AudioSourceURL: dzURL,
+							Status:         "pending",
+						})
+					}
+				}
+			}
+			rows.Close()
+		}
+	}
+
+	if len(tracks) == 0 {
+		s.failJob(job, "Не удалось разрешить недостающие треки для дозагрузки")
+		return
+	}
+
+	if meta == nil {
+		meta = &resolver.ReleaseMetadata{}
+	}
+	if job.AlbumTitle != nil && *job.AlbumTitle != "" && meta.AlbumTitle == "" {
+		meta.AlbumTitle = *job.AlbumTitle
+	}
+	if job.ArtistName != nil && *job.ArtistName != "" && meta.AlbumArtist == "" {
+		meta.AlbumArtist = *job.ArtistName
+	}
+
+	// Create temporary working directories inside TMP_DIR sandbox
+	rawDir, err := s.tmpSandbox.Resolve(filepath.Join(job.ID, "raw"), true)
+	if err != nil {
+		s.failJob(job, fmt.Sprintf("Sandbox error: %v", err))
+		return
+	}
+	convertedDir, err := s.tmpSandbox.Resolve(filepath.Join(job.ID, "converted"), true)
+	if err != nil {
+		s.failJob(job, fmt.Sprintf("Sandbox error: %v", err))
+		return
+	}
+	_ = os.MkdirAll(rawDir, 0755)
+	_ = os.MkdirAll(convertedDir, 0755)
+
+	s.processTracksPipeline(ctx, job, meta, tracks, rawDir, convertedDir)
+}
+
+func (s *Service) runPipeline(jobID string) {
+	job, ok := s.jobs.Get(jobID)
+	if !ok {
+		return
+	}
+
+	// Acquire concurrency slot
+	s.sem <- struct{}{}
+	defer func() { <-s.sem }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	job.SetCancelFunc(cancel)
+	defer cancel()
+
+	// Step 1: Resolving
+	job.SetStatus(StatusResolving)
+	job.UpdateProgress(5.0, "Определение источника и получение метаданных")
+
+	meta, tracks, err := s.resolver.Resolve(ctx, job.URL, job.Source)
+	if err != nil {
+		s.failJob(job, fmt.Sprintf("Ошибка разрешения метаданных: %v", err))
+		return
+	}
+
+	// Create temporary working directories inside TMP_DIR sandbox
+	rawDir, err := s.tmpSandbox.Resolve(filepath.Join(job.ID, "raw"), true)
+	if err != nil {
+		s.failJob(job, fmt.Sprintf("Sandbox error: %v", err))
+		return
+	}
+	convertedDir, err := s.tmpSandbox.Resolve(filepath.Join(job.ID, "converted"), true)
+	if err != nil {
+		s.failJob(job, fmt.Sprintf("Sandbox error: %v", err))
+		return
+	}
+	_ = os.MkdirAll(rawDir, 0755)
+	_ = os.MkdirAll(convertedDir, 0755)
+
+	s.processTracksPipeline(ctx, job, meta, tracks, rawDir, convertedDir)
+}
+
+func (s *Service) processTracksPipeline(
+	ctx context.Context,
+	job *DownloadJob,
+	meta *resolver.ReleaseMetadata,
+	tracks []resolver.ResolvedTrack,
+	rawDir, convertedDir string,
+) {
+	job.SetMetadata(*meta, tracks)
+
+	// Download album cover if available
+	var coverBytes []byte
+	if meta.CoverURL != "" {
+		cBytes, cErr := s.downloadCover(ctx, meta.CoverURL)
+		if cErr == nil && len(cBytes) > 0 {
+			coverBytes = cBytes
+			_ = os.WriteFile(filepath.Join(rawDir, "cover.jpg"), coverBytes, 0644)
+			_ = os.WriteFile(filepath.Join(convertedDir, "cover.jpg"), coverBytes, 0644)
+			relCover, _ := s.tmpSandbox.ToRelative(filepath.Join(convertedDir, "cover.jpg"))
+			job.SetCoverPath(relCover)
+		}
+	}
+
+	total := len(tracks)
+	if total == 0 {
+		s.failJob(job, "Релиз не содержит доступных аудиотреков")
+		return
+	}
+
+	// Process each track
+	var wg sync.WaitGroup
+	trackSem := make(chan struct{}, 2) // Up to 2 concurrent tracks per job
+
+	for i := range tracks {
+		idx := i + 1
+		t := &tracks[i]
+
+		wg.Add(1)
+		go func(trackIdx int, track *resolver.ResolvedTrack) {
+			defer wg.Done()
+			trackSem <- struct{}{}
+			defer func() { <-trackSem }()
+
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			// If audio stream URL is not yet resolved (e.g. Deezer album), match to YouTube
+			if track.AudioSourceURL == "" || strings.Contains(track.AudioSourceURL, "deezer.com") {
+				job.SetCurrentStep(fmt.Sprintf("Поиск аудиопотока %d/%d: %s", trackIdx, total, track.Title))
+
+				matchedURL, mErr := s.resolver.Matcher().FindBestMatch(ctx, track.Title, track.Artist, track.Duration)
+				if mErr != nil {
+					errStr := mErr.Error()
+					job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+						tr.Status = "error"
+						tr.Error = &errStr
+					})
+					return
+				}
+				job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+					tr.AudioSourceURL = matchedURL
+				})
+				track.AudioSourceURL = matchedURL
+			}
+
+			// Download stream with yt-dlp
+			rawOutTemplate := filepath.Join(rawDir, fmt.Sprintf("%02d.%%(ext)s", trackIdx))
+			job.SetStepAndStatus(fmt.Sprintf("Загрузка трека %d/%d: %s", trackIdx, total, track.Title), StatusDownloading)
+
+			rawAudioFile, dErr := s.downloadRawStream(ctx, track.AudioSourceURL, rawOutTemplate, func(p float64) {
+				job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
+			})
+			if dErr != nil {
+				errStr := dErr.Error()
+				job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+					tr.Status = "error"
+					tr.Error = &errStr
+				})
+				return
+			}
+			defer os.Remove(rawAudioFile)
+
+			// Transcode to MP3 320 kbps CBR
+			job.SetStepAndStatus(fmt.Sprintf("Конвертация трека %d/%d: %s в MP3 320k", trackIdx, total, track.Title), StatusConverting)
+
+			cleanTitle := id3.CleanTitle(track.Title, fmt.Sprintf("Track_%02d", trackIdx))
+			safeTitle := sandbox.SanitizeFilename(cleanTitle, fmt.Sprintf("Track_%02d", trackIdx))
+			mp3Filename := fmt.Sprintf("%02d. %s.mp3", track.TrackNumber, safeTitle)
+			mp3Path := filepath.Join(convertedDir, mp3Filename)
+
+			if cErr := s.transcodeToMP3(ctx, rawAudioFile, mp3Path); cErr != nil {
+				errStr := cErr.Error()
+				job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+					tr.Status = "error"
+					tr.Error = &errStr
+				})
+				return
+			}
+
+			// Write ID3v2.4 tags
+			job.SetStepAndStatus(fmt.Sprintf("Запись ID3v2.4 тегов %d/%d: %s", trackIdx, total, track.Title), StatusTagging)
+
+			alb := strings.TrimSpace(track.Album)
+			if (alb == "" || strings.EqualFold(alb, "single") || strings.EqualFold(alb, "singles")) && strings.TrimSpace(track.Title) != "" {
+				alb = strings.TrimSpace(track.Title)
+			}
+
+			tagData := id3.TrackTags{
+				Path:        mp3Path,
+				Title:       track.Title,
+				Artist:      track.Artist,
+				Album:       alb,
+				AlbumArtist: track.AlbumArtist,
+				TrackNumber: track.TrackNumber,
+				DiscNumber:  track.DiscNumber,
+				Duration:    float64(track.Duration),
+			}
+			if track.TrackTotal != nil {
+				tagData.TrackTotal = *track.TrackTotal
+			}
+			if track.DiscTotal != nil {
+				tagData.DiscTotal = *track.DiscTotal
+			}
+			if track.Year != nil {
+				tagData.Year = *track.Year
+			}
+			if track.Genre != nil {
+				tagData.Genre = *track.Genre
+			}
+
+			var cover *id3.CoverInfo
+			if len(coverBytes) > 0 {
+				mime := "image/jpeg"
+				if bytes.HasPrefix(coverBytes, []byte("\x89PNG")) {
+					mime = "image/png"
+				}
+				cover = &id3.CoverInfo{
+					MimeType: mime,
+					Data:     coverBytes,
+				}
+			}
+
+			_ = id3.WriteTags(mp3Path, tagData, cover)
+
+			relConverted, _ := s.tmpSandbox.ToRelative(mp3Path)
+			job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+				tr.Status = "ready"
+				tr.ConvertedPath = &relConverted
+			})
+
+			job.IncrementCompleted(total)
+
+		}(idx, t)
+	}
+
+	wg.Wait()
+
+	// Final step: READY or ERROR
+	snap := job.Snapshot()
+	if snap.CompletedTracks == 0 && total > 0 {
+		var errDetails []string
+		for _, tr := range snap.Tracks {
+			if tr.Error != nil && *tr.Error != "" {
+				errDetails = append(errDetails, fmt.Sprintf("%s: %s", tr.Title, *tr.Error))
+			}
+		}
+		errMsg := "Ни один из треков релиза не был успешно загружен"
+		if len(errDetails) > 0 {
+			errMsg = fmt.Sprintf("%s (%s)", errMsg, strings.Join(errDetails, "; "))
+		}
+		s.failJob(job, errMsg)
+		return
+	}
+
+	job.SetReady(snap.CompletedTracks, total)
+}
+
+func (s *Service) failJob(job *DownloadJob, errMsg string) {
+	job.SetError(errMsg)
+	log.Printf("[Downloader] Job %s failed: %s", job.ID, errMsg)
+}

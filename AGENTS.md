@@ -60,18 +60,18 @@ go test -v ./...
 
 **Core / Auth / Sandbox**
 - Секреты (`SECRET_KEY`, хэш пароля) — только из `.env`, никогда в коде.
-- `app/main.py` — только сборка приложения (роутеры, DI, exception handlers), без бизнес-логики.
+- `cmd/server/main.go` — только сборка приложения (роутеры, DI, middleware), без бизнес-логики.
 - Cookie сессии — обязательно `httpOnly`, `SameSite=Strict`.
 
 **Downloader Engine**
 - URL проверяется по whitelist доменов (youtube.com, music.youtube.com, soundcloud.com, deezer.com) до передачи в `yt-dlp`.
-- `ffmpeg`/`yt-dlp` вызываются асинхронно (`asyncio.create_subprocess_exec` / `asyncio.to_thread`) — не блокировать event loop.
-- Итоговые файлы остаются в `tmp_downloads/{job_id}/` до подтверждения пользователем; перенос в `MUSIC_DIR` — только через `organizer_service`.
+- `ffmpeg`/`yt-dlp` вызываются асинхронно через контекст (`exec.CommandContext`) с контролем таймаутов в отдельных горутинах.
+- Итоговые файлы остаются в `tmp_downloads/{job_id}/` до подтверждения пользователем; перенос в `MUSIC_DIR` — только через `organizer.Service`.
 
 **Metadata & Storage**
 - Теги — строго ID3v2.4, множественные значения — null-separated (`\x00`), не устаревшие ID3v1/v2.3.
 - Тексты песен — только `.lrc`/`.txt` рядом с треком, никогда в тег.
-- Любая операция с путём — сначала `PathSandbox.resolve()`, потом файловая операция. Без исключений даже для «внутренних» вызовов.
+- Любая операция с путём — сначала `PathSandbox.Resolve()`, потом файловая операция. Без исключений даже для «внутренних» вызовов.
 
 **Frontend**
 - Никаких сборщиков и `package.json`. Только `<script src="https://cdn...">`.
@@ -83,14 +83,14 @@ go test -v ./...
 - Обязательны тесты `PathSandbox` на `../../`, null-byte инъекции, обход через симлинки.
 
 **DevOps / Deploy**
-- Не хардкодить пути пользователя — только через `.env`/`Settings`.
+- Не хардкодить пути пользователя — только через `.env`/`Config`.
 - Не добавлять Docker/Compose ни при каких условиях.
 
 ---
 
 ## 6. Глобальные запреты
 
-- Обход `PathSandbox.resolve()` при вызове `open`, `os.remove`, `os.unlink`, `shutil.move`, `shutil.copy`, `os.scandir`.
+- Обход `PathSandbox.Resolve()` при вызове функций `os.Open`, `os.Create`, `os.Remove`, `os.RemoveAll`, `os.Rename`, `os.ReadDir`.
 - Деструктивные shell-команды (`rm -rf` вне временных подкаталогов проекта, работа с блочными устройствами).
 - `npm`/`yarn`/`pnpm`, любые frontend-сборщики.
 - Хардкод реальных секретов, токенов, паролей, хэшей в репозитории — только плейсхолдеры в `.env.example`.
