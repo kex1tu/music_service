@@ -98,3 +98,51 @@ func TestService_RetryJob(t *testing.T) {
 		t.Errorf("expected job ID %s, got %s", failedJob.ID, retried.ID)
 	}
 }
+
+func TestService_CreateBackfillJob(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpSb, err := sandbox.NewPathSandbox(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	musicSb, err := sandbox.NewPathSandbox(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	jobMgr := NewJobManager(nil)
+	svc := NewService(jobMgr, nil, tmpSb, musicSb, "", 1)
+
+	// Create backfill job
+	job, err := svc.CreateBackfillJob(
+		"Test Album - Cool Artist",
+		"Test Album",
+		"Cool Artist",
+		"302127",
+		[]string{"https://www.deezer.com/track/123"},
+		[]int{2, 4},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error creating backfill job: %v", err)
+	}
+
+	if !job.IsBackfill {
+		t.Errorf("expected IsBackfill true, got false")
+	}
+	if job.TargetAlbumPath == nil || *job.TargetAlbumPath != "Test Album - Cool Artist" {
+		t.Errorf("expected TargetAlbumPath 'Test Album - Cool Artist', got %v", job.TargetAlbumPath)
+	}
+	if job.AlbumTitle == nil || *job.AlbumTitle != "Test Album" {
+		t.Errorf("expected AlbumTitle 'Test Album', got %v", job.AlbumTitle)
+	}
+	if job.ArtistName == nil || *job.ArtistName != "Cool Artist" {
+		t.Errorf("expected ArtistName 'Cool Artist', got %v", job.ArtistName)
+	}
+	job.mu.Lock()
+	status := job.Status
+	job.mu.Unlock()
+	if status != StatusQueued && status != StatusResolving && status != StatusError {
+		t.Errorf("unexpected initial status: %s", status)
+	}
+}
+

@@ -103,6 +103,9 @@ window.AuditCatalogMatcher = {
                 if (jobs && jobs.length > 0) {
                     Alpine.store('app').toast(`Поставлено в очередь загрузок: ${jobs.length}`, 'success');
                     if (Alpine.store('app').queue) {
+                        if (Alpine.store('app').queue.wakeUpPolling) {
+                            Alpine.store('app').queue.wakeUpPolling();
+                        }
                         if (Alpine.store('app').queue.fetchQueue) {
                             await Alpine.store('app').queue.fetchQueue();
                         }

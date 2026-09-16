@@ -169,6 +169,9 @@ func (r *SourceResolver) Resolve(ctx context.Context, rawURL, explicitSource str
 }
 
 func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*ReleaseMetadata, []ResolvedTrack, error) {
+	if r == nil || r.deezerClient == nil {
+		return nil, nil, fmt.Errorf("deezer client is not initialized")
+	}
 	resType, id, err := r.deezerClient.ParseURL(ctx, rawURL)
 	if err != nil {
 		return nil, nil, err

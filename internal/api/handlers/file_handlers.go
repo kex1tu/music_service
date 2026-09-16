@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -645,13 +646,14 @@ func (h *FileHandler) MissingCovers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *FileHandler) IncompleteAlbums(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.database.Conn().Query(`
-		SELECT al.folder_path, al.title, a.name, al.year, al.has_cover, al.cover_path,
-		       al.present_tracks_count, al.expected_tracks_count, al.deezer_id
+	rows, err := h.database.Conn().QueryContext(r.Context(), `
+		SELECT al.id, al.folder_path, al.title, a.name, al.year, al.has_cover, al.cover_path,
+		       al.present_tracks_count, al.expected_tracks_count, al.total_tracks, al.deezer_id
 		FROM albums al
 		JOIN artists a ON al.artist_id = a.id
-		WHERE al.is_complete = 0 OR (al.expected_tracks_count > al.present_tracks_count)
-		LIMIT 50;
+		WHERE al.is_complete = 0 OR (al.expected_tracks_count > al.present_tracks_count) OR (al.total_tracks > 1 AND al.present_tracks_count < al.total_tracks)
+		ORDER BY al.title
+		LIMIT 100;
 	`)
 	if err != nil {
 		http.Error(w, `{"error":"database query failed"}`, http.StatusInternalServerError)
@@ -660,39 +662,92 @@ func (h *FileHandler) IncompleteAlbums(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type incompleteAlbumItem struct {
-		Path             string  `json:"path"`
-		Album            string  `json:"album"`
-		Artist           string  `json:"artist"`
-		Year             *int    `json:"year"`
-		HasCover         bool    `json:"has_cover"`
-		CoverURL         *string `json:"cover_url"`
-		PresentCount     int     `json:"present_count"`
-		ExpectedCount    int     `json:"expected_count"`
-		IsCatalogMatched bool    `json:"is_catalog_matched"`
-		DeezerAlbumID    *string `json:"deezer_album_id"`
+		Path                string  `json:"path"`
+		Album               string  `json:"album"`
+		Artist              string  `json:"artist"`
+		Year                *int    `json:"year"`
+		HasCover            bool    `json:"has_cover"`
+		CoverURL            *string `json:"cover_url"`
+		PresentCount        int     `json:"present_count"`
+		ExpectedCount       int     `json:"expected_count"`
+		MissingTrackNumbers []int   `json:"missing_track_numbers"`
+		IsCatalogMatched    bool    `json:"is_catalog_matched"`
+		DeezerAlbumID       *string `json:"deezer_album_id"`
 	}
 
-	var items []incompleteAlbumItem
+	type albumRow struct {
+		id            int64
+		item          incompleteAlbumItem
+		totalTracks   int
+	}
+
+	var albumRows []albumRow
 	for rows.Next() {
-		var it incompleteAlbumItem
-		var year sqlInt
-		var deezerID sqlStr
-		var coverPath sqlStr
+		var a albumRow
+		var year, expTracks, totTracks sqlInt
+		var deezerID, coverPath sqlStr
 		if err := rows.Scan(
-			&it.Path, &it.Album, &it.Artist, &year, &it.HasCover, &coverPath,
-			&it.PresentCount, &it.ExpectedCount, &deezerID,
+			&a.id, &a.item.Path, &a.item.Album, &a.item.Artist, &year, &a.item.HasCover, &coverPath,
+			&a.item.PresentCount, &expTracks, &totTracks, &deezerID,
 		); err == nil {
 			if year.Valid {
 				y := int(year.Int64)
-				it.Year = &y
+				a.item.Year = &y
 			}
+			exp := int(expTracks.Int64)
+			if exp <= 0 && totTracks.Valid {
+				exp = int(totTracks.Int64)
+			}
+			a.item.ExpectedCount = exp
+			a.totalTracks = int(totTracks.Int64)
+			a.item.MissingTrackNumbers = []int{}
+
 			if deezerID.Valid && deezerID.String != "" {
 				s := deezerID.String
-				it.DeezerAlbumID = &s
-				it.IsCatalogMatched = true
+				a.item.DeezerAlbumID = &s
+				a.item.IsCatalogMatched = true
 			}
-			items = append(items, it)
+			albumRows = append(albumRows, a)
 		}
+	}
+
+	var items []incompleteAlbumItem
+	for _, a := range albumRows {
+		it := a.item
+		// Query missing track numbers from missing_tracks table
+		mRows, mErr := h.database.Conn().QueryContext(r.Context(), "SELECT track_number FROM missing_tracks WHERE album_id = ? ORDER BY track_number", a.id)
+		if mErr == nil {
+			for mRows.Next() {
+				var tn int
+				if err := mRows.Scan(&tn); err == nil {
+					it.MissingTrackNumbers = append(it.MissingTrackNumbers, tn)
+				}
+			}
+			mRows.Close()
+		}
+
+		// Fallback: if missing_tracks table empty but expected > present, compute gaps
+		if len(it.MissingTrackNumbers) == 0 && it.ExpectedCount > it.PresentCount {
+			tRows, tErr := h.database.Conn().QueryContext(r.Context(), "SELECT track_number FROM tracks WHERE album_id = ?", a.id)
+			if tErr == nil {
+				presentNums := make(map[int]bool)
+				for tRows.Next() {
+					var tn int
+					if err := tRows.Scan(&tn); err == nil {
+						presentNums[tn] = true
+					}
+				}
+				tRows.Close()
+
+				for n := 1; n <= it.ExpectedCount; n++ {
+					if !presentNums[n] {
+						it.MissingTrackNumbers = append(it.MissingTrackNumbers, n)
+					}
+				}
+			}
+		}
+
+		items = append(items, it)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -717,25 +772,48 @@ func (h *FileHandler) DownloadMissing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var createdJobs []*downloader.DownloadJob
+	if req.Path == "" && (req.DeezerAlbumID == nil || *req.DeezerAlbumID == "") {
+		http.Error(w, `{"error":"path or deezer_album_id required"}`, http.StatusBadRequest)
+		return
+	}
 
-	if len(req.TrackURLs) > 0 {
-		for _, u := range req.TrackURLs {
-			j, err := h.downloader.CreateJob(u, "deezer")
-			if err == nil {
-				createdJobs = append(createdJobs, j)
-			}
-		}
-	} else if req.DeezerAlbumID != nil && *req.DeezerAlbumID != "" {
-		albumURL := fmt.Sprintf("https://www.deezer.com/album/%s", *req.DeezerAlbumID)
-		j, err := h.downloader.CreateJob(albumURL, "deezer")
-		if err == nil {
-			createdJobs = append(createdJobs, j)
-		}
+	// 1. Look up album metadata from database
+	var albumTitle, artistName string
+	var dbDeezerID string
+	_ = h.database.Conn().QueryRowContext(r.Context(), `
+		SELECT al.title, ar.name, COALESCE(al.deezer_id, '')
+		FROM albums al
+		JOIN artists ar ON al.artist_id = ar.id
+		WHERE al.folder_path = ? OR al.folder_path = ?
+		LIMIT 1
+	`, req.Path, filepath.Clean(req.Path)).Scan(&albumTitle, &artistName, &dbDeezerID)
+
+	deezerAlbumID := ""
+	if req.DeezerAlbumID != nil && *req.DeezerAlbumID != "" {
+		deezerAlbumID = *req.DeezerAlbumID
+	} else if dbDeezerID != "" {
+		deezerAlbumID = dbDeezerID
+	}
+
+	if albumTitle == "" {
+		albumTitle = filepath.Base(req.Path)
+	}
+
+	job, err := h.downloader.CreateBackfillJob(
+		req.Path,
+		albumTitle,
+		artistName,
+		deezerAlbumID,
+		req.TrackURLs,
+		req.TrackNumbers,
+	)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(createdJobs)
+	_ = json.NewEncoder(w).Encode([]*downloader.DownloadJob{job})
 }
 
 type sqlInt struct {
@@ -1438,6 +1516,16 @@ func (h *FileHandler) BatchLyricsProgress(w http.ResponseWriter, r *http.Request
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+var fuzzyPunctuationRegex = regexp.MustCompile(`[^\p{L}\p{N}]+`)
+var fuzzyBracketsRegex = regexp.MustCompile(`[\(\[\{].*?[\)\]\}]`)
+
+func cleanFuzzyString(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = fuzzyBracketsRegex.ReplaceAllString(s, "")
+	s = fuzzyPunctuationRegex.ReplaceAllString(s, "")
+	return s
+}
+
 func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 	albumPath := r.URL.Query().Get("path")
 	deezerID := r.URL.Query().Get("deezer_album_id")
@@ -1447,17 +1535,63 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 1. Query database for album metadata
+	var albumID int64
+	var dbArtist, dbAlbum, dbDeezerID string
+	var dbYear int
+	_ = h.database.Conn().QueryRowContext(r.Context(), `
+		SELECT al.id, ar.name, al.title, COALESCE(al.year, 0), COALESCE(al.deezer_id, '')
+		FROM albums al
+		JOIN artists ar ON al.artist_id = ar.id
+		WHERE al.folder_path = ? OR al.folder_path = ?
+		LIMIT 1
+	`, albumPath, filepath.Clean(albumPath)).Scan(&albumID, &dbArtist, &dbAlbum, &dbYear, &dbDeezerID)
+
+	if deezerID == "" && dbDeezerID != "" {
+		deezerID = dbDeezerID
+	}
+
 	var matchedAlbum *resolver.DeezerAlbum
 	var err error
 
 	if deezerID != "" {
 		matchedAlbum, err = h.deezer.GetAlbum(r.Context(), deezerID)
-	} else {
-		// Search by folder name
-		folderName := filepath.Base(albumPath)
-		albums, searchErr := h.deezer.SearchAlbums(r.Context(), folderName)
+	}
+
+	if matchedAlbum == nil {
+		// Try searching by artist and album
+		if dbArtist != "" && dbAlbum != "" {
+			q := fmt.Sprintf(`artist:"%s" album:"%s"`, dbArtist, dbAlbum)
+			albums, searchErr := h.deezer.SearchAlbums(r.Context(), q)
+			if searchErr == nil && len(albums) > 0 {
+				matchedAlbum, err = h.deezer.GetAlbum(r.Context(), strconv.FormatInt(albums[0].ID, 10))
+			}
+		}
+	}
+
+	if matchedAlbum == nil && dbAlbum != "" {
+		albums, searchErr := h.deezer.SearchAlbums(r.Context(), dbAlbum)
 		if searchErr == nil && len(albums) > 0 {
 			matchedAlbum, err = h.deezer.GetAlbum(r.Context(), strconv.FormatInt(albums[0].ID, 10))
+		}
+	}
+
+	if matchedAlbum == nil {
+		// Fallback: search by folder base name
+		folderName := filepath.Base(albumPath)
+		// If folder has format "Album - Artist", split it
+		if parts := strings.Split(folderName, " - "); len(parts) >= 2 {
+			q := fmt.Sprintf(`artist:"%s" album:"%s"`, strings.TrimSpace(parts[1]), strings.TrimSpace(parts[0]))
+			albums, searchErr := h.deezer.SearchAlbums(r.Context(), q)
+			if searchErr == nil && len(albums) > 0 {
+				matchedAlbum, err = h.deezer.GetAlbum(r.Context(), strconv.FormatInt(albums[0].ID, 10))
+			}
+		}
+		if matchedAlbum == nil {
+			albums, searchErr := h.deezer.SearchAlbums(r.Context(), folderName)
+			if searchErr == nil && len(albums) > 0 {
+				matchedAlbum, err = h.deezer.GetAlbum(r.Context(), strconv.FormatInt(albums[0].ID, 10))
+			}
 		}
 	}
 
@@ -1476,6 +1610,59 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 2. Read local tracks in album directory
+	type localTrack struct {
+		TrackNumber int
+		Title       string
+		Path        string
+		Duration    float64
+	}
+	var localTracks []localTrack
+	if albumID > 0 {
+		tRows, tErr := h.database.Conn().QueryContext(r.Context(), "SELECT track_number, title, file_path, duration FROM tracks WHERE album_id = ?", albumID)
+		if tErr == nil {
+			for tRows.Next() {
+				var lt localTrack
+				if err := tRows.Scan(&lt.TrackNumber, &lt.Title, &lt.Path, &lt.Duration); err == nil {
+					localTracks = append(localTracks, lt)
+				}
+			}
+			tRows.Close()
+		}
+	}
+
+	if len(localTracks) == 0 {
+		if fullPath, err := h.musicSandbox.Resolve(albumPath, false); err == nil {
+			entries, _ := os.ReadDir(fullPath)
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".mp3") {
+					itemRel := filepath.Join(albumPath, e.Name())
+					itemFull := filepath.Join(fullPath, e.Name())
+					if t, err := id3.ReadTags(itemFull, itemRel); err == nil {
+						localTracks = append(localTracks, localTrack{
+							TrackNumber: t.TrackNumber,
+							Title:       t.Title,
+							Path:        itemRel,
+							Duration:    t.Duration,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	presentByNum := make(map[int]localTrack)
+	presentByTitle := make(map[string]localTrack)
+	for _, lt := range localTracks {
+		if lt.TrackNumber > 0 {
+			presentByNum[lt.TrackNumber] = lt
+		}
+		cl := cleanFuzzyString(lt.Title)
+		if cl != "" {
+			presentByTitle[cl] = lt
+		}
+	}
+
 	cover := matchedAlbum.BestCoverURL()
 	year := matchedAlbum.ReleaseYear()
 	expectedCount := matchedAlbum.NbTracks
@@ -1483,6 +1670,7 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 	var allTracks []map[string]any
 	var missingTracks []map[string]any
 	var missingNums []int
+	presentCount := 0
 
 	if matchedAlbum.Tracks != nil {
 		for i, t := range matchedAlbum.Tracks.Data {
@@ -1490,19 +1678,93 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 			if pos == 0 {
 				pos = i + 1
 			}
+			cleanT := cleanFuzzyString(t.Title)
+
+			isPresent := false
+			localPath := ""
+			if lt, ok := presentByNum[pos]; ok {
+				isPresent = true
+				localPath = lt.Path
+			} else if lt, ok := presentByTitle[cleanT]; ok {
+				isPresent = true
+				localPath = lt.Path
+			}
+
+			tArtist := t.Artist.Name
+			if tArtist == "" {
+				tArtist = matchedAlbum.Artist.Name
+			}
+
+			discNum := t.DiskNumber
+			if discNum <= 0 {
+				discNum = 1
+			}
+
 			trackInfo := map[string]any{
 				"track_number": pos,
-				"disc_number":  1,
+				"disc_number":  discNum,
 				"title":        id3.CleanTitle(t.Title, ""),
-				"artist":       t.Artist.Name,
+				"artist":       tArtist,
 				"duration":     t.Duration,
 				"deezer_id":    strconv.FormatInt(t.ID, 10),
 				"deezer_url":   fmt.Sprintf("https://www.deezer.com/track/%d", t.ID),
-				"is_present":   false,
+				"is_present":   isPresent,
+				"local_path":   localPath,
 			}
 			allTracks = append(allTracks, trackInfo)
-			missingTracks = append(missingTracks, trackInfo)
-			missingNums = append(missingNums, pos)
+			if isPresent {
+				presentCount++
+			} else {
+				missingTracks = append(missingTracks, trackInfo)
+				missingNums = append(missingNums, pos)
+			}
+		}
+	}
+
+	// 3. Update database with verification results
+	isComplete := 1
+	if len(missingTracks) > 0 || (expectedCount > 1 && presentCount < expectedCount) {
+		isComplete = 0
+	}
+
+	if albumID > 0 {
+		_, _ = h.database.Conn().ExecContext(r.Context(), `
+			UPDATE albums SET
+				expected_tracks_count = ?,
+				total_tracks = ?,
+				present_tracks_count = ?,
+				deezer_id = ?,
+				is_complete = ?,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?
+		`, expectedCount, expectedCount, presentCount, strconv.FormatInt(matchedAlbum.ID, 10), isComplete, albumID)
+
+		// Repopulate missing_tracks table
+		_, _ = h.database.Conn().ExecContext(r.Context(), "DELETE FROM missing_tracks WHERE album_id = ?", albumID)
+		for _, mt := range missingTracks {
+			tNum, _ := mt["track_number"].(int)
+			dNum, _ := mt["disc_number"].(int)
+			if dNum <= 0 {
+				dNum = 1
+			}
+			tit, _ := mt["title"].(string)
+			art, _ := mt["artist"].(string)
+			dur, _ := mt["duration"].(int)
+			dzID, _ := mt["deezer_id"].(string)
+			dzURL, _ := mt["deezer_url"].(string)
+
+			_, _ = h.database.Conn().ExecContext(r.Context(), `
+				INSERT INTO missing_tracks (
+					album_id, title, artist, track_number, disc_number,
+					expected_duration, deezer_id, deezer_url, status, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'missing', CURRENT_TIMESTAMP)
+				ON CONFLICT(album_id, track_number, disc_number) DO UPDATE SET
+					title = excluded.title,
+					artist = excluded.artist,
+					deezer_id = excluded.deezer_id,
+					deezer_url = excluded.deezer_url,
+					updated_at = CURRENT_TIMESTAMP
+			`, albumID, tit, art, tNum, dNum, dur, dzID, dzURL)
 		}
 	}
 
@@ -1513,7 +1775,7 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 		"year":                  year,
 		"has_cover":             cover != "",
 		"cover_url":             cover,
-		"present_count":         0,
+		"present_count":         presentCount,
 		"expected_count":        expectedCount,
 		"missing_track_numbers": missingNums,
 		"missing_tracks":        missingTracks,
@@ -1565,23 +1827,82 @@ func (h *FileHandler) BackfillEditorData(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Deterministic sort by DiscNumber ASC, TrackNumber ASC, Title ASC
+	sort.SliceStable(tracks, func(i, j int) bool {
+		if tracks[i].DiscNumber != tracks[j].DiscNumber {
+			return tracks[i].DiscNumber < tracks[j].DiscNumber
+		}
+		if tracks[i].TrackNumber != tracks[j].TrackNumber {
+			return tracks[i].TrackNumber < tracks[j].TrackNumber
+		}
+		return tracks[i].Title < tracks[j].Title
+	})
+
 	albumArtist := ""
 	albumTitle := filepath.Base(albumPath)
-	if len(tracks) > 0 {
-		albumArtist = tracks[0].Artist
-		if tracks[0].Album != "" {
-			albumTitle = tracks[0].Album
+	albumGenre := ""
+	albumYear := 0
+
+	for _, t := range tracks {
+		if t.AlbumArtist != "" && albumArtist == "" {
+			albumArtist = t.AlbumArtist
 		}
+		if t.Artist != "" && albumArtist == "" {
+			albumArtist = t.Artist
+		}
+		if t.Album != "" && (albumTitle == "" || albumTitle == filepath.Base(albumPath)) {
+			albumTitle = t.Album
+		}
+		if t.Genre != "" && albumGenre == "" {
+			albumGenre = t.Genre
+		}
+		if t.Year > 0 && albumYear == 0 {
+			albumYear = t.Year
+		}
+	}
+
+	// Cover detection (check existing album folder, then tmp folder)
+	coverPath := ""
+	hasCover := false
+	if albumPath != "" {
+		if fullPath, err := h.musicSandbox.Resolve(albumPath, true); err == nil {
+			for _, c := range []string{"cover.jpg", "cover.png", "folder.jpg"} {
+				if _, err := os.Stat(filepath.Join(fullPath, c)); err == nil {
+					coverPath = filepath.Join(albumPath, c)
+					hasCover = true
+					break
+				}
+			}
+		}
+	}
+	if !hasCover && jobID != "" && h.tmpSandbox != nil {
+		jobDirRel := filepath.Join(jobID, "converted")
+		if fullJobDir, err := h.tmpSandbox.Resolve(jobDirRel, false); err == nil {
+			if _, err := os.Stat(filepath.Join(fullJobDir, "cover.jpg")); err == nil {
+				coverPath = filepath.Join("tmp_downloads", jobID, "converted", "cover.jpg")
+				hasCover = true
+			}
+		}
+	}
+
+	var jobIDs []string
+	if jobID != "" {
+		jobIDs = append(jobIDs, jobID)
 	}
 
 	resp := map[string]any{
 		"album": map[string]any{
 			"album_artist": albumArtist,
 			"album":        albumTitle,
+			"genre":        albumGenre,
+			"year":         albumYear,
+			"track_total":  len(tracks),
 		},
 		"tracks":           tracks,
 		"source_dir":       albumPath,
-		"job_ids":          []string{jobID},
+		"cover_path":       coverPath,
+		"has_cover":        hasCover,
+		"job_ids":          jobIDs,
 		"missing_count":    0,
 		"backfilled_count": len(tracks),
 	}

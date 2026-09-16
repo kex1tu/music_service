@@ -108,6 +108,50 @@ func (s *Service) CreateJob(rawURL, source string) (*DownloadJob, error) {
 	return job, nil
 }
 
+// CreateBackfillJob creates and queues a consolidated backfill download task for missing tracks.
+func (s *Service) CreateBackfillJob(
+	targetAlbumPath string,
+	albumTitle, artistName string,
+	deezerAlbumID string,
+	trackURLs []string,
+	trackNumbers []int,
+) (*DownloadJob, error) {
+	if targetAlbumPath == "" && albumTitle == "" {
+		return nil, fmt.Errorf("target album path or title required")
+	}
+
+	jobID := generateUUID()
+	primaryURL := ""
+	if deezerAlbumID != "" {
+		primaryURL = fmt.Sprintf("https://www.deezer.com/album/%s", deezerAlbumID)
+	} else if len(trackURLs) > 0 {
+		primaryURL = trackURLs[0]
+	}
+
+	aTitle := albumTitle
+	aArtist := artistName
+	tPath := targetAlbumPath
+
+	job := &DownloadJob{
+		ID:              jobID,
+		Status:          StatusQueued,
+		Source:          "deezer",
+		URL:             primaryURL,
+		Progress:        0.0,
+		CurrentStep:     "Задача дозагрузки ожидает очереди",
+		IsBackfill:      true,
+		TargetAlbumPath: &tPath,
+		AlbumTitle:      &aTitle,
+		ArtistName:      &aArtist,
+		CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
+		UpdatedAt:       time.Now().UTC(),
+	}
+
+	s.jobs.Add(job)
+	go s.runBackfillPipeline(jobID, deezerAlbumID, trackURLs, trackNumbers)
+	return job, nil
+}
+
 // CreateBatchJobs creates multiple download jobs.
 func (s *Service) CreateBatchJobs(urls []string, source string) ([]*DownloadJob, error) {
 	var created []*DownloadJob
@@ -154,6 +198,97 @@ func (s *Service) RetryJob(jobID string) (*DownloadJob, error) {
 	return job, nil
 }
 
+func (s *Service) runBackfillPipeline(jobID, deezerAlbumID string, trackURLs []string, trackNumbers []int) {
+	job, ok := s.jobs.Get(jobID)
+	if !ok {
+		return
+	}
+
+	// Acquire concurrency slot
+	s.sem <- struct{}{}
+	defer func() { <-s.sem }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	job.SetCancelFunc(cancel)
+	defer cancel()
+
+	// Step 1: Resolving
+	job.SetStatus(StatusResolving)
+	job.UpdateProgress(5.0, "Определение недостающих треков и получение метаданных")
+
+	var meta *resolver.ReleaseMetadata
+	var tracks []resolver.ResolvedTrack
+
+	if s.resolver != nil && deezerAlbumID != "" {
+		m, allTracks, err := s.resolver.Resolve(ctx, fmt.Sprintf("https://www.deezer.com/album/%s", deezerAlbumID), "deezer")
+		if err == nil && len(allTracks) > 0 {
+			meta = m
+			reqNums := make(map[int]bool)
+			for _, n := range trackNumbers {
+				reqNums[n] = true
+			}
+			reqURLs := make(map[string]bool)
+			for _, u := range trackURLs {
+				reqURLs[strings.ToLower(strings.TrimSpace(u))] = true
+			}
+
+			if len(reqNums) > 0 || len(reqURLs) > 0 {
+				for _, t := range allTracks {
+					trackURL := fmt.Sprintf("https://www.deezer.com/track/%s", strings.TrimPrefix(t.TrackID, "dz_"))
+					if reqNums[t.TrackNumber] || reqURLs[strings.ToLower(trackURL)] {
+						tracks = append(tracks, t)
+					}
+				}
+			} else {
+				tracks = allTracks
+			}
+		}
+	}
+
+	if s.resolver != nil && len(tracks) == 0 && len(trackURLs) > 0 {
+		for _, u := range trackURLs {
+			m, trs, err := s.resolver.Resolve(ctx, u, "deezer")
+			if err == nil && len(trs) > 0 {
+				tracks = append(tracks, trs[0])
+				if meta == nil {
+					meta = m
+				}
+			}
+		}
+	}
+
+	if len(tracks) == 0 {
+		s.failJob(job, "Не удалось разрешить недостающие треки для дозагрузки")
+		return
+	}
+
+	if meta == nil {
+		meta = &resolver.ReleaseMetadata{}
+	}
+	if job.AlbumTitle != nil && *job.AlbumTitle != "" && meta.AlbumTitle == "" {
+		meta.AlbumTitle = *job.AlbumTitle
+	}
+	if job.ArtistName != nil && *job.ArtistName != "" && meta.AlbumArtist == "" {
+		meta.AlbumArtist = *job.ArtistName
+	}
+
+	// Create temporary working directories inside TMP_DIR sandbox
+	rawDir, err := s.tmpSandbox.Resolve(filepath.Join(job.ID, "raw"), true)
+	if err != nil {
+		s.failJob(job, fmt.Sprintf("Sandbox error: %v", err))
+		return
+	}
+	convertedDir, err := s.tmpSandbox.Resolve(filepath.Join(job.ID, "converted"), true)
+	if err != nil {
+		s.failJob(job, fmt.Sprintf("Sandbox error: %v", err))
+		return
+	}
+	_ = os.MkdirAll(rawDir, 0755)
+	_ = os.MkdirAll(convertedDir, 0755)
+
+	s.processTracksPipeline(ctx, job, meta, tracks, rawDir, convertedDir)
+}
+
 func (s *Service) runPipeline(jobID string) {
 	job, ok := s.jobs.Get(jobID)
 	if !ok {
@@ -178,8 +313,6 @@ func (s *Service) runPipeline(jobID string) {
 		return
 	}
 
-	job.SetMetadata(*meta, tracks)
-
 	// Create temporary working directories inside TMP_DIR sandbox
 	rawDir, err := s.tmpSandbox.Resolve(filepath.Join(job.ID, "raw"), true)
 	if err != nil {
@@ -194,15 +327,27 @@ func (s *Service) runPipeline(jobID string) {
 	_ = os.MkdirAll(rawDir, 0755)
 	_ = os.MkdirAll(convertedDir, 0755)
 
+	s.processTracksPipeline(ctx, job, meta, tracks, rawDir, convertedDir)
+}
+
+func (s *Service) processTracksPipeline(
+	ctx context.Context,
+	job *DownloadJob,
+	meta *resolver.ReleaseMetadata,
+	tracks []resolver.ResolvedTrack,
+	rawDir, convertedDir string,
+) {
+	job.SetMetadata(*meta, tracks)
+
 	// Download album cover if available
 	var coverBytes []byte
 	if meta.CoverURL != "" {
 		cBytes, cErr := s.downloadCover(ctx, meta.CoverURL)
 		if cErr == nil && len(cBytes) > 0 {
 			coverBytes = cBytes
-			coverPath := filepath.Join(rawDir, "cover.jpg")
-			_ = os.WriteFile(coverPath, coverBytes, 0644)
-			relCover, _ := s.tmpSandbox.ToRelative(filepath.Join(rawDir, "cover.jpg"))
+			_ = os.WriteFile(filepath.Join(rawDir, "cover.jpg"), coverBytes, 0644)
+			_ = os.WriteFile(filepath.Join(convertedDir, "cover.jpg"), coverBytes, 0644)
+			relCover, _ := s.tmpSandbox.ToRelative(filepath.Join(convertedDir, "cover.jpg"))
 			job.SetCoverPath(relCover)
 		}
 	}

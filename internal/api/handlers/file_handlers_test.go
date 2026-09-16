@@ -13,12 +13,13 @@ import (
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	"music-manager/internal/id3"
+	"music-manager/internal/services/downloader"
 	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/organizer"
 	"music-manager/internal/services/scanner"
 )
 
-func setupTestFileHandler(t *testing.T) (*FileHandler, *sandbox.PathSandbox, *db.DB, string) {
+func setupTestFileHandler(t *testing.T) (*FileHandler, *sandbox.PathSandbox, *sandbox.PathSandbox, *db.DB, string, string) {
 	tempDir := t.TempDir()
 	musicDir := filepath.Join(tempDir, "music")
 	tmpDir := filepath.Join(tempDir, "tmp")
@@ -42,14 +43,16 @@ func setupTestFileHandler(t *testing.T) (*FileHandler, *sandbox.PathSandbox, *db
 
 	lyrSvc := lyrics.NewService(musicSb)
 	orgSvc := organizer.NewService(musicSb, tmpSb)
+	jobMgr := downloader.NewJobManager(database)
+	dlSvc := downloader.NewService(jobMgr, nil, tmpSb, musicSb, "", 1)
 	scannerSvc := scanner.NewScanner(musicSb, database, nil)
-	handler := NewFileHandler(musicSb, tmpSb, database, nil, orgSvc, nil, lyrSvc, scannerSvc)
+	handler := NewFileHandler(musicSb, tmpSb, database, dlSvc, orgSvc, nil, lyrSvc, scannerSvc)
 
-	return handler, musicSb, database, musicDir
+	return handler, musicSb, tmpSb, database, musicDir, tmpDir
 }
 
 func TestFileHandler_FixAllDuplicates(t *testing.T) {
-	h, _, database, musicDir := setupTestFileHandler(t)
+	h, _, _, database, musicDir, _ := setupTestFileHandler(t)
 	defer database.Close()
 
 	albumDir := filepath.Join(musicDir, "TestAlbum")
@@ -126,7 +129,7 @@ func TestFileHandler_FixAllDuplicates(t *testing.T) {
 }
 
 func TestFileHandler_RetagGenres(t *testing.T) {
-	h, _, database, musicDir := setupTestFileHandler(t)
+	h, _, _, database, musicDir, _ := setupTestFileHandler(t)
 	defer database.Close()
 
 	albumDir := filepath.Join(musicDir, "HipHopAlbum")
@@ -204,7 +207,7 @@ func TestFileHandler_RetagGenres(t *testing.T) {
 }
 
 func TestFileHandler_BatchLyricsProgress_Empty(t *testing.T) {
-	h, _, database, _ := setupTestFileHandler(t)
+	h, _, _, database, _, _ := setupTestFileHandler(t)
 	defer database.Close()
 
 	req := httptest.NewRequest(http.MethodGet, "/files/audit/missing-lyrics/progress", nil)
@@ -229,7 +232,7 @@ func TestFileHandler_BatchLyricsProgress_Empty(t *testing.T) {
 }
 
 func TestFileHandler_RefreshAudit_DetectsRenamedFolder(t *testing.T) {
-	h, _, database, musicDir := setupTestFileHandler(t)
+	h, _, _, database, musicDir, _ := setupTestFileHandler(t)
 	defer database.Close()
 
 	// Create a track in a non-canonical folder
@@ -311,5 +314,206 @@ func TestFileHandler_RefreshAudit_DetectsRenamedFolder(t *testing.T) {
 	}
 	if len(remaining) != 0 {
 		t.Errorf("expected 0 invalid paths after FixPath, got %d", len(remaining))
+	}
+}
+
+func TestFileHandler_IncompleteAlbums(t *testing.T) {
+	h, _, _, database, _, _ := setupTestFileHandler(t)
+	defer database.Close()
+
+	aRes, err := database.Conn().Exec("INSERT INTO artists (name, clean_name) VALUES ('TestBand', 'testband')")
+	if err != nil {
+		t.Fatal(err)
+	}
+	artID, _ := aRes.LastInsertId()
+
+	albRes, err := database.Conn().Exec(`
+		INSERT INTO albums (title, clean_title, artist_id, folder_path, is_complete, present_tracks_count, expected_tracks_count, total_tracks, deezer_id)
+		VALUES ('Greatest Hits', 'greatesthits', ?, 'TestBand/Greatest Hits', 0, 3, 5, 5, 'dz12345')
+	`, artID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	albID, _ := albRes.LastInsertId()
+
+	// Insert missing tracks records
+	_, _ = database.Conn().Exec("INSERT INTO missing_tracks (album_id, track_number, title, artist) VALUES (?, 2, 'Missing Track 2', 'TestBand')", albID)
+	_, _ = database.Conn().Exec("INSERT INTO missing_tracks (album_id, track_number, title, artist) VALUES (?, 4, 'Missing Track 4', 'TestBand')", albID)
+
+	req := httptest.NewRequest(http.MethodGet, "/files/audit/incomplete-albums", nil)
+	w := httptest.NewRecorder()
+	h.IncompleteAlbums(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		Albums []struct {
+			Path                string `json:"path"`
+			Album               string `json:"album"`
+			Artist              string `json:"artist"`
+			PresentCount        int    `json:"present_count"`
+			ExpectedCount       int    `json:"expected_count"`
+			MissingTrackNumbers []int  `json:"missing_track_numbers"`
+			IsCatalogMatched    bool   `json:"is_catalog_matched"`
+			DeezerAlbumID       *string `json:"deezer_album_id"`
+		} `json:"albums"`
+		TotalIncomplete int `json:"total_incomplete_albums"`
+	}
+
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(resp.Albums) != 1 {
+		t.Fatalf("expected 1 incomplete album, got %d", len(resp.Albums))
+	}
+
+	alb := resp.Albums[0]
+	if alb.Album != "Greatest Hits" || alb.Artist != "TestBand" {
+		t.Errorf("unexpected album data: %+v", alb)
+	}
+	if alb.PresentCount != 3 || alb.ExpectedCount != 5 {
+		t.Errorf("expected 3/5 tracks, got %d/%d", alb.PresentCount, alb.ExpectedCount)
+	}
+	if len(alb.MissingTrackNumbers) != 2 || alb.MissingTrackNumbers[0] != 2 || alb.MissingTrackNumbers[1] != 4 {
+		t.Errorf("expected missing tracks [2, 4], got %v", alb.MissingTrackNumbers)
+	}
+	if !alb.IsCatalogMatched || alb.DeezerAlbumID == nil || *alb.DeezerAlbumID != "dz12345" {
+		t.Errorf("expected catalog matched with deezer ID dz12345, got %+v", alb)
+	}
+}
+
+func TestFileHandler_DownloadMissing(t *testing.T) {
+	h, _, _, database, _, _ := setupTestFileHandler(t)
+	defer database.Close()
+
+	aRes, err := database.Conn().Exec("INSERT INTO artists (name, clean_name) VALUES ('TestBand', 'testband')")
+	if err != nil {
+		t.Fatal(err)
+	}
+	artID, _ := aRes.LastInsertId()
+
+	_, err = database.Conn().Exec(`
+		INSERT INTO albums (title, clean_title, artist_id, folder_path, is_complete, present_tracks_count, expected_tracks_count, deezer_id)
+		VALUES ('Greatest Hits', 'greatesthits', ?, 'TestBand/Greatest Hits', 0, 3, 5, '12345')
+	`, artID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := strings.NewReader(`{
+		"path": "TestBand/Greatest Hits",
+		"deezer_album_id": "12345",
+		"track_numbers": [2, 4]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/files/audit/incomplete-albums/download-missing", body)
+	w := httptest.NewRecorder()
+	h.DownloadMissing(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var jobs []*downloader.DownloadJob
+	if err := json.NewDecoder(w.Body).Decode(&jobs); err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	job := jobs[0]
+	if !job.IsBackfill {
+		t.Errorf("expected job.IsBackfill true, got false")
+	}
+	if job.TargetAlbumPath == nil || *job.TargetAlbumPath != "TestBand/Greatest Hits" {
+		t.Errorf("expected TargetAlbumPath 'TestBand/Greatest Hits', got %v", job.TargetAlbumPath)
+	}
+}
+
+func TestFileHandler_BackfillEditorData(t *testing.T) {
+	h, musicSb, tmpSb, database, musicDir, tmpDir := setupTestFileHandler(t)
+	defer database.Close()
+
+	// 1. Create existing library track in music sandbox
+	albumDir := filepath.Join(musicDir, "TestBand", "Greatest Hits")
+	_ = os.MkdirAll(albumDir, 0755)
+	t1Path := filepath.Join(albumDir, "01. Track One.mp3")
+	_ = os.WriteFile(t1Path, []byte("audio1"), 0644)
+	tags1 := id3.TrackTags{
+		Title:       "Track One",
+		Artist:      "TestBand",
+		Album:       "Greatest Hits",
+		TrackNumber: 1,
+		Year:        2024,
+		Genre:       "Rock",
+	}
+	_ = id3.WriteTags(t1Path, tags1, nil)
+
+	// 2. Create downloaded missing track in tmp sandbox
+	jobID := "job-backfill-test"
+	jobConvertedDir := filepath.Join(tmpDir, jobID, "converted")
+	_ = os.MkdirAll(jobConvertedDir, 0755)
+	t2Path := filepath.Join(jobConvertedDir, "02. Track Two.mp3")
+	_ = os.WriteFile(t2Path, []byte("audio2"), 0644)
+	tags2 := id3.TrackTags{
+		Title:       "Track Two",
+		Artist:      "TestBand",
+		Album:       "Greatest Hits",
+		TrackNumber: 2,
+		Year:        2024,
+		Genre:       "Rock",
+	}
+	_ = id3.WriteTags(t2Path, tags2, nil)
+
+	coverFile := filepath.Join(jobConvertedDir, "cover.jpg")
+	_ = os.WriteFile(coverFile, []byte("fake jpg cover"), 0644)
+
+	_ = musicSb
+	_ = tmpSb
+
+	req := httptest.NewRequest(http.MethodGet, "/files/audit/incomplete-albums/backfill-editor-data?path=TestBand%2FGreatest%20Hits&job_id="+jobID, nil)
+	w := httptest.NewRecorder()
+	h.BackfillEditorData(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Tracks []id3.TrackTags `json:"tracks"`
+		Album  struct {
+			AlbumArtist string `json:"album_artist"`
+			Album       string `json:"album"`
+			Genre       string `json:"genre"`
+			Year        int    `json:"year"`
+			TrackTotal  int    `json:"track_total"`
+		} `json:"album"`
+		SourceDir       string   `json:"source_dir"`
+		HasCover        bool     `json:"has_cover"`
+		CoverPath       string   `json:"cover_path"`
+		JobIDs          []string `json:"job_ids"`
+		BackfilledCount int      `json:"backfilled_count"`
+	}
+
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(resp.Tracks) != 2 {
+		t.Fatalf("expected 2 tracks merged, got %d", len(resp.Tracks))
+	}
+	if resp.Tracks[0].TrackNumber != 1 || resp.Tracks[1].TrackNumber != 2 {
+		t.Errorf("tracks not sorted properly: %v, %v", resp.Tracks[0].TrackNumber, resp.Tracks[1].TrackNumber)
+	}
+	if !resp.HasCover {
+		t.Errorf("expected HasCover true")
+	}
+	if len(resp.JobIDs) != 1 || resp.JobIDs[0] != jobID {
+		t.Errorf("expected JobIDs [%s], got %v", jobID, resp.JobIDs)
+	}
+	if resp.Album.Album != "Greatest Hits" {
+		t.Errorf("expected album 'Greatest Hits', got %s", resp.Album.Album)
 	}
 }
