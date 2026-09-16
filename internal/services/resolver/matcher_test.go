@@ -72,4 +72,53 @@ func TestCalculateScore(t *testing.T) {
 	if badScore >= goodScore {
 		t.Errorf("bad candidate score (%.1f) should be lower than good candidate score (%.1f)", badScore, goodScore)
 	}
+
+	// Max Korzh transliteration + Unicode NFD match test
+	korzhScore := m.CalculateScore(
+		"2 типа людей",
+		"Макс Корж",
+		255,
+		"Макс Корж - 2 типа людеи\u0306 (Official audio)",
+		"Max Korzh",
+		253,
+	)
+	if korzhScore < 65.0 {
+		t.Errorf("expected score >= 65.0 for Max Korzh with NFD and transliteration, got %.1f", korzhScore)
+	}
+
+	// SoundCloud exact match
+	scScore := m.CalculateScore(
+		"2 типа людей",
+		"Макс Корж",
+		255,
+		"2 типа людей",
+		"Макс Корж",
+		255,
+	)
+	if scScore < 85.0 {
+		t.Errorf("expected high score for exact SoundCloud match, got %.1f", scScore)
+	}
+}
+
+func TestNormalizeUnicodeText(t *testing.T) {
+	nfd := "людеи\u0306"
+	got := CleanQueryText(nfd)
+	want := "людей"
+	if got != want {
+		t.Errorf("CleanQueryText(%q) = %q, want %q", nfd, got, want)
+	}
+}
+
+func TestTransliterateArtist(t *testing.T) {
+	variants := TransliterateArtist("макс корж")
+	found := false
+	for _, v := range variants {
+		if v == "max korzh" || v == "maks korzh" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected max korzh in transliterated variants, got %v", variants)
+	}
 }

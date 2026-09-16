@@ -235,6 +235,16 @@
                                     </svg>
                                     <span>Отменить</span>
                                 </button>
+                            <template x-if="job.status === 'ERROR'">
+                                <button
+                                    @click="retryJob(job.id)"
+                                    class="px-3 py-1.5 bg-yellow-600/80 hover:bg-yellow-500 text-white text-xs rounded transition flex items-center space-x-1.5 font-medium"
+                                    title="Перезапустить загрузку">
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.05q-1.125-1.45-2.787-2.225T12 5q-2.9 0-4.95 2.05T5 12t2.05 4.95T12 19q2.425 0 4.3-1.463T18.65 14h2.075q-.45 3.025-2.688 5.013T12 20"/>
+                                    </svg>
+                                    <span>Повторить</span>
+                                </button>
                             </template>
                             <button
                                 @click="resetForm()"

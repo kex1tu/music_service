@@ -313,6 +313,8 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 
 func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*ReleaseMetadata, []ResolvedTrack, error) {
 	args := []string{
+		"--ignore-config",
+		"--no-download-archive",
 		"--dump-json",
 		"--flat-playlist",
 		"--no-warnings",

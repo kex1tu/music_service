@@ -56,7 +56,7 @@ func main() {
 	audioMatcher := resolver.NewAudioMatcher(cfg.CookiesFile)
 	sourceResolver := resolver.NewSourceResolver(deezerClient, audioMatcher, cfg.CookiesFile)
 
-	jobManager := downloader.NewJobManager()
+	jobManager := downloader.NewJobManager(database)
 	downloadService := downloader.NewService(
 		jobManager,
 		sourceResolver,

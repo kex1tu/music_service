@@ -97,6 +97,21 @@ window.createQueueManager = function() {
             }
         },
 
+        async retryJob(jobId) {
+            try {
+                const res = await fetch(`/downloads/${jobId}/retry`, { method: 'POST' });
+                if (res.ok) {
+                    Alpine.store('app').toast('Задача перезапущена', 'info');
+                    this.wakeUpPolling();
+                } else {
+                    const data = await res.json();
+                    Alpine.store('app').toast(data.error || 'Ошибка перезапуска задачи', 'error');
+                }
+            } catch (e) {
+                Alpine.store('app').toast('Ошибка перезапуска задачи', 'error');
+            }
+        },
+
         async openJobInTagEditor(jobId) {
             try {
                 const res = await fetch(`/downloads/${jobId}/tracks`);

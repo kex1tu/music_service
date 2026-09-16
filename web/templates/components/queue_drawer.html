@@ -139,6 +139,22 @@
                                         Отмена
                                     </button>
                                 </template>
+                                <template x-if="j.status === 'ERROR'">
+                                    <button
+                                        @click="$store.app.queue.retryJob(j.id)"
+                                        class="px-1.5 py-0.5 bg-yellow-600/80 hover:bg-yellow-500 text-white rounded text-[10px] font-semibold transition"
+                                        title="Повторить загрузку">
+                                        Повторить
+                                    </button>
+                                </template>
+                                <template x-if="j.status === 'ERROR'">
+                                    <button
+                                        @click="$store.app.queue.cancelJob(j.id)"
+                                        class="px-1.5 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-[10px] transition"
+                                        title="Удалить из списка">
+                                        Удалить
+                                    </button>
+                                </template>
                             </div>
                         </div>
                     </div>

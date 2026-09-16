@@ -15,13 +15,21 @@ import (
 )
 
 var (
-	parenRegex   = regexp.MustCompile(`[\(\[\{].*?[\)\]\}]`)
-	nonAlnumReg  = regexp.MustCompile(`[^\p{L}\p{N}\s]`)
+	parenRegex    = regexp.MustCompile(`[\(\[\{].*?[\)\]\}]`)
+	combiningReg  = regexp.MustCompile(`[\p{M}]`)
+	nonAlnumReg   = regexp.MustCompile(`[^\p{L}\p{N}\s]`)
 	multiSpaceReg = regexp.MustCompile(`\s+`)
-	badKeywords  = []string{
+	badKeywords   = []string{
 		"live", "concert", "cover", "karaoke", "remix", "instrumental",
 		"acoustic", "tutorial", "reaction", "speed up", "slowed",
 		"nightcore", "bass boosted", "8d", "clean", "radio edit",
+	}
+	cyrToLat = map[rune]string{
+		'а': "a", 'б': "b", 'в': "v", 'г': "g", 'д': "d", 'е': "e", 'ё': "e",
+		'ж': "zh", 'з': "z", 'и': "i", 'й': "y", 'к': "k", 'л': "l", 'м': "m",
+		'н': "n", 'о': "o", 'п': "p", 'р': "r", 'с': "s", 'т': "t", 'у': "u",
+		'ф': "f", 'х': "kh", 'ц': "ts", 'ч': "ch", 'ш': "sh", 'щ': "shch",
+		'ъ': "", 'ы': "y", 'ь': "", 'э': "e", 'ю': "yu", 'я': "ya",
 	}
 )
 
@@ -35,7 +43,7 @@ type YtCandidate struct {
 	URL      string  `json:"webpage_url"`
 }
 
-// AudioMatcher matches Deezer track metadata to YouTube/YouTube Music streams.
+// AudioMatcher matches Deezer track metadata to SoundCloud or YouTube audio streams.
 type AudioMatcher struct {
 	cookiesPath string
 }
@@ -47,9 +55,46 @@ func NewAudioMatcher(cookiesPath string) *AudioMatcher {
 	}
 }
 
-// CleanQueryText normalizes text for search queries.
+// NormalizeUnicodeText converts decomposed combining characters (NFD) to precomposed NFC.
+func NormalizeUnicodeText(s string) string {
+	s = strings.ReplaceAll(s, "\u0438\u0306", "й")
+	s = strings.ReplaceAll(s, "\u0418\u0306", "Й")
+	s = strings.ReplaceAll(s, "\u0435\u0308", "ё")
+	s = strings.ReplaceAll(s, "\u0415\u0308", "Ё")
+	s = strings.ReplaceAll(s, "—", "-")
+	s = strings.ReplaceAll(s, "–", "-")
+	s = strings.ReplaceAll(s, "“", "\"")
+	s = strings.ReplaceAll(s, "”", "\"")
+	s = strings.ReplaceAll(s, "«", "\"")
+	s = strings.ReplaceAll(s, "»", "\"")
+	s = combiningReg.ReplaceAllString(s, "")
+	return s
+}
+
+// TransliterateArtist generates Latin equivalents for Cyrillic artist names (e.g. "макс корж" -> ["maks korzh", "max korzh"]).
+func TransliterateArtist(s string) []string {
+	var sb strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if lat, ok := cyrToLat[r]; ok {
+			sb.WriteString(lat)
+		} else {
+			sb.WriteRune(r)
+		}
+	}
+	t1 := sb.String()
+	t2 := strings.ReplaceAll(t1, "ks", "x")
+	if t1 == t2 {
+		return []string{t1}
+	}
+	return []string{t1, t2}
+}
+
+// CleanQueryText normalizes text for search queries and matching.
 func CleanQueryText(s string) string {
+	s = NormalizeUnicodeText(s)
 	s = parenRegex.ReplaceAllString(s, " ")
+	s = strings.ReplaceAll(s, "ё", "е")
+	s = strings.ReplaceAll(s, "Ё", "Е")
 	s = nonAlnumReg.ReplaceAllString(s, " ")
 	s = multiSpaceReg.ReplaceAllString(s, " ")
 	return strings.TrimSpace(s)
@@ -98,11 +143,45 @@ func (m *AudioMatcher) CalculateScore(targetTitle, targetArtist string, targetDu
 		}
 	}
 
-	// 3. Artist similarity (up to 20 points)
+	// 3. Artist similarity (up to 20 points, with transliteration support)
 	tArt := strings.ToLower(CleanQueryText(targetArtist))
 	cChan := strings.ToLower(CleanQueryText(candidateChannel))
 	if tArt != "" {
+		matched := false
 		if strings.Contains(cTitle, tArt) || (cChan != "" && strings.Contains(cChan, tArt)) {
+			matched = true
+		} else {
+			// Check transliterated variants
+			tVariants := TransliterateArtist(tArt)
+			cChanTrans := TransliterateArtist(cChan)
+			cTitleTrans := TransliterateArtist(cTitle)
+
+			for _, tv := range tVariants {
+				if len(tv) < 3 {
+					continue
+				}
+				for _, cct := range cChanTrans {
+					if strings.Contains(cct, tv) || strings.Contains(tv, cct) {
+						matched = true
+						break
+					}
+				}
+				if matched {
+					break
+				}
+				for _, ctt := range cTitleTrans {
+					if strings.Contains(ctt, tv) {
+						matched = true
+						break
+					}
+				}
+				if matched {
+					break
+				}
+			}
+		}
+
+		if matched {
 			score += 20.0
 		}
 	}
@@ -134,11 +213,40 @@ func (m *AudioMatcher) CalculateScore(targetTitle, targetArtist string, targetDu
 	return score
 }
 
-// FindBestMatch searches for a YouTube audio match and returns the video URL.
+// FindBestMatch searches SoundCloud first (for uncut/explicit audio), falling back to YouTube.
 func (m *AudioMatcher) FindBestMatch(ctx context.Context, title, artist string, duration int) (string, error) {
 	cleanArt := CleanQueryText(artist)
 	cleanTit := CleanQueryText(title)
 
+	// Step 1: SoundCloud Search (priority for explicit/original audio)
+	scQuery := fmt.Sprintf("scsearch3:%s %s", cleanArt, cleanTit)
+	scCandidates, scErr := m.runSearch(ctx, scQuery)
+	if scErr == nil && len(scCandidates) > 0 {
+		var bestScCandidate *YtCandidate
+		bestScScore := -1.0
+		for _, cand := range scCandidates {
+			candChan := cand.Channel
+			if candChan == "" {
+				candChan = cand.Uploader
+			}
+			score := m.CalculateScore(title, artist, duration, cand.Title, candChan, int(cand.Duration))
+			if score > bestScScore {
+				bestScScore = score
+				cCopy := cand
+				bestScCandidate = &cCopy
+			}
+		}
+		if bestScCandidate != nil && bestScScore >= 65.0 {
+			if bestScCandidate.URL != "" {
+				return bestScCandidate.URL, nil
+			}
+			if bestScCandidate.ID != "" {
+				return fmt.Sprintf("https://soundcloud.com/%s", bestScCandidate.ID), nil
+			}
+		}
+	}
+
+	// Step 2: YouTube Search Fallback
 	queries := []string{
 		fmt.Sprintf("ytsearch5:%s %s Official Audio", cleanArt, cleanTit),
 		fmt.Sprintf("ytsearch5:%s %s Topic", cleanArt, cleanTit),
@@ -161,7 +269,11 @@ func (m *AudioMatcher) FindBestMatch(ctx context.Context, title, artist string, 
 		}
 
 		for _, cand := range candidates {
-			score := m.CalculateScore(title, artist, duration, cand.Title, cand.Channel, int(cand.Duration))
+			candChan := cand.Channel
+			if candChan == "" {
+				candChan = cand.Uploader
+			}
+			score := m.CalculateScore(title, artist, duration, cand.Title, candChan, int(cand.Duration))
 			if score > bestScore {
 				bestScore = score
 				cCopy := cand
@@ -187,9 +299,16 @@ func (m *AudioMatcher) FindBestMatch(ctx context.Context, title, artist string, 
 }
 
 func (m *AudioMatcher) runSearch(ctx context.Context, query string) ([]YtCandidate, error) {
+	defaultSearch := "ytsearch"
+	if strings.HasPrefix(query, "scsearch") {
+		defaultSearch = "scsearch"
+	}
+
 	args := []string{
+		"--ignore-config",
+		"--no-download-archive",
 		"--dump-json",
-		"--default-search", "ytsearch",
+		"--default-search", defaultSearch,
 		"--no-playlist",
 		"--no-warnings",
 		"--ignore-errors",

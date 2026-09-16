@@ -315,6 +315,31 @@ function downloaderComponent() {
             }
         },
 
+        async retryJob(jobId) {
+            const targetId = jobId || (this.job ? this.job.id : null);
+            if (!targetId) return;
+
+            this.isSubmitting = true;
+            try {
+                const response = await fetch(`/downloads/${targetId}/retry`, {
+                    method: 'POST',
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Ошибка перезапуска задачи');
+                }
+                const jobData = await response.json();
+                this.job = jobData;
+                Alpine.store('app').currentJobId = jobData.id;
+                Alpine.store('app').toast('Задача перезапущена', 'info');
+                this.startPolling(jobData.id);
+            } catch (err) {
+                Alpine.store('app').toast(err.message, 'error');
+            } finally {
+                this.isSubmitting = false;
+            }
+        },
+
         async cancelJob() {
             if (!this.job) return;
             if (this.pollInterval) {

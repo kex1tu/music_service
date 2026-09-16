@@ -180,6 +180,20 @@ func (h *DownloadHandler) DeleteDownload(w http.ResponseWriter, r *http.Request)
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "job_id": id})
 }
 
+func (h *DownloadHandler) RetryDownload(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	job, err := h.service.RetryJob(id)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(job)
+}
+
 type DiscographyResponse struct {
 	ArtistName    string               `json:"artist_name"`
 	ArtistID      int64                `json:"artist_id"`

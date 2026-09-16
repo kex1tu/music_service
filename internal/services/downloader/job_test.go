@@ -11,7 +11,7 @@ import (
 )
 
 func TestJobManager_ConcurrentAccess(t *testing.T) {
-	mgr := NewJobManager()
+	mgr := NewJobManager(nil)
 
 	// Create 5 jobs
 	for i := 1; i <= 5; i++ {

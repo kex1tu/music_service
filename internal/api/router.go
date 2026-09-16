@@ -92,6 +92,7 @@ func NewRouter(p RouterParams) http.Handler {
 		r.Delete("/completed", p.DownloadHandler.ClearCompleted)
 		r.Get("/{id}", p.DownloadHandler.GetDownload)
 		r.Delete("/{id}", p.DownloadHandler.DeleteDownload)
+		r.Post("/{id}/retry", p.DownloadHandler.RetryDownload)
 		r.Get("/{id}/tracks", p.DownloadHandler.GetDownloadTracks)
 	})
 

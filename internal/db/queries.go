@@ -271,6 +271,13 @@ func (db *DB) ClearOldJobs(ctx context.Context, age time.Duration) (int64, error
 	return res.RowsAffected()
 }
 
+// DeleteJob удаляет задачу по ID из download_jobs.
+func (db *DB) DeleteJob(ctx context.Context, id string) error {
+	query := `DELETE FROM download_jobs WHERE id = ?;`
+	_, err := db.conn.ExecContext(ctx, query, id)
+	return err
+}
+
 // CleanString нормализует строку для нечеткого сопоставления.
 func CleanString(s string) string {
 	return fmt.Sprintf("%s", s)

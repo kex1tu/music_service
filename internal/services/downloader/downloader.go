@@ -49,7 +49,7 @@ func NewService(
 	if maxConcurrent <= 0 {
 		maxConcurrent = 2
 	}
-	return &Service{
+	svc := &Service{
 		jobs:         jobs,
 		resolver:     res,
 		tmpSandbox:   tmpSandbox,
@@ -58,6 +58,8 @@ func NewService(
 		sem:          make(chan struct{}, maxConcurrent),
 		client:       &http.Client{Timeout: 30 * time.Second},
 	}
+	go svc.startCleaner(24 * time.Hour)
+	return svc
 }
 
 // Jobs returns the underlying JobManager.
@@ -80,8 +82,9 @@ func (s *Service) CreateJob(rawURL, source string) (*DownloadJob, error) {
 		return nil, fmt.Errorf("URL cannot be empty")
 	}
 
+	// Always enforce domain whitelist via DetectSource
 	detectedSource, err := s.resolver.DetectSource(cleanURL)
-	if err != nil && (source == "" || source == "auto") {
+	if err != nil {
 		return nil, err
 	}
 	if source == "" || source == "auto" {
@@ -116,6 +119,39 @@ func (s *Service) CreateBatchJobs(urls []string, source string) ([]*DownloadJob,
 		created = append(created, j)
 	}
 	return created, nil
+}
+
+// RetryJob resets and restarts a failed or cancelled download task.
+func (s *Service) RetryJob(jobID string) (*DownloadJob, error) {
+	job, ok := s.jobs.Get(jobID)
+	if !ok {
+		return nil, fmt.Errorf("задача %s не найдена", jobID)
+	}
+
+	snap := job.Snapshot()
+	if snap.Status == StatusResolving || snap.Status == StatusDownloading || snap.Status == StatusConverting || snap.Status == StatusTagging {
+		return nil, fmt.Errorf("задача уже выполняется")
+	}
+
+	// Clean up old temporary files
+	jobDir, err := s.tmpSandbox.Resolve(jobID, false)
+	if err == nil {
+		_ = os.RemoveAll(jobDir)
+	}
+
+	// Reset job state
+	job.mu.Lock()
+	job.Status = StatusQueued
+	job.Progress = 0.0
+	job.CurrentStep = "Задача перезапущена, ожидает очереди"
+	job.Error = nil
+	job.CompletedTracks = 0
+	job.UpdatedAt = time.Now().UTC()
+	job.mu.Unlock()
+	job.notifyUpdate()
+
+	go s.runPipeline(jobID)
+	return job, nil
 }
 
 func (s *Service) runPipeline(jobID string) {
@@ -221,9 +257,7 @@ func (s *Service) runPipeline(jobID string) {
 			job.SetStepAndStatus(fmt.Sprintf("Загрузка трека %d/%d: %s", trackIdx, total, track.Title), StatusDownloading)
 
 			rawAudioFile, dErr := s.downloadRawStream(ctx, track.AudioSourceURL, rawOutTemplate, func(p float64) {
-				trackPart := (p / 100.0) * 0.70
-				overallProg := 10.0 + ((float64(trackIdx-1) + trackPart) / float64(total)) * 80.0
-				job.UpdateProgress(overallProg, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
+				job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
 			})
 			if dErr != nil {
 				errStr := dErr.Error()
@@ -308,7 +342,17 @@ func (s *Service) runPipeline(jobID string) {
 	// Final step: READY or ERROR
 	snap := job.Snapshot()
 	if snap.CompletedTracks == 0 && total > 0 {
-		s.failJob(job, "Ни один из треков релиза не был успешно загружен")
+		var errDetails []string
+		for _, tr := range snap.Tracks {
+			if tr.Error != nil && *tr.Error != "" {
+				errDetails = append(errDetails, fmt.Sprintf("%s: %s", tr.Title, *tr.Error))
+			}
+		}
+		errMsg := "Ни один из треков релиза не был успешно загружен"
+		if len(errDetails) > 0 {
+			errMsg = fmt.Sprintf("%s (%s)", errMsg, strings.Join(errDetails, "; "))
+		}
+		s.failJob(job, errMsg)
 		return
 	}
 
@@ -442,3 +486,39 @@ func (s *Service) DeleteJob(id string) error {
 	}
 	return nil
 }
+
+func (s *Service) startCleaner(maxAge time.Duration) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		s.cleanOldTempDirs(maxAge)
+	}
+}
+
+func (s *Service) cleanOldTempDirs(maxAge time.Duration) {
+	root := s.tmpSandbox.Root()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+
+	cutoff := time.Now().Add(-maxAge)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dirPath, err := s.tmpSandbox.Resolve(entry.Name(), false)
+		if err != nil {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			_ = os.RemoveAll(dirPath)
+		}
+	}
+}
+

@@ -60,7 +60,7 @@ func setupTestRouter(t *testing.T) (http.Handler, *config.Config) {
 	matcher := resolver.NewAudioMatcher("")
 	res := resolver.NewSourceResolver(deezerClient, matcher, "")
 
-	jobMgr := downloader.NewJobManager()
+	jobMgr := downloader.NewJobManager(database)
 	downSvc := downloader.NewService(jobMgr, res, tmpSb, musicSb, "", 2)
 	orgSvc := organizer.NewService(musicSb, tmpSb)
 	lyrSvc := lyrics.NewService(musicSb)
@@ -287,3 +287,26 @@ func TestRouter_RecognizeAudioEndpoint(t *testing.T) {
 		t.Errorf("expected recognized: false, got %v", res["recognized"])
 	}
 }
+
+func TestRouter_RetryDownloadEndpoint(t *testing.T) {
+	router, _ := setupTestRouter(t)
+	authCookie := getAuthCookie(t, router)
+
+	// 1. Unauthorized
+	reqUnauth := httptest.NewRequest("POST", "/downloads/job-123/retry", nil)
+	recUnauth := httptest.NewRecorder()
+	router.ServeHTTP(recUnauth, reqUnauth)
+	if recUnauth.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 unauthorized, got %d", recUnauth.Code)
+	}
+
+	// 2. Non-existent job
+	reqNonExistent := httptest.NewRequest("POST", "/downloads/non-existent-job/retry", nil)
+	reqNonExistent.AddCookie(authCookie)
+	recNonExistent := httptest.NewRecorder()
+	router.ServeHTTP(recNonExistent, reqNonExistent)
+	if recNonExistent.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for non-existent job, got %d", recNonExistent.Code)
+	}
+}
+
