@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -65,7 +66,7 @@ func setupTestRouter(t *testing.T) (http.Handler, *config.Config) {
 	lyrSvc := lyrics.NewService(musicSb)
 
 	authHandler := handlers.NewAuthHandler(cfg)
-	downHandler := handlers.NewDownloadHandler(downSvc)
+	downHandler := handlers.NewDownloadHandler(downSvc, deezerClient)
 	tagHandler := handlers.NewTagHandler(musicSb, tmpSb, orgSvc, deezerClient)
 	fileHandler := handlers.NewFileHandler(musicSb, tmpSb, database, downSvc, orgSvc, deezerClient)
 	lyrHandler := handlers.NewLyricsHandler(lyrSvc)
@@ -158,5 +159,131 @@ func TestRouter_AuthFlow(t *testing.T) {
 
 	if recAuth.Code != http.StatusOK {
 		t.Errorf("expected status 200 for authenticated request, got %d", recAuth.Code)
+	}
+}
+
+func getAuthCookie(t *testing.T, router http.Handler) *http.Cookie {
+	loginBody, _ := json.Marshal(map[string]string{
+		"login":    "admin",
+		"password": "admin_pass",
+	})
+	reqLogin := httptest.NewRequest("POST", "/api/auth/login", bytes.NewReader(loginBody))
+	reqLogin.Header.Set("Content-Type", "application/json")
+	recLogin := httptest.NewRecorder()
+	router.ServeHTTP(recLogin, reqLogin)
+
+	if recLogin.Code != http.StatusOK {
+		t.Fatalf("expected login 200, got %d", recLogin.Code)
+	}
+	cookies := recLogin.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatalf("expected session cookie")
+	}
+	return cookies[0]
+}
+
+func TestRouter_DiscographyEndpoint(t *testing.T) {
+	router, _ := setupTestRouter(t)
+	authCookie := getAuthCookie(t, router)
+
+	// 1. Unauthorized
+	reqUnauth := httptest.NewRequest("GET", "/downloads/discography?url=https://www.deezer.com/artist/123", nil)
+	recUnauth := httptest.NewRecorder()
+	router.ServeHTTP(recUnauth, reqUnauth)
+	if recUnauth.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 unauthorized, got %d", recUnauth.Code)
+	}
+
+	// 2. Missing url param
+	reqNoURL := httptest.NewRequest("GET", "/downloads/discography", nil)
+	reqNoURL.AddCookie(authCookie)
+	recNoURL := httptest.NewRecorder()
+	router.ServeHTTP(recNoURL, reqNoURL)
+	if recNoURL.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing url, got %d", recNoURL.Code)
+	}
+
+	// 3. Invalid non-Deezer url
+	reqBadURL := httptest.NewRequest("GET", "/downloads/discography?url=https://unknown.com/artist/123", nil)
+	reqBadURL.AddCookie(authCookie)
+	recBadURL := httptest.NewRecorder()
+	router.ServeHTTP(recBadURL, reqBadURL)
+	if recBadURL.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for non-Deezer url, got %d", recBadURL.Code)
+	}
+}
+
+func TestRouter_TorrentEndpoint(t *testing.T) {
+	router, _ := setupTestRouter(t)
+	authCookie := getAuthCookie(t, router)
+
+	// 1. Unauthorized
+	reqUnauth := httptest.NewRequest("POST", "/downloads/torrent", nil)
+	recUnauth := httptest.NewRecorder()
+	router.ServeHTTP(recUnauth, reqUnauth)
+	if recUnauth.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 unauthorized, got %d", recUnauth.Code)
+	}
+
+	// 2. Upload valid .torrent file
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", "album.torrent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write([]byte("d8:announce12:udp://test.com4:infod6:lengthi12345eee"))
+	_ = writer.Close()
+
+	reqUpload := httptest.NewRequest("POST", "/downloads/torrent", body)
+	reqUpload.Header.Set("Content-Type", writer.FormDataContentType())
+	reqUpload.AddCookie(authCookie)
+	recUpload := httptest.NewRecorder()
+	router.ServeHTTP(recUpload, reqUpload)
+
+	// Returns 400 with friendly message for now
+	if recUpload.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 status with message, got %d", recUpload.Code)
+	}
+	var res map[string]string
+	if err := json.NewDecoder(recUpload.Body).Decode(&res); err != nil {
+		t.Errorf("expected JSON response, got error: %v", err)
+	}
+	if res["message"] == "" {
+		t.Errorf("expected non-empty message in response")
+	}
+}
+
+func TestRouter_RecognizeAudioEndpoint(t *testing.T) {
+	router, _ := setupTestRouter(t)
+	authCookie := getAuthCookie(t, router)
+
+	// 1. Unauthorized
+	reqUnauth := httptest.NewRequest("POST", "/tags/recognize-audio", nil)
+	recUnauth := httptest.NewRecorder()
+	router.ServeHTTP(recUnauth, reqUnauth)
+	if recUnauth.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 unauthorized, got %d", recUnauth.Code)
+	}
+
+	// 2. Non-existent file - should safely return { "recognized": false } with 200
+	reqPayload, _ := json.Marshal(map[string]string{
+		"path": "non_existent_track.mp3",
+	})
+	reqRecog := httptest.NewRequest("POST", "/tags/recognize-audio", bytes.NewReader(reqPayload))
+	reqRecog.Header.Set("Content-Type", "application/json")
+	reqRecog.AddCookie(authCookie)
+	recRecog := httptest.NewRecorder()
+	router.ServeHTTP(recRecog, reqRecog)
+
+	if recRecog.Code != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", recRecog.Code)
+	}
+	var res map[string]any
+	if err := json.NewDecoder(recRecog.Body).Decode(&res); err != nil {
+		t.Fatal(err)
+	}
+	if res["recognized"] != false {
+		t.Errorf("expected recognized: false, got %v", res["recognized"])
 	}
 }

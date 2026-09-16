@@ -194,6 +194,70 @@ func (c *DeezerClient) GetTrack(ctx context.Context, trackID string) (*DeezerTra
 	return &track, nil
 }
 
+// GetArtist retrieves artist metadata by artist ID.
+func (c *DeezerClient) GetArtist(ctx context.Context, artistID string) (*DeezerArtist, error) {
+	reqURL := fmt.Sprintf("%s/artist/%s", c.baseURL, artistID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("deezer api returned status %d", resp.StatusCode)
+	}
+
+	var artist DeezerArtist
+	if err := json.NewDecoder(resp.Body).Decode(&artist); err != nil {
+		return nil, err
+	}
+	return &artist, nil
+}
+
+// GetArtistAlbums retrieves all albums for an artist, handling pagination.
+func (c *DeezerClient) GetArtistAlbums(ctx context.Context, artistID string) ([]DeezerAlbum, error) {
+	reqURL := fmt.Sprintf("%s/artist/%s/albums?limit=100", c.baseURL, artistID)
+	var allAlbums []DeezerAlbum
+
+	for reqURL != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("deezer api returned status %d", resp.StatusCode)
+		}
+
+		var res struct {
+			Data  []DeezerAlbum `json:"data"`
+			Next  string        `json:"next"`
+			Total int           `json:"total"`
+		}
+		decErr := json.NewDecoder(resp.Body).Decode(&res)
+		_ = resp.Body.Close()
+		if decErr != nil {
+			return nil, decErr
+		}
+
+		allAlbums = append(allAlbums, res.Data...)
+		reqURL = res.Next
+	}
+
+	return allAlbums, nil
+}
+
 // SearchAlbums searches albums by query text.
 func (c *DeezerClient) SearchAlbums(ctx context.Context, query string) ([]DeezerAlbum, error) {
 	reqURL := fmt.Sprintf("%s/search/album?q=%s&limit=25", c.baseURL, url.QueryEscape(query))
