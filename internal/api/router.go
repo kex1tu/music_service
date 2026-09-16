@@ -149,6 +149,7 @@ func NewRouter(p RouterParams) http.Handler {
 			r.Get("/incomplete-albums", p.FileHandler.IncompleteAlbums)
 			r.Get("/incomplete-albums/catalog-match", p.FileHandler.CatalogMatch)
 			r.Get("/incomplete-albums/editor-data", p.FileHandler.BackfillEditorData)
+			r.Get("/incomplete-albums/backfill-editor-data", p.FileHandler.BackfillEditorData)
 			r.Post("/incomplete-albums/download-missing", p.FileHandler.DownloadMissing)
 		})
 	})
