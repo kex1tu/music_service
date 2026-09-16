@@ -1,128 +1,115 @@
-# План: Аудит, актуализация и очистка Markdown-документации (*.md)
+# План: Модульная декомпозиция HTML-шаблонов (web/templates)
 
 **Дата:** 17 сентября 2026  
-**Статус:** `DONE` (Все задачи выполнены)  
-**Целевые компоненты:** Корневая документация (`/`), временные логи мультиагентных сессий (`.agents/`), архитектурные спецификации.
+**Статус:** `PROPOSED` (Ожидает подтверждения пользователя)  
+**Целевые компоненты:** `web/templates/components/`, `web/templates/modals/`, `internal/api/router.go`.
 
 ---
 
 ## 1. Цель и границы задачи (Objective & Scope)
 
 ### 1.1. Проблема
-В репозитории скопилось большое количество устаревших и мусорных файлов формата `*.md`:
-1. Файлы `Architecture.md`, `README.md`, `PROJECT.md`, `TEST_INFRA.md` и `ORIGINAL_REQUEST.md` содержат устаревшую информацию о старой Python/FastAPI реализации проекта (с упоминаниями `uvicorn`, `pytest`, `mutagen`, `ruff`, `venv`, `Zero-Database`), тогда как проект полностью переведен на высокопроизводительный **Pure Go (Chi) + SQLite WAL + ID3v2.4 Engine + No-Build Alpine.js**.
-2. В файле `AGENTS.md` присутствуют остаточные рудименты Python в примерах правил (`app/main.py`, `asyncio`, `shutil.move`).
-3. В каталоге `.agents/` находится более 115 мусорных файлов отчетов, брифингов и диспетчеризации старых под-агентов (44 директории вида `worker_*`, `reviewer_*`, `challenger_*`, `teamwork_preview_*`), а также дубликат `ORIGINAL_REQUEST.md`.
-4. Файл `plan.md` содержит выполненный план предыдущего блока задач (Блок 32).
+В проекте проведена успешная декомпозиция Go-кода и JavaScript-скриптов на компактные файлы по 100–300 строк. Однако в шаблонах фронтенда (`web/templates/`) остаются 3 крупных монолитных HTML-файла:
+1. **[`web/templates/modals/tag_editor.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/modals/tag_editor.html)** — **979 строк** (содержит тулбар, группировку релизов, аккордеон, вложенную таблицу треков, сплошной список, модальное окно поиска Deezer и модальное окно мульти-галереи обложек).
+2. **[`web/templates/components/audit.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit.html)** — **853 строки** (содержит дашборд 7 метрик, вкладки и 6 независимых подразделов аудита: тексты, обложки, дубликаты, неполные релизы с бэкфиллом, некорректные пути, жанры).
+3. **[`web/templates/components/downloader.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/downloader.html)** — **678 строк** (содержит форму ввода с переключателями режимов, карточку активной загрузки, секцию очереди задач, карточки источников и модальное окно дискографии артиста).
+
+Остальные 8 HTML-шаблонов (`index.html`, `header.html`, `file_manager.html`, `queue_drawer.html`, `lyrics.html`, `confirmations.html`, `login.html`, `toasts.html`) уже компактны (30–195 строк) и не требуют декомпозиции.
 
 ### 1.2. Границы задачи
 - **In-Scope:**
-  - Полный аудит всех `*.md` файлов в репозитории на соответствие текущему коду на Go.
-  - Удаление устаревших и дублирующих файлов в корне (`ORIGINAL_REQUEST.md`, `PROJECT.md`, `TEST_INFRA.md`).
-  - Полная очистка мусорных временных каталогов старых под-агентов в `.agents/` (44 папки) и дубликата `.agents/ORIGINAL_REQUEST.md`.
-  - Сохранение активных навыков в `.agents/skills/` (7 навыков).
-  - Актуализация `README.md` (Go-сборка, запуск, архитектура, API, systemd).
-  - Актуализация `Architecture.md` (актуальная Go-архитектура, пакеты, модули, SQLite WAL, No-Build Frontend).
-  - Очистка `AGENTS.md` от Python-рудиментов.
-  - Сохранение `PROGRESS.md` как актуального источника трекинга задач.
+  - Декомпозиция `tag_editor.html` (979 строк) на 5 модульных под-шаблонов по 100–250 строк.
+  - Декомпозиция `audit.html` (853 строки) на 7 модульных под-шаблонов по 70–200 строк.
+  - Декомпозиция `downloader.html` (678 строк) на 5 модульных под-шаблонов по 50–200 строк.
+  - Обновление парсера шаблонов в `internal/api/router.go` (поддержка шаблонов в поддиректориях `templates/*/*.html`).
+  - Верификация сборки, тестов и рендеринга страницы `GET /`.
 - **Out-of-Scope:**
-  - Изменение исходного Go-кода, HTML-шаблонов или JS-скриптов.
-  - Изменение навыков в `.agents/skills/`.
+  - Изменение JavaScript-логики или стилей Tailwind.
+  - Изменение API эндпоинтов.
 
 ---
 
-## 2. Анализ текущего состояния и матрица решений
+## 2. Архитектурное решение и обоснование («Почему именно так»)
 
-| Файл / Каталог | Текущее состояние | Решение | Обоснование |
-|---|---|---|---|
-| [`AGENTS.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/AGENTS.md) | Актуален на 95%, но содержит единичные упоминания Python (`app/main.py`, `asyncio`, `shutil.move`) в секциях 5–6 | **[MODIFY]** | Очистить правила от рудиментов Python, синхронизировать с Pure Go стандартами |
-| [`README.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/README.md) | Полностью устарел: описывает Python 3.11, `pip install`, `uvicorn`, `mutagen`, `Zero-Database` | **[MODIFY]** | Полностью переписать под Go 1.22+, `bin/music-manager`, SQLite WAL, актуальный функционал |
-| [`Architecture.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/Architecture.md) | Полностью устарел: описывает FastAPI, `app/services/`, Jinja2, mutagen | **[MODIFY]** | Переписать под актуальную архитектуру Go (Chi router, `internal/id3`, `internal/services/`, SQLite WAL) |
-| [`PROGRESS.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/PROGRESS.md) | Актуален (38 блоков, 100% готовность) | **[KEEP]** | Оставить без изменений как эталонный журнал выполненных работ |
-| [`plan.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/plan.md) | Устарел: содержит выполненный план Блока 32 | **[MODIFY]** | Актуализировать текущим планом ревизии документации |
-| `ORIGINAL_REQUEST.md` (корень) | Устарел: лог ТЗ на Python от 06.09.2026 | **[DELETE]** | Удалить — исторический мусор |
-| `PROJECT.md` (корень) | Устарел: майлстоуны Python | **[DELETE]** | Удалить — дублирует устаревшую информацию |
-| `TEST_INFRA.md` (корень) | Устарел: запуск pytest и ruff | **[DELETE]** | Удалить — тестовая инфраструктура на Go описана в `README.md` и `AGENTS.md` |
-| `.agents/ORIGINAL_REQUEST.md` | Устаревший дубликат | **[DELETE]** | Удалить |
-| `.agents/` (44 папки под-агентов) | 115+ файлов логов и брифингов старых сессий | **[DELETE]** | Удалить все 44 мусорные папки |
-| `.agents/skills/*/SKILL.md` | 7 активных навыков для Antigravity | **[KEEP]** | Сохранить в полном объеме |
+### 2.1. Механизм композиции Go `html/template`
+Стандартная библиотека Go (`html/template`) поддерживает нативную композицию шаблонов через директивы `{{ define "name" }}` и `{{ template "name" . }}`.
+При компиляции бинарника все `.html` файлы из `web/templates/` автоматически встраиваются через `go:embed` в `web.Assets`.
+Разделение монолитных шаблонов на именованные подкомпоненты:
+1. **Не требует сборщиков** (сохраняет 100% Zero-Node.js инвариант).
+2. **Имеет нулевой оверхед по памяти и скорости рендера** (шаблоны парсятся один раз при старте сервера).
+3. **Обеспечивает легкую читаемость и поддержку верстки**: разработчик или агент редактирует конкретный изолированный компонент (например, только карточку дубликатов или галерею обложек), не листая тысячестрочный файл.
 
 ---
 
-## 3. Архитектурное решение и обоснование («Почему именно так»)
+## 3. Детальная декомпозиция шаблонов
 
-### 3.1. Единый источник истины (Single Source of Truth)
-- **`README.md`** — главная точка входа для человека/разработчика: описание возможностей, системные требования, сборка бинарника, конфигурация `.env`, запуск и деплой `systemd`.
-- **`Architecture.md`** — исчерпывающая техническая спецификация системы на Go: структура пакетов, конвейер загрузки (SoundCloud-First, yt-dlp, ffmpeg), ID3v2.4 Engine (`\x00` multi-values), схема базы данных SQLite WAL, No-Build Frontend.
-- **`AGENTS.md`** — правила, границы ответственности и жесткие инварианты для AI-агентов при работе с репозиторием.
-- **`PROGRESS.md`** — полная история и матрица статусов реализации компонентов.
+### 3.1. Декомпозиция `web/templates/modals/tag_editor.html` (979 строк -> 5 модулей)
 
-### 3.2. Удаление устаревших файлов
-- Удаление `ORIGINAL_REQUEST.md`, `PROJECT.md`, `TEST_INFRA.md` и временных папок в `.agents/` исключает галлюцинации LLM и запутывание разработчиков устаревшими инструкциями по несуществующему Python-коду.
-
----
-
-## 4. Пошаговый план реализации (Step-by-Step Implementation)
-
-### Этап 1: Удаление мусорных и устаревших файлов
-1. Удалить `ORIGINAL_REQUEST.md`, `PROJECT.md`, `TEST_INFRA.md` из корня проекта.
-2. Удалить `.agents/ORIGINAL_REQUEST.md`.
-3. Удалить все 44 временные директории под-агентов в `.agents/` (`auditor_*`, `challenger_*`, `reviewer_*`, `sentinel_*`, `survey_explorer_*`, `teamwork_preview_*`, `worker_*`), оставив только `.agents/skills/`.
-
-### Этап 2: Актуализация `README.md`
-1. Обновить заголовок и стек: Pure Go (Chi) + yt-dlp + ffmpeg + ID3v2.4 Engine + SQLite WAL + No-Build Frontend.
-2. Описать все современные возможности:
-   - SoundCloud-First Matcher & YouTube fallback.
-   - Deezer Anti-403 & iTunes Search fallback.
-   - Детерминированная персистентная очередь загрузок в SQLite и Retry механизм.
-   - Поддержка синглов и каноническая структура `{Album} - {Artist}/{Track}.mp3`.
-   - Сохранение обложек `{TrackBaseName}.jpg` и извлечение embedded APIC.
-   - Внешние тексты `.lrc`/`.txt` (Zero ID3 Lyrics).
-   - Аудит и автоисправление путей, сверка неполных релизов (Backfill).
-3. Привести актуальные команды сборки и запуска:
-   ```bash
-   go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go
-   ./bin/music-manager
-   ```
-4. Обновить инструкцию по `systemd` и переменным окружения.
-
-### Этап 3: Актуализация `Architecture.md`
-1. Описать актуальную компонентную схему на Go (HTTP Layer / Chi Router -> Service Layer -> Storage / Engine Layer).
-2. Описать структуру пакетов (`cmd/server`, `internal/api`, `internal/core`, `internal/id3`, `internal/services`, `internal/db`, `web/`, `tools/`).
-3. Задокументировать схему БД SQLite (`tracks`, `albums`, `artists`, `track_genres`, `download_jobs`, `audit_issues`, `missing_tracks`).
-4. Описать модульную структуру No-Build фронтенда.
-
-### Этап 4: Очистка `AGENTS.md`
-1. Заменить остаточные упоминания `app/main.py` на `cmd/server/main.go`.
-2. Заменить упоминания `asyncio` и `shutil` на Go-эквиваленты (`goroutines`, `os.Rename`, `os.RemoveAll`, `exec.CommandContext`).
+| Новый файл | Строк | Содержимое и назначение |
+|---|---|---|
+| [`web/templates/modals/tag_editor.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/modals/tag_editor.html) | ~110 | `{{ define "modal_tag_editor" }}`: контейнер окна, заголовок, верхний тулбар действий (очистка названий, перенумерация, Shazam, обложки синглов), подвал с кнопками «Сохранить» / «Отмена». Включает под-шаблоны через `{{ template "..." . }}`. |
+| `web/templates/modals/tag_editor_grouped.html` | ~250 | `{{ define "tag_editor_grouped" }}`: режим отображения «По релизам» (аккордеон альбомов/синглов, карточки метаданных релиза, вложенные таблицы треков, Drag & Drop). |
+| `web/templates/modals/tag_editor_flat.html` | ~160 | `{{ define "tag_editor_flat" }}`: режим отображения «Сплошной список» (плоская таблица всех треков без группировки). |
+| `web/templates/modals/tag_editor_deezer.html` | ~100 | `{{ define "tag_editor_deezer_modal" }}`: модальное окно поиска официальных релизов в Deezer API с предпросмотром треклиста. |
+| `web/templates/modals/tag_editor_covers.html` | ~150 | `{{ define "tag_editor_cover_gallery" }}`: модальное окно мульти-источниковой галереи обложек высокого разрешения (Apple Music, Deezer, Yandex, Spotify). |
 
 ---
 
-## 5. Анализ рисков и меры защиты (Risks & Guardrails)
+### 3.2. Декомпозиция `web/templates/components/audit.html` (853 строки -> 7 модулей)
 
-| Риск | Вероятность | Влияние | Стратегия митигации |
-|---|---|---|---|
-| Случайное удаление рабочих навыков `.agents/skills/` | Низкая | Высокое | Использовать точечные команды удаления только для папок под-агентов, не затрагивая `.agents/skills/` |
-| Потеря важных архитектурных деталей при обновлении `Architecture.md` | Средняя | Среднее | Тщательно перенести все актуальные алгоритмы (ID3v2.4 UTF-8, SoundCloud-First, PathSandbox, Backfill) в новый документ |
-| Нарушение инвариантов проекта | Низкая | Критическое | Все документы строго подтверждают инварианты из `AGENTS.md` (No Docker, Zero-Node.js, Pure Go, PathSandbox) |
-
----
-
-## 6. План тестирования и верификации
-
-1. Проверить дерево файлов: в корне должны остаться только `README.md`, `Architecture.md`, `AGENTS.md`, `PROGRESS.md`, `plan.md`.
-2. Проверить каталог `.agents/`: в нем должен остаться только подкаталог `skills/` с 7 навыками.
-3. Проверить, что все ссылки в документах кликабельны и ведут на существующие файлы.
-4. Убедиться, что сборка проекта `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` и тесты `go test -race ./...` проходят успешно.
+| Новый файл | Строк | Содержимое и назначение |
+|---|---|---|
+| [`web/templates/components/audit.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit.html) | ~90 | `{{ define "audit" }}`: шапка раздела «Аудит медиатеки», кнопка «Пересканировать», навигационные вкладки подразделов и переключение отображения. |
+| `web/templates/components/audit_metrics.html` | ~135 | `{{ define "audit_metrics" }}`: дашборд из 7 интерактивных карточек сводки (всего треков, без текстов, без обложек, дубликаты, неполные релизы, некорректные пути, жанры). |
+| `web/templates/components/audit_lyrics.html` | ~110 | `{{ define "audit_lyrics" }}`: подраздел треков без текстов с панелью фонового пакетного поиска в LRCLIB/Genius и таблицей. |
+| `web/templates/components/audit_covers.html` | ~55 | `{{ define "audit_covers" }}`: подраздел релизов без обложек со ссылками на директории. |
+| `web/templates/components/audit_duplicates.html` | ~115 | `{{ define "audit_duplicates" }}`: подраздел дубликатов песен с группировкой копий и кнопками безопасного удаления. |
+| `web/templates/components/audit_incomplete.html` | ~205 | `{{ define "audit_incomplete" }}`: подраздел неполных релизов, карточки сверки с Deezer, прогресс-бары и кнопка пакетной дозагрузки (Backfill). |
+| `web/templates/components/audit_paths.html` | ~155 | `{{ define "audit_paths" }}`: подраздел аудита неканонических путей с автоисправлением и подраздел проверки жанров. |
 
 ---
 
-## 7. Критерии приемки (Definition of Done)
+### 3.3. Декомпозиция `web/templates/components/downloader.html` (678 строк -> 5 модулей)
 
-- [x] В корне репозитория удалены устаревшие файлы `ORIGINAL_REQUEST.md`, `PROJECT.md`, `TEST_INFRA.md`.
-- [x] В `.agents/` удалены 44 мусорные папки под-агентов и `.agents/ORIGINAL_REQUEST.md`, сохранены все 7 навыков в `.agents/skills/`.
-- [x] `README.md` на 100% отражает актуальный стек на Go, команды сборки, настройки `.env` и возможности системы.
-- [x] `Architecture.md` на 100% отражает актуальную архитектуру Go-сервиса и SQLite WAL.
-- [x] `AGENTS.md` очищен от рудиментов Python.
-- [x] `PROGRESS.md` сохранен в актуальном состоянии.
-- [x] Все тесты `go test -race ./...` — зеленые, бинарник успешно компилируется.
+| Новый файл | Строк | Содержимое и назначение |
+|---|---|---|
+| [`web/templates/components/downloader.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/downloader.html) | ~50 | `{{ define "downloader" }}`: корневой контейнер вкладки загрузчика, объединяющий форму, статус, очередь, карточки сервисов и модал дискографии. |
+| `web/templates/components/downloader_form.html` | ~160 | `{{ define "downloader_form" }}`: карточка формы ввода (одиночная ссылка, пакетный список, загрузка .torrent, селектор источника). |
+| `web/templates/components/downloader_active.html` | ~105 | `{{ define "downloader_active" }}`: карточка активной задачи (прогресс, скорость, ETA, ошибка, кнопки повтора и перехода в редактор тегов). |
+| `web/templates/components/downloader_queue.html` | ~165 | `{{ define "downloader_queue" }}`: секция очереди задач загрузки с карточками, статусами и кнопками управления. |
+| `web/templates/components/downloader_discography.html` | ~200 | `{{ define "downloader_discography" }}`: полноэкранное модальное окно селектора дискографии артиста Deezer с фильтрами и сеткой релизов. |
+
+---
+
+## 4. Пошаговый план реализации
+
+1. **Шаг 1:** Создать новые под-шаблоны для `web/templates/modals/`:
+   - `tag_editor_grouped.html`, `tag_editor_flat.html`, `tag_editor_deezer.html`, `tag_editor_covers.html`.
+   - Обновить `tag_editor.html` для вызова этих шаблонов.
+2. **Шаг 2:** Создать новые под-шаблоны для `web/templates/components/`:
+   - `audit_metrics.html`, `audit_lyrics.html`, `audit_covers.html`, `audit_duplicates.html`, `audit_incomplete.html`, `audit_paths.html`.
+   - Обновить `audit.html` для вызова этих шаблонов.
+3. **Шаг 3:** Создать новые под-шаблоны загрузчика в `web/templates/components/`:
+   - `downloader_form.html`, `downloader_active.html`, `downloader_queue.html`, `downloader_discography.html`.
+   - Обновить `downloader.html` для вызова этих шаблонов.
+4. **Шаг 4:** Проверить и при необходимости уточнить шаблонный загрузчик в `internal/api/router.go`.
+5. **Шаг 5:** Запустить `go test -race ./...`, собрать `bin/music-manager` и проверить рендеринг `GET /`.
+
+---
+
+## 5. Анализ рисков и меры защиты
+
+| Риск | Влияние | Стратегия митигации |
+|---|---|---|
+| Ошибка имени шаблона (`template "..." not defined`) | Ошибка 500 при рендере `GET /` | Тщательно проверить каждое имя в `{{ define "..." }}` и вызов `{{ template "..." . }}`. Протестировать эндпоинт `GET /` через `httptest` |
+| Потеря области видимости данных Alpine.js (`x-data`) | UI не реагирует | Шаблоны встраиваются на этапе Go-рендеринга до передачи в браузер, DOM-иерархия и область видимости Alpine `x-data="tagEditorComponent()"` и `x-data="downloaderComponent()"` полностью сохраняются |
+
+---
+
+## 6. Критерии приемки (Definition of Done)
+
+- [ ] В проекте нет ни одного HTML-файла длиннее 250 строк.
+- [ ] Все 14 новых и обновленных шаблонов используют стандартные конструкции Go `{{ define }}` / `{{ template }}`.
+- [ ] Главная страница `GET /` корректно рендерится без ошибок парсинга шаблонов.
+- [ ] Все тесты `go test -race ./...` проходят успешно (100% PASS).
+- [ ] Статический бинарник успешно собирается без ошибок.

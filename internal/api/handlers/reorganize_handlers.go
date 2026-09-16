@@ -43,19 +43,25 @@ func (h *FileHandler) DownloadMissing(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(al.expected_tracks_count, 0), COALESCE(al.present_tracks_count, 0), COALESCE(al.total_tracks, 0)
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
-		WHERE al.folder_path = ? OR al.folder_path = ?
+		WHERE al.folder_path = ? OR al.folder_path = ? OR al.title = ?
 		LIMIT 1
-	`, req.Path, filepath.Clean(req.Path)).Scan(&albumID, &albumTitle, &artistName, &dbDeezerID, &expCount, &presentCount, &totTracks)
+	`, req.Path, filepath.Clean(req.Path), filepath.Base(req.Path)).Scan(&albumID, &albumTitle, &artistName, &dbDeezerID, &expCount, &presentCount, &totTracks)
+
+	if albumTitle == "" {
+		albumTitle = filepath.Base(req.Path)
+	}
+	if artistName == "" {
+		if parts := strings.Split(albumTitle, " - "); len(parts) >= 2 {
+			albumTitle = strings.TrimSpace(parts[0])
+			artistName = strings.TrimSpace(parts[1])
+		}
+	}
 
 	deezerAlbumID := ""
 	if req.DeezerAlbumID != nil && *req.DeezerAlbumID != "" {
 		deezerAlbumID = *req.DeezerAlbumID
 	} else if dbDeezerID != "" {
 		deezerAlbumID = dbDeezerID
-	}
-
-	if albumTitle == "" {
-		albumTitle = filepath.Base(req.Path)
 	}
 
 	trackNumbers := req.TrackNumbers

@@ -36,6 +36,21 @@ func (s *Service) runBackfillPipeline(jobID, deezerAlbumID string, trackURLs []s
 	var meta *resolver.ReleaseMetadata
 	var tracks []resolver.ResolvedTrack
 
+	if s.resolver != nil && deezerAlbumID == "" && job.AlbumTitle != nil && *job.AlbumTitle != "" && s.resolver.Deezer() != nil {
+		art := ""
+		if job.ArtistName != nil {
+			art = *job.ArtistName
+		}
+		q := fmt.Sprintf(`artist:"%s" album:"%s"`, art, *job.AlbumTitle)
+		albums, sErr := s.resolver.Deezer().SearchAlbums(ctx, q)
+		if sErr != nil || len(albums) == 0 {
+			albums, sErr = s.resolver.Deezer().SearchAlbums(ctx, fmt.Sprintf("%s %s", art, *job.AlbumTitle))
+		}
+		if sErr == nil && len(albums) > 0 {
+			deezerAlbumID = fmt.Sprintf("%d", albums[0].ID)
+		}
+	}
+
 	if s.resolver != nil && deezerAlbumID != "" {
 		m, allTracks, err := s.resolver.Resolve(ctx, fmt.Sprintf("https://www.deezer.com/album/%s", deezerAlbumID), "deezer")
 		if err == nil && len(allTracks) > 0 {
@@ -116,6 +131,27 @@ func (s *Service) runBackfillPipeline(jobID, deezerAlbumID string, trackURLs []s
 				}
 			}
 			rows.Close()
+		}
+	}
+
+	if len(tracks) == 0 && len(trackNumbers) > 0 {
+		aTit := ""
+		if job.AlbumTitle != nil {
+			aTit = *job.AlbumTitle
+		}
+		aArt := ""
+		if job.ArtistName != nil {
+			aArt = *job.ArtistName
+		}
+		for _, num := range trackNumbers {
+			tracks = append(tracks, resolver.ResolvedTrack{
+				TrackNumber: num,
+				Title:       fmt.Sprintf("%s - Track %02d", aTit, num),
+				Artist:      aArt,
+				Album:       aTit,
+				AlbumArtist:  aArt,
+				Status:      "pending",
+			})
 		}
 	}
 
@@ -243,6 +279,15 @@ func (s *Service) processTracksPipeline(
 			// If audio stream URL is not yet resolved (e.g. Deezer album), match to YouTube
 			if track.AudioSourceURL == "" || strings.Contains(track.AudioSourceURL, "deezer.com") {
 				job.SetCurrentStep(fmt.Sprintf("Поиск аудиопотока %d/%d: %s", trackIdx, total, track.Title))
+
+				if s.resolver == nil || s.resolver.Matcher() == nil {
+					errStr := "audio matcher not available"
+					job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+						tr.Status = "error"
+						tr.Error = &errStr
+					})
+					return
+				}
 
 				matchedURL, mErr := s.resolver.Matcher().FindBestMatch(ctx, track.Title, track.Artist, track.Duration)
 				if mErr != nil {

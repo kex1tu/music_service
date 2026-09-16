@@ -51,23 +51,8 @@ window.AuditCatalogMatcher = {
     },
 
     async downloadMissing(album, trackUrl = null) {
+        if (!album || !album.path) return;
         const path = album.path;
-        let currentAlbum = album;
-
-        if (!currentAlbum.is_catalog_matched || !currentAlbum.missing_tracks || currentAlbum.missing_tracks.length === 0) {
-            const matched = await this.matchCatalog(currentAlbum);
-            if (matched) {
-                currentAlbum = matched;
-            } else {
-                const idx = this.incompleteAlbums.findIndex(a => a.path === path);
-                if (idx !== -1) currentAlbum = this.incompleteAlbums[idx];
-            }
-        }
-
-        if (!trackUrl && currentAlbum.is_catalog_matched && currentAlbum.expected_count > 0 && currentAlbum.expected_count <= currentAlbum.present_count && currentAlbum.missing_tracks && currentAlbum.missing_tracks.length === 0) {
-            Alpine.store('app').toast('Все треки релиза уже присутствуют в медиатеке', 'info');
-            return;
-        }
 
         let directUrl = null;
         let trackNumber = null;
@@ -78,35 +63,57 @@ window.AuditCatalogMatcher = {
             trackNumber = trackUrl.track_number || null;
         }
 
-        let trackUrls = null;
-        let trackNumbers = null;
-        if (directUrl) {
-            trackUrls = [directUrl];
-            if (trackNumber) trackNumbers = [trackNumber];
-        } else {
-            if (currentAlbum.missing_tracks && currentAlbum.missing_tracks.length > 0) {
-                trackNumbers = currentAlbum.missing_tracks.map(t => t.track_number).filter(n => n > 0);
-                trackUrls = currentAlbum.missing_tracks.map(t => t.deezer_url).filter(Boolean);
-            } else if (currentAlbum.missing_track_numbers && currentAlbum.missing_track_numbers.length > 0) {
-                trackNumbers = currentAlbum.missing_track_numbers;
-            }
-        }
-
         const trackKey = directUrl || (trackNumber ? `track_${trackNumber}` : null);
-        const key = trackKey ? `${currentAlbum.path}:::${trackKey}` : currentAlbum.path;
+        const key = trackKey ? `${path}:::${trackKey}` : path;
+
+        // 1. Мгновенно включаем спиннер/индикатор загрузки на кнопке
         this.downloadingTracks[key] = true;
+
         try {
+            let currentAlbum = album;
+
+            // Если трек не указан индивидуально и альбом не сверен, пробуем фоновую сверку
+            if (!trackNumber && !directUrl && (!currentAlbum.is_catalog_matched || !currentAlbum.missing_tracks || currentAlbum.missing_tracks.length === 0)) {
+                try {
+                    const matched = await this.matchCatalog(currentAlbum);
+                    if (matched) {
+                        currentAlbum = matched;
+                    } else {
+                        const idx = this.incompleteAlbums.findIndex(a => a.path === path);
+                        if (idx !== -1) currentAlbum = this.incompleteAlbums[idx];
+                    }
+                } catch (err) {
+                    console.warn('Фоновая сверка каталога завершилась с предупреждением:', err);
+                }
+            }
+
+            let trackUrls = null;
+            let trackNumbers = null;
+            if (directUrl || trackNumber) {
+                if (directUrl) trackUrls = [directUrl];
+                if (trackNumber) trackNumbers = [trackNumber];
+            } else {
+                if (currentAlbum.missing_tracks && currentAlbum.missing_tracks.length > 0) {
+                    trackNumbers = currentAlbum.missing_tracks.map(t => t.track_number).filter(n => n > 0);
+                    trackUrls = currentAlbum.missing_tracks.map(t => t.deezer_url).filter(Boolean);
+                } else if (currentAlbum.missing_track_numbers && currentAlbum.missing_track_numbers.length > 0) {
+                    trackNumbers = currentAlbum.missing_track_numbers;
+                }
+            }
+
             const payload = {
                 path: currentAlbum.path,
                 deezer_album_id: currentAlbum.deezer_album_id || null,
                 track_urls: trackUrls && trackUrls.length > 0 ? trackUrls : null,
                 track_numbers: trackNumbers && trackNumbers.length > 0 ? trackNumbers : null,
             };
+
             const res = await fetch('/files/audit/incomplete-albums/download-missing', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
+
             if (res.ok) {
                 const jobs = await res.json();
                 if (jobs && jobs.length > 0) {
@@ -121,23 +128,21 @@ window.AuditCatalogMatcher = {
                         Alpine.store('app').queue.isOpen = true;
                     }
                 } else {
-                    if (currentAlbum.is_catalog_matched && (currentAlbum.expected_count <= currentAlbum.present_count || (currentAlbum.missing_tracks && currentAlbum.missing_tracks.length === 0))) {
-                        Alpine.store('app').toast('Все треки релиза уже присутствуют в медиатеке', 'info');
-                    } else {
-                        Alpine.store('app').toast('Не найдено ссылок для скачивания недостающих треков в каталоге', 'warning');
-                    }
+                    Alpine.store('app').toast('Все треки уже скачаны или не найдены в каталоге', 'info');
                 }
             } else {
                 let errText = 'Ошибка отправки запроса на скачивание';
                 try {
                     const errData = await res.json();
-                    if (errData && errData.detail) errText = errData.detail;
+                    if (errData && (errData.error || errData.detail)) {
+                        errText = errData.error || errData.detail;
+                    }
                 } catch (_) {}
                 Alpine.store('app').toast(errText, 'error');
             }
         } catch (e) {
             console.error('Ошибка дозагрузки треков:', e);
-            Alpine.store('app').toast('Сбой при запуске загрузки', 'error');
+            Alpine.store('app').toast('Сбой при запуске загрузки: ' + (e.message || e), 'error');
         } finally {
             this.downloadingTracks[key] = false;
         }
