@@ -1,0 +1,185 @@
+{{ define "header" }}
+<!-- Верхняя панель навигации -->
+    <header class="bg-gray-900 border-b border-gray-800 sticky top-0 z-30 shadow-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <!-- Логотип -->
+            <div class="flex items-center space-x-3 shrink-0">
+                <div class="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                    <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12.5 15q1.05 0 1.775-.725T15 12.5V7h2q.425 0 .713-.288T18 6t-.288-.712T17 5h-2q-.425 0-.712.288T14 6v4.5q-.325-.25-.7-.375T12.5 10q-1.05 0-1.775.725T10 12.5t.725 1.775T12.5 15M8 18q-.825 0-1.412-.587T6 16V4q0-.825.588-1.412T8 2h12q.825 0 1.413.588T22 4v12q0 .825-.587 1.413T20 18zm-4 4q-.825 0-1.412-.587T2 20V7q0-.425.288-.712T3 6t.713.288T4 7v13h13q.425 0 .713.288T18 21t-.288.713T17 22z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-base font-bold text-white tracking-wide">Music Manager</h1>
+                    <p class="text-xs text-gray-400">Downloader & Tag Editor</p>
+                </div>
+            </div>
+
+            <!-- Глобальный поиск (Ctrl+K) -->
+            <div class="flex-1 max-w-sm mx-4 relative hidden sm:block"
+                x-data="headerSearchComponent()"
+                @keydown.window.ctrl.k.prevent="$refs.globalSearchInput.focus()"
+                @keydown.escape="isOpen = false"
+                @click.outside="isOpen = false">
+                <div class="relative">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-500">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                        </svg>
+                    </div>
+                    <input
+                        x-ref="globalSearchInput"
+                        type="text"
+                        x-model="searchQuery"
+                        @input.debounce.250ms="performSearch()"
+                        @focus="if (searchQuery.trim().length > 0) isOpen = true"
+                        placeholder="Поиск по медиатеке... (Ctrl+K)"
+                        class="w-full bg-gray-950/80 border border-gray-800 rounded-lg pl-9 pr-14 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition">
+                    <div class="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none">
+                        <kbd class="px-1.5 py-0.5 text-[10px] font-mono text-gray-400 bg-gray-900 border border-gray-700 rounded">Ctrl+K</kbd>
+                    </div>
+                </div>
+
+                <!-- Выпадающий список результатов -->
+                <div
+                    x-show="isOpen && searchQuery.trim().length > 0"
+                    x-transition
+                    class="absolute left-0 right-0 top-full mt-2 bg-gray-900 border border-gray-800 rounded-xl shadow-2xl z-50 max-h-96 overflow-y-auto divide-y divide-gray-800 p-2 text-xs">
+                    <!-- Секция: Артисты -->
+                    <template x-if="results.artists && results.artists.length > 0">
+                        <div class="py-2">
+                            <span class="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-2">Исполнители</span>
+                            <div class="mt-1 space-y-1">
+                                <template x-for="art in results.artists" :key="art.name">
+                                    <button
+                                        @click="navigateToDir(art.first_path ? art.first_path.substring(0, art.first_path.lastIndexOf('/')) : '')"
+                                        class="w-full text-left px-2.5 py-1.5 rounded hover:bg-gray-800 flex items-center justify-between transition text-gray-200 hover:text-white">
+                                        <span class="font-medium" x-text="art.name"></span>
+                                        <span class="text-[10px] text-gray-500" x-text="`${art.track_count} трек.`"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Секция: Альбомы -->
+                    <template x-if="results.albums && results.albums.length > 0">
+                        <div class="py-2">
+                            <span class="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-2">Альбомы</span>
+                            <div class="mt-1 space-y-1">
+                                <template x-for="alb in results.albums" :key="alb.path">
+                                    <button
+                                        @click="navigateToDir(alb.path)"
+                                        class="w-full text-left px-2.5 py-1.5 rounded hover:bg-gray-800 flex items-center justify-between transition text-gray-200 hover:text-white">
+                                        <div class="truncate mr-2">
+                                            <span class="font-medium text-emerald-400" x-text="alb.album"></span>
+                                            <span class="text-gray-400 text-[11px]" x-text="` — ${alb.album_artist}`"></span>
+                                        </div>
+                                        <span class="text-[10px] text-gray-500 shrink-0" x-text="alb.year || ''"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Секция: Треки -->
+                    <template x-if="results.tracks && results.tracks.length > 0">
+                        <div class="py-2">
+                            <span class="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-2">Треки</span>
+                            <div class="mt-1 space-y-1">
+                                <template x-for="trk in results.tracks" :key="trk.path">
+                                    <button
+                                        @click="navigateToDir(trk.path.substring(0, trk.path.lastIndexOf('/')))"
+                                        class="w-full text-left px-2.5 py-1.5 rounded hover:bg-gray-800 flex items-center justify-between transition text-gray-200 hover:text-white">
+                                        <div class="truncate mr-2">
+                                            <span class="font-medium" x-text="trk.title"></span>
+                                            <span class="text-gray-400 text-[11px]" x-text="` • ${trk.artist}`"></span>
+                                        </div>
+                                        <div class="flex items-center space-x-1 shrink-0">
+                                            <template x-if="trk.lyrics_status === 'lrc'">
+                                                <span class="px-1 py-0.2 bg-purple-500/20 text-purple-300 text-[9px] font-bold rounded">LRC</span>
+                                            </template>
+                                            <template x-if="trk.lyrics_status === 'txt'">
+                                                <span class="px-1 py-0.2 bg-blue-500/20 text-blue-300 text-[9px] font-bold rounded">TXT</span>
+                                            </template>
+                                        </div>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Если ничего не найдено -->
+                    <template x-if="!isLoading && results.total_matches === 0">
+                        <div class="py-4 text-center text-gray-500">
+                            <span>Ничего не найдено по запросу</span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Вкладки -->
+            <nav class="flex space-x-2 bg-gray-950 p-1 rounded-lg border border-gray-800 shrink-0">
+                <button
+                    @click="$store.app.activeTab = 'downloader'"
+                    :class="$store.app.activeTab === 'downloader' ? 'bg-emerald-600 text-white font-medium shadow' : 'text-gray-400 hover:text-gray-200'"
+                    class="px-3 sm:px-4 py-1.5 rounded-md text-sm transition-all flex items-center space-x-2">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M11.625 15.513q-.175-.063-.325-.213l-3.6-3.6q-.3-.3-.288-.7t.288-.7q.3-.3.713-.312t.712.287L11 12.15V5q0-.425.288-.712T12 4t.713.288T13 5v7.15l1.875-1.875q.3-.3.713-.288t.712.313q.275.3.288.7t-.288.7l-3.6 3.6q-.15.15-.325.213t-.375.062t-.375-.062M6 20q-.825 0-1.412-.587T4 18v-2q0-.425.288-.712T5 15t.713.288T6 16v2h12v-2q0-.425.288-.712T19 15t.713.288T20 16v2q0 .825-.587 1.413T18 20z"/>
+                    </svg>
+                    <span>Загрузчик</span>
+                </button>
+                <button
+                    @click="$store.app.activeTab = 'files'; $dispatch('refresh-file-manager', '')"
+                    :class="$store.app.activeTab === 'files' ? 'bg-emerald-600 text-white font-medium shadow' : 'text-gray-400 hover:text-gray-200'"
+                    class="px-3 sm:px-4 py-1.5 rounded-md text-sm transition-all flex items-center space-x-2">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M4 20q-.825 0-1.412-.587T2 18V6q0-.825.588-1.412T4 4h5.175q.4 0 .763.15t.637.425L12 6h8q.825 0 1.413.588T22 8v10q0 .825-.587 1.413T20 20zm0-2h16V8h-8.825l-2-2H4zm0 0V6z"/>
+                    </svg>
+                    <span>Файлы</span>
+                </button>
+                <button
+                    @click="$store.app.activeTab = 'audit'; $dispatch('refresh-audit')"
+                    :class="$store.app.activeTab === 'audit' ? 'bg-emerald-600 text-white font-medium shadow' : 'text-gray-400 hover:text-gray-200'"
+                    class="px-3 sm:px-4 py-1.5 rounded-md text-sm transition-all flex items-center space-x-2">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10H7v-2h10v2zm0-4H7V7h10v2z"/>
+                    </svg>
+                    <span>Аудит</span>
+                </button>
+            </nav>
+
+            <!-- Пользователь / Вход -->
+            <div class="flex items-center space-x-3">
+                <template x-if="$store.app.user">
+                    <div class="flex items-center space-x-3">
+                        <div class="flex items-center space-x-1.5 text-xs text-gray-400 bg-gray-800/60 px-2.5 py-1 rounded border border-gray-700/50">
+                            <svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M9.175 10.825Q8 9.65 8 8t1.175-2.825T12 4t2.825 1.175T16 8t-1.175 2.825T12 12t-2.825-1.175M4 18v-.8q0-.85.438-1.562T5.6 14.55q1.55-.775 3.15-1.162T12 13t3.25.388t3.15 1.162q.725.375 1.163 1.088T20 17.2v.8q0 .825-.587 1.413T18 20H6q-.825 0-1.412-.587T4 18m2 0h12v-.8q0-.275-.137-.5t-.363-.35q-1.35-.675-2.725-1.012T12 15t-2.775.338T6.5 16.35q-.225.125-.363.35T6 17.2zm7.413-8.587Q14 8.825 14 8t-.587-1.412T12 6t-1.412.588T10 8t.588 1.413T12 10t1.413-.587M12 18"/>
+                            </svg>
+                            <span>Пользователь: <strong class="text-gray-200" x-text="$store.app.user"></strong></span>
+                        </div>
+                        <button
+                            @click="$store.app.logout()"
+                            class="text-xs px-2.5 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 transition flex items-center space-x-1.5">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h6q.425 0 .713.288T12 4t-.288.713T11 5H5v14h6q.425 0 .713.288T12 20t-.288.713T11 21zm12.175-8H10q-.425 0-.712-.288T9 12t.288-.712T10 11h7.175L15.3 9.125q-.275-.275-.275-.675t.275-.7t.7-.313t.725.288L20.3 11.3q.3.3.3.7t-.3.7l-3.575 3.575q-.3.3-.712.288t-.713-.313q-.275-.3-.262-.712t.287-.688z"/>
+                            </svg>
+                            <span>Выйти</span>
+                        </button>
+                    </div>
+                </template>
+                <template x-if="!$store.app.user">
+                    <button
+                        @click="$store.app.activeModal = 'login'"
+                        class="text-xs px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition flex items-center space-x-1.5">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M13 21q-.425 0-.712-.288T12 20t.288-.712T13 19h6V5h-6q-.425 0-.712-.288T12 4t.288-.712T13 3h6q.825 0 1.413.588T21 5v14q0 .825-.587 1.413T19 21zm-1.825-8H4q-.425 0-.712-.288T3 12t.288-.712T4 11h7.175L9.3 9.125q-.275-.275-.275-.675t.275-.7t.7-.313t.725.288L14.3 11.3q.3.3.3.7t-.3.7l-3.575 3.575q-.3.3-.712.288T9.3 16.25q-.275-.3-.262-.712t.287-.688z"/>
+                        </svg>
+                        <span>Войти</span>
+                    </button>
+                </template>
+            </div>
+        </div>
+    </header>
+{{ end }}

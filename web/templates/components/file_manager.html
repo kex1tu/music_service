@@ -1,0 +1,195 @@
+{{ define "file_manager" }}
+<!-- ==================== ВКЛАДКА 2: ФАЙЛОВЫЙ МЕНЕДЖЕР ==================== -->
+        <section x-show="$store.app.activeTab === 'files'" x-data="fileManagerComponent()" class="space-y-4 animate-fade-in">
+            <!-- Навигационная панель хлебных крошек -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-md">
+                <nav class="flex items-center space-x-2 text-sm overflow-x-auto">
+                    <template x-for="(crumb, idx) in breadcrumbs" :key="crumb.path">
+                        <div class="flex items-center space-x-2">
+                            <template x-if="idx > 0">
+                                <span class="text-gray-600">/</span>
+                            </template>
+                            <button
+                                @click="navigateTo(crumb.path)"
+                                :class="idx === breadcrumbs.length - 1 ? 'font-semibold text-emerald-400' : 'text-gray-400 hover:text-gray-200'"
+                                class="transition text-sm flex items-center space-x-1">
+                                <template x-if="idx === 0">
+                                    <svg class="w-3.5 h-3.5 inline mr-1 text-emerald-400/80" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M6 19h3v-5q0-.425.288-.712T10 13h4q.425 0 .713.288T15 14v5h3v-9l-6-4.5L6 10zm-2 0v-9q0-.475.213-.9t.587-.7l6-4.5q.525-.4 1.2-.4t1.2.4l6 4.5q.375.275.588.7T20 10v9q0 .825-.588 1.413T18 21h-4q-.425 0-.712-.288T13 20v-5h-2v5q0 .425-.288.713T10 21H6q-.825 0-1.412-.587T4 19m8-6.75"/>
+                                    </svg>
+                                </template>
+                                <span x-text="crumb.name"></span>
+                            </button>
+                        </div>
+                    </template>
+                </nav>
+
+                <div class="flex items-center space-x-2">
+                    <template x-if="parentPath !== null">
+                        <button
+                            @click="navigateUp()"
+                            class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded transition flex items-center space-x-1">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="m7.825 13l4.9 4.9q.3.3.288.7t-.313.7q-.3.275-.7.288t-.7-.288l-6.6-6.6q-.15-.15-.213-.325T4.426 12t.063-.375t.212-.325l6.6-6.6q.275-.275.688-.275t.712.275q.3.3.3.713t-.3.712L7.825 11H19q.425 0 .713.288T20 12t-.288.713T19 13z"/>
+                            </svg>
+                            <span>Назад</span>
+                        </button>
+                    </template>
+                    <button
+                        @click="loadDirectory(currentPath)"
+                        class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded transition flex items-center space-x-1">
+                        <svg class="w-3.5 h-3.5" :class="isLoading ? 'animate-spin' : ''" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V5q0-.425.288-.712T19 4t.713.288T20 5v5q0 .425-.288.713T19 11h-5q-.425 0-.712-.288T13 10t.288-.712T14 9h3.2q-.8-1.4-2.187-2.2T12 6Q9.5 6 7.75 7.75T6 12t1.75 4.25T12 18q1.7 0 3.113-.862t2.187-2.313q.2-.35.563-.487t.737-.013q.4.125.575.525t-.025.75q-1.025 2-2.925 3.2T12 20"/>
+                        </svg>
+                        <span>Обновить</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Таблица элементов каталога -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm text-gray-300">
+                        <thead class="bg-gray-950/80 text-xs text-gray-400 uppercase tracking-wider border-b border-gray-800">
+                            <tr>
+                                <th class="py-3 px-4 w-12">#</th>
+                                <th class="py-3 px-4">Имя / Композиция</th>
+                                <th class="py-3 px-4">Исполнитель</th>
+                                <th class="py-3 px-4">Альбом</th>
+                                <th class="py-3 px-4 text-center">Текст</th>
+                                <th class="py-3 px-4 text-right">Длительность</th>
+                                <th class="py-3 px-4 text-right">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-800/60">
+                            <!-- Пустое состояние -->
+                            <template x-if="items.length === 0 && !isLoading">
+                                <tr>
+                                    <td colspan="7" class="py-12 text-center text-gray-500">
+                                        Каталог пуст
+                                    </td>
+                                </tr>
+                            </template>
+
+                            <!-- Элементы -->
+                            <template x-for="item in items" :key="item.path">
+                                <tr class="hover:bg-gray-800/40 transition group">
+                                    <!-- Номер или Иконка -->
+                                    <td class="py-3 px-4 text-gray-500">
+                                        <template x-if="item.type === 'directory'">
+                                            <svg class="w-5 h-5 text-amber-400" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M4 20q-.825 0-1.412-.587T2 18V6q0-.825.588-1.412T4 4h5.175q.4 0 .763.15t.637.425L12 6h8q.825 0 1.413.588T22 8v10q0 .825-.587 1.413T20 20z"/>
+                                            </svg>
+                                        </template>
+                                        <template x-if="item.type === 'file'">
+                                            <div class="flex items-center space-x-1.5">
+                                                <svg class="w-3.5 h-3.5 text-emerald-400/80" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M7.175 19.825Q6 18.65 6 17t1.175-2.825T10 13q.575 0 1.063.138t.937.412V4q0-.425.288-.712T13 3h4q.425 0 .713.288T18 4v2q0 .425-.288.713T17 7h-3v10q0 1.65-1.175 2.825T10 21t-2.825-1.175"/>
+                                                </svg>
+                                                <span x-text="item.track_number || '—'"></span>
+                                            </div>
+                                        </template>
+                                    </td>
+
+                                    <!-- Имя / Название -->
+                                    <td class="py-3 px-4 font-medium text-white">
+                                        <template x-if="item.type === 'directory'">
+                                            <button
+                                                @click="navigateTo(item.path)"
+                                                class="hover:text-emerald-400 transition text-left flex items-center space-x-2">
+                                                <span x-text="item.name"></span>
+                                                <template x-if="item.track_count">
+                                                    <span class="text-xs text-gray-500" x-text="`(${item.track_count} треков)`"></span>
+                                                </template>
+                                            </button>
+                                        </template>
+                                        <template x-if="item.type === 'file'">
+                                            <div class="flex items-center space-x-2">
+                                                <span x-text="item.title || item.name"></span>
+                                            </div>
+                                        </template>
+                                    </td>
+
+                                    <!-- Исполнитель -->
+                                    <td class="py-3 px-4 text-gray-400" x-text="item.artist || '—'"></td>
+
+                                    <!-- Альбом -->
+                                    <td class="py-3 px-4 text-gray-400" x-text="item.album || '—'"></td>
+
+                                    <!-- Статус текста -->
+                                    <td class="py-3 px-4 text-center">
+                                        <template x-if="item.type === 'file' && item.extension === '.mp3'">
+                                            <div>
+                                                <span
+                                                    class="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider"
+                                                    :class="{
+                                                        'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30': item.lyrics_status === 'lrc',
+                                                        'bg-blue-500/20 text-blue-400 border border-blue-500/30': item.lyrics_status === 'txt',
+                                                        'bg-gray-800 text-gray-500': item.lyrics_status === 'none'
+                                                    }"
+                                                    x-text="item.lyrics_status === 'lrc' ? 'LRC' : (item.lyrics_status === 'txt' ? 'TXT' : 'НЕТ')">
+                                                </span>
+                                            </div>
+                                        </template>
+                                    </td>
+
+                                    <!-- Длительность -->
+                                    <td class="py-3 px-4 text-right text-gray-400" x-text="formatDuration(item.duration)"></td>
+
+                                    <!-- Действия -->
+                                    <td class="py-3 px-4 text-right">
+                                        <div class="flex items-center justify-end space-x-2">
+                                            <!-- Редактировать теги и сверка -->
+                                            <template x-if="item.type === 'directory'">
+                                                <div class="flex items-center space-x-1.5">
+                                                    <button
+                                                        @click="matchInAudit(item)"
+                                                        title="Сверить релиз с каталогом Deezer"
+                                                        class="px-2.5 py-1 bg-gray-800 hover:bg-sky-600 hover:text-white text-sky-400 rounded text-xs transition flex items-center space-x-1">
+                                                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                                                            <path d="m19.6 21l-6.3-6.3q-.75.6-1.725.95T9.5 16q-2.725 0-4.612-1.888T3 9.5t1.888-4.612T9.5 3t4.613 1.888T16 9.5q0 1.1-.35 2.075T14.7 13.3l6.3 6.3zM9.5 14q1.875 0 3.188-1.312T14 9.5t-1.312-3.187T9.5 5T6.313 6.313T5 9.5t1.313 3.188T9.5 14"/>
+                                                        </svg>
+                                                        <span>Сверить</span>
+                                                    </button>
+                                                    <button
+                                                        @click="openInTagEditor(item)"
+                                                        title="Редактировать альбом"
+                                                        class="px-2.5 py-1 bg-gray-800 hover:bg-emerald-600 hover:text-white text-gray-300 rounded text-xs transition flex items-center space-x-1">
+                                                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                                                            <path d="M4 21q-.425 0-.712-.288T3 20v-2.425q0-.4.15-.763t.425-.637L16.2 3.575q.3-.275.663-.425t.762-.15t.775.15t.65.45L20.425 5q.3.275.437.65T21 6.4q0 .4-.138.763t-.437.662l-12.6 12.6q-.275.275-.638.425t-.762.15zM17.6 7.8L19 6.4L17.6 5l-1.4 1.4z"/>
+                                                        </svg>
+                                                        <span>Редактировать</span>
+                                                    </button>
+                                                </div>
+                                            </template>
+                                            <template x-if="item.type === 'file' && item.extension === '.mp3'">
+                                                <button
+                                                    @click="openInTagEditor(item)"
+                                                    title="Редактировать теги"
+                                                    class="px-2.5 py-1 bg-gray-800 hover:bg-emerald-600 hover:text-white text-gray-300 rounded text-xs transition flex items-center space-x-1">
+                                                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                                                        <path d="m21.4 14.25l-7.15 7.15q-.3.3-.675.45t-.75.15t-.75-.15t-.675-.45l-8.825-8.825q-.275-.275-.425-.637T2 11.175V4q0-.825.588-1.412T4 2h7.175q.4 0 .775.163t.65.437l8.8 8.825q.3.3.438.675t.137.75t-.137.738t-.438.662M6.5 8q.625 0 1.063-.437T8 6.5t-.437-1.062T6.5 5t-1.062.438T5 6.5t.438 1.063T6.5 8"/>
+                                                    </svg>
+                                                    <span>Теги</span>
+                                                </button>
+                                            </template>
+
+                                            <!-- Удалить -->
+                                            <button
+                                                @click="promptDelete(item)"
+                                                title="Удалить"
+                                                class="p-1 hover:bg-red-500/20 text-gray-500 hover:text-red-400 rounded transition">
+                                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zM17 6H7v13h10zm-6.287 10.713Q11 16.425 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288M7 6v13z"/>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+{{ end }}

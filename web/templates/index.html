@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ru" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Music Downloader & Tag Manager</title>
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#ecfdf5',
+                            500: '#10b981',
+                            600: '#059669',
+                            700: '#047857',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Кастомные стили -->
+    <link rel="stylesheet" href="/static/css/style.css">
+
+    <!-- Утилиты -->
+    <script src="/static/js/utils/formatters.js?v=20260916_01"></script>
+    <script src="/static/js/utils/clipboard.js?v=20260916_01"></script>
+
+    <!-- Состояние приложения (Store & Queue) -->
+    <script src="/static/js/store/queue_manager.js?v=20260916_01"></script>
+    <script src="/static/js/store/app_store.js?v=20260916_01"></script>
+
+    <!-- Компоненты навигации и аутентификации -->
+    <script src="/static/js/header_search.js?v=20260916_01"></script>
+    <script src="/static/js/login_modal.js?v=20260916_01"></script>
+
+    <!-- Модули загрузчика -->
+    <script src="/static/js/downloader/torrent.js?v=20260916_01"></script>
+    <script src="/static/js/downloader/discography.js?v=20260916_01"></script>
+    <script src="/static/js/downloader/downloader.js?v=20260916_01"></script>
+
+    <!-- Модули редактора тегов -->
+    <script src="/static/js/tag_editor/cleaner.js?v=20260916_01"></script>
+    <script src="/static/js/tag_editor/releases.js?v=20260916_01"></script>
+    <script src="/static/js/tag_editor/covers.js?v=20260916_01"></script>
+    <script src="/static/js/tag_editor/deezer.js?v=20260916_01"></script>
+    <script src="/static/js/tag_editor/recognition.js?v=20260916_01"></script>
+    <script src="/static/js/tag_editor/drag_drop.js?v=20260916_01"></script>
+    <script src="/static/js/tag_editor/lyrics.js?v=20260916_01"></script>
+    <script src="/static/js/tag_editor/tag_editor.js?v=20260916_01"></script>
+
+    <!-- Модальное окно текстов и файловый менеджер -->
+    <script src="/static/js/lyrics_modal.js?v=20260916_01"></script>
+    <script src="/static/js/file_manager.js?v=20260916_01"></script>
+
+    <!-- Модули аудита медиатеки -->
+    <script src="/static/js/audit/lyrics_batch.js?v=20260916_01"></script>
+    <script src="/static/js/audit/catalog_matcher.js?v=20260916_01"></script>
+    <script src="/static/js/audit/fixes.js?v=20260916_01"></script>
+    <script src="/static/js/audit/library_audit.js?v=20260916_01"></script>
+
+    <!-- Alpine.js CDN -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-full flex flex-col font-sans selection:bg-emerald-500 selection:text-white" x-data>
+
+
+    {{ template "header" . }}
+
+    <!-- Основная рабочая область -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+        {{ template "downloader" . }}
+        {{ template "file_manager" . }}
+        {{ template "audit" . }}
+    </main>
+
+    {{ template "modal_tag_editor" . }}
+    {{ template "modal_lyrics" . }}
+    {{ template "modal_confirmations" . }}
+    {{ template "modal_login" . }}
+    {{ template "queue_drawer" . }}
+    {{ template "toasts" . }}
+
+</body>
+</html>

@@ -6,7 +6,7 @@
 
 ## 1. О проекте
 
-Self-hosted веб-сервис на **FastAPI + yt-dlp + ffmpeg + mutagen**, фронтенд без сборки (**HTML5 + Tailwind CDN + Alpine.js CDN**). Без реляционных/документных СУБД — источник истины — файловая система `MUSIC_DIR` и ID3-теги в самих файлах.
+Высокопроизводительный self-hosted веб-сервис на **Go (Chi) + yt-dlp + ffmpeg + ID3v2.4 Engine** со встроенным фронтендом без сборки (**HTML5 + Tailwind CDN + Alpine.js CDN**, модульные шаблоны `web/templates/`). Источник истины — файловая система `MUSIC_DIR` и ID3-теги в самих файлах, кэширование и полнотекстовый поиск — pure Go `modernc.org/sqlite` в WAL-режиме.
 
 Подробная архитектура компонентов — в `Architecture.md`. Текущий план работ — в `plan.md`. Статус задач — в `PROGRESS.md`. Этот файл (`AGENTS.md`) не дублирует их содержимое, а фиксирует жёсткие правила и границы.
 
@@ -14,12 +14,11 @@ Self-hosted веб-сервис на **FastAPI + yt-dlp + ffmpeg + mutagen**, ф
 
 ## 2. Технологические инварианты (без исключений)
 
-1. **Zero-Database.** Никаких PostgreSQL/SQLite/Redis/MongoDB. Каталог строится из `MUSIC_DIR` и ID3-тегов на лету.
-2. **Sandbox обязателен.** Любое чтение/запись/удаление/переименование файла — только через `PathSandbox.resolve()`. Прямая работа с путём от клиента запрещена.
-3. **Zero-Node.js / no-build frontend.** Никаких `package.json`, `npm`/`yarn`, Vite/Webpack. Только CDN-версии Tailwind и Alpine.js.
-4. **No Docker.** Деплой — `venv` + `systemd` (`music-manager.service`). Dockerfile/docker-compose создавать нельзя.
-5. **Аудио-пайплайн фиксирован.** Скачивание — `yt-dlp`; конвертация — `ffmpeg` в MP3 320 kbps CBR / 44.1 kHz; теги — строго ID3v2.4 через `mutagen`, множественные значения — `\x00` внутри фрейма, `\\` — только формат пользовательского ввода на фронте.
-6. **Тексты песен не вшиваются в MP3** — только внешние `.lrc`/`.txt` рядом с треком.
+1. **Pure Go / Zero-Python / Zero-Node.js.** Сервис компилируется в единый статический бинарный файл `bin/music-manager`. Никаких runtime-зависимостей от Python, Node.js, `npm`/`yarn`, Vite/Webpack.
+2. **Sandbox обязателен.** Любое чтение/запись/удаление/переименование файла — только через `PathSandbox.Resolve()`. Прямая работа с путём от клиента запрещена.
+3. **No Docker.** Деплой — `systemd` (`music-manager.service`) с запуском бинарника `bin/music-manager`. Dockerfile/docker-compose создавать нельзя.
+4. **Аудио-пайплайн фиксирован.** Скачивание — `yt-dlp`; конвертация — `ffmpeg` в MP3 320 kbps CBR / 44.1 kHz; теги — строго ID3v2.4 UTF-8 через внутренний пакет `internal/id3`, множественные значения — `\x00` внутри фрейма, `\\` — только формат пользовательского ввода на фронте.
+5. **Тексты песен не вшиваются в MP3** — только внешние `.lrc`/`.txt` рядом с треком.
 
 Любое расхождение кода с этими пунктами — блокирующая ошибка, а не предмет для обсуждения в рамках отдельной задачи.
 
@@ -31,30 +30,26 @@ Self-hosted веб-сервис на **FastAPI + yt-dlp + ffmpeg + mutagen**, ф
 
 | Область | Пути | Что входит | Что запрещено трогать |
 |---|---|---|---|
-| **Core / Auth / Sandbox** | `app/core/`, `app/config.py`, `app/dependencies.py`, `app/main.py`, `app/schemas/auth.py` | Конфигурация, bcrypt-аутентификация, `PathSandbox`, DI, обработка исключений | Бизнес-логика загрузки/тегов, фронтенд |
-| **Downloader Engine** | `app/services/download_service.py`, `app/services/deezer_client.py`, `app/services/source_resolver.py`, `app/routers/downloads.py` | yt-dlp/ffmpeg-пайплайн, поиск источника, интеграция с Deezer API | Прямая запись в `MUSIC_DIR` — только через `tmp_downloads/{job_id}/` |
-| **Metadata & Storage** | `app/services/tag_service.py`, `app/services/lyrics_service.py`, `app/services/file_manager_service.py`, `app/services/organizer_service.py`, `app/routers/tags.py`, `app/routers/lyrics.py`, `app/routers/files.py` | mutagen, LRCLIB/Genius, навигация по ФС, перемещение/переименование файлов | Любой вызов `open/os.remove/shutil.move` в обход `PathSandbox` |
-| **Frontend** | `app/templates/`, `app/static/js/`, `app/static/css/` | Downloader/File Manager tabs, Tag Editor, Lyrics modal, `Alpine.store('app', …)` | Python-код, добавление Node.js-зависимостей |
-| **Tests** | `tests/` | Unit/integration тесты, моки внешних API | Правки бизнес-логики в `app/` ради «зелёных» тестов — вместо этого баг-репорт в `PROGRESS.md` |
-| **DevOps / Deploy** | `music-manager.service`, `requirements.txt`, `.env.example` | systemd unit, зависимости, переменные окружения | Dockerfile, хардкод пользовательских путей вида `/home/username/...` |
+| **Core / Auth / Sandbox** | `internal/core/`, `internal/config/` | Конфигурация, bcrypt-аутентификация, `PathSandbox`, сессии HMAC-SHA256 | Бизнес-логика загрузки/тегов, фронтенд |
+| **Downloader Engine** | `internal/services/downloader/`, `internal/services/resolver/` | yt-dlp/ffmpeg-пайплайн, поиск источника, интеграция с Deezer API | Прямая запись в `MUSIC_DIR` — только через `tmp_downloads/{job_id}/` |
+| **Metadata & Storage** | `internal/id3/`, `internal/services/organizer/`, `internal/services/lyrics/`, `internal/services/scanner/`, `internal/db/` | ID3v2.4 парсер/генератор, LRCLIB, навигация по ФС, перемещение/переименование файлов, SQLite | Любой вызов файловых операций в обход `PathSandbox` |
+| **HTTP API & Handlers** | `internal/api/`, `internal/api/handlers/` | Chi роутер, обработчики HTTP-запросов, middleware | Бизнес-логика конвертации, обход `PathSandbox` |
+| **Frontend** | `web/templates/`, `web/static/js/`, `web/static/css/`, `web/embed.go` | Модульные HTML-шаблоны, Downloader/File Manager tabs, Tag Editor, Lyrics modal | Добавление Node.js/npm зависимостей |
+| **DevOps / Deploy** | `music-manager.service`, `cmd/server/main.go` | systemd unit, бинарная сборка | Dockerfile, хардкод пользовательских путей |
 
 ---
 
 ## 4. Команды разработки
 
 ```bash
-# установка окружения
-python3.11 -m venv venv
-./venv/bin/pip install -r requirements.txt
+# сборка сервера
+go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go
 
 # запуск сервера в разработке
-./venv/bin/uvicorn app.main:app --reload --port 8010
+./bin/music-manager
 
 # тесты
-./venv/bin/python -m pytest
-
-# линт (если добавлен в requirements)
-./venv/bin/ruff check app tests
+go test -v ./...
 ```
 
 Все команды выполняются из корня репозитория. Не запускать сервисные/деструктивные команды за пределами рабочей директории проекта.
@@ -108,8 +103,8 @@ python3.11 -m venv venv
 
 1. Код не выходит за границы своей области (раздел 3), либо изменение в чужой области согласовано и отражено в `plan.md`.
 2. Все файловые операции с пользовательским вводом путей проходят через `PathSandbox`.
-3. `./venv/bin/python -m pytest` — зелёный.
-4. Новые зависимости добавлены в `requirements.txt` (для Python) — сверься с ним перед импортом незнакомой библиотеки.
+3. `go test -v ./...` — зелёный.
+4. `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешно собирается.
 5. `.env.example` обновлён при появлении новых переменных окружения (без реальных значений).
 6. `PROGRESS.md` отражает фактическое состояние: если что-то не доделано или заблокировано — это явно написано, а не «замолчано».
 
@@ -117,9 +112,8 @@ python3.11 -m venv venv
 
 ## 8. Проверка перед действием (anti-hallucination)
 
-- Перед импортом стороннего модуля — проверь `requirements.txt`; если пакета нет, сначала добавь его туда, а не полагайся на то, что он «наверное установлен».
 - Перед изменением или ссылкой на файл — открой его и убедись, что он существует и выглядит так, как ты предполагаешь.
-- Перед вызовом метода из другого сервиса (например, `TagService` из `organizer_service.py`) — открой сигнатуру метода в файле-источнике, а не угадывай по названию.
+- Перед вызовом метода из другого пакета — открой сигнатуру метода в файле-источнике, а не угадывай по названию.
 
 ---
 
