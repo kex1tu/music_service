@@ -25,6 +25,7 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictRealtime=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/opt/music-manager /var/lib/music
 
 [Install]
 WantedBy=multi-user.target

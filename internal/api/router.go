@@ -37,10 +37,12 @@ func NewRouter(p RouterParams) http.Handler {
 	tmpl, _ := template.ParseFS(web.Assets, "templates/*.html", "templates/components/*.html", "templates/modals/*.html")
 
 	// Health check endpoint
-	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
+	healthHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok","app":"music-manager","version":"1.0.0"}`))
-	})
+	}
+	r.Get("/api/health", healthHandler)
+	r.Head("/api/health", healthHandler)
 
 	// Static assets from embedded filesystem
 	staticFS, err := fs.Sub(web.Assets, "static")
