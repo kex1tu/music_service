@@ -20,7 +20,8 @@ func selectBestDeezerAlbum(candidates []resolver.DeezerAlbum, dbArtist, dbAlbum 
 	}
 
 	normTargetAlbum := strings.ToLower(resolver.CleanQueryText(dbAlbum))
-	normTargetArtist := strings.ToLower(resolver.CleanQueryText(dbArtist))
+	primaryArtist := resolver.ExtractPrimaryArtist(dbArtist)
+	normTargetArtist := strings.ToLower(resolver.CleanQueryText(primaryArtist))
 
 	var best *resolver.DeezerAlbum
 	var bestScore float64 = -1.0
@@ -43,7 +44,7 @@ func selectBestDeezerAlbum(candidates []resolver.DeezerAlbum, dbArtist, dbAlbum 
 
 		// Artist similarity
 		if normTargetArtist != "" {
-			if candArtist == normTargetArtist {
+			if candArtist == normTargetArtist || resolver.AreArtistsEquivalent(cand.Artist.Name, primaryArtist) {
 				score += 30.0
 			} else if strings.Contains(candArtist, normTargetArtist) || strings.Contains(normTargetArtist, candArtist) {
 				score += 20.0
@@ -155,13 +156,18 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 		matchedAlbum, err = h.deezer.GetAlbum(r.Context(), deezerID)
 	}
 
+	primaryArtist := resolver.ExtractPrimaryArtist(dbArtist)
+	if primaryArtist == "" {
+		primaryArtist = dbArtist
+	}
+
 	if matchedAlbum == nil {
 		// Try searching by artist and album
-		if dbArtist != "" && dbAlbum != "" {
-			q := fmt.Sprintf(`artist:"%s" album:"%s"`, dbArtist, dbAlbum)
+		if primaryArtist != "" && dbAlbum != "" {
+			q := fmt.Sprintf(`artist:"%s" album:"%s"`, primaryArtist, dbAlbum)
 			albums, searchErr := h.deezer.SearchAlbums(r.Context(), q)
 			if searchErr == nil && len(albums) > 0 {
-				best := selectBestDeezerAlbum(albums, dbArtist, dbAlbum, len(localTracks))
+				best := selectBestDeezerAlbum(albums, primaryArtist, dbAlbum, len(localTracks))
 				if best != nil {
 					matchedAlbum, err = h.deezer.GetAlbum(r.Context(), strconv.FormatInt(best.ID, 10))
 				}
@@ -169,10 +175,21 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if matchedAlbum == nil && primaryArtist != "" && dbAlbum != "" {
+		simpleQ := fmt.Sprintf("%s %s", primaryArtist, dbAlbum)
+		albums, searchErr := h.deezer.SearchAlbums(r.Context(), simpleQ)
+		if searchErr == nil && len(albums) > 0 {
+			best := selectBestDeezerAlbum(albums, primaryArtist, dbAlbum, len(localTracks))
+			if best != nil {
+				matchedAlbum, err = h.deezer.GetAlbum(r.Context(), strconv.FormatInt(best.ID, 10))
+			}
+		}
+	}
+
 	if matchedAlbum == nil && dbAlbum != "" {
 		albums, searchErr := h.deezer.SearchAlbums(r.Context(), dbAlbum)
 		if searchErr == nil && len(albums) > 0 {
-			best := selectBestDeezerAlbum(albums, dbArtist, dbAlbum, len(localTracks))
+			best := selectBestDeezerAlbum(albums, primaryArtist, dbAlbum, len(localTracks))
 			if best != nil {
 				matchedAlbum, err = h.deezer.GetAlbum(r.Context(), strconv.FormatInt(best.ID, 10))
 			}
@@ -184,10 +201,12 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 		folderName := filepath.Base(albumPath)
 		// If folder has format "Album - Artist", split it
 		if parts := strings.Split(folderName, " - "); len(parts) >= 2 {
-			q := fmt.Sprintf(`artist:"%s" album:"%s"`, strings.TrimSpace(parts[1]), strings.TrimSpace(parts[0]))
+			fArtist := resolver.ExtractPrimaryArtist(strings.TrimSpace(parts[1]))
+			fAlbum := strings.TrimSpace(parts[0])
+			q := fmt.Sprintf(`artist:"%s" album:"%s"`, fArtist, fAlbum)
 			albums, searchErr := h.deezer.SearchAlbums(r.Context(), q)
 			if searchErr == nil && len(albums) > 0 {
-				best := selectBestDeezerAlbum(albums, strings.TrimSpace(parts[1]), strings.TrimSpace(parts[0]), len(localTracks))
+				best := selectBestDeezerAlbum(albums, fArtist, fAlbum, len(localTracks))
 				if best != nil {
 					matchedAlbum, err = h.deezer.GetAlbum(r.Context(), strconv.FormatInt(best.ID, 10))
 				}
@@ -196,7 +215,7 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 		if matchedAlbum == nil {
 			albums, searchErr := h.deezer.SearchAlbums(r.Context(), folderName)
 			if searchErr == nil && len(albums) > 0 {
-				best := selectBestDeezerAlbum(albums, dbArtist, folderName, len(localTracks))
+				best := selectBestDeezerAlbum(albums, primaryArtist, folderName, len(localTracks))
 				if best != nil {
 					matchedAlbum, err = h.deezer.GetAlbum(r.Context(), strconv.FormatInt(best.ID, 10))
 				}

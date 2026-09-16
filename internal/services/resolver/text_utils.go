@@ -74,10 +74,50 @@ func CleanQueryTextFull(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// AreArtistsEquivalent checks if two artist names are equivalent (e.g. "Макс Корж" and "Max Korzh", or "Lil Peep" and "lil peep").
+// ExtractPrimaryArtist extracts the primary artist name from a potentially multi-valued or featured artist string
+// (e.g. "Big Baby Tape\\JEEMBO" -> "Big Baby Tape", "Big Baby Tape\x00JEEMBO" -> "Big Baby Tape", "Big Baby Tape feat. JEEMBO" -> "Big Baby Tape").
+func ExtractPrimaryArtist(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	// 1. Split on ID3 null byte or double backslash / single backslash multi-value separators
+	for _, sep := range []string{"\x00", "\\\\", "\\"} {
+		if idx := strings.Index(s, sep); idx != -1 {
+			first := strings.TrimSpace(s[:idx])
+			if first != "" {
+				s = first
+				break
+			}
+		}
+	}
+	// 2. Split on " feat. ", " feat ", " ft. ", " ft ", " featuring ", " with " (case-insensitive)
+	lower := strings.ToLower(s)
+	for _, feat := range []string{" feat. ", " feat ", " ft. ", " ft ", " featuring ", " with "} {
+		if idx := strings.Index(lower, feat); idx != -1 {
+			first := strings.TrimSpace(s[:idx])
+			if first != "" {
+				s = first
+				break
+			}
+		}
+	}
+	// 3. Split on " / " (with surrounding spaces, avoiding breaking names like AC/DC)
+	if idx := strings.Index(s, " / "); idx != -1 {
+		first := strings.TrimSpace(s[:idx])
+		if first != "" {
+			s = first
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
+// AreArtistsEquivalent checks if two artist names are equivalent (e.g. "Макс Корж" and "Max Korzh", or "Big Baby Tape\\JEEMBO" and "Big Baby Tape").
 func AreArtistsEquivalent(a, b string) bool {
-	aNorm := strings.ToLower(CleanQueryText(a))
-	bNorm := strings.ToLower(CleanQueryText(b))
+	aClean := ExtractPrimaryArtist(a)
+	bClean := ExtractPrimaryArtist(b)
+	aNorm := strings.ToLower(CleanQueryText(aClean))
+	bNorm := strings.ToLower(CleanQueryText(bClean))
 	if aNorm == "" || bNorm == "" {
 		return false
 	}
@@ -98,4 +138,5 @@ func AreArtistsEquivalent(a, b string) bool {
 	}
 	return false
 }
+
 

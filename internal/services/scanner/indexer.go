@@ -10,6 +10,7 @@ import (
 
 	"music-manager/internal/id3"
 	"music-manager/internal/services/organizer"
+	"music-manager/internal/services/resolver"
 )
 
 var cleanMetaRegex = regexp.MustCompile(`[\p{P}\s_]+`)
@@ -51,17 +52,30 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		albumDir = ""
 	}
 
-	// 1. Get or create artist
+	// 1. Get or create artist for the track
 	artistID, err := s.getOrCreateArtist(artistName)
 	if err != nil {
 		return err
 	}
 
-	// 2. Get or create album
-	albumID, err := s.getOrCreateAlbum(albumTitle, artistID, tags.Year, albumDir)
+	// 2. Get or create primary artist for the album and resolve album ID
+	effectiveAlbumArtist := resolver.ExtractPrimaryArtist(albumArtist)
+	if effectiveAlbumArtist == "" {
+		effectiveAlbumArtist = resolver.ExtractPrimaryArtist(artistName)
+	}
+	if effectiveAlbumArtist == "" {
+		effectiveAlbumArtist = "Unknown Artist"
+	}
+	albumArtistID, err := s.getOrCreateArtist(effectiveAlbumArtist)
 	if err != nil {
 		return err
 	}
+
+	albumID, err := s.getOrCreateAlbum(albumTitle, albumArtistID, effectiveAlbumArtist, tags.Year, albumDir, tags.HasCover)
+	if err != nil {
+		return err
+	}
+
 
 	// 3. Compute canonical path and validate path conformity
 	effAlbum := strings.TrimSpace(tags.Album)

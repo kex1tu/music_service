@@ -171,7 +171,8 @@ func (h *FileHandler) IncompleteAlbums(w http.ResponseWriter, r *http.Request) {
 		       al.present_tracks_count, al.expected_tracks_count, al.total_tracks, al.deezer_id
 		FROM albums al
 		JOIN artists a ON al.artist_id = a.id
-		WHERE al.is_complete = 0 OR (al.expected_tracks_count > al.present_tracks_count) OR (al.total_tracks > 1 AND al.present_tracks_count < al.total_tracks)
+		WHERE al.present_tracks_count > 0
+		  AND (al.is_complete = 0 OR (al.expected_tracks_count > 0 AND al.expected_tracks_count > al.present_tracks_count) OR (al.total_tracks > 1 AND al.present_tracks_count < al.total_tracks))
 		ORDER BY al.title
 		LIMIT 100;
 	`)

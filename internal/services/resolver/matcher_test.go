@@ -158,6 +158,34 @@ func TestCalculateScore_RemixMatch(t *testing.T) {
 	}
 }
 
+func TestExtractPrimaryArtist(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Big Baby Tape\\JEEMBO", "Big Baby Tape"},
+		{"Big Baby Tape\\\\JEEMBO", "Big Baby Tape"},
+		{"Big Baby Tape\x00JEEMBO", "Big Baby Tape"},
+		{"Big Baby Tape feat. JEEMBO", "Big Baby Tape"},
+		{"Big Baby Tape ft. JEEMBO", "Big Baby Tape"},
+		{"Big Baby Tape featuring JEEMBO", "Big Baby Tape"},
+		{"Big Baby Tape with JEEMBO", "Big Baby Tape"},
+		{"Big Baby Tape / JEEMBO", "Big Baby Tape"},
+		{"AC/DC", "AC/DC"},
+		{"Earth, Wind & Fire", "Earth, Wind & Fire"},
+		{"Guns N' Roses", "Guns N' Roses"},
+		{"Max Korzh", "Max Korzh"},
+		{"Макс Корж", "Макс Корж"},
+	}
+
+	for _, tt := range tests {
+		got := ExtractPrimaryArtist(tt.input)
+		if got != tt.want {
+			t.Errorf("ExtractPrimaryArtist(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestAreArtistsEquivalent(t *testing.T) {
 	tests := []struct {
 		a    string
@@ -169,6 +197,11 @@ func TestAreArtistsEquivalent(t *testing.T) {
 		{"Max Korzh", "Макс Корж", true},
 		{"Lil Peep", "lil peep", true},
 		{"1.Kla$", "1.Kla$", true},
+		{"Big Baby Tape\\JEEMBO", "Big Baby Tape", true},
+		{"Big Baby Tape", "Big Baby Tape\\JEEMBO", true},
+		{"Big Baby Tape\\\\Boulevard Depo", "Big Baby Tape", true},
+		{"Big Baby Tape feat. JEEMBO", "Big Baby Tape", true},
+		{"Big Baby Tape / JEEMBO", "Big Baby Tape", true},
 		{"Макс Корж", "Oxxxymiron", false},
 		{"Lil Peep", "Lil Pump", false},
 	}
@@ -180,4 +213,5 @@ func TestAreArtistsEquivalent(t *testing.T) {
 		}
 	}
 }
+
 

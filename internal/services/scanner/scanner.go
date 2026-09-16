@@ -100,8 +100,30 @@ func (s *Scanner) ScanAll(ctx context.Context) (int, error) {
 	})
 
 	if err == nil {
-		// Clean up files that no longer exist on disk
+		// Clean up files that no longer exist on disk and remove orphaned records
 		s.deleteMissingFiles(ctx, seenPaths)
+
+		// Recompute statistics for all albums
+		_, _ = s.database.Conn().ExecContext(ctx, `
+			UPDATE albums SET
+				present_tracks_count = (SELECT COUNT(*) FROM tracks WHERE album_id = albums.id),
+				total_tracks = CASE
+					WHEN total_tracks <= 0 THEN COALESCE((SELECT MAX(track_total) FROM tracks WHERE album_id = albums.id), 0)
+					ELSE total_tracks
+				END,
+				updated_at = CURRENT_TIMESTAMP
+		`)
+
+		_, _ = s.database.Conn().ExecContext(ctx, `
+			UPDATE albums SET
+				is_complete = CASE
+					WHEN (SELECT COUNT(*) FROM missing_tracks WHERE album_id = albums.id) > 0 THEN 0
+					WHEN total_tracks > 1 AND present_tracks_count < total_tracks THEN 0
+					WHEN (total_tracks <= 1 OR total_tracks IS NULL) AND present_tracks_count >= 1 THEN 1
+					ELSE 1
+				END,
+				updated_at = CURRENT_TIMESTAMP
+		`)
 
 		// Check Deezer catalog for incomplete albums in background
 		if s.deezerClient != nil {

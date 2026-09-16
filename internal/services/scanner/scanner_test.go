@@ -207,3 +207,99 @@ func TestScanner_InvalidPathDetection(t *testing.T) {
 	}
 }
 
+func TestScanner_MultiArtistAlbum_Completeness(t *testing.T) {
+	tempDir := t.TempDir()
+	musicDir := filepath.Join(tempDir, "music")
+	albumFolder := filepath.Join(musicDir, "Dragonborn - Big Baby Tape")
+	_ = os.MkdirAll(albumFolder, 0755)
+
+	sb, err := sandbox.NewPathSandbox(musicDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dbPath := filepath.Join(tempDir, "test_multi_artist.db")
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	// 1. Track 1: Solo Big Baby Tape
+	f1 := filepath.Join(albumFolder, "01. Gimme The Loot.mp3")
+	_ = os.WriteFile(f1, []byte("fake mp3 1"), 0644)
+	_ = id3.WriteTags(f1, id3.TrackTags{
+		Title:       "Gimme The Loot",
+		Artist:      "Big Baby Tape",
+		Album:       "Dragonborn",
+		AlbumArtist: "Big Baby Tape",
+		TrackNumber: 1,
+		TrackTotal:  3,
+	}, nil)
+
+	// 2. Track 2: Featured JEEMBO with multi-value artist
+	f2 := filepath.Join(albumFolder, "02. Konichiwa.mp3")
+	_ = os.WriteFile(f2, []byte("fake mp3 2"), 0644)
+	_ = id3.WriteTags(f2, id3.TrackTags{
+		Title:       "Konichiwa",
+		Artist:      "Big Baby Tape\\JEEMBO",
+		Album:       "Dragonborn",
+		TrackNumber: 2,
+		TrackTotal:  3,
+	}, nil)
+
+	// 3. Track 3: Featured Boulevard Depo with null-separated multi-value artist
+	f3 := filepath.Join(albumFolder, "03. Flip Phone Twerk.mp3")
+	_ = os.WriteFile(f3, []byte("fake mp3 3"), 0644)
+	_ = id3.WriteTags(f3, id3.TrackTags{
+		Title:       "Flip Phone Twerk",
+		Artist:      "Big Baby Tape\\Boulevard Depo",
+		Album:       "Dragonborn",
+		TrackNumber: 3,
+		TrackTotal:  3,
+	}, nil)
+
+	s := NewScanner(sb, database, nil)
+	scanned, err := s.ScanAll(context.Background())
+	if err != nil {
+		t.Fatalf("ScanAll failed: %v", err)
+	}
+	if scanned != 3 {
+		t.Errorf("expected 3 scanned files, got %d", scanned)
+	}
+
+	// Verify only ONE unified album was created
+	var albumCount int
+	err = database.Conn().QueryRow("SELECT COUNT(*) FROM albums WHERE title = 'Dragonborn'").Scan(&albumCount)
+	if err != nil || albumCount != 1 {
+		t.Fatalf("expected exactly 1 album row for 'Dragonborn', got %d (err: %v)", albumCount, err)
+	}
+
+	// Verify album completeness and track count
+	var presentCount, totalTracks, isComplete int
+	var artistName string
+	err = database.Conn().QueryRow(`
+		SELECT al.present_tracks_count, al.total_tracks, al.is_complete, ar.name
+		FROM albums al
+		JOIN artists ar ON al.artist_id = ar.id
+		WHERE al.title = 'Dragonborn'
+	`).Scan(&presentCount, &totalTracks, &isComplete, &artistName)
+	if err != nil {
+		t.Fatalf("failed to query album: %v", err)
+	}
+
+	if artistName != "Big Baby Tape" {
+		t.Errorf("expected album artist 'Big Baby Tape', got %q", artistName)
+	}
+	if presentCount != 3 {
+		t.Errorf("expected present_tracks_count = 3, got %d", presentCount)
+	}
+	if totalTracks != 3 {
+		t.Errorf("expected total_tracks = 3, got %d", totalTracks)
+	}
+	if isComplete != 1 {
+		t.Errorf("expected is_complete = 1 for complete multi-artist album, got %d", isComplete)
+	}
+}
+
+

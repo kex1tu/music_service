@@ -30,7 +30,8 @@ func selectBestDeezerAlbumScanner(candidates []resolver.DeezerAlbum, dbArtist, d
 	}
 
 	normTargetAlbum := strings.ToLower(resolver.CleanQueryText(dbAlbum))
-	normTargetArtist := strings.ToLower(resolver.CleanQueryText(dbArtist))
+	primaryArtist := resolver.ExtractPrimaryArtist(dbArtist)
+	normTargetArtist := strings.ToLower(resolver.CleanQueryText(primaryArtist))
 
 	var best *resolver.DeezerAlbum
 	var bestScore float64 = -1.0
@@ -53,7 +54,7 @@ func selectBestDeezerAlbumScanner(candidates []resolver.DeezerAlbum, dbArtist, d
 
 		// Artist similarity
 		if normTargetArtist != "" {
-			if candArtist == normTargetArtist {
+			if candArtist == normTargetArtist || resolver.AreArtistsEquivalent(cand.Artist.Name, primaryArtist) {
 				score += 30.0
 			} else if strings.Contains(candArtist, normTargetArtist) || strings.Contains(normTargetArtist, candArtist) {
 				score += 20.0
@@ -141,18 +142,46 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 		}
 		tRows.Close()
 
+		if len(localTracks) == 0 {
+			continue
+		}
+
+		cleanArtist := resolver.ExtractPrimaryArtist(album.Artist)
+		if cleanArtist == "" {
+			cleanArtist = album.Artist
+		}
+
 		var remoteAlbum *resolver.DeezerAlbum
 		var fetchErr error
 
 		if album.DeezerID != "" {
 			remoteAlbum, fetchErr = s.deezerClient.GetAlbum(ctx, album.DeezerID)
 		} else {
-			query := fmt.Sprintf(`artist:"%s" album:"%s"`, album.Artist, album.Title)
+			query := fmt.Sprintf(`artist:"%s" album:"%s"`, cleanArtist, album.Title)
 			searchResults, searchErr := s.deezerClient.SearchAlbums(ctx, query)
 			if searchErr == nil && len(searchResults) > 0 {
-				best := selectBestDeezerAlbumScanner(searchResults, album.Artist, album.Title, len(localTracks))
+				best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, len(localTracks))
 				if best != nil {
 					remoteAlbum, fetchErr = s.deezerClient.GetAlbum(ctx, strconv.FormatInt(best.ID, 10))
+				}
+			}
+			if remoteAlbum == nil {
+				simpleQuery := fmt.Sprintf("%s %s", cleanArtist, album.Title)
+				searchResults, searchErr = s.deezerClient.SearchAlbums(ctx, simpleQuery)
+				if searchErr == nil && len(searchResults) > 0 {
+					best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, len(localTracks))
+					if best != nil {
+						remoteAlbum, fetchErr = s.deezerClient.GetAlbum(ctx, strconv.FormatInt(best.ID, 10))
+					}
+				}
+			}
+			if remoteAlbum == nil {
+				searchResults, searchErr = s.deezerClient.SearchAlbums(ctx, album.Title)
+				if searchErr == nil && len(searchResults) > 0 {
+					best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, len(localTracks))
+					if best != nil {
+						remoteAlbum, fetchErr = s.deezerClient.GetAlbum(ctx, strconv.FormatInt(best.ID, 10))
+					}
 				}
 			}
 		}
@@ -160,6 +189,7 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 		if fetchErr != nil || remoteAlbum == nil || remoteAlbum.Tracks == nil {
 			continue
 		}
+
 
 		// Update album total tracks and Deezer ID
 		if album.TotalTracks <= 0 && remoteAlbum.NbTracks > 0 {
