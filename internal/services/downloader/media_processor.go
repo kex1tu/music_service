@@ -30,6 +30,8 @@ func (s *Service) downloadRawStream(ctx context.Context, sourceURL, outputTempla
 		"--progress-template", "download:%(progress._percent_str)s",
 		"--progress-delta", "0.2",
 		"--no-warnings",
+		"--concurrent-fragments", "4",
+		"--buffer-size", "64k",
 		"--extractor-args", "youtube:player_client=ios,android,web",
 		"--add-header", "Accept-Language:ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
 	}
@@ -86,7 +88,7 @@ func (s *Service) transcodeToMP3(ctx context.Context, inputRaw, outputMP3 string
 		"-vn",
 		"-codec:a", "libmp3lame",
 		"-b:a", "320k",
-		"-compression_level", "2",
+		"-q:a", "0",
 		"-ar", "44100",
 		"-ac", "2",
 		outputMP3,

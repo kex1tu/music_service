@@ -1,6 +1,7 @@
 package id3
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -86,9 +87,14 @@ func WriteTags(filePath string, tags TrackTags, cover *CoverInfo) error {
 		writeTextFrame(&framesBuf, "TDRC", fmt.Sprintf("%d", tags.Year))
 	}
 
-	// APIC: Фронтальная обложка
+	// APIC: Фронтальная обложка (оптимизируется в памяти)
 	if cover != nil && len(cover.Data) > 0 {
-		writeAPICFrame(&framesBuf, cover)
+		optData, optMime := OptimizeCoverForID3(cover.Data, 1000, 85)
+		optCover := &CoverInfo{
+			MimeType: optMime,
+			Data:     optData,
+		}
+		writeAPICFrame(&framesBuf, optCover)
 	}
 
 	// Сохраняем сторонние валидные фреймы (COMM, TCOP, ISRC, TBPM и др.)
@@ -122,7 +128,7 @@ func WriteTags(filePath string, tags TrackTags, cover *CoverInfo) error {
 	// Кодируем synchsafe размер тега
 	encodeSynchsafe(totalTagLen, id3Hdr[6:10])
 
-	// 4. Атомарная запись во временный файл
+	// 4. Атомарная буферизованная запись во временный файл (буфер 128 КБ)
 	dir := filepath.Dir(filePath)
 	tmpFile, err := os.CreateTemp(dir, "tag_write_*.tmp")
 	if err != nil {
@@ -131,30 +137,39 @@ func WriteTags(filePath string, tags TrackTags, cover *CoverInfo) error {
 	tmpName := tmpFile.Name()
 	defer os.Remove(tmpName)
 
+	bufWriter := bufio.NewWriterSize(tmpFile, 128*1024)
+
 	// Заголовок
-	if _, err := tmpFile.Write(id3Hdr[:]); err != nil {
+	if _, err := bufWriter.Write(id3Hdr[:]); err != nil {
 		tmpFile.Close()
 		return err
 	}
 	// Фреймы
-	if _, err := tmpFile.Write(framesBytes); err != nil {
+	if _, err := bufWriter.Write(framesBytes); err != nil {
 		tmpFile.Close()
 		return err
 	}
 	// Padding (нули)
 	if paddingLen > 0 {
 		padding := make([]byte, paddingLen)
-		if _, err := tmpFile.Write(padding); err != nil {
+		if _, err := bufWriter.Write(padding); err != nil {
 			tmpFile.Close()
 			return err
 		}
 	}
 
-	// Копируем аудиоданные
-	if _, err := io.Copy(tmpFile, file); err != nil {
+	// Копируем аудиоданные через 128 КБ буфер
+	bufReader := bufio.NewReaderSize(file, 128*1024)
+	if _, err := io.Copy(bufWriter, bufReader); err != nil {
 		tmpFile.Close()
 		return fmt.Errorf("ошибка копирования аудиопотока: %w", err)
 	}
+
+	if err := bufWriter.Flush(); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("ошибка сброса буфера записи: %w", err)
+	}
+
 	tmpFile.Close()
 	file.Close()
 

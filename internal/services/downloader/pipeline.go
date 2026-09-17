@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -276,7 +277,13 @@ func (s *Service) processTracksPipeline(
 
 	// Process each track
 	var wg sync.WaitGroup
-	trackSem := make(chan struct{}, 2) // Up to 2 concurrent tracks per job
+	maxConcurrentTracks := runtime.NumCPU() / 2
+	if maxConcurrentTracks < 2 {
+		maxConcurrentTracks = 2
+	} else if maxConcurrentTracks > 4 {
+		maxConcurrentTracks = 4
+	}
+	trackSem := make(chan struct{}, maxConcurrentTracks)
 
 	for i := range tracks {
 		idx := i + 1
