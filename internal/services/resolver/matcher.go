@@ -36,20 +36,33 @@ func NewAudioMatcher(cookiesPath string) *AudioMatcher {
 
 // FindBestMatch searches SoundCloud first (for uncut/explicit audio), falling back to YouTube.
 func (m *AudioMatcher) FindBestMatch(ctx context.Context, title, artist string, duration int) (string, error) {
+	if scURL, scErr := m.FindSoundCloudMatch(ctx, title, artist, duration); scErr == nil && scURL != "" {
+		return scURL, nil
+	}
+	return m.FindYouTubeMatch(ctx, title, artist, duration)
+}
+
+// FindSoundCloudMatch specifically searches SoundCloud streams with scoring.
+func (m *AudioMatcher) FindSoundCloudMatch(ctx context.Context, title, artist string, duration int) (string, error) {
 	cleanArt := CleanQueryText(artist)
 	cleanTit := CleanQueryText(title)
 	cleanTitFull := CleanQueryTextFull(title)
 
-	// Step 1: SoundCloud Search (priority for explicit/original audio)
 	scQueries := []string{}
 	if cleanTitFull != "" && cleanTitFull != cleanTit {
-		scQueries = append(scQueries, fmt.Sprintf("scsearch3:%s %s", cleanArt, cleanTitFull))
+		scQueries = append(scQueries, fmt.Sprintf("scsearch5:%s %s", cleanArt, cleanTitFull))
 	}
 	if cleanTit != "" {
-		scQueries = append(scQueries, fmt.Sprintf("scsearch3:%s %s", cleanArt, cleanTit))
+		scQueries = append(scQueries, fmt.Sprintf("scsearch5:%s %s", cleanArt, cleanTit))
 	}
 
 	for _, scQ := range scQueries {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
+
 		scCandidates, scErr := m.runSearch(ctx, scQ)
 		if scErr == nil && len(scCandidates) > 0 {
 			var bestScCandidate *YtCandidate
@@ -66,7 +79,7 @@ func (m *AudioMatcher) FindBestMatch(ctx context.Context, title, artist string, 
 					bestScCandidate = &cCopy
 				}
 			}
-			if bestScCandidate != nil && bestScScore >= 65.0 {
+			if bestScCandidate != nil && bestScScore >= 55.0 {
 				if bestScCandidate.URL != "" {
 					return bestScCandidate.URL, nil
 				}
@@ -77,8 +90,7 @@ func (m *AudioMatcher) FindBestMatch(ctx context.Context, title, artist string, 
 		}
 	}
 
-	// Step 2: YouTube Search Fallback
-	return m.FindYouTubeMatch(ctx, title, artist, duration)
+	return "", fmt.Errorf("no soundcloud match found for '%s - %s'", artist, title)
 }
 
 // FindYouTubeMatch specifically searches YouTube streams with scoring.

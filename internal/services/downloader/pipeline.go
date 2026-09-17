@@ -329,9 +329,10 @@ func (s *Service) processTracksPipeline(
 			rawAudioFile, dErr := s.downloadRawStream(ctx, track.AudioSourceURL, rawOutTemplate, func(p float64) {
 				job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
 			})
-			if dErr != nil {
-				// Fallback to YouTube if initial stream (e.g. SoundCloud DRM / 403) failed
-				if s.resolver != nil && s.resolver.Matcher() != nil && !strings.Contains(track.AudioSourceURL, "youtube.com") && !strings.Contains(track.AudioSourceURL, "youtu.be") {
+			if dErr != nil && s.resolver != nil && s.resolver.Matcher() != nil {
+				isYT := strings.Contains(track.AudioSourceURL, "youtube.com") || strings.Contains(track.AudioSourceURL, "youtu.be")
+				if !isYT {
+					// Fallback from SoundCloud to YouTube
 					job.SetCurrentStep(fmt.Sprintf("Резервный поиск YouTube %d/%d: %s", trackIdx, total, track.Title))
 					if ytURL, ytErr := s.resolver.Matcher().FindYouTubeMatch(ctx, track.Title, track.Artist, track.Duration); ytErr == nil && ytURL != "" {
 						job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
@@ -339,6 +340,18 @@ func (s *Service) processTracksPipeline(
 						})
 						track.AudioSourceURL = ytURL
 						rawAudioFile, dErr = s.downloadRawStream(ctx, ytURL, rawOutTemplate, func(p float64) {
+							job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
+						})
+					}
+				} else {
+					// Fallback from YouTube (e.g. age restriction / DRM) to SoundCloud
+					job.SetCurrentStep(fmt.Sprintf("Резервный поиск SoundCloud %d/%d: %s", trackIdx, total, track.Title))
+					if scURL, scErr := s.resolver.Matcher().FindSoundCloudMatch(ctx, track.Title, track.Artist, track.Duration); scErr == nil && scURL != "" {
+						job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+							tr.AudioSourceURL = scURL
+						})
+						track.AudioSourceURL = scURL
+						rawAudioFile, dErr = s.downloadRawStream(ctx, scURL, rawOutTemplate, func(p float64) {
 							job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
 						})
 					}

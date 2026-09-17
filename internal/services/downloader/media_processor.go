@@ -30,6 +30,7 @@ func (s *Service) downloadRawStream(ctx context.Context, sourceURL, outputTempla
 		"--progress-template", "download:%(progress._percent_str)s",
 		"--progress-delta", "0.2",
 		"--no-warnings",
+		"--extractor-args", "youtube:player_client=ios,android,web",
 		"--add-header", "Accept-Language:ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
 	}
 
