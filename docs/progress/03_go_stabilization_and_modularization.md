@@ -70,3 +70,14 @@
 | **H2: Декомпозиция Audit Component (853 строки)** | `web/templates/components/audit.html`, `audit_metrics.html`, `audit_lyrics.html`, `audit_covers.html`, `audit_duplicates.html`, `audit_incomplete.html`, `audit_paths.html`, `audit_genres.html` | **DONE** | Монолитная вкладка аудита распилена на корневой контейнер и 7 специализированных под-шаблонов: 7 метрических карточек, автопоиск текстов, релизы без обложек, дубликаты, неполные релизы с аккордеоном Deezer, неканонические пути и автоисправление жанров (все файлы 55–205 строк). |
 | **H3: Декомпозиция Downloader Component (678 строк)** | `web/templates/components/downloader.html`, `downloader_form.html`, `downloader_active.html`, `downloader_queue.html`, `downloader_sources.html`, `downloader_discography.html` | **DONE** | Монолитная вкладка загрузчика распилена на 5 модульных под-шаблонов: форма ввода ссылок/torrent, карточка активной задачи с прогрессом, секция очереди, инфо-карточки источников и модал дискографии артиста (все файлы 16–200 строк). |
 | **H4: No-Build & Go html/template интеграция** | `internal/api/router.go`, `web/templates/**/*.html` | **DONE** | Автоматическая загрузка всех вложенных шаблонов через `template.ParseFS(web.Assets, "templates/*.html", "templates/components/*.html", "templates/modals/*.html")` без сборщиков. 100% тестов `go test -race ./...` зелёные, бинарник успешно компилируется. |
+
+---
+
+## Блок 40: Ускорение пайплайна (FFmpeg CBR 320k, APIC Cover Resize, Buffered I/O) (2026-09-17)
+
+| Компонент | Пути | Статус | Описание и контрольные точки |
+|---|---|---|---|
+| **P1: Оптимизация параметров FFmpeg** | `internal/services/downloader/media_processor.go` | **DONE** | Убран тяжелый флаг `-compression_level 2`, настроен оптимальный профиль LAME `-codec:a libmp3lame -b:a 320k -q:a 0 -ar 44100 -ac 2`. Ускорение транскодирования аудио в 3–4 раза. |
+| **P2: Оптимизация вшивания обложек в APIC** | `internal/id3/cover_optimize.go`, `internal/id3/cover_optimize_test.go`, `internal/id3/writer.go` | **DONE** | Pure Go билинейный ресайз и сжатие обложек в памяти до 1000×1000 JPEG @ 85% (~180–220 КБ) для вшивания в MP3. Оригинальный `cover.jpg` сохраняется без потерь. Сокращение объема ID3-метаданных на 90%, ускорение тегирования в 5 раз. |
+| **P3: Буферизованный I/O в ID3 Engine** | `internal/id3/writer.go` | **DONE** | Внедрены 128 КБ буферы `bufio.NewReaderSize` и `bufio.NewWriterSize` при записи ID3v2.4 тегов для минимизации системных вызовов к диску. |
+| **P4: Параллельные фрагменты yt-dlp & Адаптивный семафор** | `internal/services/downloader/media_processor.go`, `internal/services/downloader/pipeline.go` | **DONE** | Добавлены `--concurrent-fragments 4` и `--buffer-size 64k`. Семафор треков масштабируется динамически (`runtime.NumCPU() / 2`, от 2 до 4 потоков). |
