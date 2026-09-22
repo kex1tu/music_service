@@ -1,6 +1,6 @@
 {{ define "audit_metrics" }}
-<!-- Сводка метрик коллекции (7 карточек) -->
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7 gap-4">
+<!-- Сводка метрик коллекции (8 карточек) -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-8 gap-4">
     <!-- Карточка 1: Всего треков -->
     <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
         <div class="flex items-center justify-between">
@@ -128,6 +128,25 @@
         <div class="mt-4 flex items-baseline space-x-2">
             <span class="text-2xl font-bold text-rose-300 font-mono" x-text="(nonEnGenres ? nonEnGenres.length : (summary.non_en_genres_count ?? 0)) ?? 0"></span>
             <span class="text-xs text-gray-500">тегов</span>
+        </div>
+    </div>
+
+    <!-- Карточка 8: Сверка тегов -->
+    <div
+        @click="activeSubTab = 'tags'"
+        class="bg-gray-900 border border-gray-800 rounded-xl p-5 cursor-pointer hover:border-emerald-500/50 transition"
+        :class="{'ring-1 ring-emerald-500/50': activeSubTab === 'tags'}">
+        <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-emerald-400 uppercase tracking-wider">Сверка тегов</span>
+            <span class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                </svg>
+            </span>
+        </div>
+        <div class="mt-4 flex items-baseline space-x-2">
+            <span class="text-2xl font-bold text-emerald-300 font-mono" x-text="(tagIssues ? tagIssues.length : (summary.tag_issues_count ?? 0)) ?? 0"></span>
+            <span class="text-xs text-gray-500">дефектов</span>
         </div>
     </div>
 </div>

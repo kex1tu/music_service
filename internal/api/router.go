@@ -151,6 +151,13 @@ func NewRouter(p RouterParams) http.Handler {
 			r.Get("/incomplete-albums/editor-data", p.FileHandler.BackfillEditorData)
 			r.Get("/incomplete-albums/backfill-editor-data", p.FileHandler.BackfillEditorData)
 			r.Post("/incomplete-albums/download-missing", p.FileHandler.DownloadMissing)
+			r.Get("/tag-issues", p.FileHandler.TagIssues)
+			r.Post("/tag-issues/fix", p.FileHandler.FixTagIssue)
+			r.Post("/tag-issues/fix-safe", p.FileHandler.FixSafeTagIssues)
+			r.Post("/tag-issues/fix-selected", p.FileHandler.FixSelectedTagIssues)
+			r.Post("/tag-issues/fix-all", p.FileHandler.FixAllTagIssues)
+			r.Get("/tag-issues/catalog-match", p.FileHandler.CatalogMatchTrack)
+			r.Post("/tag-issues/apply-catalog", p.FileHandler.ApplyCatalogTags)
 		})
 	})
 

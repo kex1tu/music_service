@@ -52,23 +52,49 @@ type ReleaseMetadata struct {
 
 // SourceResolver coordinates URL detection and metadata extraction.
 type SourceResolver struct {
-	deezerClient *DeezerClient
-	audioMatcher *AudioMatcher
-	cookiesPath  string
+	deezerClient  *DeezerClient
+	yandexClient  *YandexMusicClient
+	ytmusicClient *YouTubeMusicClient
+	featEnricher  *FeatEnricher
+	audioMatcher  *AudioMatcher
+	cookiesPath   string
 }
 
 // NewSourceResolver creates a new SourceResolver.
-func NewSourceResolver(deezer *DeezerClient, matcher *AudioMatcher, cookiesPath string) *SourceResolver {
+// yandexOpts optionally takes [token, proxyURL].
+func NewSourceResolver(deezer *DeezerClient, matcher *AudioMatcher, cookiesPath string, yandexOpts ...string) *SourceResolver {
 	if deezer == nil {
 		deezer = NewDeezerClient()
 	}
 	if matcher == nil {
 		matcher = NewAudioMatcher(cookiesPath)
 	}
+	var yaToken, yaProxy string
+	if len(yandexOpts) > 0 {
+		yaToken = yandexOpts[0]
+	}
+	if len(yandexOpts) > 1 {
+		yaProxy = yandexOpts[1]
+	}
+	yandex := NewYandexMusicClient(yaToken, yaProxy)
+	ytmusic := NewYouTubeMusicClient("")
 	return &SourceResolver{
-		deezerClient: deezer,
-		audioMatcher: matcher,
-		cookiesPath:  cookiesPath,
+		deezerClient:  deezer,
+		yandexClient:  yandex,
+		ytmusicClient: ytmusic,
+		featEnricher:  NewFeatEnricher(yandex, ytmusic),
+		audioMatcher:  matcher,
+		cookiesPath:   cookiesPath,
+	}
+}
+
+// SetYandexClient configures a custom YandexMusicClient (e.g. for testing).
+func (r *SourceResolver) SetYandexClient(client *YandexMusicClient) {
+	if client != nil {
+		r.yandexClient = client
+		if r.featEnricher != nil {
+			r.featEnricher.yandexClient = client
+		}
 	}
 }
 
@@ -80,6 +106,21 @@ func (r *SourceResolver) Deezer() *DeezerClient {
 // Matcher returns the underlying AudioMatcher.
 func (r *SourceResolver) Matcher() *AudioMatcher {
 	return r.audioMatcher
+}
+
+// Enricher returns the underlying FeatEnricher.
+func (r *SourceResolver) Enricher() *FeatEnricher {
+	return r.featEnricher
+}
+
+// YandexClient returns the underlying YandexMusicClient.
+func (r *SourceResolver) YandexClient() *YandexMusicClient {
+	return r.yandexClient
+}
+
+// YtMusicClient returns the underlying YouTubeMusicClient.
+func (r *SourceResolver) YtMusicClient() *YouTubeMusicClient {
+	return r.ytmusicClient
 }
 
 // DetectSource identifies the source platform from a URL or torrent string.
@@ -149,6 +190,8 @@ func (r *SourceResolver) Resolve(ctx context.Context, rawURL, explicitSource str
 	switch source {
 	case "deezer":
 		return r.resolveDeezer(ctx, rawURL)
+	case "yandex":
+		return r.resolveYandex(ctx, rawURL)
 	case "youtube", "soundcloud":
 		return r.resolveYtDlp(ctx, rawURL)
 	case "torrent":

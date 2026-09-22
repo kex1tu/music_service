@@ -12,11 +12,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"music-manager/internal/services/resolver"
 )
 
 type DiscographyResponse struct {
 	ArtistName    string               `json:"artist_name"`
 	ArtistID      int64                `json:"artist_id"`
+	ArtistAvatar  string               `json:"artist_avatar,omitempty"`
+	Source        string               `json:"source,omitempty"`
 	TotalReleases int                  `json:"total_releases"`
 	Releases      []DiscographyRelease `json:"releases"`
 }
@@ -73,18 +77,24 @@ func (h *DownloadHandler) GetDiscography(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 4. Яндекс Музыка или Spotify: пока не реализован прямой API сборщик дискографии
-	if strings.Contains(lower, "yandex") || strings.Contains(lower, "spotify.com") {
+	// 4. Яндекс Музыка
+	if strings.Contains(lower, "yandex") {
+		h.getYandexMusicDiscography(w, r, rawURL)
+		return
+	}
+
+	// 5. Spotify: пока не реализован прямой API сборщик дискографии
+	if strings.Contains(lower, "spotify.com") {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{
-			"detail": "Пакетная дискография для Яндекс Музыки и Spotify пока не поддерживается напрямую. Рекомендуется использовать ссылку на артиста в Deezer, Apple Music или YouTube Music.",
+			"detail": "Пакетная дискография для Spotify пока не поддерживается напрямую. Рекомендуется использовать ссылку на артиста в Яндекс Музыке, Deezer, Apple Music или YouTube Music.",
 		})
 		return
 	}
 
 	w.WriteHeader(http.StatusBadRequest)
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"detail": "Нераспознанный URL артиста. Поддерживаются Deezer, YouTube Music и Apple Music.",
+		"detail": "Нераспознанный URL артиста. Поддерживаются Яндекс Музыка, Deezer, YouTube Music и Apple Music.",
 	})
 }
 
@@ -137,27 +147,83 @@ func (h *DownloadHandler) getDeezerDiscography(w http.ResponseWriter, r *http.Re
 	_ = json.NewEncoder(w).Encode(DiscographyResponse{
 		ArtistName:    artist.Name,
 		ArtistID:      artist.ID,
+		ArtistAvatar:  artist.Picture,
+		Source:        "deezer",
 		TotalReleases: len(releases),
 		Releases:      releases,
 	})
 }
 
-// getYoutubeMusicDiscography — извлечение релизов YouTube Music через yt-dlp
-func (h *DownloadHandler) getYoutubeMusicDiscography(w http.ResponseWriter, r *http.Request, rawURL string) {
-	targetURL := rawURL
-	// Убираем параметры запроса (?si=...)
-	if idx := strings.Index(targetURL, "?"); idx != -1 {
-		targetURL = targetURL[:idx]
+// getYandexMusicDiscography — получение дискографии через открытый API Яндекс Музыки
+func (h *DownloadHandler) getYandexMusicDiscography(w http.ResponseWriter, r *http.Request, rawURL string) {
+	var yandexClient *resolver.YandexMusicClient
+	if h.service != nil && h.service.Resolver() != nil {
+		yandexClient = h.service.Resolver().Yandex()
+	}
+	if yandexClient == nil {
+		yandexClient = resolver.NewYandexMusicClient("")
 	}
 
-	// Если ссылка ведет на канал, добавляем /releases
-	if strings.Contains(targetURL, "/channel/") && !strings.Contains(targetURL, "/releases") {
-		targetURL = strings.TrimRight(targetURL, "/") + "/releases"
+	resType, artistID, err := yandexClient.ParseURL(rawURL)
+	if err != nil || resType != "artist" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"detail": "Некорректная ссылка на артиста Яндекс Музыки (ожидается ссылка вида https://music.yandex.ru/artist/{id})",
+		})
+		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
+	artist, err := yandexClient.GetArtistBriefInfo(r.Context(), artistID)
+	if err != nil {
+		statusCode := http.StatusBadRequest
+		if strings.Contains(err.Error(), "451") || strings.Contains(err.Error(), "Geoblock") {
+			statusCode = http.StatusUnavailableForLegalReasons
+		}
+		w.WriteHeader(statusCode)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"detail": fmt.Sprintf("Не удалось получить профиль артиста Яндекс Музыки: %v", err),
+		})
+		return
+	}
 
+	albums, err := yandexClient.GetArtistDirectAlbums(r.Context(), artistID, 0, 100)
+	if err != nil {
+		statusCode := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "451") || strings.Contains(err.Error(), "Geoblock") {
+			statusCode = http.StatusUnavailableForLegalReasons
+		}
+		w.WriteHeader(statusCode)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"detail": fmt.Sprintf("Не удалось получить дискографию Яндекс Музыки: %v", err),
+		})
+		return
+	}
+
+	releases := make([]DiscographyRelease, 0, len(albums))
+	for _, alb := range albums {
+		releases = append(releases, DiscographyRelease{
+			ID:         alb.ID,
+			Title:      alb.Title,
+			Type:       alb.RecordType(),
+			Year:       alb.Year,
+			URL:        fmt.Sprintf("https://music.yandex.ru/album/%d", alb.ID),
+			CoverURL:   alb.BestCoverURL(),
+			TrackCount: alb.TrackCount,
+		})
+	}
+
+	_ = json.NewEncoder(w).Encode(DiscographyResponse{
+		ArtistName:    artist.Name,
+		ArtistID:      artist.ID,
+		ArtistAvatar:  artist.AvatarURL(),
+		Source:        "yandex",
+		TotalReleases: len(releases),
+		Releases:      releases,
+	})
+}
+
+// fetchYtReleases выполняет yt-dlp для целевого URL и возвращает список найденных релизов/плейлистов
+func fetchYtReleases(ctx context.Context, targetURL, cookiesPath string) ([]DiscographyRelease, string, error) {
 	args := []string{
 		"--ignore-config",
 		"--no-download-archive",
@@ -165,18 +231,22 @@ func (h *DownloadHandler) getYoutubeMusicDiscography(w http.ResponseWriter, r *h
 		"--flat-playlist",
 		"--no-warnings",
 		"--ignore-errors",
-		targetURL,
 	}
+	if cookiesPath != "" {
+		args = append(args, "--cookies", cookiesPath)
+	}
+	args = append(args, targetURL)
 
-	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
+	cmdCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(cmdCtx, "yt-dlp", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil && stdout.Len() == 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"detail": fmt.Sprintf("Сбой получения релизов из YouTube Music: %s", stderr.String())})
-		return
+		return nil, "", fmt.Errorf("yt-dlp error: %w: %s", err, stderr.String())
 	}
 
 	type YtReleaseItem struct {
@@ -207,9 +277,9 @@ func (h *DownloadHandler) getYoutubeMusicDiscography(w http.ResponseWriter, r *h
 		if err := json.Unmarshal(line, &e); err == nil && (e.ID != "" || e.URL != "") {
 			if artistName == "" {
 				if e.Channel != "" {
-					artistName = e.Channel
+					artistName = resolver.CleanChannelName(e.Channel)
 				} else if e.Uploader != "" {
-					artistName = e.Uploader
+					artistName = resolver.CleanChannelName(e.Uploader)
 				}
 			}
 
@@ -239,19 +309,67 @@ func (h *DownloadHandler) getYoutubeMusicDiscography(w http.ResponseWriter, r *h
 		}
 	}
 
+	return items, artistName, nil
+}
+
+// getYoutubeMusicDiscography — извлечение релизов YouTube Music через yt-dlp
+func (h *DownloadHandler) getYoutubeMusicDiscography(w http.ResponseWriter, r *http.Request, rawURL string) {
+	targetURL := rawURL
+	// Убираем параметры запроса (?si=...)
+	if idx := strings.Index(targetURL, "?"); idx != -1 {
+		targetURL = targetURL[:idx]
+	}
+
+	// Нормализуем URL артиста: добавляем /releases если это канал или @handle
+	isReleases := strings.Contains(targetURL, "/releases")
+	isPlaylists := strings.Contains(targetURL, "/playlists")
+	if !isReleases && !isPlaylists {
+		targetURL = strings.TrimRight(targetURL, "/") + "/releases"
+	}
+
+	var cookiesPath string
+	if h.service != nil {
+		cookiesPath = h.service.CookiesPath()
+	}
+
+	items, artistName, err := fetchYtReleases(r.Context(), targetURL, cookiesPath)
+
+	// Каскадный fallback: если на /releases пусто, пробуем /playlists (для обычных YouTube каналов)
+	if (len(items) == 0 || err != nil) && strings.Contains(targetURL, "/releases") {
+		fallbackURL := strings.Replace(targetURL, "/releases", "/playlists", 1)
+		if fbItems, fbArtist, fbErr := fetchYtReleases(r.Context(), fallbackURL, cookiesPath); fbErr == nil && len(fbItems) > 0 {
+			items = fbItems
+			if artistName == "" {
+				artistName = fbArtist
+			}
+			err = nil
+		}
+	}
+
+	if err != nil && len(items) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"detail": fmt.Sprintf("Сбой получения релизов из YouTube: %v", err),
+		})
+		return
+	}
+
 	if len(items) == 0 {
 		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Релизы артиста не найдены на YouTube Music"})
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"detail": "Релизы артиста не найдены на YouTube. Рекомендуется использовать ссылку на артиста в Яндекс Музыке, Deezer или Apple Music.",
+		})
 		return
 	}
 
 	if artistName == "" {
-		artistName = "Исполнитель YouTube Music"
+		artistName = "Исполнитель YouTube"
 	}
 
 	_ = json.NewEncoder(w).Encode(DiscographyResponse{
 		ArtistName:    artistName,
 		ArtistID:      0,
+		Source:        "youtube",
 		TotalReleases: len(items),
 		Releases:      items,
 	})
@@ -328,6 +446,7 @@ func (h *DownloadHandler) getAppleMusicDiscography(w http.ResponseWriter, r *htt
 	_ = json.NewEncoder(w).Encode(DiscographyResponse{
 		ArtistName:    artistName,
 		ArtistID:      artistID,
+		Source:        "applemusic",
 		TotalReleases: len(releases),
 		Releases:      releases,
 	})

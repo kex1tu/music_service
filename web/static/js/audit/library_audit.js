@@ -56,6 +56,7 @@ function libraryAuditComponent() {
         ...(window.AuditLyrics || {}),
         ...(window.AuditCatalogMatcher || {}),
         ...(window.AuditFixes || {}),
+        ...(window.AuditTagAudit || {}),
 
         init() {
             this.loadAll();
@@ -116,6 +117,7 @@ function libraryAuditComponent() {
                     this.loadIncompleteAlbums(),
                     this.loadInvalidPaths(),
                     this.loadNonEnGenres(),
+                    this.loadTagIssues ? this.loadTagIssues() : Promise.resolve(),
                 ]);
             } finally {
                 this.isLoading = false;

@@ -26,6 +26,8 @@ type Config struct {
 	SessionCookieSecure    bool
 	MaxConcurrentDownloads int
 	CookiesFile            string
+	YandexMusicToken       string
+	YandexMusicProxy       string
 	Debug                  bool
 }
 
@@ -58,6 +60,8 @@ func Load() (*Config, error) {
 		SessionCookieSecure:    cookieSecure,
 		MaxConcurrentDownloads: maxDownloads,
 		CookiesFile:            getEnv("YTDLP_COOKIES_PATH", "cookies.txt"),
+		YandexMusicToken:       getEnv("YANDEX_MUSIC_TOKEN", ""),
+		YandexMusicProxy:       getEnv("YANDEX_MUSIC_PROXY", ""),
 		Debug:                  debug,
 	}
 

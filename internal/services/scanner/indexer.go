@@ -20,6 +20,11 @@ func cleanString(s string) string {
 	return cleanMetaRegex.ReplaceAllString(s, "")
 }
 
+// IndexFile indexes or re-indexes a single MP3 file in the SQLite database.
+func (s *Scanner) IndexFile(fullPath, relPath string) error {
+	return s.indexFile(fullPath, relPath)
+}
+
 func (s *Scanner) indexFile(fullPath, relPath string) error {
 	tags, err := id3.ReadTags(fullPath, relPath)
 	if err != nil {
@@ -52,8 +57,12 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		albumDir = ""
 	}
 
-	// 1. Get or create artist for the track
-	artistID, err := s.getOrCreateArtist(artistName)
+	// 1. Get or create primary artist for the track (avoiding composite 'Artist 1\\Artist 2' in artists table)
+	primaryTrackArtist := resolver.ExtractPrimaryArtist(artistName)
+	if primaryTrackArtist == "" {
+		primaryTrackArtist = "Unknown Artist"
+	}
+	artistID, err := s.getOrCreateArtist(primaryTrackArtist)
 	if err != nil {
 		return err
 	}

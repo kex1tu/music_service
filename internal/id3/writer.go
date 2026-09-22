@@ -49,9 +49,9 @@ func WriteTags(filePath string, tags TrackTags, cover *CoverInfo) error {
 		writeMultiTextFrame(&framesBuf, "TPE1", tags.Artist)
 	}
 
-	// TPE2: Исполнитель альбома
+	// TPE2: Исполнитель альбома (поддержка null-separated \x00 для нескольких исполнителей стандарта ID3v2.4)
 	if strings.TrimSpace(tags.AlbumArtist) != "" {
-		writeTextFrame(&framesBuf, "TPE2", tags.AlbumArtist)
+		writeMultiTextFrame(&framesBuf, "TPE2", tags.AlbumArtist)
 	}
 
 	// TALB: Альбом
@@ -109,7 +109,7 @@ func WriteTags(filePath string, tags TrackTags, cover *CoverInfo) error {
 	}
 
 	for _, ef := range existingFrames {
-		if !managed[ef.ID] && isValidFrameID(ef.ID) && len(ef.Data) > 0 {
+		if !managed[ef.ID] && isValidFrameID(ef.ID) && len(ef.Data) > 0 && !isArtistOrConflictingTXXX(ef) {
 			writeRawFrame(&framesBuf, ef)
 		}
 	}
@@ -276,3 +276,62 @@ func writeRawFrame(w io.Writer, f RawFrame) {
 	w.Write(hdr[:])
 	w.Write(f.Data)
 }
+
+// isArtistOrConflictingTXXX определяет, является ли пользовательский TXXX фрейм конфликтующим тегом артистов
+// (TXXX:ARTISTS, TXXX:ALBUMARTISTS и др.), который перебивает чистые ID3v2.4 фреймы TPE1/TPE2 в Navidrome/TagLib.
+func isArtistOrConflictingTXXX(f RawFrame) bool {
+	if f.ID != "TXXX" || len(f.Data) < 2 {
+		return false
+	}
+	desc := extractTXXXDescription(f.Data)
+	descLower := strings.ToLower(strings.TrimSpace(desc))
+	switch descLower {
+	case "artists", "albumartists", "album artists", "artist", "album artist", "album_artist":
+		return true
+	default:
+		return false
+	}
+}
+
+// extractTXXXDescription извлекает текстовое описание фрейма TXXX с учетом кодировки байта [0].
+func extractTXXXDescription(data []byte) string {
+	if len(data) < 2 {
+		return ""
+	}
+	enc := data[0]
+	payload := data[1:]
+
+	switch enc {
+	case 1: // UTF-16 with BOM
+		for i := 0; i+1 < len(payload); i += 2 {
+			if payload[i] == 0 && payload[i+1] == 0 {
+				parts := decodeUTF16(payload[:i], true)
+				return strings.Join(parts, " ")
+			}
+		}
+		parts := decodeUTF16(payload, true)
+		return strings.Join(parts, " ")
+	case 2: // UTF-16BE without BOM
+		for i := 0; i+1 < len(payload); i += 2 {
+			if payload[i] == 0 && payload[i+1] == 0 {
+				parts := decodeUTF16(payload[:i], false)
+				return strings.Join(parts, " ")
+			}
+		}
+		parts := decodeUTF16(payload, false)
+		return strings.Join(parts, " ")
+	case 3: // UTF-8
+		idx := bytes.IndexByte(payload, 0)
+		if idx != -1 {
+			return string(payload[:idx])
+		}
+		return string(payload)
+	default: // ISO-8859-1
+		idx := bytes.IndexByte(payload, 0)
+		if idx != -1 {
+			return decodeISO88591(payload[:idx])
+		}
+		return decodeISO88591(payload)
+	}
+}
+

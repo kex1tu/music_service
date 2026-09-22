@@ -54,6 +54,16 @@ func (s *Service) Jobs() *JobManager {
 	return s.jobs
 }
 
+// Resolver returns the underlying SourceResolver.
+func (s *Service) Resolver() *resolver.SourceResolver {
+	return s.resolver
+}
+
+// CookiesPath returns the configured cookies file path.
+func (s *Service) CookiesPath() string {
+	return s.cookiesPath
+}
+
 func generateUUID() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)

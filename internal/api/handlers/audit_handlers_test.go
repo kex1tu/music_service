@@ -214,6 +214,7 @@ func TestFileHandler_DownloadMissing(t *testing.T) {
 	if job.TargetAlbumPath == nil || *job.TargetAlbumPath != "TestBand/Greatest Hits" {
 		t.Errorf("expected TargetAlbumPath 'TestBand/Greatest Hits', got %v", job.TargetAlbumPath)
 	}
+	h.downloader.Jobs().Delete(job.ID)
 }
 
 func TestFileHandler_BackfillEditorData(t *testing.T) {

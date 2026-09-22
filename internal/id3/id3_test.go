@@ -1,8 +1,10 @@
 package id3
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -169,3 +171,157 @@ func TestWriteAndReadTags_Roundtrip(t *testing.T) {
 		t.Errorf("cover data mismatch")
 	}
 }
+
+func TestWriteTags_AlbumArtistMultiValue_NullSeparated(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "id3_album_artist_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	filePath := filepath.Join(tempDir, "album_artist.mp3")
+	dummyAudio := make([]byte, 1024)
+	if err := os.WriteFile(filePath, dummyAudio, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tags := TrackTags{
+		Title:       "Collab Track",
+		Artist:      "WesGhost\\\\TWISTED",
+		Album:       "Collab Single",
+		AlbumArtist: "WesGhost\\\\TWISTED",
+	}
+
+	if err := WriteTags(filePath, tags, nil); err != nil {
+		t.Fatalf("WriteTags failed: %v", err)
+	}
+
+	// Считываем сырые фреймы
+	frames, err := ReadRawFrames(filePath)
+	if err != nil {
+		t.Fatalf("ReadRawFrames failed: %v", err)
+	}
+
+	var foundTPE1, foundTPE2 *RawFrame
+	for i := range frames {
+		if frames[i].ID == "TPE1" {
+			foundTPE1 = &frames[i]
+		}
+		if frames[i].ID == "TPE2" {
+			foundTPE2 = &frames[i]
+		}
+	}
+
+	if foundTPE1 == nil {
+		t.Fatal("TPE1 frame not found")
+	}
+	if foundTPE2 == nil {
+		t.Fatal("TPE2 frame not found")
+	}
+
+	// Проверяем, что в TPE2 разделителем является \x00, а не литеральный \\
+	expectedPayload := append([]byte{3}, []byte("WesGhost\x00TWISTED")...)
+	if !bytes.Equal(foundTPE2.Data, expectedPayload) {
+		t.Errorf("expected TPE2 payload %q, got %q", expectedPayload, foundTPE2.Data)
+	}
+	if !bytes.Equal(foundTPE1.Data, expectedPayload) {
+		t.Errorf("expected TPE1 payload %q, got %q", expectedPayload, foundTPE1.Data)
+	}
+}
+
+func TestWriteTags_FiltersConflictingTXXX(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "id3_txxx_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	filePath := filepath.Join(tempDir, "txxx_test.mp3")
+	dummyAudio := make([]byte, 1024)
+	if err := os.WriteFile(filePath, dummyAudio, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Создаем начальный тег с кастомным TXXX:ARTISTS и TXXX:MY_CUSTOM_ID
+	initialTags := TrackTags{
+		Title:  "Track 1",
+		Artist: "Artist 1",
+	}
+	if err := WriteTags(filePath, initialTags, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Вручную добавляем сырые фреймы TXXX:ARTISTS и TXXX:CUSTOM_TAG
+	rawFrames, err := ReadRawFrames(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// TXXX:ARTISTS (Encoding 3 = UTF-8, "ARTISTS\x00Artist 1\\Artist 2")
+	txxxArtistsData := append([]byte{3}, []byte("ARTISTS\x00Artist 1\\\\Artist 2")...)
+	rawFrames = append(rawFrames, RawFrame{
+		ID:   "TXXX",
+		Data: txxxArtistsData,
+	})
+
+	// TXXX:CUSTOM_TAG (Encoding 3, "CUSTOM_INFO\x00ImportantData")
+	txxxCustomData := append([]byte{3}, []byte("CUSTOM_INFO\x00ImportantData")...)
+	rawFrames = append(rawFrames, RawFrame{
+		ID:   "TXXX",
+		Data: txxxCustomData,
+	})
+
+	// Перезаписываем файл сырыми фреймами через буфер
+	var buf bytes.Buffer
+	for _, rf := range rawFrames {
+		writeRawFrame(&buf, rf)
+	}
+	framesBytes := buf.Bytes()
+	var hdr [10]byte
+	copy(hdr[0:3], "ID3")
+	hdr[3] = 4
+	encodeSynchsafe(len(framesBytes)+1024, hdr[6:10])
+	all := append(hdr[:], framesBytes...)
+	all = append(all, make([]byte, 1024)...)
+	all = append(all, dummyAudio...)
+	if err := os.WriteFile(filePath, all, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Теперь вызываем WriteTags
+	newTags := TrackTags{
+		Title:  "Track 1 Clean",
+		Artist: "Artist 1\\\\Artist 2",
+	}
+	if err := WriteTags(filePath, newTags, nil); err != nil {
+		t.Fatalf("WriteTags failed: %v", err)
+	}
+
+	// Проверяем сохраненные фреймы
+	newFrames, err := ReadRawFrames(filePath)
+	if err != nil {
+		t.Fatalf("ReadRawFrames failed: %v", err)
+	}
+
+	hasTXXXArtists := false
+	hasTXXXCustom := false
+	for _, f := range newFrames {
+		if f.ID == "TXXX" {
+			desc := extractTXXXDescription(f.Data)
+			if strings.EqualFold(desc, "ARTISTS") {
+				hasTXXXArtists = true
+			}
+			if strings.EqualFold(desc, "CUSTOM_INFO") {
+				hasTXXXCustom = true
+			}
+		}
+	}
+
+	if hasTXXXArtists {
+		t.Errorf("TXXX:ARTISTS was NOT filtered out by WriteTags")
+	}
+	if !hasTXXXCustom {
+		t.Errorf("TXXX:CUSTOM_INFO should have been preserved, but was lost")
+	}
+}
+

@@ -60,6 +60,27 @@ func (h *FileHandler) AuditSummary(w http.ResponseWriter, r *http.Request) {
 
 	invalidPaths, _ := h.database.GetInvalidPaths(r.Context())
 
+	var tagIssuesCount int
+	if tRows, tErr := h.database.Conn().QueryContext(r.Context(), `
+		SELECT t.id, t.file_path, t.title, a.name, al.title, COALESCE(al.year, 0), t.track_number, t.duration
+		FROM tracks t
+		JOIN artists a ON t.artist_id = a.id
+		JOIN albums al ON t.album_id = al.id;
+	`); tErr == nil {
+		for tRows.Next() {
+			var id int64
+			var filePath, title, artist, album string
+			var year, trackNumber int
+			var duration float64
+			if err := tRows.Scan(&id, &filePath, &title, &artist, &album, &year, &trackNumber, &duration); err == nil {
+				if analyzeTrackIssues(id, filePath, title, artist, album, year, trackNumber, duration) != nil {
+					tagIssuesCount++
+				}
+			}
+		}
+		tRows.Close()
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"total_tracks":            totalTracks,
@@ -70,6 +91,7 @@ func (h *FileHandler) AuditSummary(w http.ResponseWriter, r *http.Request) {
 		"incomplete_albums_count": incompleteAlbums,
 		"invalid_paths_count":     len(invalidPaths),
 		"non_en_genres_count":     0,
+		"tag_issues_count":        tagIssuesCount,
 	})
 }
 

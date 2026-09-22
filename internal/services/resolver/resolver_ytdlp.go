@@ -6,15 +6,46 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"music-manager/internal/id3"
 )
+
+// fetchYouTubeOEmbed запрашивает метаданные видео через открытый YouTube oEmbed API
+// (работает публично, без авторизации и без возрастных ограничений).
+func fetchYouTubeOEmbed(ctx context.Context, rawURL string) (*ParsedYouTubeTrack, string, error) {
+	oembedURL := fmt.Sprintf("https://www.youtube.com/oembed?url=%s&format=json", url.QueryEscape(rawURL))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, oembedURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("youtube oembed status %d", resp.StatusCode)
+	}
+
+	var data struct {
+		Title        string `json:"title"`
+		AuthorName   string `json:"author_name"`
+		ThumbnailURL string `json:"thumbnail_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, "", err
+	}
+
+	parsed := ParseYouTubeTitle(data.Title, data.AuthorName, data.AuthorName)
+	return &parsed, data.ThumbnailURL, nil
+}
 
 // resolveYtDlp разрешает ссылки YouTube, YouTube Music и SoundCloud через yt-dlp.
 func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*ReleaseMetadata, []ResolvedTrack, error) {
@@ -40,6 +71,7 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 		"--flat-playlist",
 		"--no-warnings",
 		"--ignore-errors",
+		"--extractor-args", "youtube:player_client=tv_embedded,web_embedded,android,ios",
 		targetURL,
 	}
 	if r.cookiesPath != "" {
@@ -60,9 +92,7 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil && stdout.Len() == 0 {
-		return nil, nil, fmt.Errorf("yt-dlp extraction failed: %w: %s", err, stderr.String())
-	}
+	runErr := cmd.Run()
 
 	type YtEntry struct {
 		ID          string  `json:"id"`
@@ -81,40 +111,102 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 	}
 
 	var entries []YtEntry
-	scanner := bufio.NewScanner(&stdout)
-	buf := make([]byte, 1024*1024)
-	scanner.Buffer(buf, 10*1024*1024)
+	if stdout.Len() > 0 {
+		scanner := bufio.NewScanner(&stdout)
+		buf := make([]byte, 1024*1024)
+		scanner.Buffer(buf, 10*1024*1024)
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var e YtEntry
-		if err := json.Unmarshal(line, &e); err == nil && (e.ID != "" || e.URL != "") {
-			entries = append(entries, e)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			var e YtEntry
+			if err := json.Unmarshal(line, &e); err == nil && (e.ID != "" || e.URL != "") {
+				entries = append(entries, e)
+			}
 		}
 	}
 
-	if len(entries) == 0 {
-		return nil, nil, fmt.Errorf("не найдено треков по ссылке %s", rawURL)
+	// Обработка возрастных ограничений (Age Gate) и сбоев прямого извлечения
+	if (runErr != nil && len(entries) == 0) || len(entries) == 0 {
+		stderrStr := stderr.String()
+		isAgeOrVideo := strings.Contains(stderrStr, "Sign in to confirm your age") ||
+			strings.Contains(stderrStr, "inappropriate") ||
+			strings.Contains(stderrStr, "age gate") ||
+			strings.Contains(rawURL, "watch?v=") || strings.Contains(rawURL, "youtu.be/")
+
+		if isAgeOrVideo {
+			if parsed, thumb, oErr := fetchYouTubeOEmbed(ctx, rawURL); oErr == nil && parsed != nil && parsed.Title != "" {
+				tot := 1
+				artists := parsed.Artists
+				if len(artists) == 0 && parsed.Artist != "" {
+					artists = []string{parsed.Artist}
+				}
+				if r.featEnricher != nil {
+					artists = r.featEnricher.EnrichTrackArtists(ctx, parsed.Title, artists)
+				}
+				fmtArt := parsed.Artist
+				albArt := parsed.Artist
+				if len(artists) > 0 {
+					fmtArt = id3.FormatMultiValue(artists)
+					albArt = artists[0]
+				}
+				meta := &ReleaseMetadata{
+					AlbumTitle:  parsed.Title,
+					AlbumArtist: fmtArt,
+					CoverURL:    thumb,
+					TotalTracks: 1,
+				}
+				tr := ResolvedTrack{
+					TrackID:        "yt_oembed",
+					TrackNumber:    1,
+					TrackTotal:     &tot,
+					DiscNumber:     1,
+					Title:          parsed.Title,
+					Artist:         fmtArt,
+					Album:          parsed.Title,
+					AlbumArtist:    albArt,
+					AudioSourceURL: "", // пустое поле triggers AudioMatcher fallback to SoundCloud
+					Status:         "pending",
+				}
+				if thumb != "" {
+					tr.CoverURL = &thumb
+				}
+				return meta, []ResolvedTrack{tr}, nil
+			}
+		}
+
+		if len(entries) == 0 && runErr == nil {
+			return nil, nil, fmt.Errorf("не найдено треков по ссылке %s", rawURL)
+		}
+		return nil, nil, fmt.Errorf("yt-dlp extraction failed: %w: %s", runErr, stderrStr)
 	}
 
+	// Извлекаем артиста и альбом первого элемента для релиза
+	firstParsed := ParseYouTubeTitle(entries[0].Title, entries[0].Channel, entries[0].Uploader)
+	firstArtists := firstParsed.Artists
 	artistName := entries[0].Artist
 	if artistName == "" {
-		artistName = entries[0].Channel
-		if artistName == "" {
-			artistName = entries[0].Uploader
-		}
+		artistName = firstParsed.Artist
+	}
+	if len(firstArtists) == 0 && artistName != "" {
+		firstArtists = []string{artistName}
+	}
+	if r.featEnricher != nil {
+		firstArtists = r.featEnricher.EnrichTrackArtists(ctx, firstParsed.Title, firstArtists)
+	}
+	if len(firstArtists) > 0 {
+		artistName = id3.FormatMultiValue(firstArtists)
 	}
 
-	isArtistPage := strings.Contains(rawURL, "/channel/")
+	isArtistPage := strings.Contains(rawURL, "/channel/") || strings.Contains(rawURL, "/releases")
 	albumTitle := entries[0].Album
 	if albumTitle == "" || isArtistPage {
 		if isArtistPage && artistName != "" {
 			albumTitle = artistName
-		} else if entries[0].Title != "" {
-			albumTitle = entries[0].Title
+		} else if firstParsed.Title != "" {
+			albumTitle = firstParsed.Title
 		} else {
 			albumTitle = "Unknown Album"
 		}
@@ -144,10 +236,22 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 			}
 		}
 
-		title := e.Title
-		cleanArt := artistName
+		parsed := ParseYouTubeTitle(e.Title, e.Channel, e.Uploader)
+		cleanTit := parsed.Title
+		cleanArt := parsed.Artist
 		if e.Artist != "" {
 			cleanArt = e.Artist
+		}
+
+		artists := parsed.Artists
+		if len(artists) == 0 && cleanArt != "" {
+			artists = []string{cleanArt}
+		}
+		if r.featEnricher != nil {
+			artists = r.featEnricher.EnrichTrackArtists(ctx, cleanTit, artists)
+		}
+		if len(artists) > 0 {
+			cleanArt = id3.FormatMultiValue(artists)
 		}
 
 		trURL := e.WebpageURL
@@ -163,7 +267,7 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 			if !isArtistPage {
 				trAlbum = albumTitle
 			} else {
-				trAlbum = title
+				trAlbum = cleanTit
 			}
 		}
 
@@ -172,15 +276,20 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 			trID = fmt.Sprintf("yt_%d", i+1)
 		}
 
+		albArt := artistName
+		if len(artists) > 0 {
+			albArt = artists[0]
+		}
+
 		tr := ResolvedTrack{
 			TrackID:        fmt.Sprintf("yt_%s", trID),
 			TrackNumber:    pos,
 			TrackTotal:     &total,
 			DiscNumber:     1,
-			Title:          id3.CleanTitle(title, filepath.Base(title)),
+			Title:          cleanTit,
 			Artist:         cleanArt,
 			Album:          trAlbum,
-			AlbumArtist:    artistName,
+			AlbumArtist:    albArt,
 			Duration:       int(e.Duration),
 			AudioSourceURL: trURL,
 			Status:         "pending",

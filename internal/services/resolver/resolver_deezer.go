@@ -63,6 +63,9 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 				if len(artists) == 0 && tArtist != "" {
 					artists = []string{tArtist}
 				}
+				if r.featEnricher != nil {
+					artists = r.featEnricher.EnrichTrackArtists(ctx, t.Title, artists)
+				}
 				formattedArtist := id3.FormatMultiValue(artists)
 
 				discNum := t.DiskNumber
@@ -125,6 +128,22 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 			TotalTracks: 1,
 		}
 
+		var artists []string
+		if len(track.Contributors) > 0 {
+			for _, c := range track.Contributors {
+				if c.Name != "" {
+					artists = append(artists, c.Name)
+				}
+			}
+		}
+		if len(artists) == 0 && track.Artist.Name != "" {
+			artists = []string{track.Artist.Name}
+		}
+		if r.featEnricher != nil {
+			artists = r.featEnricher.EnrichTrackArtists(ctx, track.Title, artists)
+		}
+		formattedArtist := id3.FormatMultiValue(artists)
+
 		tot := 1
 		tr := ResolvedTrack{
 			TrackID:     fmt.Sprintf("dz_%d", track.ID),
@@ -132,7 +151,7 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 			TrackTotal:  &tot,
 			DiscNumber:  1,
 			Title:       id3.CleanTitle(track.Title, ""),
-			Artist:      track.Artist.Name,
+			Artist:      formattedArtist,
 			Album:       albumTitle,
 			AlbumArtist: track.Artist.Name,
 			Duration:    track.Duration,

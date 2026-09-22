@@ -318,6 +318,17 @@ func (c *DeezerClient) SearchAlbums(ctx context.Context, query string) ([]Deezer
 	return c.searchAlbumsItunes(ctx, query)
 }
 
+// SearchTracks searches tracks by query text.
+func (c *DeezerClient) SearchTracks(ctx context.Context, query string) ([]DeezerTrack, error) {
+	var res struct {
+		Data []DeezerTrack `json:"data"`
+	}
+	if err := c.fetchDeezerJSON(ctx, fmt.Sprintf("/search/track?q=%s&limit=25", url.QueryEscape(query)), &res); err == nil && len(res.Data) > 0 {
+		return res.Data, nil
+	}
+	return nil, fmt.Errorf("no tracks found on deezer")
+}
+
 // DownloadCoverBytes downloads an image from coverURL.
 func (c *DeezerClient) DownloadCoverBytes(ctx context.Context, coverURL string) ([]byte, error) {
 	if coverURL == "" {

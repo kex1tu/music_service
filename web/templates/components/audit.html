@@ -77,13 +77,19 @@
             class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Некорректные пути</span>
             <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="invalidPaths.length || summary.invalid_paths_count || 0"></span>
-        </button>
         <button
             @click="activeSubTab = 'genres'"
             :class="activeSubTab === 'genres' ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
             class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Жанры на проверку</span>
             <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="nonEnGenres.length || summary.non_en_genres_count || 0"></span>
+        </button>
+        <button
+            @click="activeSubTab = 'tags'"
+            :class="activeSubTab === 'tags' ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
+            class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
+            <span>Сверка тегов</span>
+            <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="tagIssues.length || summary.tag_issues_count || 0"></span>
         </button>
     </div>
 
@@ -94,5 +100,6 @@
     {{ template "audit_incomplete" . }}
     {{ template "audit_paths" . }}
     {{ template "audit_genres" . }}
+    {{ template "audit_tags" . }}
 </section>
 {{ end }}

@@ -32,7 +32,7 @@ func (s *Service) downloadRawStream(ctx context.Context, sourceURL, outputTempla
 		"--no-warnings",
 		"--concurrent-fragments", "4",
 		"--buffer-size", "64k",
-		"--extractor-args", "youtube:player_client=ios,android,web",
+		"--extractor-args", "youtube:player_client=tv_embedded,web_embedded,android,ios",
 		"--add-header", "Accept-Language:ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
 	}
 
@@ -91,6 +91,7 @@ func (s *Service) transcodeToMP3(ctx context.Context, inputRaw, outputMP3 string
 		"-q:a", "0",
 		"-ar", "44100",
 		"-ac", "2",
+		"-map_metadata", "-1",
 		outputMP3,
 	}
 

@@ -60,7 +60,13 @@ func main() {
 	// 4. Initialize services
 	deezerClient := resolver.NewDeezerClient()
 	audioMatcher := resolver.NewAudioMatcher(cfg.CookiesFile)
-	sourceResolver := resolver.NewSourceResolver(deezerClient, audioMatcher, cfg.CookiesFile)
+	sourceResolver := resolver.NewSourceResolver(
+		deezerClient,
+		audioMatcher,
+		cfg.CookiesFile,
+		cfg.YandexMusicToken,
+		cfg.YandexMusicProxy,
+	)
 
 	jobManager := downloader.NewJobManager(database)
 	downloadService := downloader.NewService(
