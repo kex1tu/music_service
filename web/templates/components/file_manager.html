@@ -26,11 +26,34 @@
                     </template>
                 </nav>
 
-                <div class="flex items-center space-x-2">
+                <div class="flex items-center space-x-2 w-full sm:w-auto justify-end flex-wrap gap-y-2">
+                    <!-- Быстрый фильтр в папке -->
+                    <div class="relative flex-1 sm:w-60 min-w-[160px]">
+                        <input
+                            type="text"
+                            x-model="searchQuery"
+                            @input="onSearchInput()"
+                            placeholder="Фильтр в папке..."
+                            class="w-full bg-surface-elevated text-content-primary text-xs rounded-lg pl-8 pr-7 py-1.5 border border-surface-border focus:border-brand focus:ring-1 focus:ring-brand outline-none transition placeholder:text-content-muted"
+                        >
+                        <svg class="w-3.5 h-3.5 text-content-muted absolute left-2.5 top-2 pointer-events-none" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="m19.6 21l-6.3-6.3q-.75.6-1.725.95T9.5 16q-2.725 0-4.612-1.888T3 9.5t1.888-4.612T9.5 3t4.613 1.888T16 9.5q0 1.1-.35 2.075T14.7 13.3l6.3 6.3zM9.5 14q1.875 0 3.188-1.312T14 9.5t-1.312-3.187T9.5 5T6.313 6.313T5 9.5t1.313 3.188T9.5 14"/>
+                        </svg>
+                        <button
+                            x-show="searchQuery"
+                            @click="clearSearch()"
+                            class="absolute right-2 top-1.5 text-content-muted hover:text-content-primary p-0.5"
+                            title="Очистить фильтр">
+                            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                            </svg>
+                        </button>
+                    </div>
+
                     <template x-if="parentPath !== null">
                         <button
                             @click="navigateUp()"
-                            class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-content-primary text-xs font-medium rounded-lg transition border border-surface-border flex items-center space-x-1.5 shadow-sm active:scale-95">
+                            class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-content-primary text-xs font-medium rounded-lg transition border border-surface-border flex items-center space-x-1.5 shadow-sm active:scale-95 shrink-0">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="m7.825 13l4.9 4.9q.3.3.288.7t-.313.7q-.3.275-.7.288t-.7-.288l-6.6-6.6q-.15-.15-.213-.325T4.426 12t.063-.375t.212-.325l6.6-6.6q.275-.275.688-.275t.712.275q.3.3.3.713t-.3.712L7.825 11H19q.425 0 .713.288T20 12t-.288.713T19 13z"/>
                             </svg>
@@ -39,7 +62,7 @@
                     </template>
                     <button
                         @click="loadDirectory(currentPath)"
-                        class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-content-primary text-xs font-medium rounded-lg transition border border-surface-border flex items-center space-x-1.5 shadow-sm active:scale-95">
+                        class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-content-primary text-xs font-medium rounded-lg transition border border-surface-border flex items-center space-x-1.5 shadow-sm active:scale-95 shrink-0">
                         <svg class="w-3.5 h-3.5 text-brand" :class="isLoading ? 'animate-spin' : ''" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V5q0-.425.288-.712T19 4t.713.288T20 5v5q0 .425-.288.713T19 11h-5q-.425 0-.712-.288T13 10t.288-.712T14 9h3.2q-.8-1.4-2.187-2.2T12 6Q9.5 6 7.75 7.75T6 12t1.75 4.25T12 18q1.7 0 3.113-.862t2.187-2.313q.2-.35.563-.487t.737-.013q.4.125.575.525t-.025.75q-1.025 2-2.925 3.2T12 20"/>
                         </svg>
@@ -64,7 +87,7 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-surface-border/50">
-                            <!-- Пустое состояние -->
+                            <!-- Пустое состояние каталога -->
                             <template x-if="items.length === 0 && !isLoading">
                                 <tr>
                                     <td colspan="7" class="py-16 text-center text-content-muted">
@@ -78,8 +101,23 @@
                                 </tr>
                             </template>
 
+                            <!-- Ничего не найдено по поисковому фильтру -->
+                            <template x-if="items.length > 0 && totalFiltered === 0 && !isLoading">
+                                <tr>
+                                    <td colspan="7" class="py-12 text-center text-content-muted">
+                                        <div class="flex flex-col items-center justify-center space-y-2">
+                                            <svg class="w-8 h-8 text-content-muted/50" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="m19.6 21l-6.3-6.3q-.75.6-1.725.95T9.5 16q-2.725 0-4.612-1.888T3 9.5t1.888-4.612T9.5 3t4.613 1.888T16 9.5q0 1.1-.35 2.075T14.7 13.3l6.3 6.3zM9.5 14q1.875 0 3.188-1.312T14 9.5t-1.312-3.187T9.5 5T6.313 6.313T5 9.5t1.313 3.188T9.5 14"/>
+                                            </svg>
+                                            <span class="text-sm">Ничего не найдено по запросу «<span class="text-content-primary" x-text="searchQuery"></span>»</span>
+                                            <button @click="clearSearch()" class="text-xs text-brand hover:underline mt-1">Очистить фильтр</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+
                             <!-- Элементы -->
-                            <template x-for="item in items" :key="item.path">
+                            <template x-for="item in paginatedItems" :key="item.path">
                                 <tr class="hover:bg-surface-hover/70 transition-colors group/row"
                                     :class="{ 'bg-brand-muted/70 text-content-primary border-l-2 border-brand': $store.player?.currentTrack && $store.player.currentTrack.path === item.path }">
                                     <!-- Номер или Иконка / Кнопка воспроизведения -->
@@ -111,16 +149,9 @@
                                                                 'flex bg-brand text-white shadow-brand/30': $store.player.currentTrack?.path === item.path && $store.player.isPlaying,
                                                                 'hidden group-hover/row:flex bg-surface-elevated text-content-primary hover:bg-brand hover:text-white border border-surface-border': !($store.player.currentTrack?.path === item.path && $store.player.isPlaying)
                                                             }">
-                                                            <template x-if="$store.player.currentTrack?.path === item.path && $store.player.isPlaying">
-                                                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                                                                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-                                                                </svg>
-                                                            </template>
-                                                            <template x-if="!($store.player.currentTrack?.path === item.path && $store.player.isPlaying)">
-                                                                <svg class="w-3.5 h-3.5 translate-x-0.5" viewBox="0 0 24 24" fill="currentColor">
-                                                                    <path d="M8 5v14l11-7z"/>
-                                                                </svg>
-                                                            </template>
+                                                            <svg class="w-3.5 h-3.5" :class="($store.player.currentTrack?.path === item.path && $store.player.isPlaying) ? '' : 'translate-x-0.5'" viewBox="0 0 24 24" fill="currentColor">
+                                                                <path :d="($store.player.currentTrack?.path === item.path && $store.player.isPlaying) ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z'"/>
+                                                            </svg>
                                                         </button>
                                                     </div>
                                                 </template>
@@ -155,17 +186,11 @@
                                         <template x-if="item.type === 'file'">
                                             <div class="flex items-center space-x-2.5 sm:space-x-3 min-w-0">
                                                 <!-- Mini Cover Thumbnail -->
-                                                <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-md bg-surface-elevated border border-surface-border/60 overflow-hidden shrink-0 relative">
-                                                    <template x-if="item.has_cover">
-                                                        <img :src="'/cover?path=' + encodeURIComponent(item.path)" class="w-full h-full object-cover" loading="lazy">
-                                                    </template>
-                                                    <template x-if="!item.has_cover">
-                                                        <div class="w-full h-full flex items-center justify-center text-content-muted/60">
-                                                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                                                                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3z"/>
-                                                            </svg>
-                                                        </div>
-                                                    </template>
+                                                <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-md bg-surface-elevated border border-surface-border/60 overflow-hidden shrink-0 relative flex items-center justify-center">
+                                                    <img x-show="item.has_cover" :src="item.has_cover ? '/cover?path=' + encodeURIComponent(item.path) : ''" class="w-full h-full object-cover" loading="lazy">
+                                                    <svg x-show="!item.has_cover" class="w-4 h-4 text-content-muted/60" viewBox="0 0 24 24" fill="currentColor">
+                                                        <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3z"/>
+                                                    </svg>
                                                 </div>
                                                 <div class="min-w-0 flex-1">
                                                     <div
@@ -176,12 +201,12 @@
                                                     <!-- Mobile metadata subtitle: artist + lyrics badge -->
                                                     <div class="flex items-center space-x-1.5 text-[10px] sm:text-[11px] text-content-muted truncate md:hidden">
                                                         <span class="truncate" x-text="item.artist || 'Неизвестный исполнитель'"></span>
-                                                        <template x-if="item.lyrics_status === 'lrc'">
-                                                            <span class="px-1 py-0.2 bg-brand-muted text-brand border border-brand/30 rounded text-[9px] font-mono font-bold shrink-0">LRC</span>
-                                                        </template>
-                                                        <template x-if="item.lyrics_status === 'txt'">
-                                                            <span class="px-1 py-0.2 bg-sky-500/10 text-sky-400 border border-sky-500/30 rounded text-[9px] font-mono font-bold shrink-0">TXT</span>
-                                                        </template>
+                                                        <span
+                                                            x-show="item.lyrics_status === 'lrc' || item.lyrics_status === 'txt'"
+                                                            class="px-1 py-0.2 rounded text-[9px] font-mono font-bold shrink-0 border"
+                                                            :class="item.lyrics_status === 'lrc' ? 'bg-brand-muted text-brand border-brand/30' : 'bg-sky-500/10 text-sky-400 border-sky-500/30'"
+                                                            x-text="item.lyrics_status ? item.lyrics_status.toUpperCase() : ''">
+                                                        </span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -203,11 +228,11 @@
                                         <template x-if="item.type === 'file' && item.extension === '.mp3'">
                                             <div>
                                                 <span
-                                                    class="text-[10px] font-mono font-bold px-1.5 sm:px-2 py-0.5 rounded tracking-wider uppercase inline-block"
+                                                    class="text-[10px] font-mono font-bold px-1.5 sm:px-2 py-0.5 rounded tracking-wider uppercase inline-block border"
                                                     :class="{
-                                                        'bg-brand-muted text-brand border border-brand/30': item.lyrics_status === 'lrc',
-                                                        'bg-sky-500/10 text-sky-400 border border-sky-500/30': item.lyrics_status === 'txt',
-                                                        'text-content-muted/50': item.lyrics_status === 'none' || !item.lyrics_status
+                                                        'bg-brand-muted text-brand border-brand/30': item.lyrics_status === 'lrc',
+                                                        'bg-sky-500/10 text-sky-400 border-sky-500/30': item.lyrics_status === 'txt',
+                                                        'text-content-muted/50 border-transparent': item.lyrics_status === 'none' || !item.lyrics_status
                                                     }"
                                                     x-text="item.lyrics_status === 'lrc' ? 'LRC' : (item.lyrics_status === 'txt' ? 'TXT' : '—')">
                                                 </span>
@@ -256,16 +281,9 @@
                                                             'bg-brand text-white border-brand shadow-brand/20': $store.player.currentTrack?.path === item.path && $store.player.isPlaying,
                                                             'bg-surface-elevated hover:bg-brand hover:text-white text-content-secondary': !($store.player.currentTrack?.path === item.path && $store.player.isPlaying)
                                                         }">
-                                                        <template x-if="$store.player.currentTrack?.path === item.path && $store.player.isPlaying">
-                                                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                                                                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-                                                            </svg>
-                                                        </template>
-                                                        <template x-if="!($store.player.currentTrack?.path === item.path && $store.player.isPlaying)">
-                                                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                                                                <path d="M8 5v14l11-7z"/>
-                                                            </svg>
-                                                        </template>
+                                                        <svg class="w-3.5 h-3.5" :class="($store.player.currentTrack?.path === item.path && $store.player.isPlaying) ? '' : 'translate-x-0.5'" viewBox="0 0 24 24" fill="currentColor">
+                                                            <path :d="($store.player.currentTrack?.path === item.path && $store.player.isPlaying) ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z'"/>
+                                                        </svg>
                                                     </button>
                                                     <button
                                                         @click="openInTagEditor(item)"
@@ -293,6 +311,74 @@
                             </template>
                         </tbody>
                     </table>
+                </div>
+            </div>
+
+            <!-- Панель пагинации -->
+            <div x-show="totalFiltered > 0" class="bg-surface-panel/90 border border-surface-border rounded-xl p-3 sm:p-4 flex flex-wrap items-center justify-between gap-3 text-xs shadow-md">
+                <!-- Сведения о количестве -->
+                <div class="text-content-secondary flex items-center space-x-2 font-mono">
+                    <span>Показано:</span>
+                    <span class="font-semibold text-content-primary" x-text="paginationInfo"></span>
+                    <template x-if="searchQuery">
+                        <span class="text-brand font-sans">(по фильтру)</span>
+                    </template>
+                </div>
+
+                <!-- Кнопки перелистывания -->
+                <div class="flex items-center space-x-1 sm:space-x-1.5" x-show="totalPages > 1">
+                    <button
+                        @click="setPage(1)"
+                        :disabled="currentPage === 1"
+                        title="Первая страница"
+                        class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover disabled:opacity-40 disabled:hover:bg-surface-elevated text-content-primary rounded-lg transition border border-surface-border active:scale-95 font-mono text-xs">
+                        «
+                    </button>
+                    <button
+                        @click="prevPage()"
+                        :disabled="currentPage === 1"
+                        title="Предыдущая страница"
+                        class="px-2.5 py-1 bg-surface-elevated hover:bg-surface-hover disabled:opacity-40 disabled:hover:bg-surface-elevated text-content-primary rounded-lg transition border border-surface-border active:scale-95 flex items-center space-x-1 text-xs">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="m7.825 13l4.9 4.9q.3.3.288.7t-.313.7q-.3.275-.7.288t-.7-.288l-6.6-6.6q-.15-.15-.213-.325T4.426 12t.063-.375t.212-.325l6.6-6.6q.275-.275.688-.275t.712.275q.3.3.3.713t-.3.712L7.825 11H19q.425 0 .713.288T20 12t-.288.713T19 13z"/>
+                        </svg>
+                        <span class="hidden sm:inline">Назад</span>
+                    </button>
+                    <div class="px-2.5 py-1 text-content-secondary font-mono text-xs">
+                        Стр. <span class="font-bold text-content-primary" x-text="currentPage"></span> из <span x-text="totalPages"></span>
+                    </div>
+                    <button
+                        @click="nextPage()"
+                        :disabled="currentPage === totalPages"
+                        title="Следующая страница"
+                        class="px-2.5 py-1 bg-surface-elevated hover:bg-surface-hover disabled:opacity-40 disabled:hover:bg-surface-elevated text-content-primary rounded-lg transition border border-surface-border active:scale-95 flex items-center space-x-1 text-xs">
+                        <span class="hidden sm:inline">Вперед</span>
+                        <svg class="w-3.5 h-3.5 rotate-180" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="m7.825 13l4.9 4.9q.3.3.288.7t-.313.7q-.3.275-.7.288t-.7-.288l-6.6-6.6q-.15-.15-.213-.325T4.426 12t.063-.375t.212-.325l6.6-6.6q.275-.275.688-.275t.712.275q.3.3.3.713t-.3.712L7.825 11H19q.425 0 .713.288T20 12t-.288.713T19 13z"/>
+                        </svg>
+                    </button>
+                    <button
+                        @click="setPage(totalPages)"
+                        :disabled="currentPage === totalPages"
+                        title="Последняя страница"
+                        class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover disabled:opacity-40 disabled:hover:bg-surface-elevated text-content-primary rounded-lg transition border border-surface-border active:scale-95 font-mono text-xs">
+                        »
+                    </button>
+                </div>
+
+                <!-- Выбор размера страницы -->
+                <div class="flex items-center space-x-2 text-content-muted">
+                    <span class="hidden sm:inline">На странице:</span>
+                    <select
+                        x-model="pageSize"
+                        @change="setPageSize($event.target.value)"
+                        class="bg-surface-elevated text-content-primary text-xs rounded-lg px-2 py-1 border border-surface-border focus:border-brand outline-none transition cursor-pointer">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                        <option value="0">Все</option>
+                    </select>
                 </div>
             </div>
         </section>

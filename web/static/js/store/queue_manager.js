@@ -108,22 +108,28 @@ window.createQueueManager = function() {
             } catch (e) {
                 console.error('Ошибка опроса очереди:', e);
             }
-            if (this.activeCount > 0 && this.pollTimeout) {
-                this.scheduleNextPoll();
-            }
         },
 
         scheduleNextPoll() {
-            if (this.pollTimeout) clearTimeout(this.pollTimeout);
+            if (this.pollTimeout) {
+                clearTimeout(this.pollTimeout);
+                this.pollTimeout = null;
+            }
             const delay = this.activeCount > 0 ? 2000 : 10000;
             this.pollTimeout = setTimeout(async () => {
-                await this.fetchQueue();
-                this.scheduleNextPoll();
+                try {
+                    await this.fetchQueue();
+                } finally {
+                    this.scheduleNextPoll();
+                }
             }, delay);
         },
 
         wakeUpPolling() {
-            if (this.pollTimeout) clearTimeout(this.pollTimeout);
+            if (this.pollTimeout) {
+                clearTimeout(this.pollTimeout);
+                this.pollTimeout = null;
+            }
             this.fetchQueue().then(() => {
                 this.scheduleNextPoll();
             });

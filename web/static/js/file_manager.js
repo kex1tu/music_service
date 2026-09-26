@@ -14,6 +14,82 @@ function fileManagerComponent() {
         totalFiles: 0,
         isLoading: false,
 
+        // Пагинация и фильтрация
+        searchQuery: '',
+        currentPage: 1,
+        pageSize: 50,
+        lastLoadedAt: 0,
+
+        get filteredItems() {
+            if (!this.searchQuery || !this.searchQuery.trim()) {
+                return this.items || [];
+            }
+            const q = this.searchQuery.toLowerCase().trim();
+            return (this.items || []).filter(item => {
+                return (item.name && item.name.toLowerCase().includes(q)) ||
+                       (item.title && item.title.toLowerCase().includes(q)) ||
+                       (item.artist && item.artist.toLowerCase().includes(q)) ||
+                       (item.album && item.album.toLowerCase().includes(q));
+            });
+        },
+
+        get totalFiltered() {
+            return this.filteredItems.length;
+        },
+
+        get totalPages() {
+            if (this.pageSize === 0) return 1;
+            const len = this.totalFiltered;
+            return Math.max(1, Math.ceil(len / this.pageSize));
+        },
+
+        get paginatedItems() {
+            const list = this.filteredItems;
+            if (this.pageSize === 0) return list;
+            const start = (this.currentPage - 1) * this.pageSize;
+            return list.slice(start, start + this.pageSize);
+        },
+
+        get paginationInfo() {
+            const total = this.totalFiltered;
+            if (total === 0) return '0 из 0';
+            if (this.pageSize === 0) return `1–${total} из ${total}`;
+            const start = (this.currentPage - 1) * this.pageSize + 1;
+            const end = Math.min(this.currentPage * this.pageSize, total);
+            return `${start}–${end} из ${total}`;
+        },
+
+        setPage(page) {
+            const p = Math.max(1, Math.min(this.totalPages, page));
+            this.currentPage = p;
+        },
+
+        prevPage() {
+            if (this.currentPage > 1) {
+                this.currentPage--;
+            }
+        },
+
+        nextPage() {
+            if (this.currentPage < this.totalPages) {
+                this.currentPage++;
+            }
+        },
+
+        setPageSize(size) {
+            this.pageSize = size === 'all' || size === '0' || size === 0 ? 0 : Number(size);
+            this.currentPage = 1;
+        },
+
+        onSearchInput() {
+            this.currentPage = 1;
+        },
+
+        clearSearch() {
+            this.searchQuery = '';
+            this.currentPage = 1;
+        },
+
         init() {
             this.loadDirectory('');
 
@@ -30,19 +106,23 @@ function fileManagerComponent() {
                 this.loadDirectory(targetPath);
             });
 
-            // Автообновление при возврате на вкладку Файлы
+            // Автообновление при возврате на вкладку Файлы (с кулдауном 30 секунд)
             if (this.$watch) {
                 this.$watch('$store.app.activeTab', (tab) => {
                     if (tab === 'files') {
-                        this.loadDirectory(this.currentPath);
+                        if (Date.now() - this.lastLoadedAt > 30000) {
+                            this.loadDirectory(this.currentPath);
+                        }
                     }
                 });
             }
 
-            // Автообновление при переключении фокуса на окно браузера
+            // Автообновление при переключении фокуса на окно браузера (с кулдауном 30 секунд)
             window.addEventListener('focus', () => {
                 if (Alpine.store('app').activeTab === 'files') {
-                    this.loadDirectory(this.currentPath);
+                    if (Date.now() - this.lastLoadedAt > 30000) {
+                        this.loadDirectory(this.currentPath);
+                    }
                 }
             });
         },
@@ -52,6 +132,9 @@ function fileManagerComponent() {
                 path = (typeof this.currentPath === 'string' && this.currentPath !== '[object Object]') ? this.currentPath : '';
             }
             this.isLoading = true;
+            this.currentPage = 1;
+            this.searchQuery = '';
+            this.lastLoadedAt = Date.now();
 
             try {
                 const res = await fetch(`/files?path=${encodeURIComponent(path || '')}&_t=${Date.now()}`);

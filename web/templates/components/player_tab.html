@@ -114,22 +114,24 @@
                     <span class="text-[10px] font-mono text-content-muted w-3">L</span>
                     <div class="flex-1 h-2 bg-surface-elevated rounded-full overflow-hidden flex">
                         <div
+                            id="vu-meter-bar-l"
                             class="h-full bg-gradient-to-r from-brand via-amber-400 to-red-500 transition-all duration-75"
-                            :style="`width: ${$store.player.vuMeterL}%;`">
+                            style="width: 0%;">
                         </div>
                     </div>
-                    <span class="text-[10px] font-mono text-content-secondary w-7 text-right" x-text="`${$store.player.vuMeterL}%`"></span>
+                    <span id="vu-meter-val-l" class="text-[10px] font-mono text-content-secondary w-7 text-right">0%</span>
                 </div>
                 <!-- Правый канал -->
                 <div class="flex items-center space-x-2">
                     <span class="text-[10px] font-mono text-content-muted w-3">R</span>
                     <div class="flex-1 h-2 bg-surface-elevated rounded-full overflow-hidden flex">
                         <div
+                            id="vu-meter-bar-r"
                             class="h-full bg-gradient-to-r from-brand via-amber-400 to-red-500 transition-all duration-75"
-                            :style="`width: ${$store.player.vuMeterR}%;`">
+                            style="width: 0%;">
                         </div>
                     </div>
-                    <span class="text-[10px] font-mono text-content-secondary w-7 text-right" x-text="`${$store.player.vuMeterR}%`"></span>
+                    <span id="vu-meter-val-r" class="text-[10px] font-mono text-content-secondary w-7 text-right">0%</span>
                 </div>
             </div>
 

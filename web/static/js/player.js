@@ -361,6 +361,14 @@ document.addEventListener('alpine:init', () => {
                 cancelAnimationFrame(this.animationFrameId);
                 this.animationFrameId = null;
             }
+            const barL = document.getElementById('vu-meter-bar-l');
+            const barR = document.getElementById('vu-meter-bar-r');
+            const valL = document.getElementById('vu-meter-val-l');
+            const valR = document.getElementById('vu-meter-val-r');
+            if (barL) barL.style.width = '0%';
+            if (barR) barR.style.width = '0%';
+            if (valL) valL.textContent = '0%';
+            if (valR) valR.textContent = '0%';
         },
 
         renderVisualizer() {
@@ -463,9 +471,17 @@ document.addEventListener('alpine:init', () => {
                 }
             }
 
-            // Обновление VU пиков
-            this.vuMeterL = Math.min(100, Math.round((sumL / (16 * 255)) * 100));
-            this.vuMeterR = Math.min(100, Math.round((sumR / (16 * 255)) * 100));
+            // Обновление аналоговых VU пиков напрямую в DOM без реактивного шторма Alpine
+            const pctL = Math.min(100, Math.round((sumL / (16 * 255)) * 100));
+            const pctR = Math.min(100, Math.round((sumR / (16 * 255)) * 100));
+            const barL = document.getElementById('vu-meter-bar-l');
+            const barR = document.getElementById('vu-meter-bar-r');
+            const valL = document.getElementById('vu-meter-val-l');
+            const valR = document.getElementById('vu-meter-val-r');
+            if (barL) barL.style.width = pctL + '%';
+            if (barR) barR.style.width = pctR + '%';
+            if (valL) valL.textContent = pctL + '%';
+            if (valR) valR.textContent = pctR + '%';
 
             // Частотные подписи внизу
             ctx.fillStyle = '#52525b'; // Zinc 600
