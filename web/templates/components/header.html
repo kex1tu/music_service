@@ -155,6 +155,16 @@
                     </svg>
                     <span>Аудит</span>
                 </button>
+                <button
+                    @click="$store.app.activeTab = 'player'; $store.player.onTabOpened()"
+                    :class="$store.app.activeTab === 'player' ? 'bg-emerald-600 text-white font-medium shadow' : 'text-gray-400 hover:text-gray-200'"
+                    class="px-3 sm:px-4 py-1.5 rounded-md text-sm transition-all flex items-center space-x-2 relative">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                    </svg>
+                    <span>Плеер</span>
+                    <span x-show="$store.player.isPlaying" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-0.5"></span>
+                </button>
             </nav>
 
             <!-- Пользователь / Вход -->

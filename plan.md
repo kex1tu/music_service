@@ -1,192 +1,173 @@
-# План: Audio Streaming & Web Audio Player Pipeline (Блок 44)
+# План: Dedicated Studio Hi-Fi Player Tab (Блок 45)
 
 **Дата:** 26 сентября 2026  
 **Статус:** `COMPLETED`  
-**Целевые компоненты:** `internal/api/handlers/`, `internal/api/`, `internal/db/`, `web/templates/components/`, `web/static/js/`, `web/templates/index.html`.
+**Целевые компоненты:** `web/templates/components/`, `web/templates/`, `web/static/js/`, `internal/api/handlers/`.
 
 ---
 
 ## 1. Цель и границы задачи (Objective & Scope)
 
 ### 1.1. Проблема
-На текущий момент в сервисе реализован полный пайплайн загрузки (yt-dlp, ffmpeg), редактирования ID3v2.4 тегов, поиска текстов песен (LRCLIB), навигации по файловой системе и аудита медиатеки.
-Однако полноценного воспроизведения аудио нет:
-1. В интерфейсе отсутствует аудиоплеер — пользователь не может прослушать скачанный трек или проверить качество аудиофайла непосредственно в браузере.
-2. Существующий эндпоинт `GET /files/stream?path=...` принимает сырой путь к файлу через query-параметр, что неудобно для плееров, требует сложного URL-экранирования и не предоставляет структурированного API для сторонних клиентов или мобильных приложений.
-3. Отсутствуют эндпоинты получения легковесных метаданных трека и обложки по стабильному идентификатору (`track_id`).
-4. Отсутствует поддержка эндпоинта-алиаса `/api/library/stream/{id}/chunks`, необходимого для xHTTP-маскировки VPN-трафика под аудиостриминг на боевом сервере `nl_vpn`.
+В Блоке 44 был успешно внедрен бэкенд стриминга (HTTP RFC 7233 Range, Zero-Copy sendfile, детерминированные TrackID) и базовый нижний sticky-миниплеер.
+Однако для полноценного, эстетически выверенного взаимодействия с медиатекой пользователю требуется **выделенная вкладка «Плеер»** с бескомпромиссным, профессиональным дизайном («не нейрослоп», отказ от шаблонных градиентных карточек, характерный индустриальный Hi-Fi стиль **Teenage Engineering / Studio Console**).
 
-### 1.2. In-Scope (что входит в задачу)
-1. **Детерминированная идентификация треков (`TrackID`):**
-   - Вычисление стабильного 16-символьного хэша `TrackHash(relPath) = sha256(relPath)[:16]`.
-   - Универсальный резолвер `resolveTrackPath(idOrHash)`: поддержка числового ID из SQLite (`tracks.id`), 16-символьного hex-хэша и пути файла.
-   - Строгая изоляция через `PathSandbox.Resolve()` с возвратом HTTP 403 Forbidden при любых попытках path traversal.
-2. **HTTP Range Audio Streaming (RFC 7233 / RFC 9110):**
-   - Высокопроизводительный Zero-Copy стриминг через `http.ServeFile` на ядре Linux (`sendfile(2)`).
-   - Поддержка заголовков `Range: bytes=start-end`, `bytes=start-`, `206 Partial Content`, `Content-Range`, `Accept-Ranges: bytes`, `416 Range Not Satisfiable`.
-   - Эндпоинт `GET /api/tracks/{id}/stream`.
-   - VPN-алиас `GET /api/library/stream/{id}/chunks` для маскировки xHTTP-трафика.
-3. **Метаданные и обложки по ID:**
-   - Эндпоинт `GET /api/tracks/{id}/metadata`: мгновенный ответ из SQLite WAL (`duration`, `bitrate`, `title`, `artist`, `album`, `has_cover`) с fallback на парсер ID3v2.4.
-   - Эндпоинт `GET /api/tracks/{id}/cover`: извлечение встроенного APIC-фрейма или папочной обложки `cover.jpg` с `Cache-Control: public, max-age=86400`.
-   - Эндпоинт листинга `GET /api/library/tracks?query=&limit=&offset=`.
-4. **No-Build Web Audio Player (Alpine.js CDN + Tailwind CSS CDN):**
-   - Компонент плеера [`web/templates/components/audio_player.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audio_player.html): фиксированная нижняя панель (Sticky Bottom Bar) в стиле modern dark UI (Spotify/Navidrome).
-   - Обложка трека (48×48), название, артист, тайминги (`01:23 / 03:45`).
-   - Кнопки управления: Play/Pause, Next/Prev, ползунок перемотки с перемоткой по клику (Range requests), регулятор громкости и Mute.
-   - Глобальное состояние `Alpine.store('player', ...)` в [`web/static/js/player.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/player.js).
-   - Интеграция кнопки воспроизведения ▶ в таблицу файлов [`web/templates/components/file_manager.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/file_manager.html) с подсветкой активного трека.
-5. **Тестирование и валидация:**
-   - Полноценные тесты эндпоинтов стриминга с различными вариациями `Range`, некорректными диапазонами, проверкой `403 Forbidden` и валидацией метаданных.
-   - Полный прогон `go test -race ./...`.
+### 1.2. Решения пользователя по интерфейсу и функционалу
+По результатам интерактивного брифа согласованы следующие требования:
+1. **Эстетическое направление:** Студийный Hi-Fi / Teenage Engineering — глубокий матовый графит (`#0d0f12`, `#14171f`), тактильные переключатели с физической окантовкой, точная моноширинная телеметрия, CRT-дисплей с частотным спектром и аналоговые светодиодные янтарно-изумрудные индикаторы.
+2. **Интерактивные модули (все 4 согласованы):**
+   - **Synced Scrolling Lyrics (`.lrc`):** Караоке-подсветка текущей строчки, плавный автоскролл, перемотка по клику на строчку.
+   - **Real-time Canvas Audio Visualizer:** Web Audio API (`AudioContext`, `AnalyserNode`), 32 частотные полосы с пик-холдом (падающие маркеры пиков), частотная сетка (`32Hz` – `16kHz`).
+   - **Интерактивная очередь (Queue / Tape Rack):** Треклист с удалением, перемещением выше/ниже, очисткой, прямым переходом и анимированным мини-эквалайзером на активном треке.
+   - **Технический паспорт трека (Audiophile Specs):** Битрейт (320 kbps CBR), частота дискретизации (44.1 kHz), размер файла, стандарт тегов (ID3v2.4 UTF-8 с null-разделителями), 16-символьный SHA-256 хэш трека.
+3. **Поведение мини-плеера:** Липкая нижняя плашка остаётся на всех вкладках, а при клике по ней (или кнопке разворота) открывается вкладка «Плеер».
 
-### 1.3. Out-of-Scope (что явно не входит)
-- Транскодинг на лету через ffmpeg pipe (вся библиотека уже стандартизирована в MP3 320 kbps CBR по инварианту №4 `AGENTS.md`; транскодинг без seek ломает перемотку и создает оверинжиниринг).
-- Внедрение внешних JS-библиотек плееров (Howler.js, Video.js и т.д.) — строго нативный HTML5 `<audio>` + Alpine.js без сборки.
-- Плейлисты произвольного состава в базе данных (в первой версии очередь воспроизведения формируется на лету из треков текущей директории или результатов поиска).
+### 1.3. In-Scope (что входит в задачу)
+1. **Навигация:** Добавление 4-й вкладки «Плеер» в шапку [`web/templates/components/header.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/header.html) с сохранением состояния `$store.app.activeTab = 'player'`.
+2. **Шаблон студийной консоли:** Создание [`web/templates/components/player_tab.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/player_tab.html) с 3-палубной архитектурой (Left Deck: Cassette & Transport, Center Deck: Multi-monitor CRT, Right Deck: Tape Queue).
+3. **Включение в базовый шаблон:** Подключение компонента в [`web/templates/index.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/index.html).
+4. **Реактивный движок плеера:** Расширение [`web/static/js/player.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/player.js):
+   - Инициализация Web Audio API `AudioContext` + `AnalyserNode` (обработка политик автоплея и однократного создания `createMediaElementSource`).
+   - Рендер-луп спектроанализатора на HTML5 Canvas (32 бара + peak hold).
+   - Парсер LRC-таймкодов и караоке-трекер с кликабельным `seek(time)`.
+   - Операции управления очередью (`removeFromQueue`, `moveInQueue`, `clearQueue`).
+   - Переход во вкладку плеера (`openPlayerTab()`).
+5. **Связка с мини-плеером:** Добавление кнопки «Развернуть консоль» и клика по обложке/названию в [`web/templates/components/audio_player.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audio_player.html).
+6. **Обогащение метаданных бэкенда:** Добавление полей `file_size` и `track_number` в `TrackMetadataResponse` в [`internal/api/handlers/stream_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/stream_handlers.go).
+
+### 1.4. Out-of-Scope (что явно не входит)
+- Внедрение внешних NPM-библиотек или frontend-сборщиков (строго инвариант №1: Pure Go + No-Build Alpine.js + Tailwind CDN).
+- Транскодинг на лету (все файлы в медиатеке соответствуют стандарту MP3 320 kbps).
 
 ---
 
 ## 2. Анализ текущего состояния (Current State Analysis)
 
-| Компонент | Текущее состояние | Что требуется добавить |
+| Файл | Текущее состояние | Что необходимо изменить |
 |---|---|---|
-| [`stream_search_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/stream_search_handlers.go) | Содержит простой `StreamAudio(w, r)`, принимающий `?path=...` и вызывающий `http.ServeFile` | Вынести логику треков по ID: `StreamTrack`, `GetTrackMetadata`, `GetTrackCover`, `ListLibraryTracks` |
-| [`router.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/router.go) | Только `/files/stream` внутри защищенной группы `/files` | Маршруты `/api/tracks/{id}/*` и `/api/library/stream/{id}/chunks` |
-| [`schema.sql`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/db/schema.sql) | Поле `file_hash TEXT` уже присутствует в таблице `tracks`, но не индексировано | Индекс `idx_tracks_hash` и заполнение `file_hash` при сканировании для $O(1)$ поиска |
-| [`file_manager.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/file_manager.html) | Таблица треков отображает метаданные и кнопки «Сверить», «Теги», «Удалить» | Добавить кнопку Play ▶ для аудиофайлов и индикатор текущего воспроизведения |
-| [`index.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/index.html) | Модальные окна и экраны загрузчика/менеджера/аудита | Включение шаблона `audio_player` и подключение скрипта `player.js` |
+| [`header.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/header.html) | Вкладки: Загрузчик, Файлы, Аудит | Добавить кнопку вкладки «Плеер» с иконкой студийной деки и индикатором воспроизведения |
+| [`index.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/index.html) | Включает `downloader`, `file_manager`, `audit` | Добавить `{{ template "player_tab" . }}` в блок `<main>` |
+| [`player.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/player.js) | Управляет `audioElement`, базовым воспроизведением и громкостью | Добавить Web Audio API Analyser, LRC-парсер, караоке-скроллер, расширенное управление очередью |
+| [`audio_player.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audio_player.html) | Стики-миниплеер внизу экрана | Добавить кнопку открытия вкладки «Плеер» и клик по треку |
+| [`player_tab.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/player_tab.html) | Отсутствует | **[NEW]** Создать полноразмерный студийный интерфейс в стиле Teenage Engineering |
+| [`stream_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/stream_handlers.go) | `TrackMetadataResponse` отдает базовые поля | Добавить `file_size`, `track_number`, `sample_rate` |
 
 ---
 
 ## 3. Архитектурное решение и обоснование (Architecture & Rationale)
 
-### 3.1. Архитектурная схема взаимодействия
+### 3.1. Дизайн-система: Teenage Engineering / Studio Console Hi-Fi
+Вместо типового «нейрослопа» (мягкие розово-фиолетовые градиенты, полупрозрачные карточки с размытием, размазанные тени) интерфейс строится по законам индустриального дизайна профессионального звукового оборудования:
+- **Палитра:**
+  - Шасси (Base): `#0d0f12` — глубокий матовый графит.
+  - Модульные рэковые панели: `#14171f` — фактурная металлическая поверхность.
+  - Углубления регуляторов (Wells): `#191e28` — тактильные гнезда.
+  - Линии разметки: `#262d3d` и `border-white/10` — строгая гравировка 1px.
+  - Индикаторы Amber: `#f59e0b` / `#d97706` — лампа накаливания / винтажный индикатор записи.
+  - Индикаторы Emerald: `#10b981` / `#059669` — студийный светодиод активности / пик-метр.
+- **Типографика:**
+  - Чистый гротеск для названий треков и артистов.
+  - Строгий моноширинный шрифт (`font-mono tracking-wider`) для всех параметров: `CH-01`, `03:42.18`, `320 KBPS / 44.1 KHZ`, `ID3v2.4 UTF-8`, `43.8 MB`.
+- **Компоновка (3-Deck Rack):**
+  - **Left Deck (Cassette & Master Controls):** Физический картридж трека (крупная обложка с виниловым акцентом), название, артист, блок тяжелых тактильных кнопок управления, стерео-VU пиковые индикаторы, шкала воспроизведения с миллисекундной точностью, ползунок уровня громкости.
+  - **Center Deck (Multi-Function Monitor):** Переключаемый CRT-экран с тремя режимами:
+    1. *SPECTRUM:* Реалтайм эквалайзер на Canvas с пик-холдом.
+    2. *LYRICS:* Синхронизированный караоке-текст песни с интерактивной перемоткой.
+    3. *PASSPORT:* Технический паспорт файла и спецификация тегов.
+  - **Right Deck (Tape Queue Rack):** Очередь треков с живым эквалайзером, кнопками смены порядка, удаления и счетчиками длительности.
 
+### 3.2. Архитектура Web Audio API & Canvas Visualizer
 ```text
-┌────────────────────────────────────────────────────────────────────────┐
-│                          Браузер / Web UI                              │
-│                                                                        │
-│   [Таблица файлов / Поиск] ──(клик Play)──► Alpine.store('player')    │
-│                                                     │                  │
-│                                                     ▼                  │
-│   [Sticky Bottom Player] ◄─────────────── HTML5 <audio>               │
-└───────────────────────────────────────────────┬────────────────────────┘
-                                                │ HTTP GET
-                                                │ Range: bytes=1048576-
-                                                ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                        Go-бэкенд (Chi Router)                          │
-│                                                                        │
-│  /api/tracks/{id}/stream ──► FileHandler.StreamTrack                   │
-│  /api/library/stream/{id}/chunks (VPN alias)                           │
-│                                    │                                   │
-│                 ┌──────────────────┴──────────────────┐                │
-│                 ▼                                     ▼                │
-│      1. resolveTrackPath(id)                2. musicSandbox.Resolve    │
-│         - in-memory fast cache                 - защита от traversal   │
-│         - SQLite query (id / file_hash)        - 403 Forbidden         │
-│                 │                                     │                │
-│                 └──────────────────┬──────────────────┘                │
-│                                    ▼                                   │
-│                     3. http.ServeFile(w, r, path)                     │
-│                        - RFC 7233 Range parser                         │
-│                        - Linux sendfile(2) Zero-Copy                   │
-│                        - 206 Partial Content / 416                     │
-└────────────────────────────────────┬───────────────────────────────────┘
-                                     │ sendfile
-                                     ▼
-                            [Файловая система]
-                        MUSIC_DIR/Artist/Album/01.mp3
+┌───────────────────────────────────────────────────────────────┐
+│                    HTML5 <audio> Element                      │
+└──────────────────────────────┬────────────────────────────────┘
+                               │ createMediaElementSource() (once)
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│              Web Audio API: AnalyserNode (fftSize=64)         │
+│                 32 частотных бина (0 - 22.05 kHz)             │
+└──────────────┬────────────────────────────────┬───────────────┘
+               │ connect                        │ getByteFrequencyData()
+               ▼                                ▼
+┌──────────────────────────────┐ ┌──────────────────────────────┐
+│ AudioContext.destination     │ │   Canvas Render Loop (rAF)   │
+│ (Аудиовыход на динамики)     │ │ - 32 изумрудных полосы       │
+└──────────────────────────────┘ │ - Peak-hold с гравитацией    │
+                                 │ - Частотная шкала (Гц/кГц)   │
+                                 └──────────────────────────────┘
 ```
+**Важные технические гарантии:**
+1. Метод `audioCtx.createMediaElementSource(audioEl)` вызывается строго один раз и кэшируется в `$store.player.audioSourceNode` во избежание ошибки `InvalidStateError`.
+2. Перед возобновлением воспроизведения проверяется состояние `audioCtx.state === 'suspended'`: вызывается `audioCtx.resume()` по жесту пользователя.
+3. Цикл `requestAnimationFrame` активен только тогда, когда открыта вкладка `player` и `isPlaying === true`. При переходе на другую вкладку или паузе рендеринг засыпает, гарантируя 0% паразитной нагрузки на CPU/GPU.
 
-### 3.2. Детальное обоснование принятых решений («Почему именно так»)
+### 3.3. Архитектура движка Synced LRC Lyrics
+1. При смене трека `$store.player` вызывает `GET /lyrics?path={path}`.
+2. Текст парсится регулярным выражением `/\[(\d{2}):(\d{2}(?:\.\d{2,3})?)\](.*)/g`.
+3. Каждая строка преобразуется в объект `{ time: seconds, text: string }`.
+4. В процессе воспроизведения (`timeupdate`) вычисляется индекс активной строки `currentLyricIndex`.
+5. Автоскролл: контейнер плавно центрирует активную строку через `scrollIntoView({ behavior: 'smooth', block: 'center' })`.
+6. Пользовательский скролл не блокируется; при клике на любую строку вызывается `seek(line.time)` с мгновенным переходом.
 
-1. **Использование `http.ServeFile` вместо ручной отдачи чанков:**
-   - *Почему:* Стандартный `http.ServeFile` в Go протестирован десятилетиями в высоконагруженных системах. Он реализует полную спецификацию RFC 7233 (включая многодиапазонные Range, open-ended Range, валидацию ETag и Last-Modified). В среде Linux `http.ServeFile` использует системный вызов `sendfile(2)`, при котором ядро ОС перенаправляет страницы памяти из дискового кэша напрямую в сокет без участия userspace. Это обеспечивает минимальное использование CPU и памяти (< 4 КБ на соединение).
-2. **Гибридный `TrackID` (Числовой ID + 16-hex хэш пути):**
-   - *Почему:* Фронтенду и сторонним клиентам удобнее оперировать короткими строками без слэшей. Хэш `sha256(relPath)[:16]` полностью детерминирован и не зависит от пересоздания базы SQLite. При этом проверка числового ID (`tracks.id`) сохраняет обратную совместимость с результатами поиска SQLite.
-3. **Хранение состояния плеера в выделенном `Alpine.store('player')`:**
-   - *Почему:* Разделение ответственности. `Alpine.store('app')` отвечает за навигацию по вкладкам, модальные окна и тосты. Вынос плеера в отдельный стор `player` изолирует логику событий аудио (`timeupdate`, `ended`, `error`, `volumechange`) и предотвращает лишние перерисовки других компонентов.
-4. **Отказ от внешних JS-библиотек воспроизведения:**
-   - *Почему:* Соответствие инварианту №1 из `AGENTS.md` (No-Build, zero npm). Нативный тег `<audio>` в современных браузерах безупречно поддерживает seek и Range-запросы, если сервер отвечает `206 Partial Content` и `Accept-Ranges: bytes`.
-
-### 3.3. Сравнительная таблица альтернатив
-
-| Критерий | Вариант 1: Предложенный (Go http.ServeFile + ID resolver + Alpine store) | Вариант 2: Ручной чанкинг в Go (io.CopyN по 1MB) | Вариант 3: Оставить только `?path=...` без ID и без плеера |
+### 3.4. Сравнительная таблица альтернатив
+| Критерий | Вариант 1 (Студийный 3-Deck Hi-Fi) | Вариант 2 (Шаблонный Tailwind SaaS плеер) | Вариант 3 (Только мини-плеер внизу) |
 |---|---|---|---|
-| **Производительность** | **Экстремальная** (Zero-Copy `sendfile(2)`) | Средняя (буферизация 1MB в памяти на чанк) | Экстремальная |
-| **Поддержка Range/Seek** | **100% стандарт RFC 7233** (все клиенты) | Требует ручного парсинга и обработки краевых случаев | 100% стандарт |
-| **Удобство URL** | **Отличное** (`/api/tracks/a1b2c3d4/stream`) | Отличное | Плохое (слэши, пробелы в URL) |
-| **Безопасность** | **Двойная** (ID lookup + `PathSandbox.Resolve`) | Двойная | Только `PathSandbox.Resolve` |
-| **UX для пользователя** | **Встроенный плеер в браузере** | Встроенный плеер | Нет возможности слушать |
+| **Уникальность стиля** | **Бескомпромиссная (Teenage Engineering)** | Низкая («нейрослоп», типовые карточки) | Минимальная |
+| **Визуализатор** | **Реалтайм Canvas с пик-холдом** | Фейковый CSS-вейвформ | Отсутствует |
+| **Синхронный караоке-текст** | **Интерактивный с кликом и автоскроллом** | Статичный блок текста | Нет |
+| **Управление очередью** | **Полнофункциональный рэк** | Простой выпадающий список | Только кнопки след/пред |
+| **Нагрузка на браузер** | **Минимальная (отключение при скрытии)** | Низкая | Минимальная |
 
 ---
 
 ## 4. Пошаговая декомпозиция реализации (Step-by-Step Implementation)
 
-### Этап 1: Доработка базы данных и идентификации треков
-- **`[MODIFY]` [`internal/db/schema.sql`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/db/schema.sql)**:
-  Добавление индекса `CREATE INDEX IF NOT EXISTS idx_tracks_hash ON tracks(file_hash);`.
-- **`[MODIFY]` [`internal/db/queries.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/db/queries.go)**:
-  Добавление методов:
-  - `GetTrackByIDOrHash(ctx context.Context, idOrHash string) (*TrackEntity, error)`
-  - `UpdateTrackHash(ctx context.Context, trackID int64, hash string) error`
+### Этап 1: Доработка бэкенда метаданных
+- **`[MODIFY]` [`internal/api/handlers/stream_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/stream_handlers.go)**:
+  - Добавить поля `file_size`, `track_number`, `sample_rate` в структуру `TrackMetadataResponse`.
+  - Заполнить их в `GetTrackMetadata` из `TrackEntity` или через `id3.ReadTags` и `os.Stat`.
 
-### Этап 2: Бэкенд-хендлеры стриминга, метаданных и обложек
-- **`[NEW]` [`internal/api/handlers/stream_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/stream_handlers.go)**:
-  - Функция `TrackHash(relPath string) string` (детерминированный SHA256 [:16]).
-  - Метод `(h *FileHandler) resolveTrack(idOrHash string) (fullPath string, relPath string, track *db.TrackEntity, err error)`.
-  - Метод `(h *FileHandler) StreamTrack(w http.ResponseWriter, r *http.Request)`.
-  - Метод `(h *FileHandler) GetTrackMetadata(w http.ResponseWriter, r *http.Request)`.
-  - Метод `(h *FileHandler) GetTrackCover(w http.ResponseWriter, r *http.Request)`.
-  - Метод `(h *FileHandler) ListLibraryTracks(w http.ResponseWriter, r *http.Request)`.
-- **`[MODIFY]` [`internal/api/handlers/file_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/file_handlers.go)**:
-  - Добавление `trackCache sync.Map` в `FileHandler` для мгновенного резолвинга без обращения к диску.
-  - Обогащение ответа `fileItem` полями `id` и `stream_url` для каждого `.mp3`.
+### Этап 2: Расширение JavaScript движка плеера
+- **`[MODIFY]` [`web/static/js/player.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/player.js)**:
+  - Добавить поля состояния:
+    - `audioCtx`, `analyserNode`, `audioSourceNode`, `visualizerRunning`
+    - `centerDeckMode` (`'spectrum'`, `'lyrics'`, `'specs'`)
+    - `lyricsLines`, `currentLyricIndex`, `lyricsLoading`, `lyricsError`, `lyricsType`
+    - `stereoPeakL`, `stereoPeakR` (VU levels)
+  - Методы:
+    - `initAudioVisualizer(canvasEl)`: подключение Web Audio API к `<audio>` и запуск Canvas loop.
+    - `loadLyrics(track)`: загрузка и парсинг `.lrc`/`.txt`.
+    - `updateLyrics(currentTime)`: подсветка строки и плавный скролл.
+    - `removeFromQueue(index)`, `moveInQueue(fromIdx, toIdx)`, `clearQueue()`
+    - `openPlayerTab()`: переключение на `$store.app.activeTab = 'player'`.
 
-### Этап 3: Регистрация маршрутов в Chi Router
-- **`[MODIFY]` [`internal/api/router.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/router.go)**:
-  Регистрация эндпоинтов:
-  ```go
-  r.Route("/api/tracks", func(r chi.Router) {
-      r.Use(authMiddleware)
-      r.Get("/{id}/stream", p.FileHandler.StreamTrack)
-      r.Get("/{id}/metadata", p.FileHandler.GetTrackMetadata)
-      r.Get("/{id}/cover", p.FileHandler.GetTrackCover)
-  })
-  r.Route("/api/library", func(r chi.Router) {
-      r.Use(authMiddleware)
-      r.Get("/tracks", p.FileHandler.ListLibraryTracks)
-      r.Get("/stream/{id}/chunks", p.FileHandler.StreamTrack) // xHTTP VPN obfuscation alias
-  })
-  ```
-  Поддержка передачи токена сессии через query-параметр `?token=` в middleware для внешних плееров (VLC, mpv).
+### Этап 3: Навигация в шапке
+- **`[MODIFY]` [`web/templates/components/header.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/header.html)**:
+  - Добавить 4-ю кнопку «Плеер» в навигационный блок:
+    ```html
+    <button
+        @click="$store.app.activeTab = 'player'; $store.player.onTabOpened()"
+        :class="$store.app.activeTab === 'player' ? 'bg-emerald-600 text-white font-medium shadow' : 'text-gray-400 hover:text-gray-200'"
+        class="px-3 sm:px-4 py-1.5 rounded-md text-sm transition-all flex items-center space-x-2">
+        <svg class="w-4 h-4" ...>...</svg>
+        <span>Плеер</span>
+        <span x-show="$store.player.isPlaying" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+    </button>
+    ```
 
-### Этап 4: No-Build фронтенд (Alpine.js + Tailwind)
-- **`[NEW]` [`web/templates/components/audio_player.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audio_player.html)**:
-  - Шаблон фиксированной панели плеера (Sticky Bottom Bar).
-  - Скрытый `<audio x-ref="audio">` элемент.
-  - Полоса прогресса с визуализацией буферизации и ползунком перемотки.
-  - Индикатор громкости с поддержкой Mute.
-- **`[NEW]` [`web/static/js/player.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/player.js)**:
-  - `Alpine.store('player', { ... })` со всеми методами воспроизведения.
-  - Горячие клавиши (Space: Play/Pause, Стрелки: перемотка +/- 5 сек, M: Mute).
-- **`[MODIFY]` [`web/templates/components/file_manager.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/file_manager.html)**:
-  - Добавление кнопки Play ▶ в каждой строке MP3-файла.
-  - Подсветка строки играющего трека.
+### Этап 4: Разработка шаблона выделенной вкладки плеера
+- **`[NEW]` [`web/templates/components/player_tab.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/player_tab.html)**:
+  - Корневой контейнер с условием `x-show="$store.app.activeTab === 'player'"`.
+  - Студийная рамка с аппаратной гравировкой, светодиодными индикаторами питания и стереоканала.
+  - **Левая палуба:** Кассета трека, большой виниловый диск/обложка, кнопки воспроизведения, VU-метр, слайдер времени и громкости.
+  - **Центральная палуба:** CRT-монитор с тумблером режимов (Спектроанализатор / Караоке LRC / Паспорт аудио).
+  - **Правая палуба:** Очередь треков с динамическим эквалайзером, драгом/перемещением и мгновенным запуском.
+
+### Этап 5: Интеграция в index.html и мини-плеер
 - **`[MODIFY]` [`web/templates/index.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/index.html)**:
-  - Подключение `player.js` и шаблона `audio_player`.
-
-### Этап 5: Автоматизированные тесты
-- **`[NEW]` [`internal/api/handlers/stream_handlers_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/stream_handlers_test.go)**:
-  - Тест `TestStreamTrack_Range206`: запрос с `Range: bytes=0-100` возвращает 206 и корректный `Content-Range`.
-  - Тест `TestStreamTrack_Full200`: запрос без `Range` возвращает 200 и весь файл.
-  - Тест `TestStreamTrack_RangeNotSatisfiable416`: запрос `Range: bytes=99999999-` возвращает 416.
-  - Тест `TestStreamTrack_PathTraversalBlocked`: проверка защиты от `../`.
-  - Тест `TestGetTrackMetadata`: проверка валидности JSON.
-  - Тест `TestGetTrackCover`: проверка извлечения обложки.
-  - Тест `TestStreamTrack_VPNAlias`: проверка роута `/api/library/stream/{id}/chunks`.
+  - Включение `{{ template "player_tab" . }}` внутри тега `<main>`.
+- **`[MODIFY]` [`web/templates/components/audio_player.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audio_player.html)**:
+  - Добавление кнопки «Развернуть консоль» и клика по названию/обложке для вызова `$store.player.openPlayerTab()`.
 
 ---
 
@@ -194,33 +175,38 @@
 
 | Риск | Описание | Стратегия митигации |
 |---|---|---|
-| **Path Traversal через ID** | Передача пути вида `../../etc/passwd` в качестве `track_id` | Вызов `musicSandbox.Resolve(relPath, false)` обязателен для каждого разрешённого пути. При `errors.Is(err, sandbox.ErrPathTraversal)` немедленно отдавать HTTP 403 Forbidden. |
-| **Утечка файловых дескрипторов** | Браузер резко разрывает соединение при перемотке трека | В Go `http.ServeFile` корректно обрабатывает закрытие контекста `r.Context().Done()` и закрывает дескриптор файла. |
-| **Трек отсутствует в SQLite** | Пользователь только что скопировал файл в папку, сканер ещё не отработал | Резолвер осуществляет fallback: если ID совпадает с хэшем файла на диске или передан валидный путь — файл отдаётся, а теги читаются на лету через `id3.ReadTags`. |
-| **Аудиофайлы без ID3-тегов** | Файл поврежден или не содержит тегов | Метаданные формируются из имени файла и размера; fallback на `audio/mpeg` MIME-тип. |
+| **InvalidStateError в Web Audio API** | Повторный вызов `createMediaElementSource(audioEl)` выбрасывает исключение | Сохранять `audioSourceNode` в инстансе стора и вызывать конструктор источника строго один раз. |
+| **Блокировка AudioContext политикой автоплея** | Браузер переводит `AudioContext` в состояние `suspended` до клика | Автоматический вызов `audioCtx.resume()` внутри обработчика `playTrack()` и `togglePlay()`. |
+| **Утечка ресурсов при фоновом рендеринге** | Canvas перерисовывается в цикле rAF при скрытой вкладке | Проверять флаг `$store.app.activeTab === 'player' && $store.player.isPlaying`. Если вкладка скрыта — прерывать rAF-луп. |
+| **Трек без LRC (только TXT или без слов)** | Нет таймкодов для караоке | Отображать структурированный чистый текст с моноширинными номерами строк или плашку «Текст отсутствует» с кнопкой поиска в LRCLIB. |
+| **Пустая очередь воспроизведения** | Пользователь открыл вкладку до запуска какого-либо трека | Отображать элегантный standby-экран студийной деки («NO TAPE LOADED», индикаторы в режиме ожидания, кнопка выбора трека из медиатеки). |
 
 ---
 
 ## 6. План тестирования и верификации (Verification Matrix)
 
-1. **Модульные и интеграционные тесты:**
-   - Запуск: `go test -v -race ./internal/api/handlers/ -run TestStream`
-   - Запуск полного набора: `go test -race ./...` (все пакеты должны оставаться зелёными, 0 data races).
+1. **Автоматизированные тесты бэкенда:**
+   - Запуск `go test -v -race ./...` (все тесты зеленые, 0 гонок).
 2. **Сборка бинарного файла:**
-   - Команда: `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go`
+   - `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go`
 3. **Ручная верификация UI:**
-   - Открытие веб-интерфейса в браузере.
-   - Запуск трека по кнопке ▶ в файловом менеджере.
-   - Проверка перемотки трека по клику на прогресс-бар (проверка отправки браузером Range-запросов и ответа 206).
-   - Проверка регулировки громкости и переключения треков.
+   - Переход на вкладку «Плеер» через шапку и через клик по мини-плееру.
+   - Запуск трека: проверка анимации частотного спектра на Canvas.
+   - Переключение в режим «Текст»: проверка плавного караоке-скроллинга и перемотки по клику на строчку.
+   - Переключение в режим «Паспорт»: проверка корректности битрейта, размера файла и ID3-тегов.
+   - Управление очередью: переключение треков, удаление трека из очереди, проверка живого эквалайзера рядом с текущим треком.
+   - Проверка энергоэффективности: сворачивание вкладки «Плеер» останавливает rAF-цикл.
 
 ---
 
 ## 7. Критерии приёмки (Definition of Done)
 
-- [ ] Все эндпоинты (`/api/tracks/{id}/stream`, `/api/tracks/{id}/metadata`, `/api/tracks/{id}/cover`, `/api/library/stream/{id}/chunks`) работают и протестированы.
-- [ ] Запросы с `Range: bytes=...` корректно возвращают HTTP 206 Partial Content с правильным `Content-Range`.
-- [ ] При попытке traversal возвращается HTTP 403 Forbidden.
-- [ ] В UI встроен современный адаптивный аудиоплеер на Alpine.js.
-- [ ] `go test -race ./...` проходит на 100% без ошибок и гонок.
-- [ ] Бинарник успешно собирается командой `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go`.
+- [x] Вкладка «Плеер» доступна в шапке сайта и открывается по клику на нижний мини-плеер.
+- [x] Дизайн выполнен строго в индустриальном стиле Teenage Engineering / Studio Console (без шаблонного градиентного «нейрослопа»).
+- [x] Реалтайм эквалайзер на Canvas работает через Web Audio API с частотной сеткой и пик-холдом.
+- [x] Синхронизированный караоке-текст плавно скроллится и позволяет мгновенно перематывать трек по клику.
+- [x] Очередь треков поддерживает интерактивное управление и индикацию активного трека.
+- [x] Аудиофильский паспорт трека отображает полные технические параметры.
+- [x] `go test -race ./...` проходит на 100% без ошибок.
+- [x] Бинарный файл успешно компилируется.
+

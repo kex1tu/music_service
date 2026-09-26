@@ -201,6 +201,15 @@ func TestStreamTrack_FullAndRangeRequests(t *testing.T) {
 		if meta.StreamURL != "/api/tracks/"+trackHash+"/stream" {
 			t.Errorf("expected StreamURL '/api/tracks/%s/stream', got '%s'", trackHash, meta.StreamURL)
 		}
+		if meta.SampleRate != 44100 {
+			t.Errorf("expected SampleRate 44100, got %d", meta.SampleRate)
+		}
+		if meta.TrackNumber != 1 {
+			t.Errorf("expected TrackNumber 1, got %d", meta.TrackNumber)
+		}
+		if meta.FileSize <= 0 {
+			t.Errorf("expected FileSize > 0, got %d", meta.FileSize)
+		}
 	})
 
 	// 8. Тест: Защита от Path Traversal -> 403 Forbidden

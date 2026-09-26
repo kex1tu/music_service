@@ -140,6 +140,11 @@ type TrackMetadataResponse struct {
 	Album       string `json:"album"`
 	DurationSec int    `json:"duration_sec"`
 	BitrateKbps int    `json:"bitrate_kbps"`
+	SampleRate  int    `json:"sample_rate"`
+	TrackNumber int    `json:"track_number,omitempty"`
+	Year        int    `json:"year,omitempty"`
+	Genre       string `json:"genre,omitempty"`
+	FileSize    int64  `json:"file_size,omitempty"`
 	Codec       string `json:"codec"`
 	HasCover    bool   `json:"has_cover"`
 	StreamURL   string `json:"stream_url"`
@@ -170,11 +175,12 @@ func (h *FileHandler) GetTrackMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := TrackMetadataResponse{
-		ID:        trackID,
-		Codec:     codec,
-		StreamURL: fmt.Sprintf("/api/tracks/%s/stream", trackID),
-		CoverURL:  fmt.Sprintf("/api/tracks/%s/cover", trackID),
-		FilePath:  relPath,
+		ID:         trackID,
+		Codec:      codec,
+		SampleRate: 44100,
+		StreamURL:  fmt.Sprintf("/api/tracks/%s/stream", trackID),
+		CoverURL:   fmt.Sprintf("/api/tracks/%s/cover", trackID),
+		FilePath:   relPath,
 	}
 
 	if track != nil {
@@ -183,6 +189,8 @@ func (h *FileHandler) GetTrackMetadata(w http.ResponseWriter, r *http.Request) {
 		resp.Album = track.Album
 		resp.DurationSec = int(track.Duration)
 		resp.BitrateKbps = track.Bitrate
+		resp.TrackNumber = track.TrackNumber
+		resp.FileSize = track.FileSize
 		resp.HasCover = track.HasCover || track.HasEmbeddedCover
 	} else {
 		// Читаем теги на лету через pure Go id3 движок
@@ -192,9 +200,15 @@ func (h *FileHandler) GetTrackMetadata(w http.ResponseWriter, r *http.Request) {
 			resp.Album = tags.Album
 			resp.DurationSec = int(tags.Duration)
 			resp.BitrateKbps = tags.Bitrate
+			resp.TrackNumber = tags.TrackNumber
+			resp.Year = tags.Year
+			resp.Genre = tags.Genre
 			resp.HasCover = tags.HasCover
 		} else {
 			resp.Title = strings.TrimSuffix(filepath.Base(fullPath), filepath.Ext(fullPath))
+		}
+		if fi, err := os.Stat(fullPath); err == nil {
+			resp.FileSize = fi.Size()
 		}
 	}
 

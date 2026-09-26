@@ -28,9 +28,12 @@
     <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
         
         <!-- ЛЕВАЯ КОЛОНКА: Обложка и метаданные трека -->
-        <div class="flex items-center space-x-3 min-w-0 w-1/4">
+        <div
+            @click="$store.player.openPlayerTab()"
+            title="Открыть студийную консоль плеера"
+            class="flex items-center space-x-3 min-w-0 w-1/4 cursor-pointer group">
             <!-- Обложка трека -->
-            <div class="relative w-12 h-12 rounded bg-gray-800 shrink-0 overflow-hidden shadow border border-gray-700/50 flex items-center justify-center">
+            <div class="relative w-12 h-12 rounded bg-gray-800 shrink-0 overflow-hidden shadow border border-gray-700/50 flex items-center justify-center group-hover:border-emerald-500/50 transition">
                 <template x-if="$store.player.currentTrack && ($store.player.currentTrack.has_cover || $store.player.currentTrack.cover_url)">
                     <img
                         :src="$store.player.currentTrack.cover_url || `/api/tracks/${$store.player.currentTrack.id || $store.player.currentTrack.path}/cover?_t=${$store.player.currentTrack.id}`"
@@ -49,7 +52,7 @@
             <!-- Название и Исполнитель -->
             <div class="min-w-0 flex-1">
                 <div
-                    class="text-sm font-medium text-white truncate"
+                    class="text-sm font-medium text-white truncate group-hover:text-emerald-400 transition"
                     :title="$store.player.currentTrack?.title || $store.player.currentTrack?.name"
                     x-text="$store.player.currentTrack?.title || $store.player.currentTrack?.name || 'Трек не выбран'">
                 </div>
@@ -159,6 +162,16 @@
                     title="Громкость"
                 >
             </div>
+
+            <!-- Развернуть консоль плеера -->
+            <button
+                @click="$store.player.openPlayerTab()"
+                title="Развернуть студийную консоль (Вкладка Плеер)"
+                class="text-gray-400 hover:text-emerald-400 transition p-1 rounded-full focus:outline-none ml-1">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm0 4h14V6H5v2zm0 10h14V10H5v8z"/>
+                </svg>
+            </button>
 
             <!-- Закрыть плеер -->
             <button
