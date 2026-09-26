@@ -21,16 +21,18 @@ type QueueSummaryResponse struct {
 
 // JobManager manages concurrent download jobs with SQLite persistence.
 type JobManager struct {
-	mu       sync.RWMutex
-	jobs     map[string]*DownloadJob
-	database *db.DB
+	mu         sync.RWMutex
+	jobs       map[string]*DownloadJob
+	database   *db.DB
+	syncTimers map[string]*time.Timer
 }
 
 // NewJobManager creates a new JobManager and restores existing jobs from SQLite.
 func NewJobManager(database *db.DB) *JobManager {
 	jm := &JobManager{
-		jobs:     make(map[string]*DownloadJob),
-		database: database,
+		jobs:       make(map[string]*DownloadJob),
+		database:   database,
+		syncTimers: make(map[string]*time.Timer),
 	}
 
 	if database != nil {
@@ -95,11 +97,41 @@ func (m *JobManager) syncJob(job *DownloadJob) {
 		ArtistName:      snap.ArtistName,
 		UpdatedAt:       snap.UpdatedAt,
 	}
-	go func() {
+
+	saveFn := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		_ = m.database.SaveJob(ctx, entity)
-	}()
+	}
+
+	// For terminal states, sync immediately to avoid losing final status
+	if snap.Status == StatusReady || snap.Status == StatusError || snap.Status == StatusCancelled {
+		m.mu.Lock()
+		if m.syncTimers != nil {
+			if prev, ok := m.syncTimers[snap.ID]; ok {
+				prev.Stop()
+				delete(m.syncTimers, snap.ID)
+			}
+		}
+		m.mu.Unlock()
+		go saveFn()
+		return
+	}
+
+	m.mu.Lock()
+	if m.syncTimers == nil {
+		m.syncTimers = make(map[string]*time.Timer)
+	}
+	if prev, ok := m.syncTimers[snap.ID]; ok {
+		prev.Stop()
+	}
+	m.syncTimers[snap.ID] = time.AfterFunc(500*time.Millisecond, func() {
+		m.mu.Lock()
+		delete(m.syncTimers, snap.ID)
+		m.mu.Unlock()
+		saveFn()
+	})
+	m.mu.Unlock()
 }
 
 // Add adds a new job to the manager and syncs to SQLite.
@@ -152,6 +184,10 @@ func (m *JobManager) ClearCompleted() int {
 		j.mu.RUnlock()
 		if st == StatusReady || st == StatusError || st == StatusCancelled {
 			delete(m.jobs, id)
+			if timer, ok := m.syncTimers[id]; ok {
+				timer.Stop()
+				delete(m.syncTimers, id)
+			}
 			count++
 			if m.database != nil {
 				delID := id
@@ -174,6 +210,10 @@ func (m *JobManager) Delete(id string) bool {
 	if ok {
 		j.Cancel()
 		delete(m.jobs, id)
+		if timer, ok := m.syncTimers[id]; ok {
+			timer.Stop()
+			delete(m.syncTimers, id)
+		}
 		if m.database != nil {
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

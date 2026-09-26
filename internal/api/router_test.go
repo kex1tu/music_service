@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -62,7 +63,8 @@ func setupTestRouter(t *testing.T) (http.Handler, *config.Config) {
 	res := resolver.NewSourceResolver(deezerClient, matcher, "")
 
 	jobMgr := downloader.NewJobManager(database)
-	downSvc := downloader.NewService(jobMgr, res, tmpSb, musicSb, "", 2)
+	downSvc := downloader.NewService(context.Background(), jobMgr, res, tmpSb, musicSb, "", 2)
+	t.Cleanup(downSvc.Close)
 	orgSvc := organizer.NewService(musicSb, tmpSb)
 	lyrSvc := lyrics.NewService(musicSb)
 	scannerSvc := scanner.NewScanner(musicSb, database, deezerClient)
@@ -70,7 +72,16 @@ func setupTestRouter(t *testing.T) (http.Handler, *config.Config) {
 	authHandler := handlers.NewAuthHandler(cfg)
 	downHandler := handlers.NewDownloadHandler(downSvc, deezerClient)
 	tagHandler := handlers.NewTagHandler(musicSb, tmpSb, orgSvc, deezerClient)
-	fileHandler := handlers.NewFileHandler(musicSb, tmpSb, database, downSvc, orgSvc, deezerClient, lyrSvc, scannerSvc)
+	fileHandler := handlers.NewFileHandler(handlers.FileHandlerParams{
+		MusicSandbox: musicSb,
+		TmpSandbox:   tmpSb,
+		Database:     database,
+		Downloader:   downSvc,
+		Organizer:    orgSvc,
+		Deezer:       deezerClient,
+		Lyrics:       lyrSvc,
+		Scanner:      scannerSvc,
+	})
 	lyrHandler := handlers.NewLyricsHandler(lyrSvc)
 
 	router := NewRouter(RouterParams{

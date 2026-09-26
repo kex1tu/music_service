@@ -112,9 +112,6 @@ music-manager/
 │   │   ├── css/style.css           # Базовые стили
 │   │   └── js/                     # Модульный JavaScript (Alpine.js)
 │   └── embed.go                    # Встраивание статики в бинарник
-└── tools/
-    ├── music-scanner/              # Автономный CLI сканер медиатеки
-    └── retag_genres/               # Инструмент нормализации жанров
 ```
 
 ---

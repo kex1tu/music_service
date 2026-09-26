@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -42,9 +43,18 @@ func setupTestFileHandler(t *testing.T) (*FileHandler, *sandbox.PathSandbox, *sa
 	lyrSvc := lyrics.NewService(musicSb)
 	orgSvc := organizer.NewService(musicSb, tmpSb)
 	jobMgr := downloader.NewJobManager(database)
-	dlSvc := downloader.NewService(jobMgr, nil, tmpSb, musicSb, "", 1)
+	dlSvc := downloader.NewService(context.Background(), jobMgr, nil, tmpSb, musicSb, "", 1)
+	t.Cleanup(dlSvc.Close)
 	scannerSvc := scanner.NewScanner(musicSb, database, nil)
-	handler := NewFileHandler(musicSb, tmpSb, database, dlSvc, orgSvc, nil, lyrSvc, scannerSvc)
+	handler := NewFileHandler(FileHandlerParams{
+		MusicSandbox: musicSb,
+		TmpSandbox:   tmpSb,
+		Database:     database,
+		Downloader:   dlSvc,
+		Organizer:    orgSvc,
+		Lyrics:       lyrSvc,
+		Scanner:      scannerSvc,
+	})
 
 	return handler, musicSb, tmpSb, database, musicDir, tmpDir
 }

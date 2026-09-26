@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -74,7 +75,8 @@ func TestGetDiscography_YandexMusic(t *testing.T) {
 	sourceRes := resolver.NewSourceResolver(nil, nil, "")
 	// Use mock yandex client in resolver via reflection or internal field
 	// Or pass directly to test
-	svc := downloader.NewService(nil, sourceRes, nil, nil, "", 2)
+	svc := downloader.NewService(context.Background(), nil, sourceRes, nil, nil, "", 2)
+	defer svc.Close()
 	sourceRes.Yandex().SetBaseURL(mockYt.URL)
 
 	h := NewDownloadHandler(svc, nil)
@@ -140,7 +142,8 @@ func TestGetDiscography_YandexHTTP451Geoblock(t *testing.T) {
 	sourceRes := resolver.NewSourceResolver(nil, nil, "")
 	sourceRes.Yandex().SetBaseURL(mockYt.URL)
 
-	svc := downloader.NewService(nil, sourceRes, nil, nil, "", 2)
+	svc := downloader.NewService(context.Background(), nil, sourceRes, nil, nil, "", 2)
+	defer svc.Close()
 	h := NewDownloadHandler(svc, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/downloads/discography?url=https://music.yandex.ru/artist/8135481", nil)

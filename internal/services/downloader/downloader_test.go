@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"context"
 	"testing"
 
 	"music-manager/internal/core/sandbox"
@@ -59,7 +60,8 @@ func TestService_RetryJob(t *testing.T) {
 	}
 
 	jobMgr := NewJobManager(nil)
-	svc := NewService(jobMgr, nil, tmpSb, musicSb, "", 1)
+	svc := NewService(context.Background(), jobMgr, nil, tmpSb, musicSb, "", 1)
+	defer svc.Close()
 
 	// 1. Non-existent job
 	_, err = svc.RetryJob("non-existent")
@@ -111,7 +113,8 @@ func TestService_CreateBackfillJob(t *testing.T) {
 	}
 
 	jobMgr := NewJobManager(nil)
-	svc := NewService(jobMgr, nil, tmpSb, musicSb, "", 1)
+	svc := NewService(context.Background(), jobMgr, nil, tmpSb, musicSb, "", 1)
+	defer svc.Close()
 
 	// Create backfill job
 	job, err := svc.CreateBackfillJob(
@@ -144,5 +147,28 @@ func TestService_CreateBackfillJob(t *testing.T) {
 	if status != StatusQueued && status != StatusResolving && status != StatusError {
 		t.Errorf("unexpected initial status: %s", status)
 	}
+}
+
+func TestService_CleanerStopsOnContextCancel(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpSb, err := sandbox.NewPathSandbox(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	musicSb, err := sandbox.NewPathSandbox(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	svc := NewService(ctx, nil, nil, tmpSb, musicSb, "", 1)
+
+	// Cancel the context and verify Close stops without deadlock or hang
+	cancel()
+	svc.Close()
+
+	// Create another service with Close() directly
+	svc2 := NewService(nil, nil, nil, tmpSb, musicSb, "", 1)
+	svc2.Close()
 }
 

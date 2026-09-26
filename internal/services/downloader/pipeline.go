@@ -285,14 +285,20 @@ func (s *Service) processTracksPipeline(
 	}
 	trackSem := make(chan struct{}, maxConcurrentTracks)
 
+trackLoop:
 	for i := range tracks {
 		idx := i + 1
 		t := &tracks[i]
 
+		select {
+		case <-ctx.Done():
+			break trackLoop
+		case trackSem <- struct{}{}:
+		}
+
 		wg.Add(1)
 		go func(trackIdx int, track *resolver.ResolvedTrack) {
 			defer wg.Done()
-			trackSem <- struct{}{}
 			defer func() { <-trackSem }()
 
 			select {

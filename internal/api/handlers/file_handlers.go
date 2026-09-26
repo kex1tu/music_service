@@ -3,11 +3,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
@@ -39,28 +41,43 @@ type FileHandler struct {
 	deezer       *resolver.DeezerClient
 	lyrics       *lyrics.Service
 	scanner      *scanner.Scanner
+	yandex       *resolver.YandexMusicClient
+	ytmusic      *resolver.YouTubeMusicClient
+	itunes       *resolver.ITunesClient
+	httpClient   *http.Client
 	lyricsState  lyricsBatchState
+	trackCache   sync.Map // Кэш ID/хэш -> относительный путь
 }
 
-func NewFileHandler(
-	musicSandbox *sandbox.PathSandbox,
-	tmpSandbox *sandbox.PathSandbox,
-	database *db.DB,
-	downloader *downloader.Service,
-	organizer *organizer.Service,
-	deezer *resolver.DeezerClient,
-	lyrics *lyrics.Service,
-	scanner *scanner.Scanner,
-) *FileHandler {
+// FileHandlerParams содержит параметры для инициализации FileHandler.
+type FileHandlerParams struct {
+	MusicSandbox *sandbox.PathSandbox
+	TmpSandbox   *sandbox.PathSandbox
+	Database     *db.DB
+	Downloader   *downloader.Service
+	Organizer    *organizer.Service
+	Deezer       *resolver.DeezerClient
+	Lyrics       *lyrics.Service
+	Scanner      *scanner.Scanner
+	Yandex       *resolver.YandexMusicClient
+	YTMusic      *resolver.YouTubeMusicClient
+	ITunes       *resolver.ITunesClient
+}
+
+func NewFileHandler(p FileHandlerParams) *FileHandler {
 	return &FileHandler{
-		musicSandbox: musicSandbox,
-		tmpSandbox:   tmpSandbox,
-		database:     database,
-		downloader:   downloader,
-		organizer:    organizer,
-		deezer:       deezer,
-		lyrics:       lyrics,
-		scanner:      scanner,
+		musicSandbox: p.MusicSandbox,
+		tmpSandbox:   p.TmpSandbox,
+		database:     p.Database,
+		downloader:   p.Downloader,
+		organizer:    p.Organizer,
+		deezer:       p.Deezer,
+		lyrics:       p.Lyrics,
+		scanner:      p.Scanner,
+		yandex:       p.Yandex,
+		ytmusic:      p.YTMusic,
+		itunes:       p.ITunes,
+		httpClient:   &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
@@ -78,6 +95,8 @@ type fileItem struct {
 	Duration     *int    `json:"duration,omitempty"`
 	HasCover     bool    `json:"has_cover"`
 	LyricsStatus string  `json:"lyrics_status"` // "none", "lrc", "txt"
+	ID           *string `json:"id,omitempty"`
+	StreamURL    *string `json:"stream_url,omitempty"`
 }
 
 type breadcrumbItem struct {
@@ -98,7 +117,11 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	relPath := r.URL.Query().Get("path")
 	fullPath, err := h.musicSandbox.Resolve(relPath, true)
 	if err != nil {
-		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
+		if errors.Is(err, sandbox.ErrPathTraversal) {
+			http.Error(w, `{"error":"access denied"}`, http.StatusForbidden)
+		} else {
+			http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
+		}
 		return
 	}
 
@@ -157,6 +180,12 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if strings.EqualFold(ext, ".mp3") {
+				tHash := db.TrackHash(itemRel)
+				fItem.ID = &tHash
+				streamURL := "/api/tracks/" + tHash + "/stream"
+				fItem.StreamURL = &streamURL
+				h.trackCache.Store(tHash, itemRel)
+
 				if tags, err := id3.ReadTags(itemFull, itemRel); err == nil {
 					fItem.TrackNumber = &tags.TrackNumber
 					fItem.Title = &tags.Title
@@ -217,7 +246,11 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 
 	fullPath, err := h.musicSandbox.Resolve(relPath, false)
 	if err != nil {
-		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
+		if errors.Is(err, sandbox.ErrPathTraversal) {
+			http.Error(w, `{"error":"access denied"}`, http.StatusForbidden)
+		} else {
+			http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
+		}
 		return
 	}
 

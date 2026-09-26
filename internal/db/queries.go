@@ -2,8 +2,13 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -301,3 +306,76 @@ func (db *DB) ResetLibraryTables(ctx context.Context) error {
 	}
 	return nil
 }
+
+// TrackHash вычисляет стабильный 16-символьный хэш пути к файлу трека.
+func TrackHash(relPath string) string {
+	clean := filepath.Clean(filepath.ToSlash(relPath))
+	h := sha256.Sum256([]byte(clean))
+	return hex.EncodeToString(h[:])[:16]
+}
+
+// TrackEntity представляет запись трека в SQLite со связанными альбомом и артистом.
+type TrackEntity struct {
+	ID               int64   `json:"id"`
+	AlbumID          int64   `json:"album_id"`
+	ArtistID         int64   `json:"artist_id"`
+	Title            string  `json:"title"`
+	Artist           string  `json:"artist,omitempty"`
+	Album            string  `json:"album,omitempty"`
+	TrackNumber      int     `json:"track_number"`
+	Duration         float64 `json:"duration"`
+	Bitrate          int     `json:"bitrate"`
+	FilePath         string  `json:"file_path"`
+	FileSize         int64   `json:"file_size"`
+	FileHash         string  `json:"file_hash,omitempty"`
+	HasEmbeddedCover bool    `json:"has_embedded_cover"`
+	LyricsStatus     string  `json:"lyrics_status"`
+	HasCover         bool    `json:"has_cover"`
+	CoverPath        string  `json:"cover_path,omitempty"`
+}
+
+// GetTrackByIDOrHash ищет трек по числовому ID, 16-символьному хэшу пути или прямому относительному пути.
+func (db *DB) GetTrackByIDOrHash(ctx context.Context, idOrHash string) (*TrackEntity, error) {
+	idOrHash = strings.TrimSpace(idOrHash)
+	if idOrHash == "" {
+		return nil, sql.ErrNoRows
+	}
+
+	var idNum int64
+	if num, err := strconv.ParseInt(idOrHash, 10, 64); err == nil && num > 0 {
+		idNum = num
+	}
+
+	query := `
+	SELECT t.id, t.album_id, t.artist_id, t.title, ar.name AS artist, al.title AS album,
+	       t.track_number, t.duration, t.bitrate, t.file_path, t.file_size,
+	       COALESCE(t.file_hash, ''), t.has_embedded_cover, t.lyrics_status,
+	       al.has_cover, COALESCE(al.cover_path, '')
+	FROM tracks t
+	JOIN albums al ON t.album_id = al.id
+	JOIN artists ar ON t.artist_id = ar.id
+	WHERE (t.id = ? AND ? > 0) OR t.file_hash = ? OR t.file_path = ?
+	LIMIT 1;
+	`
+
+	var t TrackEntity
+	row := db.conn.QueryRowContext(ctx, query, idNum, idNum, idOrHash, idOrHash)
+	err := row.Scan(
+		&t.ID, &t.AlbumID, &t.ArtistID, &t.Title, &t.Artist, &t.Album,
+		&t.TrackNumber, &t.Duration, &t.Bitrate, &t.FilePath, &t.FileSize,
+		&t.FileHash, &t.HasEmbeddedCover, &t.LyricsStatus,
+		&t.HasCover, &t.CoverPath,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// UpdateTrackHash обновляет file_hash трека в SQLite.
+func (db *DB) UpdateTrackHash(ctx context.Context, trackID int64, hash string) error {
+	query := `UPDATE tracks SET file_hash = ? WHERE id = ?;`
+	_, err := db.conn.ExecContext(ctx, query, hash, trackID)
+	return err
+}
+

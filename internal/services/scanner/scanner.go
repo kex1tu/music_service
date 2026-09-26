@@ -139,29 +139,45 @@ func (s *Scanner) RemoveFile(relPath string) error {
 	var trackID, albumID int64
 	err := s.database.Conn().QueryRow("SELECT id, album_id FROM tracks WHERE file_path = ?", relPath).Scan(&trackID, &albumID)
 	if err == nil {
-		_, _ = s.database.Conn().Exec("DELETE FROM tracks WHERE id = ?", trackID)
-		_, _ = s.database.Conn().Exec("DELETE FROM audit_issues WHERE (entity_type = 'track' AND entity_id = ?) OR file_path = ?", trackID, relPath)
-		_, _ = s.database.Conn().Exec("DELETE FROM track_genres WHERE track_id = ?", trackID)
+		if _, err := s.database.Conn().Exec("DELETE FROM tracks WHERE id = ?", trackID); err != nil {
+			log.Printf("[Scanner] RemoveFile: failed to delete track %d: %v", trackID, err)
+		}
+		if _, err := s.database.Conn().Exec("DELETE FROM audit_issues WHERE (entity_type = 'track' AND entity_id = ?) OR file_path = ?", trackID, relPath); err != nil {
+			log.Printf("[Scanner] RemoveFile: failed to clean audit_issues for track %d: %v", trackID, err)
+		}
+		if _, err := s.database.Conn().Exec("DELETE FROM track_genres WHERE track_id = ?", trackID); err != nil {
+			log.Printf("[Scanner] RemoveFile: failed to clean track_genres for track %d: %v", trackID, err)
+		}
 
 		if albumID > 0 {
 			var count int
 			_ = s.database.Conn().QueryRow("SELECT COUNT(*) FROM tracks WHERE album_id = ?", albumID).Scan(&count)
 			if count == 0 {
-				_, _ = s.database.Conn().Exec("DELETE FROM albums WHERE id = ?", albumID)
-				_, _ = s.database.Conn().Exec("DELETE FROM missing_tracks WHERE album_id = ?", albumID)
+				if _, err := s.database.Conn().Exec("DELETE FROM albums WHERE id = ?", albumID); err != nil {
+					log.Printf("[Scanner] RemoveFile: failed to delete album %d: %v", albumID, err)
+				}
+				if _, err := s.database.Conn().Exec("DELETE FROM missing_tracks WHERE album_id = ?", albumID); err != nil {
+					log.Printf("[Scanner] RemoveFile: failed to clean missing_tracks for album %d: %v", albumID, err)
+				}
 			} else {
-				_, _ = s.database.Conn().Exec(`
+				if _, err := s.database.Conn().Exec(`
 					UPDATE albums SET
 						present_tracks_count = ?,
 						updated_at = CURRENT_TIMESTAMP
 					WHERE id = ?
-				`, count, albumID)
+				`, count, albumID); err != nil {
+					log.Printf("[Scanner] RemoveFile: failed to update present_tracks_count for album %d: %v", albumID, err)
+				}
 			}
 		}
 
 		// Clean orphaned artists and missing tracks
-		_, _ = s.database.Conn().Exec("DELETE FROM artists WHERE (SELECT COUNT(*) FROM albums WHERE artist_id = artists.id) = 0")
-		_, _ = s.database.Conn().Exec("DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums)")
+		if _, err := s.database.Conn().Exec("DELETE FROM artists WHERE (SELECT COUNT(*) FROM albums WHERE artist_id = artists.id) = 0"); err != nil {
+			log.Printf("[Scanner] RemoveFile: failed to clean orphaned artists: %v", err)
+		}
+		if _, err := s.database.Conn().Exec("DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums)"); err != nil {
+			log.Printf("[Scanner] RemoveFile: failed to clean orphaned missing_tracks: %v", err)
+		}
 	}
 	return nil
 }

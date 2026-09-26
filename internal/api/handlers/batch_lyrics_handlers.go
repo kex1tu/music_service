@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 )
@@ -114,8 +115,12 @@ func (h *FileHandler) BatchLyricsFetch(w http.ResponseWriter, r *http.Request) {
 						if res.Synced {
 							kind = "lrc"
 						}
-						_, _ = h.database.Conn().Exec("UPDATE tracks SET lyrics_status = ?, updated_at = CURRENT_TIMESTAMP WHERE file_path = ?", kind, tr.path)
-						_, _ = h.database.Conn().Exec("UPDATE audit_issues SET is_resolved = 1 WHERE entity_type = 'track' AND file_path = ? AND issue_type = 'missing_lyrics'", tr.path)
+						if _, err := h.database.Conn().Exec("UPDATE tracks SET lyrics_status = ?, updated_at = CURRENT_TIMESTAMP WHERE file_path = ?", kind, tr.path); err != nil {
+							log.Printf("[BatchLyrics] failed to update lyrics_status for %s: %v", tr.path, err)
+						}
+						if _, err := h.database.Conn().Exec("UPDATE audit_issues SET is_resolved = 1 WHERE entity_type = 'track' AND file_path = ? AND issue_type = 'missing_lyrics'", tr.path); err != nil {
+							log.Printf("[BatchLyrics] failed to resolve audit issue for %s: %v", tr.path, err)
+						}
 
 						h.lyricsState.Lock()
 						h.lyricsState.found++

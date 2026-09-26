@@ -96,6 +96,14 @@
                                             <span class="text-gray-400 text-[11px]" x-text="` • ${trk.artist}`"></span>
                                         </div>
                                         <div class="flex items-center space-x-1 shrink-0">
+                                            <button
+                                                @click.stop="$store.player.playTrack(trk, results.tracks)"
+                                                title="Слушать"
+                                                class="p-1 hover:text-emerald-400 text-gray-400 transition rounded">
+                                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M8 5v14l11-7z"/>
+                                                </svg>
+                                            </button>
                                             <template x-if="trk.lyrics_status === 'lrc'">
                                                 <span class="px-1 py-0.2 bg-purple-500/20 text-purple-300 text-[9px] font-bold rounded">LRC</span>
                                             </template>

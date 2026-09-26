@@ -176,27 +176,11 @@ sudo systemctl status music-manager.service
 
 ---
 
-## 6. CLI Сканер медиатеки (`tools/music-scanner`)
-
-Для пакетной индексации медиатеки из терминала доступен высокопроизводительный CLI инструмент:
-
-```bash
-# Сборка CLI сканера
-cd tools/music-scanner
-go build -o ../../bin/music-scanner main.go
-cd ../..
-
-# Запуск сканирования медиатеки
-./bin/music-scanner -dir /var/lib/music -db data/library.db -workers 8
-```
-
----
-
-## 7. Структура проекта
+## 6. Структура проекта
 
 ```
 music-manager/
-├── bin/                        # Скомпилированные бинарники (music-manager, music-scanner)
+├── bin/                        # Скомпилированный бинарник (music-manager)
 ├── cmd/
 │   └── server/main.go          # Точка входа веб-сервера
 ├── internal/
@@ -214,9 +198,6 @@ music-manager/
 │       ├── organizer/          # Перемещение файлов, обложек, текстов и очистка пустых папок
 │       ├── resolver/           # SoundCloud-First Matcher, Deezer API, iTunes Search
 │       └── scanner/            # Индексация медиатеки, fsnotify воркер, чекер неполных альбомов
-├── tools/
-│   ├── music-scanner/          # Автономный CLI сканер медиатеки
-│   └── retag_genres/           # Утилита нормализации и ретегирования жанров
 ├── web/
 │   ├── static/                 # No-build JS компоненты и CSS стили
 │   │   ├── css/style.css
@@ -232,6 +213,6 @@ music-manager/
 
 ---
 
-## 8. Лицензия
+## 7. Лицензия
 
 MIT License.

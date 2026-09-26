@@ -1,9 +1,9 @@
-# PROGRESS.md — Матрица статусов и дашборд реализареализации
+# PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 42 блока задач полностью реализованы и протестированы).
+- **Статус готовности:** **100% DONE** (Все 44 блока задач полностью реализованы и протестированы).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 15 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
-- **Результаты тестов:** 100% Go unit & integration tests (`go test -v ./...`, `go test -race ./...` — **0 data races**, все пакеты зеленые).
+- **Результаты тестов:** 100% Go unit & integration tests (146/146 тестов пройдено, `go test -race ./...` — **0 data races**, все 12 пакетов зеленые).
 - **Продакшен-деплой:** Развернут под управлением `systemd` (`music-manager.service`) на боевых серверах `nl_vpn` (144.31.51.105) и `nl_music` (194.76.168.20).
 
 ---
@@ -33,25 +33,25 @@
 
 | Эпоха / Этап | Блоки | Статус | Документ с подробным описанием |
 |---|---|---|---|
-| **1. Первоначальный прототип (Python era)** | Блоки 1–20 | **DONE** | [`docs/progress/01_python_initial.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/docs/progress/01_python_initial.md) |
-| **2. Миграция на Pure Go & SQLite WAL** | Блоки 21–30 | **DONE** | [`docs/progress/02_go_migration.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/docs/progress/02_go_migration.md) |
-| **3. Стабилизация, оптимизация и декомпозиция** | Блоки 31–42 | **DONE** | [`docs/progress/03_go_stabilization_and_modularization.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/docs/progress/03_go_stabilization_and_modularization.md) |
+| **1. Первоначальный прототип (Python era)** | Блоки 1–20 | **DONE** | Консолидировано в PROGRESS.md |
+| **2. Миграция на Pure Go & SQLite WAL** | Блоки 21–30 | **DONE** | Консолидировано в PROGRESS.md |
+| **3. Стабилизация, оптимизация и декомпозиция** | Блоки 31–42 | **DONE** | Консолидировано в PROGRESS.md |
 
 ---
 
 ### Краткий состав блоков по эпохам
 
-#### Эпоха 1: Первоначальный прототип ([`01_python_initial.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/docs/progress/01_python_initial.md))
+#### Эпоха 1: Первоначальный прототип
 - **Блоки 1–5:** Базовое ядро, авторизация bcrypt, PathSandbox, Downloader, ID3 теги, тексты LRCLIB, файловый менеджер, systemd.
 - **Блоки 6–10:** YouTube Age Gate, Deezer короткие ссылки, AudioMatcher, стриминг прогресса, Google Material Icons, DRM bypass, SoundCloud плейлисты, тексты песен.
 - **Блоки 11–15:** Распознавание Shazam, Deezer Search, импорт Яндекс/Spotify/Apple Music, очистка названий, DnD/TPOS перенумерация, галерея обложек, пакетный режим, глобальный поиск `Ctrl+K`.
 - **Блоки 16–20:** Группировка релизов, карточки релизов, торрент-загрузчик, стабилизация очередей.
 
-#### Эпоха 2: Миграция на Pure Go ([`02_go_migration.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/docs/progress/02_go_migration.md))
+#### Эпоха 2: Миграция на Pure Go
 - **Блоки 21–25:** Реактивность аудита, селектор дискографии, параллельное транскодирование, извлечение метаданных Deezer, бэкфилл неполных релизов.
 - **Блоки 26–30:** CLI сканер `music-scanner` (NDJSON), нормализация жанров, одноуровневая структура `Альбом/Треки.mp3`, демон аудита на Go + `fsnotify` + SQLite WAL, полный вывод Python из кодовой базы, декомпозиция фронтенда на Go-шаблоны и модульные JS-файлы.
 
-#### Эпоха 3: Стабилизация и декомпозиция Go-монолитов ([`03_go_stabilization_and_modularization.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/docs/progress/03_go_stabilization_and_modularization.md))
+#### Эпоха 3: Стабилизация и декомпозиция Go-монолитов
 - **Блок 31 (Git Checkpoint):** Фиксация перехода на Go и деплой на боевые серверы `nl_vpn`, `nl_music`.
 - **Блок 32 (Downloader Engine Stabilization):** Персистентность очереди в SQLite, SoundCloud-First Matcher, Deezer anti-403 WAF fallback на iTunes, кнопка Retry.
 - **Блок 33 (YouTube PO Token & Remixes):** Обход ограничений YouTube PO Token (`--flat-playlist`), сохранение ремиксов и версий треков.
@@ -59,7 +59,7 @@
 - **Блок 35 (1-Level Album Layout & Singles):** Каноническая раскладка альбомов и синглов (`album = title`), независимая маршрутизация треков.
 - **Блок 36 (Track Prefixes & Navidrome ID3v2.4 Multi-Genres):** Сохранение числовых префиксов артистов (`1.Kla$`), ID3v2.4 UTF-8 с null-байтами `\x00` для Navidrome.
 - **Блок 37 (Track-Named Covers & Embedded APIC):** Сохранение обложек `{TrackBaseName}.jpg` для синглов и автоизвлечение встроенных APIC обложек.
-- **Блок 38 (Full Monolith Decomposition):** Полная декомпозиция всех Go-пакет (`internal/id3`, `resolver`, `downloader`, `organizer`, `scanner`, `handlers`, `tools/music-scanner`) и JS-модулей на компактные файлы по 100–300 строк.
+- **Блок 38 (Full Monolith Decomposition):** Полная декомпозиция всех Go-пакетов (`internal/id3`, `resolver`, `downloader`, `organizer`, `scanner`, `handlers`) и JS-модулей на компактные файлы по 100–300 строк. Устаревший `tools/music-scanner` выведен из репозитория.
 - **Блок 39 (HTML Templates Decomposition):** Полная декомпозиция всех монолитных HTML-шаблонов (`tag_editor.html`, `audit.html`, `downloader.html`) на компактные под-шаблоны по 15–230 строк.
 - **Блок 40 (YouTube & Yandex Cross-Referencing, Max Artists Wins & Tag Audit):**
   - Клиент YouTube Music Innertube API (`client_ytmusic.go`) на Pure Go без API-ключей.
@@ -89,6 +89,30 @@
     - Кнопки "Безопасные (N)" со счетчиком и "Применить к выбранным (N)".
     - Бейджи серьезности (`Безопасно (Авто)`, `Требует внимания`, `Инфо`) и дефектов.
     - Бейджи процента совпадения (`MatchScore`) и длительности трека в карточках каталогов модального окна Diff-сверки.
+  - **Блок 43: Устранение оверинжиниринга, стабилизация конкурентности и декомпозиция архитектуры Go-бэкенда:**
+    - **Concurrency Hardening & Goroutine Leak Fix:** Фоновый таймер `startCleaner` в `downloader.Service` переведён на `ctx context.Context` и снабжён методом `Close()`, полностью устранив утечки горутин при создании сервисов и в тестах. В `pipeline.go` захват семафора `trackSem` перенесён до `go func()` с поддержкой ранней отмены через `select { case <-ctx.Done() }`. В `manager.go` внедрён дебаунс `syncJob` через `time.AfterFunc(500ms)`, кардинально снизивший частоту параллельных записей в SQLite WAL при обновлении прогресса.
+    - **Вынос доменной логики в `internal/services/resolver/`:**
+      - Реализован переиспользуемый клиент `ITunesClient` (`client_itunes_track.go`) с возможностью подмены `SetBaseURL` для тестирования.
+      - Алгоритм ранжирования каталогов вынесен в `catalog_score.go` (`ComputeCatalogMatchScore`) отдельно от аудио-скоринга `score.go`.
+    - **Декомпозиция монолита `tag_audit_handlers.go` (1 116 строк) на 4 компактных файла:**
+      - `tag_audit_models.go`: структуры данных (`TagIssueItem`, `ProposedTagChange`, `CatalogTrackMatch`, `FixTagIssueRequest`, etc.).
+      - `tag_audit_analyzer.go`: чистая функция обнаружения дефектов `analyzeTrackIssues`.
+      - `tag_audit_fix_handlers.go`: HTTP-обработчики автоисправления (`FixTagIssue`, `FixSafeTagIssues`, `FixSelectedTagIssues`, `FixAllTagIssues`).
+      - `tag_audit_handlers.go`: компактные эндпоинты (`TagIssues`, `CatalogMatchTrack`, `ApplyCatalogTags`).
+    - **Parameter Object & Внедрение зависимостей:** Конструктор `NewFileHandler` переведён на `FileHandlerParams` по аналогии с `RouterParams`, исключив Constructor Bloat (8 -> 1 параметр) и позволив внедрить каталожные клиенты `Yandex`, `YTMusic`, `ITunes` и переиспользуемый `httpClient` для обложек.
+    - **Усиление обработки ошибок:** Проверка `errors.Is(err, sandbox.ErrPathTraversal)` во всех обработчиках файлов возвращает точный HTTP-статус `403 Forbidden` вместо `400/404`. Подавленные ошибки SQL в `scanner.RemoveFile` и `batch_lyrics_handlers` заменены на диагностическое логирование.
+    - **100% изоляция сети в тестах:** Добавлены модульные тесты с моками (`httptest.Server`) для `ITunesClient`, `ComputeCatalogMatchScore` и `CatalogMatchTrack`. Тестовое покрытие выросло со 127 до 135 тестов (все 12 пакетов зеленые, 0 data races).
+- **Блок 44 (Audio Streaming & Web Audio Player Pipeline):**
+  - **Zero-Copy HTTP Range Streaming:** Эндпоинт `GET /api/tracks/{id}/stream` на базе `http.ServeFile` и системного вызова `sendfile(2)` ядра Linux. Полная поддержка RFC 7233 (206 Partial Content, перемотка, `416 Not Satisfiable`, `Accept-Ranges: bytes`, ETag).
+  - **VPN-маскировка (xHTTP):** Алиас-маршрут `GET /api/library/stream/{id}/chunks` и `GET /api/library/stream/{id}/chunks/*` для маскировки туннельного трафика xHTTP под стриминг аудиофрагментов.
+  - **TrackID Resolver & Fast In-Memory Cache:** Детерминированный 16-hex хэш `TrackHash(relPath) = sha256(relPath)[:16]`, числовой ID SQLite, индекс `idx_tracks_hash` и кэш `trackCache sync.Map`. Обязательная валидация через `PathSandbox.Resolve()`.
+  - **Метаданные и обложки по ID:** Эндпоинты `GET /api/tracks/{id}/metadata` (мгновенная отдача из SQLite WAL с fallback на `id3.ReadTags`), `GET /api/tracks/{id}/cover` (встроенный APIC или папочная обложка с `Cache-Control: public, max-age=86400`) и каталог `GET /api/library/tracks`.
+  - **Поддержка query-токена в Auth:** `auth.Middleware` проверяет `?token=` наряду с cookie сессии и `Authorization: Bearer`, позволяя стримить в сторонние плееры (VLC, mpv).
+  - **No-Build Alpine.js Аудиоплеер:**
+    - Компонент `web/templates/components/audio_player.html`: фиксированная нижняя панель (Sticky Bottom Bar) в стиле modern dark UI с мини-обложкой, названием, артистом, таймлайном с перемоткой по клику, регулятором громкости и Mute.
+    - Реактивный стор `Alpine.store('player')` в `web/static/js/player.js` с управлением воспроизведением, горячими клавишами (Space, стрелки, M) и сохранением громкости.
+    - Кнопки ▶ в строках файлов `file_manager.html` и в окне глобального поиска `header.html` с подсветкой играющего трека.
+  - **Тесты:** 11 новых unit-тестов в `stream_handlers_test.go` с проверкой Range 200/206/416, VPN-алиаса, защиты от path traversal и метаданных. Общее количество тестов достигло 146/146 (100% зеленые).
 
 ---
 

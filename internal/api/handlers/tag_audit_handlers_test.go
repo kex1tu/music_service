@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"music-manager/internal/id3"
+	"music-manager/internal/services/resolver"
 )
 
 func TestAnalyzeTrackIssues(t *testing.T) {
@@ -417,3 +418,64 @@ func TestFileHandler_FixSelectedTagIssues(t *testing.T) {
 		t.Errorf("expected 2024, got %d", tags.Year)
 	}
 }
+
+func TestFileHandler_CatalogMatchTrack(t *testing.T) {
+	h, _, _, database, _, _ := setupTestFileHandler(t)
+	defer database.Close()
+
+	// Mock iTunes
+	mockItunes := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"resultCount": 1,
+			"results": [
+				{
+					"trackName": "Mock Track",
+					"artistName": "Mock Artist",
+					"collectionName": "Mock Album",
+					"releaseDate": "2023-01-01T00:00:00Z",
+					"trackNumber": 1,
+					"trackTimeMillis": 180000,
+					"artworkUrl100": "http://example.com/cover100.jpg"
+				}
+			]
+		}`))
+	}))
+	defer mockItunes.Close()
+
+	itunesClient := resolver.NewITunesClient(mockItunes.Client())
+	itunesClient.SetBaseURL(mockItunes.URL)
+	h.itunes = itunesClient
+
+	req := httptest.NewRequest(http.MethodGet, "/files/audit/catalog-match?artist=Mock+Artist&title=Mock+Track", nil)
+	w := httptest.NewRecorder()
+	h.CatalogMatchTrack(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Current map[string]any      `json:"current"`
+		Matches []CatalogTrackMatch `json:"matches"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(resp.Matches) == 0 {
+		t.Fatalf("expected at least 1 match from mocked iTunes, got 0")
+	}
+
+	topMatch := resp.Matches[0]
+	if topMatch.Source != "itunes" {
+		t.Errorf("expected source 'itunes', got %q", topMatch.Source)
+	}
+	if topMatch.Title != "Mock Track" {
+		t.Errorf("expected title 'Mock Track', got %q", topMatch.Title)
+	}
+	if topMatch.MatchScore < 80 {
+		t.Errorf("expected high match score >= 80, got %d", topMatch.MatchScore)
+	}
+}
+

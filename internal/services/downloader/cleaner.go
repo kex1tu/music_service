@@ -1,16 +1,22 @@
 package downloader
 
 import (
+	"context"
 	"os"
 	"time"
 )
 
-func (s *Service) startCleaner(maxAge time.Duration) {
+func (s *Service) startCleaner(ctx context.Context, maxAge time.Duration) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		s.cleanOldTempDirs(maxAge)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.cleanOldTempDirs(maxAge)
+		}
 	}
 }
 

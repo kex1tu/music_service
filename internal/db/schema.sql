@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS tracks (
 );
 CREATE INDEX IF NOT EXISTS idx_tracks_clean ON tracks(clean_title);
 CREATE INDEX IF NOT EXISTS idx_tracks_path ON tracks(file_path);
+CREATE INDEX IF NOT EXISTS idx_tracks_hash ON tracks(file_hash);
 CREATE INDEX IF NOT EXISTS idx_tracks_path_valid ON tracks(is_path_valid);
 CREATE INDEX IF NOT EXISTS idx_tracks_lyrics ON tracks(lyrics_status);
 

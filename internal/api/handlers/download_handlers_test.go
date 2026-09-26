@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -23,7 +24,8 @@ func TestDownloadHandler_ListDownloads_DeterministicSort(t *testing.T) {
 	}
 
 	jobMgr := downloader.NewJobManager(nil)
-	svc := downloader.NewService(jobMgr, nil, tmpSb, musicSb, "", 2)
+	svc := downloader.NewService(context.Background(), jobMgr, nil, tmpSb, musicSb, "", 2)
+	defer svc.Close()
 	handler := NewDownloadHandler(svc, nil)
 
 	sameTimestamp := time.Now().UTC().Format(time.RFC3339)
@@ -99,7 +101,8 @@ func TestDownloadHandler_ListDownloads_StatusPriority(t *testing.T) {
 	}
 
 	jobMgr := downloader.NewJobManager(nil)
-	svc := downloader.NewService(jobMgr, nil, tmpSb, musicSb, "", 2)
+	svc := downloader.NewService(context.Background(), jobMgr, nil, tmpSb, musicSb, "", 2)
+	defer svc.Close()
 	handler := NewDownloadHandler(svc, nil)
 
 	// Add jobs with different statuses

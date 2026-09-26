@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -22,10 +23,13 @@ type Service struct {
 	cookiesPath  string
 	sem          chan struct{}
 	client       *http.Client
+	ctx          context.Context
+	cancel       context.CancelFunc
 }
 
 // NewService creates a new DownloadService.
 func NewService(
+	ctx context.Context,
 	jobs *JobManager,
 	res *resolver.SourceResolver,
 	tmpSandbox *sandbox.PathSandbox,
@@ -33,6 +37,10 @@ func NewService(
 	cookiesPath string,
 	maxConcurrent int,
 ) *Service {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	serviceCtx, cancel := context.WithCancel(ctx)
 	if maxConcurrent <= 0 {
 		maxConcurrent = 2
 	}
@@ -44,9 +52,18 @@ func NewService(
 		cookiesPath:  cookiesPath,
 		sem:          make(chan struct{}, maxConcurrent),
 		client:       &http.Client{Timeout: 30 * time.Second},
+		ctx:          serviceCtx,
+		cancel:       cancel,
 	}
-	go svc.startCleaner(24 * time.Hour)
+	go svc.startCleaner(serviceCtx, 24*time.Hour)
 	return svc
+}
+
+// Close cancels the service context, terminating the background cleaner goroutine.
+func (s *Service) Close() {
+	if s.cancel != nil {
+		s.cancel()
+	}
 }
 
 // Jobs returns the underlying JobManager.

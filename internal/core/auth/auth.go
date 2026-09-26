@@ -97,13 +97,21 @@ func ClearSessionCookie(w http.ResponseWriter) {
 func Middleware(secretKey string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			cookie, err := r.Cookie(CookieName)
-			if err != nil || cookie.Value == "" {
+			token := ""
+			if cookie, err := r.Cookie(CookieName); err == nil && cookie.Value != "" {
+				token = cookie.Value
+			} else if qToken := r.URL.Query().Get("token"); qToken != "" {
+				token = qToken
+			} else if authHdr := r.Header.Get("Authorization"); strings.HasPrefix(authHdr, "Bearer ") {
+				token = strings.TrimPrefix(authHdr, "Bearer ")
+			}
+
+			if token == "" {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
 
-			_, valid := ValidateSessionToken(cookie.Value, secretKey)
+			_, valid := ValidateSessionToken(token, secretKey)
 			if !valid {
 				http.Error(w, `{"error":"invalid session"}`, http.StatusUnauthorized)
 				return

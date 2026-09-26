@@ -121,6 +121,22 @@ func NewRouter(p RouterParams) http.Handler {
 		r.Delete("/", p.LyricsHandler.DeleteLyrics)
 	})
 
+	// Tracks API (Audio Streaming with Range, Metadata, Covers)
+	r.Route("/api/tracks", func(r chi.Router) {
+		r.Use(authMiddleware)
+		r.Get("/{id}/stream", p.FileHandler.StreamTrack)
+		r.Get("/{id}/metadata", p.FileHandler.GetTrackMetadata)
+		r.Get("/{id}/cover", p.FileHandler.GetTrackCover)
+	})
+
+	// Library API & VPN Obfuscation Alias (xHTTP chunks)
+	r.Route("/api/library", func(r chi.Router) {
+		r.Use(authMiddleware)
+		r.Get("/tracks", p.FileHandler.ListLibraryTracks)
+		r.Get("/stream/{id}/chunks", p.FileHandler.StreamTrack)
+		r.Get("/stream/{id}/chunks/*", p.FileHandler.StreamTrack)
+	})
+
 	// Files API & Library Audit
 	r.Route("/files", func(r chi.Router) {
 		r.Use(authMiddleware)

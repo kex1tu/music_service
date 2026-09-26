@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"music-manager/internal/db"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/organizer"
 	"music-manager/internal/services/resolver"
@@ -114,12 +115,13 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 	}
 
 	cleanTitle := strings.ToLower(tags.Title)
+	fileHash := db.TrackHash(relPath)
 	query := `
 	INSERT INTO tracks (
 		album_id, artist_id, title, clean_title, track_number, track_total,
 		disc_number, disc_total, duration, bitrate, file_path, file_size,
-		mtime, has_embedded_cover, lyrics_status, is_path_valid, path_violation_reason, suggested_path
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		mtime, file_hash, has_embedded_cover, lyrics_status, is_path_valid, path_violation_reason, suggested_path
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(file_path) DO UPDATE SET
 		album_id = excluded.album_id,
 		artist_id = excluded.artist_id,
@@ -133,6 +135,7 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		bitrate = excluded.bitrate,
 		file_size = excluded.file_size,
 		mtime = excluded.mtime,
+		file_hash = excluded.file_hash,
 		has_embedded_cover = excluded.has_embedded_cover,
 		lyrics_status = excluded.lyrics_status,
 		is_path_valid = excluded.is_path_valid,
@@ -157,6 +160,7 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		relPath,
 		st.Size(),
 		float64(st.ModTime().Unix()),
+		fileHash,
 		tags.HasCover,
 		tags.LyricsStatus,
 		isPathValid,

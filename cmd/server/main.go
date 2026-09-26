@@ -57,7 +57,10 @@ func main() {
 		log.Printf("[Main] Warning: Failed to reset library cache tables: %v", err)
 	}
 
-	// 4. Initialize services
+	// 4. Initialize services and root context
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+
 	deezerClient := resolver.NewDeezerClient()
 	audioMatcher := resolver.NewAudioMatcher(cfg.CookiesFile)
 	sourceResolver := resolver.NewSourceResolver(
@@ -70,6 +73,7 @@ func main() {
 
 	jobManager := downloader.NewJobManager(database)
 	downloadService := downloader.NewService(
+		appCtx,
 		jobManager,
 		sourceResolver,
 		tmpSandbox,
@@ -77,15 +81,13 @@ func main() {
 		cfg.CookiesFile,
 		cfg.MaxConcurrentDownloads,
 	)
+	defer downloadService.Close()
 
 	organizerService := organizer.NewService(musicSandbox, tmpSandbox)
 	lyricsService := lyrics.NewService(musicSandbox)
 	scannerService := scanner.NewScanner(musicSandbox, database, deezerClient)
 
 	// 5. Start background scanner and fsnotify watcher
-	appCtx, appCancel := context.WithCancel(context.Background())
-	defer appCancel()
-
 	if err := scannerService.StartWatcher(appCtx); err != nil {
 		log.Printf("[Main] Warning: fsnotify watcher failed to start: %v", err)
 	}
@@ -103,7 +105,24 @@ func main() {
 	authHandler := handlers.NewAuthHandler(cfg)
 	downloadHandler := handlers.NewDownloadHandler(downloadService, deezerClient)
 	tagHandler := handlers.NewTagHandler(musicSandbox, tmpSandbox, organizerService, deezerClient)
-	fileHandler := handlers.NewFileHandler(musicSandbox, tmpSandbox, database, downloadService, organizerService, deezerClient, lyricsService, scannerService)
+
+	yandexClient := resolver.NewYandexMusicClient(cfg.YandexMusicToken, cfg.YandexMusicProxy)
+	ytmusicClient := resolver.NewYouTubeMusicClient("")
+	itunesClient := resolver.NewITunesClient(nil)
+
+	fileHandler := handlers.NewFileHandler(handlers.FileHandlerParams{
+		MusicSandbox: musicSandbox,
+		TmpSandbox:   tmpSandbox,
+		Database:     database,
+		Downloader:   downloadService,
+		Organizer:    organizerService,
+		Deezer:       deezerClient,
+		Lyrics:       lyricsService,
+		Scanner:      scannerService,
+		Yandex:       yandexClient,
+		YTMusic:      ytmusicClient,
+		ITunes:       itunesClient,
+	})
 	lyricsHandler := handlers.NewLyricsHandler(lyricsService)
 
 	// 7. Initialize Router
