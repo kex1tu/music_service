@@ -2,10 +2,10 @@
 <!-- ==================== ВКЛАДКА 3: АУДИТ МЕДИАТЕКИ ==================== -->
 <section x-show="$store.app.activeTab === 'audit'" x-data="libraryAuditComponent()" class="space-y-6 animate-fade-in">
     <!-- Заголовок и кнопка обновления -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-surface-panel border border-surface-border rounded-2xl p-6 shadow-panel">
         <div>
-            <h2 class="text-lg font-semibold text-white">Аудит целостности медиатеки</h2>
-            <p class="text-sm text-gray-400 mt-1">
+            <h2 class="text-lg font-bold text-content-primary">Аудит целостности медиатеки</h2>
+            <p class="text-sm text-content-secondary mt-1">
                 Проверка качества тегов, синхронизированных текстов (.lrc), наличия обложек и поиск дубликатов треков.
             </p>
         </div>
@@ -13,7 +13,7 @@
             <button
                 @click="confirmReorganizeLibrary()"
                 :disabled="isReorganizing"
-                class="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 hover:text-indigo-200 border border-indigo-500/40 disabled:opacity-50 text-xs font-medium rounded-lg transition flex items-center justify-center space-x-2">
+                class="px-4 py-2 bg-brand/10 hover:bg-brand/20 text-brand hover:text-brand-hover border border-brand/30 disabled:opacity-50 text-xs font-semibold rounded-lg transition flex items-center justify-center space-x-2 shadow-sm active:scale-95">
                 <template x-if="isReorganizing">
                     <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
@@ -29,7 +29,7 @@
             <button
                 @click="loadAll()"
                 :disabled="isLoading || isReorganizing"
-                class="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 text-xs font-medium rounded-lg transition flex items-center justify-center space-x-2 border border-gray-700/60">
+                class="px-4 py-2 bg-surface-elevated hover:bg-surface-hover disabled:opacity-50 text-content-primary text-xs font-semibold rounded-lg transition flex items-center justify-center space-x-2 border border-surface-border active:scale-95">
                 <svg class="w-3.5 h-3.5" :class="{'animate-spin': isLoading}" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
                 </svg>
@@ -42,54 +42,55 @@
     {{ template "audit_metrics" . }}
 
     <!-- Вкладки подразделов аудита -->
-    <div class="flex flex-wrap gap-2 border-b border-gray-800 pb-2">
+    <div class="flex flex-wrap gap-2 border-b border-surface-border pb-2">
         <button
             @click="activeSubTab = 'lyrics'"
-            :class="activeSubTab === 'lyrics' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
+            :class="activeSubTab === 'lyrics' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
             class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Треки без текстов</span>
-            <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="missingLyrics.length || summary.missing_lyrics_count || 0"></span>
+            <span class="px-1.5 py-0.5 bg-surface-elevated text-content-secondary rounded text-[10px] font-mono" x-text="missingLyrics.length || summary.missing_lyrics_count || 0"></span>
         </button>
         <button
             @click="activeSubTab = 'covers'"
-            :class="activeSubTab === 'covers' ? 'bg-yellow-600/20 text-yellow-300 border border-yellow-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
+            :class="activeSubTab === 'covers' ? 'bg-yellow-600/20 text-yellow-300 border border-yellow-500/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
             class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Релизы без обложек</span>
-            <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="missingCovers.length || summary.missing_covers_count || 0"></span>
+            <span class="px-1.5 py-0.5 bg-surface-elevated text-content-secondary rounded text-[10px] font-mono" x-text="missingCovers.length || summary.missing_covers_count || 0"></span>
         </button>
         <button
             @click="activeSubTab = 'duplicates'"
-            :class="activeSubTab === 'duplicates' ? 'bg-red-600/20 text-red-300 border border-red-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
+            :class="activeSubTab === 'duplicates' ? 'bg-red-600/20 text-red-300 border border-red-500/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
             class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Дубликаты песен</span>
-            <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="duplicatesData.groups ? duplicatesData.groups.length : 0"></span>
+            <span class="px-1.5 py-0.5 bg-surface-elevated text-content-secondary rounded text-[10px] font-mono" x-text="duplicatesData.groups ? duplicatesData.groups.length : 0"></span>
         </button>
         <button
             @click="activeSubTab = 'incomplete'"
-            :class="activeSubTab === 'incomplete' ? 'bg-sky-600/20 text-sky-300 border border-sky-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
+            :class="activeSubTab === 'incomplete' ? 'bg-sky-600/20 text-sky-300 border border-sky-500/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
             class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Неполные релизы</span>
-            <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="incompleteAlbums.length || summary.incomplete_albums_count || 0"></span>
+            <span class="px-1.5 py-0.5 bg-surface-elevated text-content-secondary rounded text-[10px] font-mono" x-text="incompleteAlbums.length || summary.incomplete_albums_count || 0"></span>
         </button>
         <button
             @click="activeSubTab = 'paths'"
-            :class="activeSubTab === 'paths' ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
+            :class="activeSubTab === 'paths' ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
             class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Некорректные пути</span>
-            <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="invalidPaths.length || summary.invalid_paths_count || 0"></span>
+            <span class="px-1.5 py-0.5 bg-surface-elevated text-content-secondary rounded text-[10px] font-mono" x-text="invalidPaths.length || summary.invalid_paths_count || 0"></span>
+        </button>
         <button
             @click="activeSubTab = 'genres'"
-            :class="activeSubTab === 'genres' ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
+            :class="activeSubTab === 'genres' ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
             class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Жанры на проверку</span>
-            <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="nonEnGenres.length || summary.non_en_genres_count || 0"></span>
+            <span class="px-1.5 py-0.5 bg-surface-elevated text-content-secondary rounded text-[10px] font-mono" x-text="nonEnGenres.length || summary.non_en_genres_count || 0"></span>
         </button>
         <button
             @click="activeSubTab = 'tags'"
-            :class="activeSubTab === 'tags' ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40' : 'text-gray-400 hover:text-gray-200 border border-transparent'"
+            :class="activeSubTab === 'tags' ? 'bg-brand-muted text-brand border border-brand/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
             class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Сверка тегов</span>
-            <span class="px-1.5 py-0.2 bg-gray-800 text-gray-300 rounded text-[10px] font-mono" x-text="tagIssues.length || summary.tag_issues_count || 0"></span>
+            <span class="px-1.5 py-0.5 bg-surface-elevated text-content-secondary rounded text-[10px] font-mono" x-text="tagIssues.length || summary.tag_issues_count || 0"></span>
         </button>
     </div>
 

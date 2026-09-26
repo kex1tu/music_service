@@ -440,10 +440,10 @@ document.addEventListener('alpine:init', () => {
                     this.peakValues[i] = Math.max(2, this.peakValues[i] - this.peakVelocities[i]);
                 }
 
-                // Градиент полосы: Студийный изумруд -> Янтарный пик
+                // Градиент полосы: Студийный электрический оранжевый -> Янтарный пик
                 const grad = ctx.createLinearGradient(0, height - 16, 0, y);
-                grad.addColorStop(0, '#059669');    // Deep emerald
-                grad.addColorStop(0.7, '#10b981');  // Bright emerald
+                grad.addColorStop(0, '#c2410c');    // Deep warm orange
+                grad.addColorStop(0.7, '#ff5500');  // SoundCloud electric orange
                 grad.addColorStop(0.9, '#f59e0b');  // Amber warning
                 grad.addColorStop(1, '#ef4444');    // Peak red
 

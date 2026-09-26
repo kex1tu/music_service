@@ -3,15 +3,15 @@
 <template x-if="viewMode === 'grouped'">
     <div class="space-y-5">
         <template x-for="group in releases" :key="group.id">
-            <div class="bg-gray-950/70 border border-gray-800 rounded-xl overflow-hidden shadow">
+            <div class="bg-surface-panel border border-surface-border rounded-xl overflow-hidden shadow-panel">
                 <!-- Заголовок релиза (аккордеон) -->
                 <div
                     @click="toggleGroupCollapse(group.id)"
-                    class="py-3 px-4 bg-gray-900/80 hover:bg-gray-900 border-b border-gray-800/80 flex items-center justify-between cursor-pointer select-none transition">
+                    class="py-3 px-4 bg-surface-elevated/70 hover:bg-surface-elevated border-b border-surface-border flex items-center justify-between cursor-pointer select-none transition">
                     <div class="flex items-center space-x-3 min-w-0">
                         <!-- Шеврон сворачивания / разворачивания -->
                         <div
-                            class="p-1 text-gray-400 hover:text-white rounded transition flex-shrink-0"
+                            class="p-1 text-content-muted hover:text-content-primary rounded transition flex-shrink-0"
                             :title="isGroupCollapsed(group.id) ? 'Развернуть релиз' : 'Свернуть релиз'">
                             <svg class="w-4 h-4 transition-transform duration-200" :class="{ '-rotate-90': isGroupCollapsed(group.id) }" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6l-6-6l1.41-1.41z"/>
@@ -19,7 +19,7 @@
                         </div>
 
                         <!-- Обложка релиза (32x32) -->
-                        <div class="w-8 h-8 rounded bg-gray-800 border border-gray-700 overflow-hidden flex items-center justify-center flex-shrink-0">
+                        <div class="w-8 h-8 rounded bg-surface-input border border-surface-border overflow-hidden flex items-center justify-center flex-shrink-0">
                             <template x-if="group.coverPreviewUrl">
                                 <img :src="group.coverPreviewUrl" class="w-full h-full object-cover">
                             </template>
@@ -39,17 +39,17 @@
 
                         <!-- Название и метаданные заголовка -->
                         <div class="flex items-center space-x-2 min-w-0 flex-wrap">
-                            <span class="font-bold text-white text-xs sm:text-sm tracking-wide truncate" x-text="group.title"></span>
+                            <span class="font-bold text-content-primary text-xs sm:text-sm tracking-wide truncate" x-text="group.title"></span>
                             <template x-if="group.isSingles">
                                 <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">Синглы</span>
                             </template>
                             <template x-if="!group.isSingles && group.albumArtist">
-                                <span class="text-xs text-gray-400 truncate" x-text="group.albumArtist"></span>
+                                <span class="text-xs text-content-secondary truncate" x-text="group.albumArtist"></span>
                             </template>
                             <template x-if="group.year">
-                                <span class="text-xs text-gray-500" x-text="`• ${group.year}`"></span>
+                                <span class="text-xs text-content-muted font-mono" x-text="`• ${group.year}`"></span>
                             </template>
-                            <span class="text-xs text-gray-500" x-text="`(${group.items.length} трек.)`"></span>
+                            <span class="text-xs text-content-muted font-mono" x-text="`(${group.items.length} трек.)`"></span>
                         </div>
                     </div>
                 </div>
@@ -57,16 +57,16 @@
                 <!-- Раскрывающееся содержимое карточки релиза -->
                 <div x-show="!isGroupCollapsed(group.id)" class="p-4 sm:p-5 space-y-4">
                     <!-- БЛОК МЕТАДАННЫХ РЕЛИЗА (БОЛЬШОЕ МЕНЮ РЕЛИЗА) -->
-                    <div class="bg-gray-900/60 border border-gray-800 rounded-xl p-4">
+                    <div class="bg-surface-base/80 border border-surface-border rounded-xl p-4">
                         <div class="flex flex-col md:flex-row gap-5">
                             <!-- Обложка релиза (128x128) -->
                             <div class="flex flex-col items-center space-y-2 flex-shrink-0">
-                                <div class="w-32 h-32 rounded-lg bg-gray-950 border border-gray-800 flex items-center justify-center overflow-hidden shadow-inner relative group">
+                                <div class="w-32 h-32 rounded-lg bg-surface-input border border-surface-border flex items-center justify-center overflow-hidden shadow-inner relative group">
                                     <template x-if="group.coverPreviewUrl">
                                         <img :src="group.coverPreviewUrl" alt="Release Cover" class="w-full h-full object-cover">
                                     </template>
                                     <template x-if="!group.coverPreviewUrl">
-                                        <svg class="w-10 h-10 text-gray-700" viewBox="0 0 24 24" fill="currentColor">
+                                        <svg class="w-10 h-10 text-content-muted" viewBox="0 0 24 24" fill="currentColor">
                                             <path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h14q.825 0 1.413.588T21 5v14q0 .825-.587 1.413T19 21zm0-2h14V5H5zm0 0V5zm2-2h10q.3 0 .45-.275t-.05-.525l-2.75-3.675q-.15-.2-.4-.2t-.4.2L11.25 16L9.4 13.525q-.15-.2-.4-.2t-.4.2l-2 2.675q-.2.25-.05.525T7 17"/>
                                         </svg>
                                     </template>
@@ -82,7 +82,7 @@
                                     <button
                                         type="button"
                                         @click="openGroupCoverGallery(group)"
-                                        class="text-xs text-purple-400 hover:text-purple-300 hover:underline flex items-center space-x-1">
+                                        class="text-xs text-brand hover:text-brand-hover hover:underline font-medium flex items-center space-x-1">
                                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                                             <path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h14q.825 0 1.413.588T21 5v14q0 .825-.587 1.413T19 21zm0-2h14V5H5zm0 0V5zm2-2h10q.3 0 .45-.275t-.05-.525l-2.75-3.675q-.15-.2-.4-.2t-.4.2L11.25 16L9.4 13.525q-.15-.2-.4-.2t-.4.2l-2 2.675q-.2.25-.05.525T7 17"/>
                                         </svg>
@@ -94,50 +94,50 @@
                             <!-- Поля метаданных релиза -->
                             <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                                 <div>
-                                    <label class="block text-xs font-semibold text-gray-400 mb-1">Исполнитель релиза (Album Artist)</label>
+                                    <label class="block text-xs font-semibold text-content-secondary mb-1">Исполнитель релиза (Album Artist)</label>
                                     <input
                                         type="text"
                                         x-model="group.albumArtist"
                                         placeholder="Daft Punk\\Pharrell Williams"
-                                        class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500">
-                                    <p class="text-[10px] text-gray-500 mt-0.5">Разделитель множественных артистов: \\</p>
+                                        class="w-full bg-surface-input border border-surface-border rounded-lg px-3 py-1.5 text-sm text-content-primary focus:outline-none focus:border-brand">
+                                    <p class="text-[10px] text-content-muted mt-0.5 font-mono">Разделитель множественных артистов: \\</p>
                                 </div>
                                 <div>
-                                    <label class="block text-xs font-semibold text-gray-400 mb-1">Название альбома (Album Title)</label>
+                                    <label class="block text-xs font-semibold text-content-secondary mb-1">Название альбома (Album Title)</label>
                                     <input
                                         type="text"
                                         x-model="group.albumTitle"
                                         placeholder="Discovery"
-                                        class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500">
+                                        class="w-full bg-surface-input border border-surface-border rounded-lg px-3 py-1.5 text-sm text-content-primary focus:outline-none focus:border-brand">
                                 </div>
                                 <div class="grid grid-cols-2 gap-2">
                                     <div>
-                                        <label class="block text-xs font-semibold text-gray-400 mb-1">Год релиза (Year)</label>
+                                        <label class="block text-xs font-semibold text-content-secondary mb-1">Год релиза (Year)</label>
                                         <input
                                             type="number"
                                             x-model="group.year"
                                             placeholder="2001"
-                                            class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500">
+                                            class="w-full bg-surface-input border border-surface-border rounded-lg px-3 py-1.5 text-sm text-content-primary focus:outline-none focus:border-brand">
                                     </div>
                                     <div>
-                                        <label class="block text-xs font-semibold text-gray-400 mb-1">Дисков (Discs)</label>
+                                        <label class="block text-xs font-semibold text-content-secondary mb-1">Дисков (Discs)</label>
                                         <input
                                             type="number"
                                             min="1"
                                             x-model="group.discTotal"
                                             placeholder="1"
-                                            class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500">
+                                            class="w-full bg-surface-input border border-surface-border rounded-lg px-3 py-1.5 text-sm text-content-primary focus:outline-none focus:border-brand">
                                     </div>
                                 </div>
                                 <div>
-                                    <label class="block text-xs font-semibold text-gray-400 mb-1">Жанры (Genre)</label>
+                                    <label class="block text-xs font-semibold text-content-secondary mb-1">Жанры (Genre)</label>
                                     <input
                                         type="text"
                                         x-model="group.genre"
                                         @blur="group.genre = formatGenres(group.genre)"
                                         @change="group.genre = formatGenres(group.genre)"
                                         placeholder="House\\Electronic"
-                                        class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500">
+                                        class="w-full bg-surface-input border border-surface-border rounded-lg px-3 py-1.5 text-sm text-content-primary focus:outline-none focus:border-brand">
                                 </div>
 
                                 <!-- Кнопки действий релиза -->
@@ -145,7 +145,7 @@
                                     <button
                                         type="button"
                                         @click="openDeezerSearchForGroup(group)"
-                                        class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-purple-400 hover:text-purple-300 text-xs font-semibold rounded-lg border border-purple-500/30 transition flex items-center space-x-1.5 shadow-sm"
+                                        class="px-3 py-1.5 px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-purple-400 hover:text-purple-300 text-xs font-semibold rounded-lg border border-purple-500/30 transition flex items-center space-x-1.5 shadow-sm active:scale-95"
                                         title="Найти официальный альбом в каталоге Deezer">
                                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                                             <path d="M12 3a9 9 0 0 0-9 9a9 9 0 0 0 9 9a9 9 0 0 0 9-9a9 9 0 0 0-9-9m0 16a7 7 0 0 1-7-7a7 7 0 0 1 7-7a7 7 0 0 1 7 7a7 7 0 0 1-7 7m0-10a3 3 0 0 0-3 3a3 3 0 0 0 3 3a3 3 0 0 0 3-3a3 3 0 0 0-3-3m0 4a1 1 0 0 1-1-1a1 1 0 0 1 1-1a1 1 0 0 1 1 1a1 1 0 0 1-1 1"/>
@@ -155,7 +155,7 @@
                                     <button
                                         type="button"
                                         @click="renumberGroupTracks(group)"
-                                        class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-teal-400 hover:text-teal-300 text-xs font-semibold rounded-lg border border-teal-500/30 transition flex items-center space-x-1.5 shadow-sm"
+                                        class="px-3 py-1.5 px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-teal-400 hover:text-teal-300 text-xs font-semibold rounded-lg border border-teal-500/30 transition flex items-center space-x-1.5 shadow-sm active:scale-95"
                                         title="Автоматически перенумеровать треки этого релиза (1..N)">
                                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                                             <path d="M4 19h16v2H4zm3.8-4L6.4 9.6c-.2-.7-.4-1.3-.5-1.9h-.1c0 .6-.1 1.2-.3 1.9L4.2 15zm-2-7.2h1.6l2.9 8.2H8.8l-.6-1.9H4.6l-.6 1.9H2.6zm9.7 7.2h2v-8h-2zm-.5-9.5c0-.7.6-1.2 1.5-1.2s1.5.5 1.5 1.2c0 .6-.6 1.2-1.5 1.2s-1.5-.6-1.5-1.2"/>
@@ -165,7 +165,7 @@
                                     <button
                                         type="button"
                                         @click="fetchLyricsForGroup(group)"
-                                        class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-emerald-400 hover:text-emerald-300 text-xs font-semibold rounded-lg border border-emerald-500/30 transition flex items-center space-x-1.5 shadow-sm"
+                                        class="px-3 py-1.5 px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-brand hover:text-brand-hover text-xs font-semibold rounded-lg border border-brand/30 transition flex items-center space-x-1.5 shadow-sm active:scale-95"
                                         title="Найти тексты для треков этого релиза">
                                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                                             <path d="M9.5 16q-2.725 0-4.612-1.888T3 9.5t1.888-4.612T9.5 3t4.613 1.888T16 9.5q0 1.1-.35 2.075T14.7 13.3l5.6 5.6q.275.275.275.7t-.275.7t-.7.275t-.7-.275l-5.6-5.6q-.75.6-1.725.95T9.5 16m0-2q1.875 0 3.188-1.312T14 9.5t-1.312-3.187T9.5 5T6.313 6.313T5 9.5t1.313 3.188T9.5 14"/>
@@ -175,7 +175,7 @@
                                     <button
                                         type="button"
                                         @click="cleanGroupTitles(group)"
-                                        class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-amber-400 hover:text-amber-300 text-xs font-semibold rounded-lg border border-amber-500/30 transition flex items-center space-x-1.5 shadow-sm"
+                                        class="px-3 py-1.5 px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-amber-400 hover:text-amber-300 text-xs font-semibold rounded-lg border border-amber-500/30 transition flex items-center space-x-1.5 shadow-sm active:scale-95"
                                         title="Очистить названия треков от мусора и извлечь фиты (для этого релиза)">
                                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                                             <path d="M19.36 2.72l1.42 1.42a1.996 1.996 0 0 1 0 2.83l-1.42 1.42l-4.24-4.24l1.41-1.43a2 2 0 0 1 2.83 0M3 21v-4.24l10.6-10.6l4.25 4.24L7.24 21zm3.5-2H7.5l7.66-7.66l-.96-.95l-7.7 7.7z"/>
@@ -185,7 +185,7 @@
                                     <button
                                         type="button"
                                         @click="applyGroupToTracks(group)"
-                                        class="px-3.5 py-1.5 bg-gray-800 hover:bg-gray-700 text-emerald-400 hover:text-emerald-300 text-xs font-semibold rounded-lg border border-emerald-500/30 transition flex items-center space-x-1.5"
+                                        class="px-3.5 py-1.5 px-3.5 py-1.5 bg-brand/10 hover:bg-brand/20 text-brand hover:text-brand-hover text-xs font-semibold rounded-lg border border-brand/30 transition flex items-center space-x-1.5 active:scale-95"
                                         title="Применить обложку и метаданные релиза ко всем его трекам">
                                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                                             <path d="m12 16.175l3.9-3.875q.275-.275.688-.288t.712.288q.275.275.275.7t-.275.7l-4.6 4.6q-.15.15-.325.213t-.375.062t-.375-.062t-.325-.213l-4.6-4.6q-.275-.275-.288-.687T6.7 12.3q.275-.275.7-.275t.7.275zm0-6L15.9 6.3q.275-.275.688-.287t.712.287q.275.275.275.7t-.275.7l-4.6 4.6q-.15.15-.325.213t-.375.062t-.375-.062t-.325-.213L6.7 7.7q-.275-.275-.288-.687T6.7 6.3q.275-.275.7-.275t.7.275z"/>

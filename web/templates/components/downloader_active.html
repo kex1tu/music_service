@@ -1,7 +1,7 @@
 {{ define "downloader_active" }}
 <!-- Статус активной задачи загрузки -->
 <template x-if="job">
-    <div class="mt-6 pt-6 border-t border-gray-800 space-y-3">
+    <div class="mt-6 pt-6 border-t border-surface-border space-y-3">
         <div class="flex items-center justify-between gap-4">
             <div class="flex items-center space-x-3 min-w-0">
                 <span class="text-xs font-semibold px-2.5 py-1 rounded uppercase tracking-wider flex-shrink-0"
@@ -10,31 +10,31 @@
                         'bg-blue-500/20 text-blue-400 border border-blue-500/30': job.status === 'DOWNLOADING',
                         'bg-purple-500/20 text-purple-400 border border-purple-500/30': job.status === 'CONVERTING',
                         'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30': job.status === 'TAGGING',
-                        'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30': job.status === 'READY',
+                        'bg-brand-muted text-brand border border-brand/30': job.status === 'READY',
                         'bg-red-500/20 text-red-400 border border-red-500/30': job.status === 'ERROR',
                     }"
                     x-text="job.status">
                 </span>
-                <span class="text-sm text-gray-300 font-medium min-w-0 truncate" x-text="job.current_step" :title="job.current_step"></span>
+                <span class="text-sm text-content-primary font-medium min-w-0 truncate" x-text="job.current_step" :title="job.current_step"></span>
             </div>
             <div class="flex items-center space-x-2 flex-shrink-0">
                 <template x-if="job.total_tracks > 1">
-                    <span class="text-xs text-gray-500 font-mono" x-text="`(${job.completed_tracks}/${job.total_tracks})`"></span>
+                    <span class="text-xs text-content-muted font-mono" x-text="`(${job.completed_tracks}/${job.total_tracks})`"></span>
                 </template>
-                <span class="text-xs text-emerald-400 font-semibold font-mono" x-text="`${Math.min(100, Math.max(0, Math.round(job.progress || 0)))}%`"></span>
+                <span class="text-xs text-brand font-semibold font-mono" x-text="`${Math.min(100, Math.max(0, Math.round(job.progress || 0)))}%`"></span>
             </div>
         </div>
 
         <!-- Прогресс-бар -->
-        <div class="w-full bg-gray-950 rounded-full h-2.5 overflow-hidden border border-gray-800">
+        <div class="w-full bg-surface-input rounded-full h-2 overflow-hidden border border-surface-border">
             <div
-                class="bg-gradient-to-r from-emerald-500 to-teal-400 h-2.5 rounded-full transition-all duration-300"
+                class="bg-gradient-to-r from-brand to-amber-400 h-2 rounded-full transition-all duration-300 shadow-sm shadow-brand/40"
                 :style="`width: ${Math.min(100, Math.max(0, Math.round(job.progress || 0)))}%`"></div>
         </div>
 
         <!-- Сообщение об ошибке при ERROR -->
         <template x-if="job.status === 'ERROR'">
-            <div class="p-3 bg-red-900/20 border border-red-700/40 rounded-lg text-xs text-red-300">
+            <div class="p-3 bg-red-900/20 border border-red-700/40 rounded-xl text-xs text-red-300">
                 <strong class="font-bold">Ошибка:</strong> <span x-text="job.error"></span>
             </div>
         </template>
@@ -47,7 +47,7 @@
                         <button
                             type="button"
                             @click="$store.app.queue.openAllReadyJobsInTagEditor()"
-                            class="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-lg transition shadow flex items-center space-x-1.5 animate-pulse"
+                            class="px-3.5 py-2 bg-gradient-to-r from-brand to-amber-600 hover:from-brand-hover hover:to-amber-500 text-white text-xs font-bold rounded-lg transition shadow-md shadow-brand/20 flex items-center space-x-1.5 animate-pulse"
                             title="Открыть все завершенные релизы из очереди в редакторе тегов">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M4 18q-.825 0-1.412-.587T2 16V4q0-.825.588-1.412T4 2h12q.825 0 1.413.588T18 4v12q0 .825-.587 1.413T16 18zm16 4q-.825 0-1.412-.587T18 20V7q0-.425.288-.712T19 6t.713.288T20 7v13h-13q-.425 0-.712-.288T6 19t.288-.712T7 18h13z"/>
@@ -58,7 +58,7 @@
                     <button
                         type="button"
                         @click="openTagEditorForJob(job.id)"
-                        class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition shadow flex items-center space-x-1.5">
+                        class="px-4 py-2 bg-brand hover:bg-brand-hover text-white text-xs font-semibold rounded-lg transition shadow-md shadow-brand/20 flex items-center space-x-1.5">
                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                             <path d="m21.4 14.25l-7.15 7.15q-.3.3-.675.45t-.75.15t-.75-.15t-.675-.45l-8.825-8.825q-.275-.275-.425-.637T2 11.175V4q0-.825.588-1.412T4 2h7.175q.4 0 .775.163t.65.437l8.8 8.825q.3.3.438.675t.137.75t-.137.738t-.438.662M6.5 8q.625 0 1.063-.437T8 6.5t-.437-1.062T6.5 5t-1.062.438T5 6.5t.438 1.063T6.5 8"/>
                         </svg>
@@ -69,7 +69,7 @@
             <template x-if="job.status !== 'READY' && job.status !== 'ERROR'">
                 <button
                     @click="cancelJob()"
-                    class="px-3 py-1.5 bg-red-800/80 hover:bg-red-700 text-red-200 text-xs rounded transition flex items-center space-x-1.5">
+                    class="px-3 py-1.5 bg-red-900/60 hover:bg-red-800 text-red-200 text-xs rounded-lg border border-red-700/50 transition flex items-center space-x-1.5">
                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                         <path d="m12 13.4l2.9 2.9q.275.275.7.275t.7-.275t.275-.7t-.275-.7L13.4 12l2.9-2.9q.275-.275.275-.7t-.275-.7t-.7-.275t-.7.275L12 10.6L9.1 7.7q-.275-.275-.7-.275t-.7.275t-.275.7t.275.7l2.9 2.9l-2.9 2.9q-.275.275-.275.7t.275.7t.7.275t.7-.275zm0 8.6q-2.075 0-3.9-.788t-3.175-2.137T2.788 15.9T2 12t.788-3.9t2.137-3.175T8.1 2.788T12 2t3.9.788t3.175 2.137T21.213 8.1T22 12t-.788 3.9t-2.137 3.175t-3.175 2.138T12 22"/>
                     </svg>
@@ -79,7 +79,7 @@
             <template x-if="job.status === 'ERROR'">
                 <button
                     @click="retryJob(job.id)"
-                    class="px-3 py-1.5 bg-yellow-600/80 hover:bg-yellow-500 text-white text-xs rounded transition flex items-center space-x-1.5 font-medium"
+                    class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs rounded-lg transition flex items-center space-x-1.5 font-medium shadow"
                     title="Перезапустить загрузку">
                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.05q-1.125-1.45-2.787-2.225T12 5q-2.9 0-4.95 2.05T5 12t2.05 4.95T12 19q2.425 0 4.3-1.463T18.65 14h2.075q-.45 3.025-2.688 5.013T12 20"/>
@@ -89,7 +89,7 @@
             </template>
             <button
                 @click="resetForm()"
-                class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded transition flex items-center space-x-1.5">
+                class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border border-surface-border text-xs rounded-lg transition flex items-center space-x-1.5">
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M9.825 20.7q-2.575-.725-4.2-2.837T4 13q0-1.425.475-2.713t1.35-2.362q.275-.3.675-.313t.725.313q.275.275.288.675t-.263.75q-.6.775-.925 1.7T6 13q0 2.025 1.188 3.613t3.062 2.162q.325.1.538.375t.212.6q0 .5-.35.788t-.825.162m4.35 0q-.475.125-.825-.175t-.35-.8q0-.3.213-.575t.537-.375q1.875-.6 3.063-2.175T18 13q0-2.5-1.75-4.25T12 7h-.075l.4.4q.275.275.275.7t-.275.7t-.7.275t-.7-.275l-2.1-2.1q-.15-.15-.212-.325T8.55 6t.063-.375t.212-.325l2.1-2.1q.275-.275.7-.275t.7.275t.275.7t-.275.7l-.4.4H12q3.35 0 5.675 2.325T20 13q0 2.725-1.625 4.85t-4.2 2.85"/>
                 </svg>

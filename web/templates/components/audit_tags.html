@@ -2,10 +2,10 @@
 <!-- СЕКЦИЯ 7: Сверка тегов медиатеки -->
 <div x-show="activeSubTab === 'tags'" class="space-y-4">
     <!-- Шапка секции и панель фильтров/действий -->
-    <div class="bg-gray-900/80 border border-emerald-800/40 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+    <div class="bg-surface-panel border border-surface-border rounded-xl p-4 shadow-panel flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
             <h3 class="text-sm font-semibold text-white flex items-center space-x-2">
-                <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                <span class="w-2 h-2 rounded-full bg-brand"></span>
                 <span>Сверка и очистка метаданных (ID3v2.4)</span>
             </h3>
             <p class="text-xs text-gray-400 mt-0.5">
@@ -17,7 +17,7 @@
             <button
                 @click="fixSafeTagIssues()"
                 :disabled="isFixingSafeTags || safeIssuesCount() === 0"
-                class="px-3 py-2 bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 shadow"
+                class="px-3 py-2 px-3 py-2 bg-brand hover:bg-brand-hover disabled:opacity-40 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 shadow-lg shadow-brand/20 active:scale-95"
                 title="Быстрое детерминированное локальное исправление клипового мусора, номеров треков и topic-каналов">
                 <template x-if="isFixingSafeTags">
                     <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
@@ -55,14 +55,14 @@
             <button
                 @click="fixAllTagIssues()"
                 :disabled="isFixingAllTags || tagIssuesTotalCount === 0"
-                class="px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 disabled:opacity-40 text-gray-200 rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 shadow">
+                class="px-3 py-2 bg-surface-elevated hover:bg-surface-hover border border-surface-border disabled:opacity-40 text-content-primary rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 shadow">
                 <template x-if="isFixingAllTags">
                     <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
                     </svg>
                 </template>
                 <template x-if="!isFixingAllTags">
-                    <svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-3.5 h-3.5 text-brand" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
                     </svg>
                 </template>
@@ -76,41 +76,41 @@
         <span class="text-xs text-gray-500 mr-1">Фильтр:</span>
         <button
             @click="filterTagIssues('all')"
-            :class="tagIssuesFilter === 'all' ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500/50' : 'bg-gray-900 text-gray-400 border-gray-800 hover:text-white'"
+            :class="tagIssuesFilter === 'all' ? 'bg-brand/20 text-brand border-brand/50 font-semibold' : 'bg-surface-elevated text-content-muted border-surface-border hover:text-content-primary'"
             class="px-2.5 py-1 rounded text-[11px] font-medium border transition">
             Все дефекты
         </button>
         <button
             @click="filterTagIssues('dirty_title')"
-            :class="tagIssuesFilter === 'dirty_title' ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500/50' : 'bg-gray-900 text-gray-400 border-gray-800 hover:text-white'"
+            :class="tagIssuesFilter === 'dirty_title' ? 'bg-brand/20 text-brand border-brand/50 font-semibold' : 'bg-surface-elevated text-content-muted border-surface-border hover:text-content-primary'"
             class="px-2.5 py-1 rounded text-[11px] font-medium border transition">
             Мусор в названии
         </button>
         <button
             @click="filterTagIssues('unparsed_feat')"
-            :class="tagIssuesFilter === 'unparsed_feat' ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500/50' : 'bg-gray-900 text-gray-400 border-gray-800 hover:text-white'"
+            :class="tagIssuesFilter === 'unparsed_feat' ? 'bg-brand/20 text-brand border-brand/50 font-semibold' : 'bg-surface-elevated text-content-muted border-surface-border hover:text-content-primary'"
             class="px-2.5 py-1 rounded text-[11px] font-medium border transition">
             Нераспарсенные соавторы (feat.)
         </button>
         <button
             @click="filterTagIssues('label_as_artist')"
-            :class="tagIssuesFilter === 'label_as_artist' ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500/50' : 'bg-gray-900 text-gray-400 border-gray-800 hover:text-white'"
+            :class="tagIssuesFilter === 'label_as_artist' ? 'bg-brand/20 text-brand border-brand/50 font-semibold' : 'bg-surface-elevated text-content-muted border-surface-border hover:text-content-primary'"
             class="px-2.5 py-1 rounded text-[11px] font-medium border transition">
             Канал Topic / Лейбл
         </button>
         <button
             @click="filterTagIssues('missing_tags')"
-            :class="tagIssuesFilter === 'missing_tags' ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500/50' : 'bg-gray-900 text-gray-400 border-gray-800 hover:text-white'"
+            :class="tagIssuesFilter === 'missing_tags' ? 'bg-brand/20 text-brand border-brand/50 font-semibold' : 'bg-surface-elevated text-content-muted border-surface-border hover:text-content-primary'"
             class="px-2.5 py-1 rounded text-[11px] font-medium border transition">
             Пропущенный год / альбом
         </button>
     </div>
 
     <!-- Таблица треков с дефектами -->
-    <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl">
+    <div class="bg-surface-panel border border-surface-border rounded-xl overflow-hidden shadow-panel">
         <template x-if="tagIssuesLoading">
             <div class="p-8 text-center text-gray-400 text-sm flex items-center justify-center space-x-2">
-                <svg class="w-4 h-4 animate-spin text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+                <svg class="w-4 h-4 animate-spin text-brand" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
                 </svg>
                 <span>Анализ метаданных коллекции...</span>
@@ -124,14 +124,14 @@
         <template x-if="!tagIssuesLoading && tagIssues.length > 0">
             <div class="overflow-x-auto max-h-[650px]">
                 <table class="w-full text-left border-collapse text-xs">
-                    <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider font-semibold sticky top-0 z-10 border-b border-gray-800">
+                    <thead class="bg-surface-base text-content-secondary uppercase tracking-wider font-semibold sticky top-0 z-10 border-b border-surface-border font-mono text-[11px]">
                         <tr>
                             <th class="p-3 w-10 text-center">
                                 <input
                                     type="checkbox"
                                     :checked="tagIssues.length > 0 && selectedPaths.length === tagIssues.length"
                                     @change="toggleSelectAll()"
-                                    class="w-4 h-4 rounded border-gray-700 bg-gray-800 text-emerald-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                                    class="w-4 h-4 rounded border-surface-border bg-surface-input text-brand focus:ring-0 focus:ring-offset-0 cursor-pointer"
                                     title="Выбрать все" />
                             </th>
                             <th class="p-3">Текущие метаданные</th>
@@ -149,7 +149,7 @@
                                         type="checkbox"
                                         :checked="isSelected(item.file_path)"
                                         @change="toggleSelectItem(item.file_path)"
-                                        class="w-4 h-4 rounded border-gray-700 bg-gray-800 text-emerald-500 focus:ring-0 focus:ring-offset-0 cursor-pointer" />
+                                        class="w-4 h-4 rounded border-surface-border bg-surface-input text-brand focus:ring-0 focus:ring-offset-0 cursor-pointer" />
                                 </td>
 
                                 <!-- Текущие метаданные -->
@@ -167,7 +167,7 @@
                                             <span
                                                 class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
                                                 :class="{
-                                                    'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30': item.severity === 'safe_autofix',
+                                                    'bg-brand-muted text-brand border border-brand/30': item.severity === 'safe_autofix',
                                                     'bg-amber-500/20 text-amber-300 border border-amber-500/30': item.severity === 'review_needed',
                                                     'bg-blue-500/20 text-blue-300 border border-blue-500/30': item.severity === 'info'
                                                 }"
@@ -188,7 +188,7 @@
                                                         'bg-purple-500/10 text-purple-400 border border-purple-500/20': iss === 'unparsed_feat',
                                                         'bg-amber-500/10 text-amber-400 border border-amber-500/20': iss === 'label_as_artist',
                                                         'bg-blue-500/10 text-blue-400 border border-blue-500/20': iss === 'artist_in_title',
-                                                        'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20': iss === 'literal_backslash_artist',
+                                                        'bg-brand/10 text-brand border border-brand/20': iss === 'literal_backslash_artist',
                                                         'bg-gray-500/10 text-gray-400 border border-gray-500/20': iss === 'missing_year' || iss === 'missing_album' || iss === 'track_num_in_title'
                                                     }"
                                                     x-text="{
@@ -209,7 +209,7 @@
 
                                 <!-- Предлагаемые чистые теги -->
                                 <td class="p-3 max-w-xs">
-                                    <div class="font-medium text-emerald-300 truncate" x-text="item.proposed.title" :title="item.proposed.title"></div>
+                                    <div class="font-medium text-brand truncate" x-text="item.proposed.title" :title="item.proposed.title"></div>
                                     <div class="text-[11px] text-teal-400/90 truncate mt-0.5 flex items-center space-x-1" :title="item.proposed.artist">
                                         <span x-text="item.proposed.artist"></span>
                                     </div>
@@ -223,7 +223,7 @@
                                     <button
                                         @click="fixTagIssue(item)"
                                         :disabled="isFixingTagIssue[item.file_path]"
-                                        class="px-2.5 py-1 bg-emerald-700/80 hover:bg-emerald-600 text-white rounded text-[11px] font-medium transition disabled:opacity-50 inline-flex items-center space-x-1">
+                                        class="px-2.5 py-1 bg-brand/20 hover:bg-brand/30 text-brand border border-brand/30 rounded text-[11px] font-semibold transition disabled:opacity-50 inline-flex items-center space-x-1 active:scale-95">
                                         <span x-text="isFixingTagIssue[item.file_path] ? '...' : 'Исправить'"></span>
                                     </button>
                                     <button
@@ -237,8 +237,8 @@
                     </tbody>
                 </table>
                 <template x-if="tagIssuesTotalCount > tagIssues.length">
-                    <div class="p-3 bg-gray-950/60 border-t border-gray-800 text-center text-xs text-gray-400">
-                        Показано первых <span class="font-mono text-emerald-400" x-text="tagIssues.length"></span> треков из <span class="font-mono text-emerald-400" x-text="tagIssuesTotalCount"></span>.
+                    <div class="p-3 bg-surface-base border-t border-surface-border text-center text-xs text-content-muted">
+                        Показано первых <span class="font-mono text-brand" x-text="tagIssues.length"></span> треков из <span class="font-mono text-brand" x-text="tagIssuesTotalCount"></span>.
                     </div>
                 </template>
             </div>
@@ -254,10 +254,10 @@
         
         <div
             @click.outside="closeTagDiffModal()"
-            class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            class="bg-surface-panel border border-surface-border rounded-2xl w-full max-w-4xl shadow-panel overflow-hidden flex flex-col max-h-[90vh]">
             
             <!-- Заголовок модального окна -->
-            <div class="p-5 border-b border-gray-800 flex items-center justify-between bg-gray-950">
+            <div class="p-5 border-b border-surface-border flex items-center justify-between bg-surface-base/80">
                 <div class="flex items-center space-x-3">
                     <span class="w-8 h-8 rounded-lg bg-sky-500/10 text-sky-400 flex items-center justify-center">
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
@@ -306,13 +306,13 @@
                                 <template x-for="(match, idx) in catalogDiffMatches" :key="idx">
                                     <div
                                         @click="selectedMatchIndex = idx"
-                                        :class="selectedMatchIndex === idx ? 'border-sky-500 ring-1 ring-sky-500/50 bg-gray-800/80' : 'border-gray-800 bg-gray-950/60 hover:border-gray-700'"
+                                        :class="selectedMatchIndex === idx ? 'border-brand ring-1 ring-brand/50 bg-surface-elevated' : 'border-surface-border bg-surface-base hover:border-brand'"
                                         class="p-3 border rounded-xl cursor-pointer transition flex space-x-3 items-center">
                                         <template x-if="match.cover_url">
-                                            <img :src="match.cover_url" class="w-12 h-12 rounded-lg object-cover bg-gray-900 shrink-0 border border-gray-800" />
+                                            <img :src="match.cover_url" class="w-12 h-12 rounded-lg object-cover bg-surface-input shrink-0 border border-surface-border" />
                                         </template>
                                         <template x-if="!match.cover_url">
-                                            <div class="w-12 h-12 rounded-lg bg-gray-900 border border-gray-800 flex items-center justify-center text-gray-600 shrink-0">
+                                            <div class="w-12 h-12 rounded-lg bg-surface-input border border-surface-border flex items-center justify-center text-content-muted shrink-0">
                                                 <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
                                                     <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
                                                 </svg>
@@ -334,7 +334,7 @@
                                                 <template x-if="match.match_score">
                                                     <span
                                                         class="px-1.5 py-0.2 rounded text-[9px] font-bold"
-                                                        :class="match.match_score >= 80 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : (match.match_score >= 50 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30')"
+                                                        :class="match.match_score >= 80 ? 'bg-brand-muted text-brand border border-brand/30' : (match.match_score >= 50 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30')"
                                                         x-text="match.match_score + '% совпадение'">
                                                     </span>
                                                 </template>
@@ -354,9 +354,9 @@
 
                         <!-- Diff Таблица Сравнения -->
                         <template x-if="catalogDiffMatches[selectedMatchIndex]">
-                            <div class="border border-gray-800 rounded-xl overflow-hidden bg-gray-950/60">
+                            <div class="border border-surface-border rounded-xl overflow-hidden bg-surface-base">
                                 <table class="w-full text-left border-collapse text-xs">
-                                    <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider font-semibold border-b border-gray-800">
+                                    <thead class="bg-surface-base text-content-secondary uppercase tracking-wider font-semibold border-b border-surface-border font-mono text-[11px]">
                                         <tr>
                                             <th class="p-3 w-1/4">Поле тега</th>
                                             <th class="p-3 w-3/8 text-gray-400">Текущее в файле</th>
@@ -370,7 +370,7 @@
                                             <td class="p-3 text-gray-300" x-text="activeDiffItem.title"></td>
                                             <td
                                                 class="p-3 font-semibold"
-                                                :class="catalogDiffMatches[selectedMatchIndex].title !== activeDiffItem.title ? 'text-emerald-400 bg-emerald-500/5' : 'text-gray-300'"
+                                                :class="catalogDiffMatches[selectedMatchIndex].title !== activeDiffItem.title ? 'text-brand bg-brand-muted' : 'text-gray-300'"
                                                 x-text="catalogDiffMatches[selectedMatchIndex].title">
                                             </td>
                                         </tr>
@@ -381,7 +381,7 @@
                                             <td class="p-3 text-gray-300" x-text="activeDiffItem.artist"></td>
                                             <td
                                                 class="p-3 font-semibold"
-                                                :class="catalogDiffMatches[selectedMatchIndex].artist !== activeDiffItem.artist ? 'text-emerald-400 bg-emerald-500/5' : 'text-gray-300'"
+                                                :class="catalogDiffMatches[selectedMatchIndex].artist !== activeDiffItem.artist ? 'text-brand bg-brand-muted' : 'text-gray-300'"
                                                 x-text="catalogDiffMatches[selectedMatchIndex].artist">
                                             </td>
                                         </tr>
@@ -392,7 +392,7 @@
                                             <td class="p-3 text-gray-300" x-text="activeDiffItem.album"></td>
                                             <td
                                                 class="p-3 font-semibold"
-                                                :class="catalogDiffMatches[selectedMatchIndex].album !== activeDiffItem.album ? 'text-emerald-400 bg-emerald-500/5' : 'text-gray-300'"
+                                                :class="catalogDiffMatches[selectedMatchIndex].album !== activeDiffItem.album ? 'text-brand bg-brand-muted' : 'text-gray-300'"
                                                 x-text="catalogDiffMatches[selectedMatchIndex].album">
                                             </td>
                                         </tr>
@@ -403,7 +403,7 @@
                                             <td class="p-3 text-gray-300" x-text="activeDiffItem.year || 'Не указан'"></td>
                                             <td
                                                 class="p-3 font-semibold"
-                                                :class="catalogDiffMatches[selectedMatchIndex].year && catalogDiffMatches[selectedMatchIndex].year !== activeDiffItem.year ? 'text-emerald-400 bg-emerald-500/5' : 'text-gray-300'"
+                                                :class="catalogDiffMatches[selectedMatchIndex].year && catalogDiffMatches[selectedMatchIndex].year !== activeDiffItem.year ? 'text-brand bg-brand-muted' : 'text-gray-300'"
                                                 x-text="catalogDiffMatches[selectedMatchIndex].year || '—'">
                                             </td>
                                         </tr>
@@ -414,7 +414,7 @@
                                             <td class="p-3 text-gray-300" x-text="activeDiffItem.track_number || 1"></td>
                                             <td
                                                 class="p-3 font-semibold"
-                                                :class="catalogDiffMatches[selectedMatchIndex].track_number && catalogDiffMatches[selectedMatchIndex].track_number !== activeDiffItem.track_number ? 'text-emerald-400 bg-emerald-500/5' : 'text-gray-300'"
+                                                :class="catalogDiffMatches[selectedMatchIndex].track_number && catalogDiffMatches[selectedMatchIndex].track_number !== activeDiffItem.track_number ? 'text-brand bg-brand-muted' : 'text-gray-300'"
                                                 x-text="catalogDiffMatches[selectedMatchIndex].track_number || 1">
                                             </td>
                                         </tr>
@@ -427,7 +427,7 @@
                                                 <template x-if="catalogDiffMatches[selectedMatchIndex].cover_url">
                                                     <div class="flex items-center space-x-2">
                                                         <img :src="catalogDiffMatches[selectedMatchIndex].cover_url" class="w-10 h-10 rounded border border-gray-700 object-cover" />
-                                                        <span class="text-xs text-emerald-400">Будет загружена студийная обложка (1000×1000)</span>
+                                                        <span class="text-xs text-brand font-medium">Будет загружена студийная обложка (1000×1000)</span>
                                                     </div>
                                                 </template>
                                                 <template x-if="!catalogDiffMatches[selectedMatchIndex].cover_url">
@@ -444,7 +444,7 @@
             </div>
 
             <!-- Подвал модального окна -->
-            <div class="p-5 border-t border-gray-800 flex items-center justify-between bg-gray-950">
+            <div class="p-5 border-t border-surface-border flex items-center justify-between bg-surface-base/80">
                 <button
                     @click="closeTagDiffModal()"
                     class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-xs font-medium transition">
@@ -453,13 +453,13 @@
                 <div class="flex items-center space-x-3">
                     <button
                         @click="fixTagIssue(activeDiffItem); closeTagDiffModal()"
-                        class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-semibold transition">
+                        class="px-4 py-2 bg-surface-elevated hover:bg-surface-hover text-brand border border-brand/30 rounded-lg text-xs font-semibold transition active:scale-95">
                         Применить локальное исправление
                     </button>
                     <button
                         @click="applyDiffMatch(catalogDiffMatches[selectedMatchIndex])"
                         :disabled="isApplyingCatalog || catalogDiffMatches.length === 0 || !catalogDiffMatches[selectedMatchIndex]"
-                        class="px-5 py-2 bg-gradient-to-r from-sky-600 to-emerald-600 hover:from-sky-500 hover:to-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition shadow-lg flex items-center space-x-2">
+                        class="px-5 py-2 bg-gradient-to-r from-brand to-amber-500 hover:opacity-90 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition shadow-lg flex items-center space-x-2">
                         <template x-if="isApplyingCatalog">
                             <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>

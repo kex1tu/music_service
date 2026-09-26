@@ -1,9 +1,9 @@
 {{ define "tag_editor_flat" }}
                     <!-- РЕЖИМ 2: СПЛОШНОЙ СПИСОК (FLAT VIEW) -->
                     <template x-if="viewMode === 'flat'">
-                        <div class="border border-gray-800 rounded-xl overflow-x-auto shadow">
+                        <div class="border border-surface-border rounded-xl overflow-x-auto shadow-panel">
                             <table class="w-full text-left text-xs min-w-[820px]">
-                                <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider border-b border-gray-800">
+                                <thead class="bg-surface-base text-content-secondary uppercase tracking-wider border-b border-surface-border font-mono text-[11px]">
                                     <tr>
                                         <th class="py-2.5 px-2 w-8 text-center" title="Перетаскивание треков"></th>
                                         <th class="py-2.5 px-2 w-12 text-center" title="Обложка трека">Арт</th>
@@ -18,12 +18,12 @@
                                         <th class="py-2.5 px-1 w-8 text-center" title="Исключить трек">✕</th>
                                     </tr>
                                 </thead>
-                                <tbody class="divide-y divide-gray-800/60 bg-gray-900/40">
+                                <tbody class="divide-y divide-surface-borderSubtle bg-surface-panel/40">
                                     <template x-for="(track, index) in tracks" :key="track.path || index">
                                         <tr
-                                            class="hover:bg-gray-800/30 transition-colors"
+                                            class="hover:bg-surface-elevated/60 transition-colors"
                                             :class="{
-                                                'bg-emerald-950/30 border-t-2 border-emerald-500': dragOverIndex === index,
+                                                'bg-brand-muted border-t-2 border-brand': dragOverIndex === index,
                                                 'opacity-40': draggedIndex === index
                                             }"
                                             draggable="true"
@@ -31,7 +31,7 @@
                                             @dragover="onDragOver($event, index)"
                                             @drop="onDrop($event, index)"
                                             @dragend="onDragEnd()">
-                                            <td class="py-2 px-1 text-center cursor-grab active:cursor-grabbing text-gray-500 hover:text-gray-300 select-none">
+                                            <td class="py-2 px-1 text-center cursor-grab active:cursor-grabbing text-content-muted hover:text-content-primary select-none">
                                                 <svg class="w-4 h-4 mx-auto" viewBox="0 0 24 24" fill="currentColor">
                                                     <path d="M9 19q-.825 0-1.412-.587T7 17t.588-1.412T9 15t1.413.588T11 17t-.587 1.413T9 19m6 0q-.825 0-1.412-.587T13 17t.588-1.412T15 15t1.413.588T17 17t-.587 1.413T15 19M9 13q-.825 0-1.412-.587T7 11t.588-1.412T9 9t1.413.588T11 11t-.587 1.413T9 13m6 0q-.825 0-1.412-.587T13 11t.588-1.412T15 9t1.413.588T17 11t-.587 1.413T15 13M9 7q-.825 0-1.412-.587T7 5t.588-1.412T9 3t1.413.588T11 5t-.587 1.413T9 7m6 0q-.825 0-1.412-.587T13 5t.588-1.412T15 3t1.413.588T17 5t-.587 1.413T15 7"/>
                                                 </svg>
@@ -41,17 +41,17 @@
                                                 <button
                                                     type="button"
                                                     @click="openTrackCoverGallery(track, index)"
-                                                    class="w-10 h-10 rounded bg-gray-900 border border-gray-700/80 hover:border-pink-500 overflow-hidden relative group/art transition flex items-center justify-center mx-auto shadow-sm"
+                                                    class="w-10 h-10 rounded bg-surface-input border border-surface-border hover:border-brand overflow-hidden relative group/art transition flex items-center justify-center mx-auto shadow-sm"
                                                     title="Выбрать обложку для трека">
                                                     <template x-if="track.cover_preview_url || track.cover_url || track.cover_base64 || coverPreviewUrl">
                                                         <img :src="track.cover_preview_url || track.cover_url || track.cover_base64 || coverPreviewUrl" class="w-full h-full object-cover">
                                                     </template>
                                                     <template x-if="!(track.cover_preview_url || track.cover_url || track.cover_base64 || coverPreviewUrl)">
-                                                        <svg class="w-4 h-4 text-gray-600" viewBox="0 0 24 24" fill="currentColor">
+                                                        <svg class="w-4 h-4 text-content-muted" viewBox="0 0 24 24" fill="currentColor">
                                                             <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3z"/>
                                                         </svg>
                                                     </template>
-                                                    <span class="absolute inset-0 bg-black/60 opacity-0 group-hover/art:opacity-100 flex items-center justify-center text-[9px] text-pink-300 font-bold transition">Арт</span>
+                                                    <span class="absolute inset-0 bg-black/60 opacity-0 group-hover/art:opacity-100 flex items-center justify-center text-[9px] text-brand font-bold transition">Арт</span>
                                                 </button>
                                             </td>
                                             <td class="py-2 px-2 text-center">
@@ -59,14 +59,14 @@
                                                     type="number"
                                                     min="1"
                                                     x-model="track.disc_number"
-                                                    class="w-10 bg-gray-950 border border-gray-700 rounded px-1 py-1 text-center text-white focus:outline-none focus:border-emerald-500">
+                                                    class="w-10 bg-surface-input border border-surface-border rounded px-1 py-1 text-center text-content-primary focus:outline-none focus:border-brand font-mono">
                                             </td>
                                             <td class="py-2 px-2 text-center">
                                                 <input
                                                     type="number"
                                                     min="1"
                                                     x-model="track.track_number"
-                                                    class="w-12 bg-gray-950 border border-gray-700 rounded px-1.5 py-1 text-center text-white focus:outline-none focus:border-emerald-500">
+                                                    class="w-12 bg-surface-input border border-surface-border rounded px-1.5 py-1 text-center text-content-primary focus:outline-none focus:border-brand font-mono">
                                             </td>
                                             <td class="py-2 px-3">
                                                 <div class="flex items-center space-x-1">
@@ -74,12 +74,12 @@
                                                         type="text"
                                                         x-model="track.title"
                                                         placeholder="Название трека"
-                                                        class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500">
+                                                        class="w-full bg-surface-input border border-surface-border rounded px-2 py-1 text-content-primary focus:outline-none focus:border-brand">
                                                     <button
                                                         type="button"
                                                         @click="cleanTrackTitle(track)"
                                                         title="Очистить название трека от мусора и извлечь фиты"
-                                                        class="text-gray-500 hover:text-amber-400 p-1 transition flex-shrink-0">
+                                                        class="text-content-muted hover:text-brand p-1 transition flex-shrink-0">
                                                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                                                             <path d="M19.36 2.72l1.42 1.42a1.996 1.996 0 0 1 0 2.83l-1.42 1.42l-4.24-4.24l1.41-1.43a2 2 0 0 1 2.83 0M3 21v-4.24l10.6-10.6l4.25 4.24L7.24 21zm3.5-2H7.5l7.66-7.66l-.96-.95l-7.7 7.7z"/>
                                                         </svg>
@@ -91,21 +91,21 @@
                                                     type="text"
                                                     x-model="track.artist"
                                                     placeholder="Исполнитель"
-                                                    class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500">
+                                                    class="w-full bg-surface-input border border-surface-border rounded px-2 py-1 text-content-primary focus:outline-none focus:border-brand">
                                             </td>
                                             <td class="py-2 px-3">
                                                 <input
                                                     type="text"
                                                     x-model="track.album"
                                                     placeholder="Альбом"
-                                                    class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500">
+                                                    class="w-full bg-surface-input border border-surface-border rounded px-2 py-1 text-content-primary focus:outline-none focus:border-brand">
                                             </td>
                                             <td class="py-2 px-3">
                                                 <input
                                                     type="number"
                                                     x-model="track.year"
                                                     placeholder="Год"
-                                                    class="w-20 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-center text-white focus:outline-none focus:border-emerald-500">
+                                                    class="w-20 bg-surface-input border border-surface-border rounded px-2 py-1 text-center text-content-primary focus:outline-none focus:border-brand font-mono">
                                             </td>
                                             <td class="py-2 px-3 text-center">
                                                 <button
@@ -133,9 +133,9 @@
                                                     @click="openLyrics(track, index)"
                                                     class="px-2.5 py-1 rounded text-[11px] font-semibold transition flex items-center justify-center space-x-1 mx-auto"
                                                     :class="{
-                                                        'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30': track.lyrics_status === 'lrc',
+                                                        'bg-brand-muted text-brand border border-brand/30 hover:bg-brand/20': track.lyrics_status === 'lrc',
                                                         'bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30': track.lyrics_status === 'txt',
-                                                        'bg-gray-800 text-gray-400 hover:bg-gray-700': !track.lyrics_status || track.lyrics_status === 'none'
+                                                        'bg-surface-elevated text-content-muted hover:text-content-primary hover:bg-surface-hover': !track.lyrics_status || track.lyrics_status === 'none'
                                                     }">
                                                     <span x-text="track.lyrics_status === 'lrc' ? 'LRC' : (track.lyrics_status === 'txt' ? 'TXT' : '+ Текст')"></span>
                                                 </button>
@@ -144,10 +144,10 @@
                                                 <button
                                                     type="button"
                                                     @click="removeTrack(index)"
-                                                    class="text-gray-600 hover:text-red-400 p-1 rounded transition"
+                                                    class="text-content-muted hover:text-red-400 p-1 rounded transition"
                                                     title="Исключить трек из списка">
                                                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                                                        <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q-.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
+                                                        <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
                                                     </svg>
                                                 </button>
                                             </td>
@@ -157,5 +157,4 @@
                             </table>
                         </div>
                     </template>
-                </div>
 {{ end }}

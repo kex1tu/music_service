@@ -2,13 +2,13 @@
 <!-- СЕКЦИЯ 4: Неполные релизы -->
 <div x-show="activeSubTab === 'incomplete'" class="space-y-4">
     <template x-if="!incompleteLoading && incompleteAlbums.length === 0">
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-500 text-sm">
+        <div class="bg-surface-panel border border-surface-border rounded-xl p-8 text-center text-gray-500 text-sm">
             Отлично! Все альбомы в медиатеке укомплектованы, недостающих треков не обнаружено.
         </div>
     </template>
 
     <template x-if="incompleteLoading">
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-400 text-sm flex items-center justify-center space-x-2">
+        <div class="bg-surface-panel border border-surface-border rounded-xl p-8 text-center text-gray-400 text-sm flex items-center justify-center space-x-2">
             <svg class="w-4 h-4 animate-spin text-sky-400" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
             </svg>
@@ -19,12 +19,12 @@
     <template x-if="!incompleteLoading && incompleteAlbums.length > 0">
         <div class="space-y-4">
             <template x-for="alb in incompleteAlbums" :key="alb.path">
-                <div class="bg-gray-900 border border-sky-900/40 rounded-xl p-5 shadow-xl space-y-4 transition hover:border-sky-700/50">
+                <div class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel space-y-4 transition hover:border-sky-500/40">
                     <!-- Шапка релиза -->
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-surface-border pb-4">
                         <div class="flex items-center space-x-4 min-w-0">
                             <!-- Обложка -->
-                            <div class="w-14 h-14 rounded-lg bg-gray-800 flex items-center justify-center shrink-0 overflow-hidden border border-gray-700/60 shadow">
+                            <div class="w-14 h-14 rounded-lg bg-surface-input flex items-center justify-center shrink-0 overflow-hidden border border-surface-border shadow-sm">
                                 <template x-if="alb.cover_url">
                                     <img :src="alb.cover_url" class="w-full h-full object-cover" alt="Cover" />
                                 </template>
@@ -37,13 +37,13 @@
 
                             <div class="min-w-0">
                                 <div class="flex items-center space-x-2">
-                                    <h4 class="text-sm font-bold text-white truncate" x-text="alb.album" :title="alb.album"></h4>
+                                    <h4 class="text-sm font-bold text-content-primary truncate" x-text="alb.album" :title="alb.album"></h4>
                                     <template x-if="alb.year">
                                         <span class="text-[11px] text-gray-400 font-mono" x-text="`(${alb.year})`"></span>
                                     </template>
                                 </div>
-                                <p class="text-xs text-gray-300 truncate" x-text="alb.artist" :title="alb.artist"></p>
-                                <p class="text-[11px] text-gray-500 font-mono truncate mt-0.5" x-text="alb.path" :title="alb.path"></p>
+                                <p class="text-xs text-content-secondary truncate" x-text="alb.artist" :title="alb.artist"></p>
+                                <p class="text-[11px] text-content-muted font-mono truncate mt-0.5" x-text="alb.path" :title="alb.path"></p>
                             </div>
                         </div>
 
@@ -62,7 +62,7 @@
                                 </button>
                             </template>
                             <template x-if="alb.expected_count <= alb.present_count">
-                                <span class="px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg text-xs font-medium flex items-center space-x-1">
+                                <span class="px-2.5 py-1 bg-brand/10 border border-brand/20 text-brand rounded-lg text-xs font-medium flex items-center space-x-1">
                                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
                                     <span>Укомплектован</span>
                                 </span>
@@ -72,7 +72,7 @@
                             <template x-if="getBackfillJobForAlbum(alb.path)">
                                 <button
                                     @click="openBackfillJob(alb.path)"
-                                    class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 shadow"
+                                    class="px-3 py-1.5 bg-brand hover:bg-brand-hover text-white rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 shadow-lg shadow-brand/20 active:scale-95"
                                     title="Редактировать теги всех треков релиза">
                                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                                         <path d="M4 21q-.425 0-.712-.288T3 20v-2.425q0-.4.15-.763t.425-.637L16.2 3.575q.3-.275.663-.425t.762-.15t.775.15t.65.45L20.425 5q.3.275.437.65T21 6.4q0 .4-.138.763t-.437.662l-12.6 12.6q-.275.275-.638.425t-.762.15zM17.6 7.8L19 6.4L17.6 5l-1.4 1.4z"/>
@@ -116,19 +116,19 @@
                                 <strong class="font-mono" x-text="alb.missing_track_numbers.map(n => '#' + n).join(', ')"></strong>
                             </div>
                         </div>
-                        <div class="w-full bg-gray-950 rounded-full h-2 overflow-hidden border border-gray-800">
+                        <div class="w-full bg-surface-base rounded-full h-2 overflow-hidden border border-surface-border">
                             <div class="bg-gradient-to-r from-sky-500 to-indigo-500 h-2 rounded-full transition-all duration-300"
                                 :style="`width: ${Math.round(alb.present_count / (alb.expected_count || 1) * 100)}%`"></div>
                         </div>
                     </div>
 
                     <!-- Развернутый аккордеон треклиста -->
-                    <div x-show="expandedAlbums[alb.path]" class="mt-4 pt-3 border-t border-gray-800 space-y-3 animate-fade-in">
+                    <div x-show="expandedAlbums[alb.path]" class="mt-4 pt-3 border-t border-surface-border space-y-3 animate-fade-in">
                         <div class="flex items-center justify-between">
                             <h5 class="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center space-x-2">
                                 <span>Треклист релиза</span>
                                 <template x-if="alb.is_catalog_matched">
-                                    <span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 font-mono">
+                                    <span class="text-[10px] text-brand bg-brand/10 px-2 py-0.5 rounded border border-brand/20 font-mono">
                                         Сверено с каталогом Deezer
                                     </span>
                                 </template>
@@ -142,9 +142,9 @@
                         </div>
 
                         <!-- Таблица треков релиза -->
-                        <div class="bg-gray-950/80 rounded-lg border border-gray-800/80 overflow-hidden">
+                        <div class="bg-surface-base rounded-lg border border-surface-border overflow-hidden">
                             <table class="w-full text-left text-xs border-collapse">
-                                <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider font-semibold border-b border-gray-800 text-[11px]">
+                                <thead class="bg-surface-elevated text-content-secondary uppercase tracking-wider font-semibold border-b border-surface-border font-mono text-[11px]">
                                     <tr>
                                         <th class="p-2.5 w-12 text-center">#</th>
                                         <th class="p-2.5">Название трека</th>
@@ -169,7 +169,7 @@
                                             </td>
                                             <td class="p-2.5 text-center">
                                                 <template x-if="t.is_present">
-                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-brand/10 text-brand border border-brand/20">
                                                         В медиатеке
                                                     </span>
                                                 </template>

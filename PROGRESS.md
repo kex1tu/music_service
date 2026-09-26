@@ -126,6 +126,24 @@
   - **Обогащение бэкенда:** Расширение `TrackMetadataResponse` полями `sample_rate`, `track_number`, `year`, `genre`, `file_size` в `stream_handlers.go`.
   - **Тесты:** Проверены поля метаданных в `stream_handlers_test.go`, все 146 тестов зеленые (`go test -race ./...` — 0 data races).
 
+- **Блок 46 (Full Frontend Redesign — SoundCloud & Deezer Aesthetic):**
+  - **Ликвидация «AI-слопа»:** Полный отказ от шаблонной зелено-серой палитры Tailwind (`gray-950/emerald-500`) в пользу глубокой чернильно-обсидиановой основы (`#0B0C0E`), теплого студийного оранжевого акцента SoundCloud (`#FF5500`) и структурированной потоковой консоли Deezer.
+  - **Дизайн-система токенов (Tokens & Foundation):**
+    - `brand`: `#FF5500`, hover `#FF6E1A`, active `#E64D00`, muted `rgba(255, 85, 0, 0.12)`, glow `rgba(255, 85, 0, 0.25)`.
+    - `surface`: `surface-base` (`#0B0C0E`), `surface-panel` (`#13151A`), `surface-elevated` (`#1B1E26`), `surface-input` (`#0F1014`), `surface-border` (`#242834`), `surface-borderSubtle` (`#1C1F28`).
+    - `content`: `content-primary` (`#F4F4F6`), `content-secondary` (`#A2A4B0`), `content-muted` (`#636779`).
+  - **Типографика:** Подключение `Plus Jakarta Sans` для интерфейсных элементов и `JetBrains Mono` для моноширинной телеметрии (битрейты 320 kbps, таймкоды, пути, теги).
+  - **Стилизация плеера и визуализатора:** Оранжевый прогресс-бар, стильные градиенты холста спектроанализатора в `web/static/js/player.js`, глубокие бархатные тени `shadow-panel` и тонкие скроллбары в `web/static/css/style.css`.
+  - **Полный рефакторинг всех компонентов (`web/templates/`):**
+    - Шапка и навигация `header.html`: градиентный логотип-волна, стриминговый поиск `Ctrl+K`.
+    - Нижняя консоль плеера `audio_player.html` и полноэкранная вкладка `player_tab.html`.
+    - Загрузчик и очередь: `downloader_form.html`, `downloader_active.html`, `downloader_queue.html`, `downloader_sources.html`, `downloader_discography.html`.
+    - Файловый менеджер `file_manager.html`: Deezer-треклист, Play-кнопки по наведению, моно-бейджи `[320 kbps]`, `[LRC]`.
+    - Аудит целостности библиотеки: `audit.html`, `audit_metrics.html`, `audit_tags.html`, `audit_covers.html`, `audit_duplicates.html`, `audit_genres.html`, `audit_incomplete.html`, `audit_lyrics.html`, `audit_paths.html`.
+    - Модальные окна: `login.html`, `confirmations.html`, `lyrics.html`, `tag_editor.html`, `tag_editor_covers.html`, `tag_editor_deezer.html`, `tag_editor_flat.html`, `tag_editor_grouped.html`, `tag_editor_grouped_tracks.html`.
+  - **No-Build соблюдение инвариантов:** Zero-Node.js, Zero-npm, чистые inline SVG Google Material Symbols (`viewBox="0 0 24 24"`), Alpine.js CDN и Tailwind Play CDN.
+  - **Тесты и сборка:** Все 146 тестов зеленые (`go test -race ./...`), бинарник `bin/music-manager` собран без ошибок.
+
 ---
 
 ## 4. Верификация
@@ -139,3 +157,4 @@
    go test -race ./...
    ```
    **Результат:** 100% PASS, 0 race conditions.
+

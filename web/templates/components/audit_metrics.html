@@ -2,25 +2,25 @@
 <!-- Сводка метрик коллекции (8 карточек) -->
 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-8 gap-4">
     <!-- Карточка 1: Всего треков -->
-    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+    <div class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel">
         <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Всего треков</span>
-            <span class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+            <span class="text-xs font-semibold text-content-secondary uppercase tracking-wider">Всего треков</span>
+            <span class="w-8 h-8 rounded-lg bg-brand/10 text-brand flex items-center justify-center">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
                 </svg>
             </span>
         </div>
         <div class="mt-4 flex items-baseline space-x-2">
-            <span class="text-2xl font-bold text-white font-mono" x-text="summary.total_tracks"></span>
-            <span class="text-xs text-gray-500" x-text="`в ${summary.total_albums} релизах`"></span>
+            <span class="text-2xl font-bold text-content-primary font-mono" x-text="summary.total_tracks"></span>
+            <span class="text-xs text-content-muted font-mono" x-text="`в ${summary.total_albums} релизах`"></span>
         </div>
     </div>
 
     <!-- Карточка 2: Без текстов -->
     <div
         @click="activeSubTab = 'lyrics'"
-        class="bg-gray-900 border border-gray-800 rounded-xl p-5 cursor-pointer hover:border-purple-500/50 transition"
+        class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel cursor-pointer hover:border-purple-500/50 transition"
         :class="{'ring-1 ring-purple-500/50': activeSubTab === 'lyrics'}">
         <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-purple-400 uppercase tracking-wider">Без текстов (.lrc)</span>
@@ -32,14 +32,14 @@
         </div>
         <div class="mt-4 flex items-baseline space-x-2">
             <span class="text-2xl font-bold text-purple-300 font-mono" x-text="summary.missing_lyrics_count"></span>
-            <span class="text-xs text-gray-500">треков</span>
+            <span class="text-xs text-content-muted font-mono">треков</span>
         </div>
     </div>
 
     <!-- Карточка 3: Без обложек -->
     <div
         @click="activeSubTab = 'covers'"
-        class="bg-gray-900 border border-gray-800 rounded-xl p-5 cursor-pointer hover:border-yellow-500/50 transition"
+        class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel cursor-pointer hover:border-yellow-500/50 transition"
         :class="{'ring-1 ring-yellow-500/50': activeSubTab === 'covers'}">
         <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-yellow-400 uppercase tracking-wider">Без обложек</span>
@@ -51,14 +51,14 @@
         </div>
         <div class="mt-4 flex items-baseline space-x-2">
             <span class="text-2xl font-bold text-yellow-300 font-mono" x-text="summary.missing_covers_count"></span>
-            <span class="text-xs text-gray-500">релизов</span>
+            <span class="text-xs text-content-muted font-mono">релизов</span>
         </div>
     </div>
 
     <!-- Карточка 4: Дубликаты -->
     <div
         @click="activeSubTab = 'duplicates'"
-        class="bg-gray-900 border border-gray-800 rounded-xl p-5 cursor-pointer hover:border-red-500/50 transition"
+        class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel cursor-pointer hover:border-red-500/50 transition"
         :class="{'ring-1 ring-red-500/50': activeSubTab === 'duplicates'}">
         <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-red-400 uppercase tracking-wider">Дубликаты треков</span>
@@ -70,14 +70,14 @@
         </div>
         <div class="mt-4 flex items-baseline space-x-2">
             <span class="text-2xl font-bold text-red-300 font-mono" x-text="duplicatesData.total_duplicate_files || summary.duplicates_count || 0"></span>
-            <span class="text-xs text-gray-500" x-text="`в ${(duplicatesData.groups ? duplicatesData.groups.length : 0)} группах`"></span>
+            <span class="text-xs text-content-muted font-mono" x-text="`в ${(duplicatesData.groups ? duplicatesData.groups.length : 0)} группах`"></span>
         </div>
     </div>
 
     <!-- Карточка 5: Неполные релизы -->
     <div
         @click="activeSubTab = 'incomplete'"
-        class="bg-gray-900 border border-gray-800 rounded-xl p-5 cursor-pointer hover:border-sky-500/50 transition"
+        class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel cursor-pointer hover:border-sky-500/50 transition"
         :class="{'ring-1 ring-sky-500/50': activeSubTab === 'incomplete'}">
         <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-sky-400 uppercase tracking-wider">Неполные релизы</span>
@@ -89,14 +89,14 @@
         </div>
         <div class="mt-4 flex items-baseline space-x-2">
             <span class="text-2xl font-bold text-sky-300 font-mono" x-text="(incompleteAlbums ? incompleteAlbums.length : (summary.incomplete_albums_count ?? 0)) ?? 0"></span>
-            <span class="text-xs text-gray-500">альбомов</span>
+            <span class="text-xs text-content-muted font-mono">альбомов</span>
         </div>
     </div>
 
     <!-- Карточка 6: Некорректные пути -->
     <div
         @click="activeSubTab = 'paths'"
-        class="bg-gray-900 border border-gray-800 rounded-xl p-5 cursor-pointer hover:border-amber-500/50 transition"
+        class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel cursor-pointer hover:border-amber-500/50 transition"
         :class="{'ring-1 ring-amber-500/50': activeSubTab === 'paths'}">
         <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-amber-400 uppercase tracking-wider">Не по шаблону</span>
@@ -108,14 +108,14 @@
         </div>
         <div class="mt-4 flex items-baseline space-x-2">
             <span class="text-2xl font-bold text-amber-300 font-mono" x-text="(invalidPaths ? invalidPaths.length : (summary.invalid_paths_count ?? 0)) ?? 0"></span>
-            <span class="text-xs text-gray-500">путей</span>
+            <span class="text-xs text-content-muted font-mono">путей</span>
         </div>
     </div>
 
     <!-- Карточка 7: Жанры (не-EN) -->
     <div
         @click="activeSubTab = 'genres'"
-        class="bg-gray-900 border border-gray-800 rounded-xl p-5 cursor-pointer hover:border-rose-500/50 transition"
+        class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel cursor-pointer hover:border-rose-500/50 transition"
         :class="{'ring-1 ring-rose-500/50': activeSubTab === 'genres'}">
         <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-rose-400 uppercase tracking-wider">Жанры (не-EN)</span>
@@ -127,26 +127,26 @@
         </div>
         <div class="mt-4 flex items-baseline space-x-2">
             <span class="text-2xl font-bold text-rose-300 font-mono" x-text="(nonEnGenres ? nonEnGenres.length : (summary.non_en_genres_count ?? 0)) ?? 0"></span>
-            <span class="text-xs text-gray-500">тегов</span>
+            <span class="text-xs text-content-muted font-mono">тегов</span>
         </div>
     </div>
 
     <!-- Карточка 8: Сверка тегов -->
     <div
         @click="activeSubTab = 'tags'"
-        class="bg-gray-900 border border-gray-800 rounded-xl p-5 cursor-pointer hover:border-emerald-500/50 transition"
-        :class="{'ring-1 ring-emerald-500/50': activeSubTab === 'tags'}">
+        class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel cursor-pointer hover:border-brand/50 transition"
+        :class="{'ring-1 ring-brand/50': activeSubTab === 'tags'}">
         <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-emerald-400 uppercase tracking-wider">Сверка тегов</span>
-            <span class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+            <span class="text-xs font-semibold text-brand uppercase tracking-wider">Сверка тегов</span>
+            <span class="w-8 h-8 rounded-lg bg-brand/10 text-brand flex items-center justify-center">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
                 </svg>
             </span>
         </div>
         <div class="mt-4 flex items-baseline space-x-2">
-            <span class="text-2xl font-bold text-emerald-300 font-mono" x-text="(tagIssues ? tagIssues.length : (summary.tag_issues_count ?? 0)) ?? 0"></span>
-            <span class="text-xs text-gray-500">дефектов</span>
+            <span class="text-2xl font-bold text-brand font-mono" x-text="(tagIssues ? tagIssues.length : (summary.tag_issues_count ?? 0)) ?? 0"></span>
+            <span class="text-xs text-content-muted font-mono">дефектов</span>
         </div>
     </div>
 </div>
