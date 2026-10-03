@@ -1,0 +1,1058 @@
+openapi: 3.0.3
+info:
+  title: Music Downloader & Tag Manager API
+  description: |
+    Высокопроизводительный self-hosted веб-сервис на Go (Chi) + yt-dlp + ffmpeg + ID3v2.4 Engine + SQLite WAL.
+    Источник истины — файловая система `MUSIC_DIR` и ID3-теги в самих файлах.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Локальный сервер разработки
+
+tags:
+  - name: System
+    description: Системные и служебные эндпоинты
+  - name: Auth
+    description: Аутентификация и управление сессией
+  - name: Downloads
+    description: Пайплайн загрузки и персистентная очередь
+  - name: Tags
+    description: Чтение, запись ID3v2.4 тегов, обложки и распознавание музыки
+  - name: Lyrics
+    description: Синхронизированные (.lrc) и текстовые (.txt) тексты песен
+  - name: Tracks
+    description: Стриминг аудио (RFC 7233 Range) и метаданные
+  - name: Files
+    description: Файловый менеджер и полнотекстовый поиск
+  - name: Audit
+    description: Аудит медиатеки, исправление путей, дубликатов, жанров и тегов
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: session_token
+      description: HMAC-SHA256 сессионный токен администратора
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: invalid credentials
+        detail:
+          type: string
+          example: Нераспознанный URL артиста
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        app:
+          type: string
+          example: music-manager
+        version:
+          type: string
+          example: 1.0.0
+
+    LoginRequest:
+      type: object
+      required:
+        - login
+        - password
+      properties:
+        login:
+          type: string
+          example: admin
+        password:
+          type: string
+          example: password123
+
+    LoginResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Авторизация успешна
+
+    AuthMeResponse:
+      type: object
+      properties:
+        login:
+          type: string
+          example: admin
+        authenticated:
+          type: boolean
+          example: true
+
+    DownloadJob:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        status:
+          type: string
+          enum: [queued, resolving, downloading, converting, tagging, ready, error, cancelled]
+          example: ready
+        url:
+          type: string
+          example: https://music.youtube.com/watch?v=dQw4w9WgXcQ
+        source:
+          type: string
+          example: youtube
+        target_album_path:
+          type: string
+          example: ""
+        title:
+          type: string
+          example: Never Gonna Give You Up
+        artist:
+          type: string
+          example: Rick Astley
+        total_tracks:
+          type: integer
+          example: 1
+        completed_tracks:
+          type: integer
+          example: 1
+        progress:
+          type: number
+          example: 100
+        overall_progress:
+          type: number
+          example: 100
+        error:
+          type: string
+          example: ""
+        created_at:
+          type: integer
+          example: 1727376000
+        updated_at:
+          type: integer
+          example: 1727376000
+
+    CreateDownloadRequest:
+      type: object
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          example: https://music.youtube.com/watch?v=dQw4w9WgXcQ
+        source:
+          type: string
+          example: youtube
+
+    CreateBatchDownloadRequest:
+      type: object
+      required:
+        - urls
+      properties:
+        urls:
+          type: array
+          items:
+            type: string
+          example:
+            - https://www.deezer.com/album/302127
+            - https://music.youtube.com/playlist?list=PL...
+        source:
+          type: string
+          example: batch
+
+    QueueSummary:
+      type: object
+      properties:
+        queued:
+          type: integer
+        processing:
+          type: integer
+        ready:
+          type: integer
+        error:
+          type: integer
+        cancelled:
+          type: integer
+        total:
+          type: integer
+
+    TrackTags:
+      type: object
+      properties:
+        path:
+          type: string
+          example: Discovery - Daft Punk/01. One More Time.mp3
+        title:
+          type: string
+          example: One More Time
+        artist:
+          type: string
+          example: Daft Punk
+        album:
+          type: string
+          example: Discovery
+        album_artist:
+          type: string
+          example: Daft Punk
+        year:
+          type: integer
+          example: 2001
+        genre:
+          type: string
+          example: Electronic
+        track_number:
+          type: integer
+          example: 1
+        track_total:
+          type: integer
+          example: 14
+        disc_number:
+          type: integer
+          example: 1
+        disc_total:
+          type: integer
+          example: 1
+        duration:
+          type: number
+          example: 320.5
+        bitrate:
+          type: integer
+          example: 320
+        has_cover:
+          type: boolean
+          example: true
+        lyrics_status:
+          type: string
+          enum: [none, lrc, txt]
+          example: lrc
+
+    DiscographyRelease:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        type:
+          type: string
+          example: album
+        year:
+          type: integer
+        url:
+          type: string
+        cover_url:
+          type: string
+        track_count:
+          type: integer
+
+    DiscographyResponse:
+      type: object
+      properties:
+        artist_name:
+          type: string
+        artist_id:
+          type: integer
+        artist_avatar:
+          type: string
+        source:
+          type: string
+        total_releases:
+          type: integer
+        releases:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscographyRelease'
+
+paths:
+  /api/health:
+    get:
+      tags: [System]
+      summary: Проверка работоспособности сервиса
+      responses:
+        '200':
+          description: Сервис работает
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+    head:
+      tags: [System]
+      summary: Легковесный пинг сервера
+      responses:
+        '200':
+          description: Сервис доступен
+
+  /login:
+    post:
+      tags: [Auth]
+      summary: Вход в систему (установка session_token cookie)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Успешная авторизация
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: session_token=...; Path=/; HttpOnly; Max-Age=2592000; SameSite=Lax
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Неверные учетные данные
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /logout:
+    post:
+      tags: [Auth]
+      summary: Выход из системы
+      responses:
+        '200':
+          description: Сессия очищена
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Проверка статуса авторизации
+      responses:
+        '200':
+          description: Текущий статус сессии
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthMeResponse'
+
+  /downloads:
+    get:
+      tags: [Downloads]
+      security:
+        - sessionCookie: []
+      summary: Список задач в очереди
+      responses:
+        '200':
+          description: Список задач
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DownloadJob'
+    post:
+      tags: [Downloads]
+      security:
+        - sessionCookie: []
+      summary: Добавить задачу на скачивание
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDownloadRequest'
+      responses:
+        '200':
+          description: Задача создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadJob'
+
+  /downloads/batch:
+    post:
+      tags: [Downloads]
+      security:
+        - sessionCookie: []
+      summary: Пакетное создание задач скачивания
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBatchDownloadRequest'
+      responses:
+        '200':
+          description: Задачи поставлены в очередь
+
+  /downloads/discography:
+    get:
+      tags: [Downloads]
+      security:
+        - sessionCookie: []
+      summary: Получение дискографии артиста
+      parameters:
+        - name: url
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Список релизов артиста
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscographyResponse'
+
+  /downloads/queue/summary:
+    get:
+      tags: [Downloads]
+      security:
+        - sessionCookie: []
+      summary: Сводка состояния очереди
+      responses:
+        '200':
+          description: Статистика очереди
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueSummary'
+
+  /downloads/queue/clear:
+    post:
+      tags: [Downloads]
+      security:
+        - sessionCookie: []
+      summary: Очистка завершенных задач
+      responses:
+        '200':
+          description: Завершенные задачи удалены
+
+  /downloads/completed:
+    delete:
+      tags: [Downloads]
+      security:
+        - sessionCookie: []
+      summary: Удаление завершенных задач
+      responses:
+        '200':
+          description: Задачи удалены
+
+  /downloads/{id}:
+    get:
+      tags: [Downloads]
+      security:
+        - sessionCookie: []
+      summary: Получение статуса задачи
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadJob'
+    delete:
+      tags: [Downloads]
+      security:
+        - sessionCookie: []
+      summary: Отмена или удаление задачи
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Задача удалена
+
+  /downloads/{id}/retry:
+    post:
+      tags: [Downloads]
+      security:
+        - sessionCookie: []
+      summary: Повторный запуск упавшей задачи
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadJob'
+
+  /downloads/{id}/tracks:
+    get:
+      tags: [Downloads]
+      security:
+        - sessionCookie: []
+      summary: Получение треков и метаданных задачи
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Метаданные и треклист задачи
+
+  /tags:
+    get:
+      tags: [Tags]
+      security:
+        - sessionCookie: []
+      summary: Чтение ID3v2.4 тегов файла или альбома
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Метаданные релиза или трека
+    post:
+      tags: [Tags]
+      security:
+        - sessionCookie: []
+      summary: Сохранение тегов одного трека
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrackTags'
+      responses:
+        '200':
+          description: Теги успешно сохранены
+
+  /tags/batch:
+    post:
+      tags: [Tags]
+      security:
+        - sessionCookie: []
+      summary: Пакетное сохранение тегов и перемещение в медиатеку
+      responses:
+        '200':
+          description: Альбом успешно сохранен в медиатеку
+    put:
+      tags: [Tags]
+      security:
+        - sessionCookie: []
+      summary: Пакетное обновление тегов (алиас POST)
+      responses:
+        '200':
+          description: Альбом успешно сохранен в медиатеку
+
+  /tags/recognize-audio:
+    post:
+      tags: [Tags]
+      security:
+        - sessionCookie: []
+      summary: Акустическое распознавание звука через Shazam (songrec)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+      responses:
+        '200':
+          description: Результат распознавания
+
+  /tags/cover:
+    get:
+      tags: [Tags]
+      security:
+        - sessionCookie: []
+      summary: Получение изображения обложки (APIC или cover.jpg)
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Изображение обложки
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+
+  /tags/covers/search:
+    get:
+      tags: [Tags]
+      security:
+        - sessionCookie: []
+      summary: Поиск обложек высокого разрешения
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Список найденных обложек
+
+  /lyrics:
+    get:
+      tags: [Lyrics]
+      security:
+        - sessionCookie: []
+      summary: Получение локального текста песни
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Текст песни
+    post:
+      tags: [Lyrics]
+      security:
+        - sessionCookie: []
+      summary: Сохранение текста песни рядом с треком (.lrc / .txt)
+      responses:
+        '200':
+          description: Текст успешно сохранен
+    delete:
+      tags: [Lyrics]
+      security:
+        - sessionCookie: []
+      summary: Удаление файлов текстов песни
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Файлы текста удалены
+
+  /lyrics/search:
+    get:
+      tags: [Lyrics]
+      security:
+        - sessionCookie: []
+      summary: Онлайн-поиск текстов (LRCLIB + Genius)
+      parameters:
+        - name: artist
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: title
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: album
+          in: query
+          schema:
+            type: string
+        - name: duration
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Текст песни найден
+
+  /api/tracks/{id}/stream:
+    get:
+      tags: [Tracks]
+      security:
+        - sessionCookie: []
+      summary: Стриминг аудиофайла (RFC 7233 Range)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Range
+          in: header
+          schema:
+            type: string
+            example: bytes=0-
+      responses:
+        '206':
+          description: Диапазон байт аудио
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+
+  /api/tracks/{id}/metadata:
+    get:
+      tags: [Tracks]
+      security:
+        - sessionCookie: []
+      summary: Быстрые метаданные трека из базы данных
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Метаданные трека
+
+  /api/tracks/{id}/cover:
+    get:
+      tags: [Tracks]
+      security:
+        - sessionCookie: []
+      summary: Получение обложки трека по ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+
+  /api/library/tracks:
+    get:
+      tags: [Tracks]
+      security:
+        - sessionCookie: []
+      summary: Список треков медиатеки с пагинацией и поиском
+      parameters:
+        - name: query
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Список треков
+
+  /files:
+    get:
+      tags: [Files]
+      security:
+        - sessionCookie: []
+      summary: Дерево каталогов и файлов медиатеки
+      parameters:
+        - name: path
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Листинг директории
+    delete:
+      tags: [Files]
+      security:
+        - sessionCookie: []
+      summary: Удаление файла или папки с очисткой БД
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Файл или папка удалены
+
+  /files/search:
+    get:
+      tags: [Files]
+      security:
+        - sessionCookie: []
+      summary: Глобальный полнотекстовый поиск (Ctrl+K)
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Результаты поиска
+
+  /files/audit/summary:
+    get:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Сводный дашборд состояния аудита медиатеки
+      responses:
+        '200':
+          description: Статистика аудита
+
+  /files/audit/refresh:
+    post:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Принудительное пересканирование медиатеки
+      responses:
+        '200':
+          description: Обновленный дашборд аудита
+
+  /files/audit/invalid-paths:
+    get:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Список треков с неканоническими путями
+      responses:
+        '200':
+          description: Неканонические пути
+
+  /files/audit/fix-path:
+    post:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Исправление неканонического пути одного файла
+      responses:
+        '200':
+          description: Путь исправлен
+
+  /files/audit/fix-all-paths:
+    post:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Пакетное исправление всех неканонических путей
+      responses:
+        '200':
+          description: Все пути исправлены
+
+  /files/audit/missing-lyrics:
+    get:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Список треков без текстов
+      responses:
+        '200':
+          description: Треки без текстов
+
+  /files/audit/missing-lyrics/fetch-all:
+    post:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Запуск фонового сбора текстов песен
+      responses:
+        '200':
+          description: Процесс запущен
+
+  /files/audit/missing-lyrics/progress:
+    get:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Опрос прогресса сбора текстов песен
+      responses:
+        '200':
+          description: Текущий прогресс
+
+  /files/audit/missing-covers:
+    get:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Список релизов без обложек
+      responses:
+        '200':
+          description: Релизы без обложек
+
+  /files/audit/duplicates:
+    get:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Поиск файлов-дубликатов
+      responses:
+        '200':
+          description: Группы дубликатов
+
+  /files/audit/duplicates/fix:
+    post:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Удаление выбранных дубликатов
+      responses:
+        '200':
+          description: Дубликаты удалены
+
+  /files/audit/duplicates/fix-all:
+    post:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Автоматическое удаление всех дубликатов
+      responses:
+        '200':
+          description: Все дубликаты очищены
+
+  /files/audit/incomplete-albums:
+    get:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Список неполных релизов
+      responses:
+        '200':
+          description: Неполные альбомы
+
+  /files/audit/incomplete-albums/catalog-match:
+    get:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Онлайн-сверка неполного альбома с каталогом Deezer
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Детальный отчет сверки треклиста
+
+  /files/audit/incomplete-albums/download-missing:
+    post:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Дозагрузка недостающих треков (бэкфилл)
+      responses:
+        '200':
+          description: Задачи загрузки созданы
+
+  /files/audit/tag-issues:
+    get:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Список дефектов тегов (клиповый мусор, feat., слеши)
+      parameters:
+        - name: filter
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Дефекты тегов
+
+  /files/audit/tag-issues/fix-safe:
+    post:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Быстрое локальное автоисправление безопасных дефектов
+      responses:
+        '200':
+          description: Безопасные дефекты исправлены
+
+  /files/audit/tag-issues/fix-selected:
+    post:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Применение исправлений к выбранным трекам
+      responses:
+        '200':
+          description: Выбранные треки исправлены
+
+  /files/audit/tag-issues/fix-all:
+    post:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Пакетное автоисправление всех дефектов тегов
+      responses:
+        '200':
+          description: Все дефекты исправлены
+
+  /files/audit/tag-issues/catalog-match:
+    get:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Поиск трека в 4 каталогах со скорингом MatchScore
+      parameters:
+        - name: path
+          in: query
+          schema:
+            type: string
+        - name: title
+          in: query
+          schema:
+            type: string
+        - name: artist
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Результаты Diff-сверки
+
+  /files/audit/tag-issues/apply-catalog:
+    post:
+      tags: [Audit]
+      security:
+        - sessionCookie: []
+      summary: Применение каталожных тегов и обложки к треку
+      responses:
+        '200':
+          description: Теги применены

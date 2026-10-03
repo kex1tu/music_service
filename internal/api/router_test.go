@@ -124,12 +124,20 @@ func TestRouter_HealthAndIndex(t *testing.T) {
 		"libraryAuditComponent()",
 		"tagEditorComponent()",
 		"lyricsModalComponent()",
+		"loginModalComponent()",
 		"Очередь загрузок",
 	}
 	for _, substr := range expectedSubstrings {
 		if !bytes.Contains([]byte(body), []byte(substr)) {
 			t.Errorf("expected body to contain %q", substr)
 		}
+	}
+
+	// Verify balanced div tags on the rendered HTML
+	openDivs := bytes.Count([]byte(body), []byte("<div"))
+	closeDivs := bytes.Count([]byte(body), []byte("</div>"))
+	if openDivs != closeDivs {
+		t.Errorf("unbalanced <div> tags in rendered index.html: %d open vs %d close", openDivs, closeDivs)
 	}
 }
 
