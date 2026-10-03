@@ -9,6 +9,7 @@ window.AuditTagAudit = {
     tagIssues: [],
     tagIssuesTotalCount: 0,
     tagIssuesFilter: 'all',
+    tagViewMode: 'tracks', // 'tracks' | 'albums'
     tagIssuesLoading: false,
     isFixingTagIssue: {},
     isFixingAllTags: false,
@@ -21,6 +22,35 @@ window.AuditTagAudit = {
     selectedPaths: [],
     isFixingSafeTags: false,
     isFixingSelectedTags: false,
+
+    // Режим сверки целого альбома (Release / Album Level)
+    albumDiffModalOpen: false,
+    albumDiffLoading: false,
+    albumDiffData: null,
+    isApplyingAlbumCatalog: false,
+
+    getAlbumGroups() {
+        const map = new Map();
+        for (const item of (this.tagIssues || [])) {
+            const p = item.file_path || '';
+            const folder = p.includes('/') ? p.substring(0, p.lastIndexOf('/')) : '';
+            const key = folder || item.album || 'Без альбома';
+            if (!map.has(key)) {
+                map.set(key, {
+                    folder_path: folder,
+                    album: item.album || (folder ? folder.split('/').pop() : 'Без альбома'),
+                    artist: item.artist || '',
+                    tracks: [],
+                    issues_count: 0,
+                });
+            }
+            const g = map.get(key);
+            g.tracks.push(item);
+            g.issues_count++;
+            if (!g.artist && item.artist) g.artist = item.artist;
+        }
+        return Array.from(map.values());
+    },
 
     safeIssuesCount() {
         return (this.tagIssues || []).filter((i) => i.severity === 'safe_autofix').length;
@@ -276,6 +306,106 @@ window.AuditTagAudit = {
             Alpine.store('app').toast('Сетевая ошибка при применении тегов', 'error');
         } finally {
             this.isApplyingCatalog = false;
+        }
+    },
+
+    openAlbumDiffForTrack(item) {
+        if (!item || !item.file_path) return;
+        const p = item.file_path;
+        const folder = p.includes('/') ? p.substring(0, p.lastIndexOf('/')) : '';
+        this.openAlbumDiffModal(folder, item.album, item.artist);
+    },
+
+    async openAlbumDiffModal(folderPath, albumTitle, artistName) {
+        if (!folderPath) return;
+        this.albumDiffModalOpen = true;
+        this.albumDiffLoading = true;
+        this.albumDiffData = null;
+
+        try {
+            const queryParams = new URLSearchParams({ folder_path: folderPath });
+            if (albumTitle) queryParams.set('album', albumTitle);
+            if (artistName) queryParams.set('artist', artistName);
+
+            const res = await fetch(`/files/audit/tag-issues/catalog-match-album?${queryParams.toString()}&_t=${Date.now()}`);
+            if (res.ok) {
+                this.albumDiffData = await res.json();
+            } else {
+                let msg = 'Не удалось сопоставить альбом с онлайн-каталогом';
+                try {
+                    const err = await res.json();
+                    if (err && err.error) msg = err.error;
+                } catch (_) {}
+                Alpine.store('app').toast(msg, 'error');
+            }
+        } catch (e) {
+            console.error('Ошибка сверки альбома с каталогом:', e);
+            Alpine.store('app').toast('Сетевая ошибка при сверке альбома', 'error');
+        } finally {
+            this.albumDiffLoading = false;
+        }
+    },
+
+    closeAlbumDiffModal() {
+        this.albumDiffModalOpen = false;
+        this.albumDiffData = null;
+    },
+
+    async applyAlbumCatalog() {
+        if (!this.albumDiffData || this.isApplyingAlbumCatalog) return;
+        this.isApplyingAlbumCatalog = true;
+
+        try {
+            const matchedTracks = (this.albumDiffData.tracks || []).filter(t => t.is_matched && t.local_path);
+            if (matchedTracks.length === 0) {
+                Alpine.store('app').toast('Нет сопоставленных треков для применения', 'warning');
+                return;
+            }
+
+            const payload = {
+                folder_path: this.albumDiffData.folder_path,
+                album: this.albumDiffData.catalog_album || this.albumDiffData.album_title,
+                album_artist: this.albumDiffData.catalog_artist || this.albumDiffData.album_artist,
+                year: this.albumDiffData.catalog_year,
+                genre: this.albumDiffData.catalog_genre,
+                cover_url: this.albumDiffData.catalog_cover_url,
+                tracks: matchedTracks.map(t => ({
+                    path: t.local_path,
+                    title: t.catalog_title,
+                    artist: t.catalog_artist,
+                    track_number: t.catalog_track_number || t.track_number,
+                })),
+            };
+
+            const res = await fetch('/files/audit/tag-issues/apply-catalog-album', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                Alpine.store('app').toast(
+                    `Теги альбома "${payload.album}" успешно обновлены (${data.tracks_updated || matchedTracks.length} треков)`,
+                    'success'
+                );
+                this.closeAlbumDiffModal();
+                await this.loadTagIssues();
+                if (this.loadSummary) await this.loadSummary();
+                window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: payload.folder_path }));
+            } else {
+                let msg = 'Ошибка применения тегов альбома';
+                try {
+                    const err = await res.json();
+                    if (err && err.error) msg = err.error;
+                } catch (_) {}
+                Alpine.store('app').toast(msg, 'error');
+            }
+        } catch (e) {
+            console.error('Ошибка применения тегов альбома:', e);
+            Alpine.store('app').toast('Сетевая ошибка при применении тегов альбома', 'error');
+        } finally {
+            this.isApplyingAlbumCatalog = false;
         }
     }
 };

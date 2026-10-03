@@ -32,6 +32,17 @@ type lyricsBatchState struct {
 	cancel       context.CancelFunc
 }
 
+type coversBatchState struct {
+	sync.Mutex
+	isRunning    bool
+	total        int
+	current      int
+	found        int
+	failed       int
+	currentAlbum string
+	cancel       context.CancelFunc
+}
+
 type FileHandler struct {
 	musicSandbox *sandbox.PathSandbox
 	tmpSandbox   *sandbox.PathSandbox
@@ -46,6 +57,7 @@ type FileHandler struct {
 	itunes       *resolver.ITunesClient
 	httpClient   *http.Client
 	lyricsState  lyricsBatchState
+	coversState  coversBatchState
 	trackCache   sync.Map // Кэш ID/хэш -> относительный путь
 }
 

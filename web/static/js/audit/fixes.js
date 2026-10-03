@@ -222,5 +222,36 @@ window.AuditFixes = {
             isDirectory: false,
         };
         Alpine.store('app').activeModal = 'delete_confirm';
+    },
+
+    async normalizeNavidrome() {
+        if (this.isNormalizingNavidrome) return;
+        this.isNormalizingNavidrome = true;
+        Alpine.store('app').toast('Запущена синхронизация медиатеки для Navidrome (права 0644/0755 и очистка \\\\ тегов)...', 'info');
+        try {
+            const res = await fetch('/files/audit/normalize-navidrome', { method: 'POST' });
+            if (res.ok) {
+                const data = await res.json();
+                const rep = data.report || {};
+                Alpine.store('app').toast(
+                    `Синхронизация Navidrome завершена: проверено ${rep.total_files || 0} файлов, обновлены права у ${rep.fixed_permissions || 0}, нормализованы теги у ${rep.fixed_tags || 0}`,
+                    'success'
+                );
+                if (this.loadAll) await this.loadAll(true);
+                window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
+            } else {
+                let msg = 'Ошибка синхронизации Navidrome';
+                try {
+                    const err = await res.json();
+                    if (err && err.error) msg = err.error;
+                } catch (_) {}
+                Alpine.store('app').toast(msg, 'error');
+            }
+        } catch (e) {
+            console.error('Ошибка normalizeNavidrome:', e);
+            Alpine.store('app').toast('Сетевая ошибка при синхронизации Navidrome', 'error');
+        } finally {
+            this.isNormalizingNavidrome = false;
+        }
     }
 };

@@ -13,6 +13,7 @@ func TestCleanQueryText(t *testing.T) {
 		{"Track [feat. Artist]", "Track"},
 		{"Song {Audio}", "Song"},
 		{"Clean   Text!", "Clean Text"},
+		{"Toxi$ (Official Video)", "Toxi$"},
 	}
 
 	for _, tt := range tests {
@@ -48,6 +49,30 @@ func TestCalculateScore(t *testing.T) {
 		"МЭЙБИ БЭЙБИ - Topic",
 		145,
 	)
+	if topicScore < 80.0 {
+		t.Errorf("expected high topic score, got %.1f", topicScore)
+	}
+
+	// Explicit vs Clean test
+	explicitScore := m.CalculateScore(
+		"BANGER",
+		"Toxi$",
+		120,
+		"Toxi$ - BANGER (Explicit)",
+		"Toxi$ - Topic",
+		120,
+	)
+	cleanScore := m.CalculateScore(
+		"BANGER",
+		"Toxi$",
+		120,
+		"Toxi$ - BANGER (Clean Radio Edit)",
+		"Various Artists",
+		120,
+	)
+	if explicitScore <= cleanScore {
+		t.Errorf("expected explicitScore (%.1f) > cleanScore (%.1f)", explicitScore, cleanScore)
+	}
 	if topicScore < 80.0 {
 		t.Errorf("expected high score for Topic channel, got %.1f", topicScore)
 	}

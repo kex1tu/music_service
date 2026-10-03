@@ -55,6 +55,12 @@ func (m *AudioMatcher) FindSoundCloudMatch(ctx context.Context, title, artist st
 	if cleanTit != "" {
 		scQueries = append(scQueries, fmt.Sprintf("scsearch5:%s %s", cleanArt, cleanTit))
 	}
+	for _, artVar := range TransliterateArtist(artist) {
+		cleanVar := CleanQueryText(artVar)
+		if cleanVar != "" && cleanVar != cleanArt {
+			scQueries = append(scQueries, fmt.Sprintf("scsearch5:%s %s", cleanVar, cleanTit))
+		}
+	}
 
 	for _, scQ := range scQueries {
 		select {
@@ -100,14 +106,24 @@ func (m *AudioMatcher) FindYouTubeMatch(ctx context.Context, title, artist strin
 	cleanTitFull := CleanQueryTextFull(title)
 
 	queries := []string{}
+	// Приоритет Topic-каналов и Explicit студийных треков над клиповыми версиями с цензурой
+	queries = append(queries,
+		fmt.Sprintf("ytsearch5:%s %s Topic", cleanArt, cleanTit),
+		fmt.Sprintf("ytsearch5:%s %s Explicit", cleanArt, cleanTit),
+	)
 	if cleanTitFull != "" && cleanTitFull != cleanTit {
-		queries = append(queries, fmt.Sprintf("ytsearch5:%s %s", cleanArt, cleanTitFull))
+		queries = append(queries, fmt.Sprintf("ytsearch5:%s %s Topic", cleanArt, cleanTitFull))
 	}
 	queries = append(queries,
-		fmt.Sprintf("ytsearch5:%s %s Official Audio", cleanArt, cleanTit),
-		fmt.Sprintf("ytsearch5:%s %s Topic", cleanArt, cleanTit),
+		fmt.Sprintf("ytsearch5:%s %s Audio", cleanArt, cleanTit),
 		fmt.Sprintf("ytsearch5:%s %s", cleanArt, cleanTit),
 	)
+	for _, artVar := range TransliterateArtist(artist) {
+		cleanVar := CleanQueryText(artVar)
+		if cleanVar != "" && cleanVar != cleanArt {
+			queries = append(queries, fmt.Sprintf("ytsearch5:%s %s Topic", cleanVar, cleanTit))
+		}
+	}
 
 	var bestCandidate *YtCandidate
 	bestScore := -1.0

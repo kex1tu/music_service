@@ -305,7 +305,7 @@ func (c *DeezerClient) GetArtistAlbums(ctx context.Context, artistID string) ([]
 	return allAlbums, nil
 }
 
-// SearchAlbums searches albums by query text with iTunes fallback.
+// SearchAlbums searches albums by query text with iTunes fallback and artist aliases.
 func (c *DeezerClient) SearchAlbums(ctx context.Context, query string) ([]DeezerAlbum, error) {
 	var res struct {
 		Data []DeezerAlbum `json:"data"`
@@ -315,7 +315,24 @@ func (c *DeezerClient) SearchAlbums(ctx context.Context, query string) ([]Deezer
 	}
 
 	// Fallback to iTunes Search API if Deezer is blocked (403) or fails
-	return c.searchAlbumsItunes(ctx, query)
+	if itunesAlbums, err := c.searchAlbumsItunes(ctx, query); err == nil && len(itunesAlbums) > 0 {
+		return itunesAlbums, nil
+	}
+
+	// Fallback to artist aliases (e.g. "ЛСП" <-> "LSP", "Toxi$" <-> "toxis")
+	for _, alias := range TransliterateArtist(query) {
+		if strings.EqualFold(alias, query) {
+			continue
+		}
+		if err := c.fetchDeezerJSON(ctx, fmt.Sprintf("/search/album?q=%s&limit=25", url.QueryEscape(alias)), &res); err == nil && len(res.Data) > 0 {
+			return res.Data, nil
+		}
+		if itunesRes, err := c.searchAlbumsItunes(ctx, alias); err == nil && len(itunesRes) > 0 {
+			return itunesRes, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no albums found for query %q", query)
 }
 
 // SearchTracks searches tracks by query text.
@@ -326,6 +343,17 @@ func (c *DeezerClient) SearchTracks(ctx context.Context, query string) ([]Deezer
 	if err := c.fetchDeezerJSON(ctx, fmt.Sprintf("/search/track?q=%s&limit=25", url.QueryEscape(query)), &res); err == nil && len(res.Data) > 0 {
 		return res.Data, nil
 	}
+
+	// Fallback to artist aliases
+	for _, alias := range TransliterateArtist(query) {
+		if strings.EqualFold(alias, query) {
+			continue
+		}
+		if err := c.fetchDeezerJSON(ctx, fmt.Sprintf("/search/track?q=%s&limit=25", url.QueryEscape(alias)), &res); err == nil && len(res.Data) > 0 {
+			return res.Data, nil
+		}
+	}
+
 	return nil, fmt.Errorf("no tracks found on deezer")
 }
 

@@ -8,7 +8,7 @@ import (
 var (
 	parenRegex    = regexp.MustCompile(`[\(\[\{].*?[\)\]\}]`)
 	combiningReg  = regexp.MustCompile(`[\p{M}]`)
-	nonAlnumReg   = regexp.MustCompile(`[^\p{L}\p{N}\s]`)
+	nonAlnumReg   = regexp.MustCompile(`[^\p{L}\p{N}\s\$]`)
 	multiSpaceReg = regexp.MustCompile(`\s+`)
 	cyrToLat      = map[rune]string{
 		'а': "a", 'б': "b", 'в': "v", 'г': "g", 'д': "d", 'е': "e", 'ё': "e",
@@ -16,6 +16,12 @@ var (
 		'н': "n", 'о': "o", 'п': "p", 'р': "r", 'с': "s", 'т': "t", 'у': "u",
 		'ф': "f", 'х': "kh", 'ц': "ts", 'ч': "ch", 'ш': "sh", 'щ': "shch",
 		'ъ': "", 'ы': "y", 'ь': "", 'э': "e", 'ю': "yu", 'я': "ya",
+	}
+	knownArtistAliases = map[string][]string{
+		"лсп":   {"lsp", "лсп"},
+		"lsp":   {"лсп", "lsp"},
+		"toxi$": {"toxi$", "toxis", "токсис"},
+		"toxis": {"toxi$", "toxis"},
 	}
 )
 
@@ -37,8 +43,13 @@ func NormalizeUnicodeText(s string) string {
 
 // TransliterateArtist generates Latin equivalents for Cyrillic artist names (e.g. "макс корж" -> ["maks korzh", "max korzh"]).
 func TransliterateArtist(s string) []string {
+	lower := strings.ToLower(strings.TrimSpace(s))
+	if aliases, ok := knownArtistAliases[lower]; ok {
+		return aliases
+	}
+
 	var sb strings.Builder
-	for _, r := range strings.ToLower(s) {
+	for _, r := range lower {
 		if lat, ok := cyrToLat[r]; ok {
 			sb.WriteString(lat)
 		} else {

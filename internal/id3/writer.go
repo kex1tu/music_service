@@ -173,10 +173,14 @@ func WriteTags(filePath string, tags TrackTags, cover *CoverInfo) error {
 	tmpFile.Close()
 	file.Close()
 
+	// Гарантируем права 0644 для доступности сервисам (Navidrome, DLNA)
+	_ = os.Chmod(tmpName, 0644)
+
 	// Атомарная замена файла
 	if err := os.Rename(tmpName, filePath); err != nil {
 		return fmt.Errorf("не удалось обновить файл тегов: %w", err)
 	}
+	_ = os.Chmod(filePath, 0644)
 
 	return nil
 }
@@ -283,7 +287,7 @@ func isArtistOrConflictingTXXX(f RawFrame) bool {
 	if f.ID != "TXXX" || len(f.Data) < 2 {
 		return false
 	}
-	desc := extractTXXXDescription(f.Data)
+	desc := ExtractTXXXDesc(f.Data)
 	descLower := strings.ToLower(strings.TrimSpace(desc))
 	switch descLower {
 	case "artists", "albumartists", "album artists", "artist", "album artist", "album_artist":
@@ -293,7 +297,11 @@ func isArtistOrConflictingTXXX(f RawFrame) bool {
 	}
 }
 
-// extractTXXXDescription извлекает текстовое описание фрейма TXXX с учетом кодировки байта [0].
+// ExtractTXXXDesc извлекает текстовое описание фрейма TXXX с учетом кодировки байта [0].
+func ExtractTXXXDesc(data []byte) string {
+	return extractTXXXDescription(data)
+}
+
 func extractTXXXDescription(data []byte) string {
 	if len(data) < 2 {
 		return ""

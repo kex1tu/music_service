@@ -31,12 +31,14 @@ func fileExists(path string) bool {
 
 func moveFile(src, dest string) error {
 	if err := os.Rename(src, dest); err == nil {
+		_ = os.Chmod(dest, 0644)
 		return nil
 	}
 	// Fallback to streaming copy and delete across different mount points (EXDEV)
 	if err := copyFile(src, dest); err != nil {
 		return err
 	}
+	_ = os.Chmod(dest, 0644)
 	return os.Remove(src)
 }
 
@@ -56,6 +58,7 @@ func copyFile(src, dest string) error {
 	if _, err := io.Copy(out, in); err != nil {
 		return err
 	}
+	_ = os.Chmod(dest, 0644)
 	return out.Sync()
 }
 

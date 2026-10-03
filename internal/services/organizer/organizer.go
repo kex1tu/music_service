@@ -163,6 +163,7 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 		if err := os.MkdirAll(targetFullDir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create album directory '%s': %w", dir, err)
 		}
+		_ = os.Chmod(targetFullDir, 0755)
 		albumInfoMap[dir] = &targetAlbumInfo{
 			dirName:    dir,
 			fullDir:    targetFullDir,

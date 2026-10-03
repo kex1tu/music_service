@@ -9,6 +9,7 @@ Group=music
 WorkingDirectory=/opt/music-manager
 EnvironmentFile=/opt/music-manager/.env
 ExecStart=/opt/music-manager/bin/music-manager
+UMask=0022
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=10s

@@ -101,6 +101,14 @@ func main() {
 		}
 	}()
 
+	// Ensure permissions (0755 for dirs, 0644 for files) are restored for Navidrome in background
+	go func() {
+		dirsFixed, filesFixed, pErr := organizer.FixLibraryPermissions(cfg.MusicDir)
+		if pErr == nil && (dirsFixed > 0 || filesFixed > 0) {
+			log.Printf("[Permissions] Adjusted permissions for Navidrome: %d dirs (0755), %d files (0644)", dirsFixed, filesFixed)
+		}
+	}()
+
 	// 6. Initialize HTTP Handlers
 	authHandler := handlers.NewAuthHandler(cfg)
 	downloadHandler := handlers.NewDownloadHandler(downloadService, deezerClient)

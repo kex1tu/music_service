@@ -22,6 +22,7 @@ function libraryAuditComponent() {
         isRetaggingGenres: false,
         isFixingPaths: false,
         isFixingDuplicates: false,
+        isNormalizingNavidrome: false,
         summary: {
             total_tracks: 0,
             total_albums: 0,
@@ -54,6 +55,7 @@ function libraryAuditComponent() {
 
         // Подмешиваем функционал специализированных модулей
         ...(window.AuditLyrics || {}),
+        ...(window.AuditCovers || {}),
         ...(window.AuditCatalogMatcher || {}),
         ...(window.AuditFixes || {}),
         ...(window.AuditTagAudit || {}),
@@ -62,6 +64,9 @@ function libraryAuditComponent() {
             this.loadAll();
             if (this.checkLyricsProgress) {
                 this.checkLyricsProgress();
+            }
+            if (this.checkCoversProgress) {
+                this.checkCoversProgress();
             }
 
             window.addEventListener('confirm-reorganize-library', () => {
@@ -87,6 +92,7 @@ function libraryAuditComponent() {
                 const force = e?.detail?.force || false;
                 this.loadAll(force);
                 if (this.checkLyricsProgress) this.checkLyricsProgress();
+                if (this.checkCoversProgress) this.checkCoversProgress();
             });
 
             if (this.$watch) {
@@ -94,6 +100,7 @@ function libraryAuditComponent() {
                     if (tab === 'audit') {
                         this.loadAll();
                         if (this.checkLyricsProgress) this.checkLyricsProgress();
+                        if (this.checkCoversProgress) this.checkCoversProgress();
                     }
                 });
             }
