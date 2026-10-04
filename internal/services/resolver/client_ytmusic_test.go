@@ -239,3 +239,132 @@ func TestYouTubeMusicClient_EmptyAndError(t *testing.T) {
 		t.Errorf("expected error on HTTP 500, got nil")
 	}
 }
+
+func TestYouTubeMusicClient_MusicShelfRenderer(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Мок ответа YouTube Music с актуальным musicShelfRenderer
+		w.Write([]byte(`{
+			"contents": {
+				"tabbedSearchResultsRenderer": {
+					"tabs": [
+						{
+							"tabRenderer": {
+								"content": {
+									"sectionListRenderer": {
+										"contents": [
+											{
+												"musicShelfRenderer": {
+													"contents": [
+														{
+															"musicResponsiveListItemRenderer": {
+																"flexColumns": [
+																	{
+																		"musicResponsiveListItemFlexColumnRenderer": {
+																			"text": {
+																				"runs": [{"text": "Haunted House"}]
+																			}
+																		}
+																	},
+																	{
+																		"musicResponsiveListItemFlexColumnRenderer": {
+																			"text": {
+																				"runs": [
+																					{
+																						"text": "Aarne",
+																						"navigationEndpoint": {
+																							"browseEndpoint": {
+																								"browseEndpointContextSupportedConfigs": {
+																									"browseEndpointContextMusicConfig": {
+																										"pageType": "MUSIC_PAGE_TYPE_ARTIST"
+																									}
+																								}
+																							}
+																						}
+																					},
+																					{"text": ", "},
+																					{
+																						"text": "Big Baby Tape",
+																						"navigationEndpoint": {
+																							"browseEndpoint": {
+																								"browseEndpointContextSupportedConfigs": {
+																									"browseEndpointContextMusicConfig": {
+																										"pageType": "MUSIC_PAGE_TYPE_ARTIST"
+																									}
+																								}
+																							}
+																						}
+																					},
+																					{"text": " & "},
+																					{
+																						"text": "kizaru",
+																						"navigationEndpoint": {
+																							"browseEndpoint": {
+																								"browseEndpointContextSupportedConfigs": {
+																									"browseEndpointContextMusicConfig": {
+																										"pageType": "MUSIC_PAGE_TYPE_ARTIST"
+																									}
+																								}
+																							}
+																						}
+																					},
+																					{"text": " • "},
+																					{
+																						"text": "AA LANGUAGE 2",
+																						"navigationEndpoint": {
+																							"browseEndpoint": {
+																								"browseEndpointContextSupportedConfigs": {
+																									"browseEndpointContextMusicConfig": {
+																										"pageType": "MUSIC_PAGE_TYPE_ALBUM"
+																									}
+																								}
+																							}
+																						}
+																					},
+																					{"text": " • "},
+																					{"text": "2:34"}
+																				]
+																			}
+																		}
+																	}
+																]
+															}
+														}
+													]
+												}
+											}
+										]
+									}
+								}
+							}
+						}
+					]
+				}
+			}
+		}`))
+	}))
+	defer mockServer.Close()
+
+	client := NewYouTubeMusicClient(mockServer.URL)
+	tracks, err := client.Search(context.Background(), "Aarne Haunted House")
+	if err != nil {
+		t.Fatalf("unexpected search error: %v", err)
+	}
+
+	if len(tracks) != 1 {
+		t.Fatalf("expected 1 track, got %d", len(tracks))
+	}
+
+	tr := tracks[0]
+	if tr.Title != "Haunted House" {
+		t.Errorf("expected title 'Haunted House', got %q", tr.Title)
+	}
+
+	expectedArtists := []string{"Aarne", "Big Baby Tape", "kizaru"}
+	if !reflect.DeepEqual(tr.Artists, expectedArtists) {
+		t.Errorf("expected artists %v, got %v", expectedArtists, tr.Artists)
+	}
+	if tr.Album != "AA LANGUAGE 2" {
+		t.Errorf("expected album 'AA LANGUAGE 2', got %q", tr.Album)
+	}
+}

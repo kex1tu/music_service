@@ -207,123 +207,141 @@ func (c *YouTubeMusicClient) Search(ctx context.Context, query string) ([]YtMusi
 		var itemSection struct {
 			ItemSectionRenderer struct {
 				Contents []struct {
-					MusicResponsiveListItemRenderer struct {
-						FlexColumns []struct {
-							MusicResponsiveListItemFlexColumnRenderer struct {
-								Text struct {
-									Runs []struct {
-										Text               string `json:"text"`
-										NavigationEndpoint *struct {
-											BrowseEndpoint *struct {
-												BrowseEndpointContextSupportedConfigs *struct {
-													BrowseEndpointContextMusicConfig *struct {
-														PageType string `json:"pageType"`
-													} `json:"browseEndpointContextMusicConfig"`
-												} `json:"browseEndpointContextSupportedConfigs"`
-											} `json:"browseEndpoint"`
-										} `json:"navigationEndpoint"`
-									} `json:"runs"`
-								} `json:"text"`
-							} `json:"musicResponsiveListItemFlexColumnRenderer"`
-						} `json:"flexColumns"`
-						Thumbnail struct {
-							MusicThumbnailRenderer struct {
-								Thumbnail struct {
-									Thumbnails []struct {
-										URL string `json:"url"`
-									} `json:"thumbnails"`
-								} `json:"thumbnail"`
-							} `json:"musicThumbnailRenderer"`
-						} `json:"thumbnail"`
-					} `json:"musicResponsiveListItemRenderer"`
+					MusicResponsiveListItemRenderer ytResponsiveListItem `json:"musicResponsiveListItemRenderer"`
 				} `json:"contents"`
 			} `json:"itemSectionRenderer"`
 		}
-
 		if err := json.Unmarshal(secRaw, &itemSection); err == nil {
 			for _, c := range itemSection.ItemSectionRenderer.Contents {
-				r := c.MusicResponsiveListItemRenderer
-				if len(r.FlexColumns) == 0 {
-					continue
-				}
+				parseYtResponsiveListItem(c.MusicResponsiveListItemRenderer, addTrack)
+			}
+		}
 
-				// Первый столбец - название
-				runs0 := r.FlexColumns[0].MusicResponsiveListItemFlexColumnRenderer.Text.Runs
-				if len(runs0) == 0 {
-					continue
-				}
-				rawTitle := runs0[0].Text
-
-				// Второй столбец - метаданные (тип, артисты, альбом, время)
-				var artists []string
-				album := ""
-				year := 0
-
-				if len(r.FlexColumns) > 1 {
-					runs1 := r.FlexColumns[1].MusicResponsiveListItemFlexColumnRenderer.Text.Runs
-					isSongOrTrack := false
-
-					for _, run := range runs1 {
-						t := strings.TrimSpace(run.Text)
-						if t == "" || t == "•" {
-							continue
-						}
-						if t == "Композиция" || t == "Песня" || t == "Сингл" {
-							isSongOrTrack = true
-							continue
-						}
-						// Проверяем страницу артиста
-						if run.NavigationEndpoint != nil && run.NavigationEndpoint.BrowseEndpoint != nil {
-							cfg := run.NavigationEndpoint.BrowseEndpoint.BrowseEndpointContextSupportedConfigs
-							if cfg != nil && cfg.BrowseEndpointContextMusicConfig != nil {
-								pt := cfg.BrowseEndpointContextMusicConfig.PageType
-								if pt == "MUSIC_PAGE_TYPE_ARTIST" || pt == "MUSIC_PAGE_TYPE_USER_CHANNEL" {
-									artists = append(artists, t)
-									continue
-								}
-								if pt == "MUSIC_PAGE_TYPE_ALBUM" {
-									album = t
-									continue
-								}
-							} else {
-								artists = append(artists, t)
-								continue
-							}
-						}
-
-						// Проверка на год выпуска
-						if len(t) == 4 {
-							if y, err := strconv.Atoi(t); err == nil && y > 1950 && y < 2030 {
-								year = y
-								continue
-							}
-						}
-					}
-					_ = isSongOrTrack
-				}
-
-				cleanTit, titleFeats := ExtractFeatFromText(rawTitle)
-				cleanTit = CleanYouTubeVideoTitle(cleanTit)
-				artists = append(artists, titleFeats...)
-
-				bestThumb := ""
-				for _, th := range r.Thumbnail.MusicThumbnailRenderer.Thumbnail.Thumbnails {
-					bestThumb = th.URL
-				}
-
-				if len(artists) > 0 {
-					addTrack(YtMusicTrack{
-						Title:    cleanTit,
-						Artists:  artists,
-						Artist:   id3.FormatMultiValue(artists),
-						Album:    album,
-						Year:     year,
-						CoverURL: bestThumb,
-					})
-				}
+		// 3. Проверяем элементы списка musicShelfRenderer -> contents -> musicResponsiveListItemRenderer (актуальный формат Innertube)
+		var shelfContainer struct {
+			MusicShelfRenderer struct {
+				Contents []struct {
+					MusicResponsiveListItemRenderer ytResponsiveListItem `json:"musicResponsiveListItemRenderer"`
+				} `json:"contents"`
+			} `json:"musicShelfRenderer"`
+		}
+		if err := json.Unmarshal(secRaw, &shelfContainer); err == nil {
+			for _, c := range shelfContainer.MusicShelfRenderer.Contents {
+				parseYtResponsiveListItem(c.MusicResponsiveListItemRenderer, addTrack)
 			}
 		}
 	}
 
 	return tracks, nil
+}
+
+type ytResponsiveListItem struct {
+	FlexColumns []struct {
+		MusicResponsiveListItemFlexColumnRenderer struct {
+			Text struct {
+				Runs []struct {
+					Text               string `json:"text"`
+					NavigationEndpoint *struct {
+						BrowseEndpoint *struct {
+							BrowseEndpointContextSupportedConfigs *struct {
+								BrowseEndpointContextMusicConfig *struct {
+									PageType string `json:"pageType"`
+								} `json:"browseEndpointContextMusicConfig"`
+							} `json:"browseEndpointContextSupportedConfigs"`
+						} `json:"browseEndpoint"`
+					} `json:"navigationEndpoint"`
+				} `json:"runs"`
+			} `json:"text"`
+		} `json:"musicResponsiveListItemFlexColumnRenderer"`
+	} `json:"flexColumns"`
+	Thumbnail struct {
+		MusicThumbnailRenderer struct {
+			Thumbnail struct {
+				Thumbnails []struct {
+					URL string `json:"url"`
+				} `json:"thumbnails"`
+			} `json:"thumbnail"`
+		} `json:"musicThumbnailRenderer"`
+	} `json:"thumbnail"`
+}
+
+func parseYtResponsiveListItem(r ytResponsiveListItem, addTrack func(YtMusicTrack)) {
+	if len(r.FlexColumns) == 0 {
+		return
+	}
+
+	// Первый столбец - название
+	runs0 := r.FlexColumns[0].MusicResponsiveListItemFlexColumnRenderer.Text.Runs
+	if len(runs0) == 0 {
+		return
+	}
+	rawTitle := runs0[0].Text
+
+	// Второй столбец - метаданные (тип, артисты, альбом, время)
+	var artists []string
+	album := ""
+	year := 0
+
+	if len(r.FlexColumns) > 1 {
+		runs1 := r.FlexColumns[1].MusicResponsiveListItemFlexColumnRenderer.Text.Runs
+		isSongOrTrack := false
+
+		for _, run := range runs1 {
+			t := strings.TrimSpace(run.Text)
+			if t == "" || t == "•" {
+				continue
+			}
+			if t == "Композиция" || t == "Песня" || t == "Сингл" {
+				isSongOrTrack = true
+				continue
+			}
+			// Проверяем страницу артиста
+			if run.NavigationEndpoint != nil && run.NavigationEndpoint.BrowseEndpoint != nil {
+				cfg := run.NavigationEndpoint.BrowseEndpoint.BrowseEndpointContextSupportedConfigs
+				if cfg != nil && cfg.BrowseEndpointContextMusicConfig != nil {
+					pt := cfg.BrowseEndpointContextMusicConfig.PageType
+					if pt == "MUSIC_PAGE_TYPE_ARTIST" || pt == "MUSIC_PAGE_TYPE_USER_CHANNEL" {
+						artists = append(artists, t)
+						continue
+					}
+					if pt == "MUSIC_PAGE_TYPE_ALBUM" {
+						album = t
+						continue
+					}
+				} else {
+					artists = append(artists, t)
+					continue
+				}
+			}
+
+			// Проверка на год выпуска
+			if len(t) == 4 {
+				if y, err := strconv.Atoi(t); err == nil && y > 1950 && y < 2030 {
+					year = y
+					continue
+				}
+			}
+		}
+		_ = isSongOrTrack
+	}
+
+	cleanTit, titleFeats := ExtractFeatFromText(rawTitle)
+	cleanTit = CleanYouTubeVideoTitle(cleanTit)
+	artists = append(artists, titleFeats...)
+
+	bestThumb := ""
+	for _, th := range r.Thumbnail.MusicThumbnailRenderer.Thumbnail.Thumbnails {
+		bestThumb = th.URL
+	}
+
+	if len(artists) > 0 {
+		addTrack(YtMusicTrack{
+			Title:    cleanTit,
+			Artists:  artists,
+			Artist:   id3.FormatMultiValue(artists),
+			Album:    album,
+			Year:     year,
+			CoverURL: bestThumb,
+		})
+	}
 }

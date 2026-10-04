@@ -274,8 +274,19 @@
   - **Тесты и верификация:**
     - Добавлен unit-тест `TestAnalyzeTrackIssues_CensoredDetection` в [`internal/api/handlers/tag_audit_analyzer_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_audit_analyzer_test.go), проверяющий детекцию маркеров цензуры, спасители (`Uncensored`, `Uncut`), кейс артиста `Clean Bandit` и статус `review_needed`.
     - Добавлен интеграционный тест `TestFileHandler_DeleteFile_JSONBody` в [`internal/api/handlers/audit_handlers_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/audit_handlers_test.go), проверяющий физическое удаление файлов с диска и каскадную синхронизацию базы данных SQLite.
-  - **Деплой:** Бинарник пересобран со статической линковкой, синхронизирован валидный `cookies.txt` и раскатан на боевой сервер `nl_music` (194.76.168.20), служба `music-manager.service` перезапущена и протестирована.
+  - **Деплой:** Бинарник пересобран со статической линковкой, синхронизирован валидный `cookies.txt` и раскатан на боевые серверы `nl_music` (194.76.168.20) и `mymusicdownload.verymad.net`.
   - **Документация:** Секция `4c` в [`.env.example`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/.env.example) актуализирована.
+
+- **Блок 55 (Deezer Album Contributors Parallel Resolution & YouTube Music Shelf Support):**
+  - **Параллельное извлечение соавторов альбомов Deezer:**
+    - В [`internal/services/resolver/resolver_deezer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/resolver_deezer.go) внедрен конкурентный пул горутин (семафор на 8 воркеров с таймаутом контекста), который параллельно запрашивает `/track/{id}` для всех треков альбома, подтягивая оригинальный массив `track.Contributors` и `track.ISRC` прямо из Deezer.
+    - В [`internal/services/resolver/client_deezer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/client_deezer.go) конструктор `NewDeezerClient` расширен поддержкой вариативного `customTransport ...http.RoundTripper` для полной изоляции сетевых тестов.
+  - **Поддержка актуального контейнера `musicShelfRenderer` в YouTube Music:**
+    - В [`internal/services/resolver/client_ytmusic.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/client_ytmusic.go) выделена функция `parseYtResponsiveListItem` и добавлена поддержка парсинга элементов выдачи из `musicShelfRenderer` (актуальный формат YouTube Music Innertube API).
+  - **Тесты и верификация:**
+    - Добавлен юнит-тест `TestResolve_DeezerAlbumContributors` в [`internal/services/resolver/resolver_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/resolver_test.go) с моковым транспортом Deezer API (проверяет извлечение всех соавторов и ISRC).
+    - Добавлен юнит-тест `TestYouTubeMusicClient_MusicShelfRenderer` в [`internal/services/resolver/client_ytmusic_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/client_ytmusic_test.go).
+    - `go test -race ./...` — **100% PASS** (0 race conditions во всех 13 пакетах).
 
 ---
 

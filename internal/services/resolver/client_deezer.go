@@ -106,13 +106,17 @@ type DeezerClient struct {
 }
 
 // NewDeezerClient creates a new DeezerClient with anti-bot headers and proxy/fallback support.
-func NewDeezerClient() *DeezerClient {
-	transport := &http.Transport{
+func NewDeezerClient(customTransport ...http.RoundTripper) *DeezerClient {
+	var transport http.RoundTripper = &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 	}
-	if proxyURLStr := strings.TrimSpace(os.Getenv("DEEZER_PROXY")); proxyURLStr != "" {
+	if len(customTransport) > 0 && customTransport[0] != nil {
+		transport = customTransport[0]
+	} else if proxyURLStr := strings.TrimSpace(os.Getenv("DEEZER_PROXY")); proxyURLStr != "" {
 		if pURL, err := url.Parse(proxyURLStr); err == nil {
-			transport.Proxy = http.ProxyURL(pURL)
+			transport = &http.Transport{
+				Proxy: http.ProxyURL(pURL),
+			}
 		}
 	}
 

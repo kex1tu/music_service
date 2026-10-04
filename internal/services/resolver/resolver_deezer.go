@@ -3,6 +3,9 @@ package resolver
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"sync"
+	"time"
 
 	"music-manager/internal/id3"
 )
@@ -40,6 +43,41 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 		var tracks []ResolvedTrack
 		if album.Tracks != nil {
 			total := len(album.Tracks.Data)
+
+			// Параллельный дозапрос деталей треков для извлечения официального contributors (соавторов) и ISRC
+			type trackDetail struct {
+				contributors []DeezerArtist
+				isrc         string
+			}
+			details := make([]trackDetail, total)
+
+			var wg sync.WaitGroup
+			sem := make(chan struct{}, 8) // максимум 8 параллельных потоков
+
+			for i, t := range album.Tracks.Data {
+				if t.ID <= 0 {
+					continue
+				}
+				wg.Add(1)
+				go func(idx int, trackID int64) {
+					defer wg.Done()
+					sem <- struct{}{}
+					defer func() { <-sem }()
+
+					trCtx, trCancel := context.WithTimeout(ctx, 4*time.Second)
+					defer trCancel()
+
+					tr, trErr := r.deezerClient.GetTrack(trCtx, strconv.FormatInt(trackID, 10))
+					if trErr == nil && tr != nil {
+						details[idx] = trackDetail{
+							contributors: tr.Contributors,
+							isrc:         tr.ISRC,
+						}
+					}
+				}(i, t.ID)
+			}
+			wg.Wait()
+
 			for i, t := range album.Tracks.Data {
 				pos := t.TrackPosition
 				if pos == 0 {
@@ -51,9 +89,16 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 					tArtist = album.Artist.Name
 				}
 
-				// Format artist with null-byte separation if contributors exist
+				// Сначала проверяем соавторов из детального запроса трека Deezer
 				var artists []string
-				if len(t.Contributors) > 0 {
+				if len(details[i].contributors) > 0 {
+					for _, c := range details[i].contributors {
+						if c.Name != "" {
+							artists = append(artists, c.Name)
+						}
+					}
+				}
+				if len(artists) == 0 && len(t.Contributors) > 0 {
 					for _, c := range t.Contributors {
 						if c.Name != "" {
 							artists = append(artists, c.Name)
@@ -94,9 +139,12 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 				if coverURL != "" {
 					tr.CoverURL = &coverURL
 				}
-				if t.ISRC != "" {
-					isrcCopy := t.ISRC
-					tr.ISRC = &isrcCopy
+				isrc := details[i].isrc
+				if isrc == "" {
+					isrc = t.ISRC
+				}
+				if isrc != "" {
+					tr.ISRC = &isrc
 				}
 
 				tracks = append(tracks, tr)
