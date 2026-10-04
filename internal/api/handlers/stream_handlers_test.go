@@ -293,3 +293,100 @@ func TestGetTrackCover_EmbeddedAndFolder(t *testing.T) {
 		t.Errorf("expected cover size %d, got %d", len(dummyCover), rec.Body.Len())
 	}
 }
+
+func TestFileHandler_SearchLibrary_HTTP(t *testing.T) {
+	handler, _, _, database, musicDir, _ := setupTestFileHandler(t)
+
+	// Создаём тестовый файл с тегами
+	relPath := "Black Eyed Peas/Elephunk/01. Where Is The Love.mp3"
+	fullPath := createTestAudioFile(t, musicDir, relPath, []byte("fake mp3 data for search"))
+	tags := id3.TrackTags{
+		Title:       "Where Is The Love?",
+		Artist:      "Black Eyed Peas",
+		Album:       "Elephunk",
+		TrackNumber: 1,
+	}
+	_ = id3.WriteTags(fullPath, tags, nil)
+
+	// Индексируем трек в базе
+	if err := handler.scanner.IndexFile(fullPath, relPath); err != nil {
+		t.Fatalf("failed to index file: %v", err)
+	}
+	_ = database
+
+	r := chi.NewRouter()
+	r.Get("/files/search", handler.SearchLibrary)
+
+	// 1. Поиск по треку
+	req := httptest.NewRequest(http.MethodGet, "/files/search?query=love", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Query        string `json:"query"`
+		TotalMatches int    `json:"total_matches"`
+		Tracks       []struct {
+			Title        string `json:"title"`
+			Artist       string `json:"artist"`
+			Path         string `json:"path"`
+			LyricsStatus string `json:"lyrics_status"`
+		} `json:"tracks"`
+		Albums  []struct{ Path string `json:"path"` } `json:"albums"`
+		Artists []struct {
+			Name       string `json:"name"`
+			TrackCount int    `json:"track_count"`
+		} `json:"artists"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode search response: %v", err)
+	}
+	if resp.TotalMatches < 1 {
+		t.Errorf("expected total_matches >= 1, got %d", resp.TotalMatches)
+	}
+	if len(resp.Tracks) < 1 {
+		t.Fatalf("expected at least 1 track result, got %d", len(resp.Tracks))
+	}
+	if resp.Tracks[0].Title != "Where Is The Love?" {
+		t.Errorf("unexpected track title: %q", resp.Tracks[0].Title)
+	}
+	if resp.Tracks[0].Artist != "Black Eyed Peas" {
+		t.Errorf("unexpected track artist: %q", resp.Tracks[0].Artist)
+	}
+	if resp.Tracks[0].Path == "" {
+		t.Errorf("expected non-empty track path")
+	}
+
+	// 2. Поиск по артисту
+	req2 := httptest.NewRequest(http.MethodGet, "/files/search?query=black+eyed", nil)
+	rec2 := httptest.NewRecorder()
+	r.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for artist search, got %d", rec2.Code)
+	}
+	var resp2 struct {
+		Artists []struct {
+			Name       string `json:"name"`
+			Title      string `json:"title"`
+			TrackCount int    `json:"track_count"`
+			FolderPath string `json:"folder_path"`
+		} `json:"artists"`
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("failed to decode artist search response: %v", err)
+	}
+	if len(resp2.Artists) < 1 {
+		t.Fatalf("expected at least 1 artist result, got %d", len(resp2.Artists))
+	}
+	if resp2.Artists[0].Name == "" {
+		t.Errorf("artist name must not be empty (was undefined before fix)")
+	}
+	if resp2.Artists[0].TrackCount < 1 {
+		t.Errorf("expected track_count >= 1 for artist, got %d", resp2.Artists[0].TrackCount)
+	}
+}
+

@@ -251,6 +251,14 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 
 func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 	relPath := r.URL.Query().Get("path")
+	if relPath == "" && r.Body != nil {
+		var req struct {
+			Path string `json:"path"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			relPath = req.Path
+		}
+	}
 	if relPath == "" {
 		http.Error(w, `{"error":"missing path parameter"}`, http.StatusBadRequest)
 		return

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -381,6 +382,63 @@ func TestFileHandler_BackfillEditorData_ArtistNormalization(t *testing.T) {
 		if tr.AlbumArtist != "Макс Корж" {
 			t.Errorf("track %d album artist should be 'Макс Корж', got %q", i+1, tr.AlbumArtist)
 		}
+	}
+}
+
+func TestFileHandler_DeleteFile_JSONBody(t *testing.T) {
+	h, _, _, database, musicDir, _ := setupTestFileHandler(t)
+	defer database.Close()
+
+	albumDir := filepath.Join(musicDir, "Censored Album")
+	_ = os.MkdirAll(albumDir, 0755)
+	mp3Path := filepath.Join(albumDir, "01. Song (Clean).mp3")
+	lrcPath := filepath.Join(albumDir, "01. Song (Clean).lrc")
+	_ = os.WriteFile(mp3Path, []byte("fake mp3 data"), 0644)
+	_ = os.WriteFile(lrcPath, []byte("[00:00.00] test lyrics"), 0644)
+
+	relPath := "Censored Album/01. Song (Clean).mp3"
+	_ = id3.WriteTags(mp3Path, id3.TrackTags{
+		Title:       "Song (Clean)",
+		Artist:      "Artist",
+		Album:       "Censored Album",
+		TrackNumber: 1,
+		Year:        2023,
+	}, nil)
+
+	if err := h.scanner.IndexFile(mp3Path, relPath); err != nil {
+		t.Fatalf("failed to index track: %v", err)
+	}
+
+	// Verify track was indexed
+	var count int
+	_ = database.Conn().QueryRow("SELECT COUNT(*) FROM tracks WHERE file_path = ?", relPath).Scan(&count)
+	if count != 1 {
+		t.Fatalf("expected 1 indexed track, got %d", count)
+	}
+
+	// Call DELETE /files with JSON body
+	bodyBytes, _ := json.Marshal(map[string]string{"path": relPath})
+	req := httptest.NewRequest(http.MethodDelete, "/files", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.DeleteFile(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify files removed from disk
+	if _, err := os.Stat(mp3Path); !os.IsNotExist(err) {
+		t.Errorf("expected mp3 file to be deleted, err: %v", err)
+	}
+	if _, err := os.Stat(lrcPath); !os.IsNotExist(err) {
+		t.Errorf("expected lrc file to be deleted, err: %v", err)
+	}
+
+	// Verify track deleted from SQLite
+	_ = database.Conn().QueryRow("SELECT COUNT(*) FROM tracks WHERE file_path = ?", relPath).Scan(&count)
+	if count != 0 {
+		t.Errorf("expected 0 tracks in DB after delete, got %d", count)
 	}
 }
 

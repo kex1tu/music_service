@@ -1,10 +1,17 @@
 package handlers
 
 import (
+	"regexp"
 	"strings"
 
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
+)
+
+var (
+	// badRegexAudit используется для детекции цензурированных версий в аудите тегов
+	// Упрощённая версия без Anti-Collision, так как у нас нет эталонного названия для сравнения
+	badRegexAudit = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(clean|radio\s+edit|censored|censored version|radio version|tv edit|с\s+цензурой|цензурная)(?:$|[^\p{L}\p{N}])`)
 )
 
 // analyzeTrackIssues анализирует метаданные трека и возвращает обнаруженные дефекты.
@@ -96,6 +103,13 @@ func analyzeTrackIssues(id int64, filePath, title, artist, album string, year, t
 		issues = append(issues, "missing_album")
 	}
 
+	// 9. Проверка на цензурированную версию (используем badRegexAudit)
+	// Для аудита используем упрощённую проверку без Anti-Collision, так как у нас нет эталонного названия
+	badMatches := badRegexAudit.FindAllStringSubmatchIndex(title, -1)
+	if len(badMatches) > 0 {
+		issues = append(issues, "censored_version")
+	}
+
 	if len(issues) == 0 {
 		return nil
 	}
@@ -155,7 +169,7 @@ func analyzeTrackIssues(id int64, filePath, title, artist, album string, year, t
 		switch iss {
 		case "literal_backslash_artist", "track_num_in_title", "dirty_title", "label_as_artist":
 			hasSafeIssues = true
-		case "unparsed_feat", "artist_in_title", "missing_album":
+		case "unparsed_feat", "artist_in_title", "missing_album", "censored_version":
 			hasReviewNeeded = true
 		case "missing_year":
 			// мягкое предупреждение

@@ -130,6 +130,12 @@
                 class="px-2.5 py-1 rounded text-[11px] font-medium border transition">
                 Пропущенный год/альбом
             </button>
+            <button
+                @click="filterTagIssues('censored_version')"
+                :class="tagIssuesFilter === 'censored_version' ? 'bg-brand/20 text-brand border-brand/50 font-semibold' : 'bg-surface-elevated text-content-muted border-surface-border hover:text-content-primary'"
+                class="px-2.5 py-1 rounded text-[11px] font-medium border transition">
+                Цензурированные
+            </button>
         </div>
     </div>
 
@@ -216,6 +222,7 @@
                                                         'bg-amber-500/10 text-amber-400 border border-amber-500/20': iss === 'label_as_artist',
                                                         'bg-blue-500/10 text-blue-400 border border-blue-500/20': iss === 'artist_in_title',
                                                         'bg-brand/10 text-brand border border-brand/20': iss === 'literal_backslash_artist',
+                                                        'bg-red-600/10 text-red-400 border border-red-600/20': iss === 'censored_version',
                                                         'bg-gray-500/10 text-gray-400 border border-gray-500/20': iss === 'missing_year' || iss === 'missing_album' || iss === 'track_num_in_title'
                                                     }"
                                                     x-text="{
@@ -226,7 +233,8 @@
                                                         'literal_backslash_artist': 'Navidrome \\\\',
                                                         'track_num_in_title': 'Номер в названии',
                                                         'missing_year': 'Нет года',
-                                                        'missing_album': 'Нет альбома'
+                                                        'missing_album': 'Нет альбома',
+                                                        'censored_version': 'Цензурированная версия'
                                                     }[iss] || iss">
                                                 </span>
                                             </template>
@@ -258,6 +266,14 @@
                                         class="px-2.5 py-1 bg-sky-700/80 hover:bg-sky-600 text-white rounded text-[11px] font-medium transition inline-flex items-center space-x-1">
                                         <span>Сверка</span>
                                     </button>
+                                    <template x-if="item.issues.includes('censored_version')">
+                                        <button
+                                            @click="deleteCensoredTrack(item)"
+                                            class="px-2.5 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-600/30 rounded text-[11px] font-medium transition inline-flex items-center space-x-1"
+                                            title="Удалить цензурированный файл">
+                                            <span>Удалить</span>
+                                        </button>
+                                    </template>
                                     <button
                                         @click="openAlbumDiffForTrack(item)"
                                         class="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded text-[11px] font-medium transition inline-flex items-center space-x-1"

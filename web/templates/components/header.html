@@ -55,12 +55,12 @@
                         <div class="py-2">
                             <span class="text-[10px] font-bold text-content-muted uppercase tracking-wider px-2">Исполнители</span>
                             <div class="mt-1 space-y-0.5">
-                                <template x-for="art in results.artists" :key="art.name">
+                                <template x-for="art in results.artists" :key="art.name || art.title">
                                     <button
-                                        @click="navigateToDir(art.first_path ? art.first_path.substring(0, art.first_path.lastIndexOf('/')) : '')"
+                                        @click="navigateToDir(art.folder_path || art.first_path || '')"
                                         class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-surface-hover flex items-center justify-between transition text-content-secondary hover:text-white">
-                                        <span class="font-medium" x-text="art.name"></span>
-                                        <span class="text-[10px] font-mono text-content-muted" x-text="`${art.track_count} трек.`"></span>
+                                        <span class="font-medium" x-text="art.name || art.title"></span>
+                                        <span class="text-[10px] font-mono text-content-muted" x-text="`${art.track_count || 0} трек.`"></span>
                                     </button>
                                 </template>
                             </div>
@@ -72,13 +72,13 @@
                         <div class="py-2">
                             <span class="text-[10px] font-bold text-content-muted uppercase tracking-wider px-2">Альбомы</span>
                             <div class="mt-1 space-y-0.5">
-                                <template x-for="alb in results.albums" :key="alb.path">
+                                <template x-for="alb in results.albums" :key="alb.path || alb.id">
                                     <button
                                         @click="navigateToDir(alb.path)"
                                         class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-surface-hover flex items-center justify-between transition text-content-secondary hover:text-white">
                                         <div class="truncate mr-2">
-                                            <span class="font-medium text-brand" x-text="alb.album"></span>
-                                            <span class="text-content-muted text-[11px]" x-text="` — ${alb.album_artist}`"></span>
+                                            <span class="font-medium text-brand" x-text="alb.album || alb.title"></span>
+                                            <span class="text-content-muted text-[11px]" x-text="(alb.album_artist || alb.artist) ? ` — ${alb.album_artist || alb.artist}` : ''"></span>
                                         </div>
                                         <span class="text-[10px] font-mono text-content-muted shrink-0" x-text="alb.year || ''"></span>
                                     </button>
@@ -92,13 +92,13 @@
                         <div class="py-2">
                             <span class="text-[10px] font-bold text-content-muted uppercase tracking-wider px-2">Треки</span>
                             <div class="mt-1 space-y-0.5">
-                                <template x-for="trk in results.tracks" :key="trk.path">
+                                <template x-for="trk in results.tracks" :key="trk.path || trk.id">
                                     <button
-                                        @click="navigateToDir(trk.path.substring(0, trk.path.lastIndexOf('/')))"
+                                        @click="navigateToDir(getTrackDir(trk.path))"
                                         class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-surface-hover flex items-center justify-between transition text-content-secondary hover:text-white">
                                         <div class="truncate mr-2">
                                             <span class="font-medium text-content-primary" x-text="trk.title"></span>
-                                            <span class="text-content-muted text-[11px]" x-text="` • ${trk.artist}`"></span>
+                                            <span class="text-content-muted text-[11px]" x-text="trk.artist ? ` • ${trk.artist}` : ''"></span>
                                         </div>
                                         <div class="flex items-center space-x-1 shrink-0">
                                             <button

@@ -37,25 +37,17 @@ func (h *FileHandler) StreamAudio(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *FileHandler) SearchLibrary(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query().Get("q")
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
-		q = r.URL.Query().Get("query")
+		q = strings.TrimSpace(r.URL.Query().Get("query"))
 	}
 
-	artists, albums, tracks, err := h.database.SearchLibrary(r.Context(), q, 50)
+	result, err := h.database.SearchLibrary(r.Context(), q, 50)
 	if err != nil {
 		http.Error(w, `{"error":"search failed"}`, http.StatusInternalServerError)
 		return
 	}
 
-	total := len(artists) + len(albums) + len(tracks)
-
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"query":         q,
-		"artists":       artists,
-		"albums":        albums,
-		"tracks":        tracks,
-		"total_matches": total,
-	})
+	_ = json.NewEncoder(w).Encode(result)
 }

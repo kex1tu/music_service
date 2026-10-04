@@ -1,10 +1,11 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 52 блока задач полностью реализованы и протестированы).
+- **Статус готовности:** **100% DONE** (Все 54 блока задач полностью реализованы и протестированы).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 15 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
-- **Результаты тестов:** 100% Go unit & integration tests (146/146 тестов пройдено, `go test -race ./...` — **0 data races**, все 12 пакетов зеленые).
+- **Результаты тестов:** 100% Go unit & integration tests (155/155 тестов пройдено, `go test -race ./...` — **0 data races**, все 13 пакетов зеленые).
 - **Продакшен-деплой:** Развернут под управлением `systemd` (`music-manager.service`) на боевых серверах `nl_vpn` (144.31.51.105) и `nl_music` (194.76.168.20).
+
 
 ---
 
@@ -245,6 +246,36 @@
   - **Этап 5: Фронтенд (UI статусов и селектор версий):**
     - Модуль `web/static/js/downloader/versions.js` (`window.DownloaderVersions`): переключение версий в 1 клик, бейджи оригинальности (🟢 marked, 🟡 likely, ⚪ unverified, 🔵 manual, 🔴 link_dead), форматирование дельты хронометража и дат.
     - Интеграция в `downloader.js`, `downloader_active.html`, `downloader_queue.html` (аккордеон «Треки (N)» и выпадающий список кандидатов «Версии (N)» с кнопкой «Выбрать»), а также отображение бейджей в Tag Editor (`tag_editor_flat.html`, `tag_editor_grouped_tracks.html`).
+
+- **Блок 53 (Search Bug Fix, In-Folder Tag Editor & Integration Test):**
+  - **Устранение инверсии результатов глобального поиска (`Ctrl+K`):**
+    - Корень бага: в `stream_search_handlers.go` переменные `SearchLibrary` распаковывались в обратном порядке (`artists, albums, tracks` вместо `tracks, albums, artists`), из-за чего треки показывались как артисты и наоборот.
+    - `internal/db/queries.go`: монолитная структура `SearchResultItem` заменена на три типизированные: `SearchTrackItem` (добавлено поле `lyrics_status`), `SearchAlbumItem` (добавлены `Album`, `AlbumArtist`, `Artist`, `TrackCount`), `SearchArtistItem` (добавлены `Name`, `TrackCount`, `FolderPath`, `FirstPath`). Метод `SearchLibrary` возвращает `(*SearchLibraryResult, error)` вместо 4-кортежа. SQL-запросы переписаны с правильными JOIN и алиасами.
+    - `internal/api/handlers/stream_search_handlers.go`: обработчик теперь вызывает `result, err := h.database.SearchLibrary(...)` и кодирует `result` напрямую.
+    - `web/static/js/header_search.js`: добавлен хелпер `getTrackDir(path)`, безопасный `path || ''` в `navigateToDir`.
+    - `web/templates/components/header.html`: исправлены шаблоны артистов (`art.name || art.title`, `art.folder_path || art.first_path || ''`), альбомов (`alb.album || alb.title`, безопасный `alb.album_artist || alb.artist`) и треков (`getTrackDir(trk.path)`, безопасный `trk.artist`).
+  - **Кнопка «Редактировать теги» внутри открытой папки:**
+    - `web/static/js/file_manager.js`: добавлен геттер `hasAudioTracksInCurrentFolder` и метод `editCurrentFolderTags()`, вызывающий `openInTagEditor({ type: 'directory', path: this.currentPath, ... })`.
+    - `web/templates/components/file_manager.html`: добавлена кнопка «Редактировать теги» в панель инструментов папки (видна только при `currentPath && currentPath.length > 0`), рядом с кнопкой «Назад».
+  - **Тесты:**
+    - `internal/db/db_test.go`: добавлен `TestDB_SearchLibrary` (3 кейса: поиск по артисту, альбому, треку) — всё PASS.
+    - `internal/api/handlers/stream_handlers_test.go`: добавлен `TestFileHandler_SearchLibrary_HTTP` с двумя сабтестами (поиск по треку и по артисту через HTTP); проверяет `title`, `artist`, `path`, `name`, `track_count`. PASS.
+    - `go test -race ./...` — **0 data races**, 153/153 тестов зеленые.
+  - **Деплой:** Бинарник пересобран и раскатан на `nl_music` (194.76.168.20), сервис перезапущен.
+
+- **Блок 54 (Censored Tracks Detection & Deletion in Tag Audit):**
+  - **Детекция цензурированных версий на бэкенде:**
+    - В [`internal/api/handlers/tag_audit_analyzer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_audit_analyzer.go) добавлен регулярный выразитель `badRegexAudit` (`clean`, `radio edit`, `censored`, `censored version`, `radio version`, `tv edit`, `с цензурой`, `цензурная`) по границам слов `[^\p{L}\p{N}]`.
+    - Добавлен тип дефекта `censored_version` в `analyzeTrackIssues` с классификацией серьезности `review_needed` (amber бейдж «Требует внимания»).
+    - В [`internal/api/handlers/file_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/file_handlers.go) метод `DeleteFile` расширен поддержкой извлечения пути из JSON-тела `{ "path": "..." }` при отсутствии query-параметра с сохранением обратной совместимости.
+  - **Интерфейс и взаимодействие (Alpine.js + Tailwind):**
+    - В [`web/templates/components/audit_tags.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit_tags.html) добавлена кнопка фильтрации «Цензурированные» (`filterTagIssues('censored_version')`), бейдж дефекта (`bg-red-600/10 text-red-400 border border-red-600/20`) и кнопка «Удалить» в колонке действий только для цензурированных треков.
+    - В [`web/static/js/audit/tag_audit.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/audit/tag_audit.js) реализован метод `deleteCensoredTrack(item)` с диалогом подтверждения `confirm(...)`, вызовом `DELETE /files` с query и JSON-телом, тостом уведомления и оптимистичным удалением строки из таблицы.
+  - **Тесты и верификация:**
+    - Добавлен unit-тест `TestAnalyzeTrackIssues_CensoredDetection` в [`internal/api/handlers/tag_audit_analyzer_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_audit_analyzer_test.go), проверяющий детекцию маркеров цензуры, спасители (`Uncensored`, `Uncut`), кейс артиста `Clean Bandit` и статус `review_needed`.
+    - Добавлен интеграционный тест `TestFileHandler_DeleteFile_JSONBody` в [`internal/api/handlers/audit_handlers_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/audit_handlers_test.go), проверяющий физическое удаление файлов с диска и каскадную синхронизацию базы данных SQLite.
+    - Все 155 тестов зеленые (`go test -race ./...` — 0 data races).
+  - **Документация:** Секция `4c` в [`.env.example`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/.env.example) актуализирована.
 
 ---
 

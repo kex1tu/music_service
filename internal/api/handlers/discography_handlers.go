@@ -232,7 +232,8 @@ func fetchYtReleases(ctx context.Context, targetURL, cookiesPath string) ([]Disc
 		"--no-warnings",
 		"--ignore-errors",
 	}
-	if cookiesPath != "" {
+	useCookies := resolver.IsValidNetscapeCookiesFile(cookiesPath)
+	if useCookies {
 		args = append(args, "--cookies", cookiesPath)
 	}
 	args = append(args, targetURL)
@@ -245,8 +246,27 @@ func fetchYtReleases(ctx context.Context, targetURL, cookiesPath string) ([]Disc
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil && stdout.Len() == 0 {
-		return nil, "", fmt.Errorf("yt-dlp error: %w: %s", err, stderr.String())
+	if err := cmd.Run(); err != nil {
+		if useCookies && strings.Contains(stderr.String(), "does not look like a Netscape format cookies file") {
+			argsNoCookies := make([]string, 0, len(args))
+			for i := 0; i < len(args); i++ {
+				if args[i] == "--cookies" {
+					i++
+					continue
+				}
+				argsNoCookies = append(argsNoCookies, args[i])
+			}
+			cmdRetry := exec.CommandContext(cmdCtx, "yt-dlp", argsNoCookies...)
+			stdout.Reset()
+			stderr.Reset()
+			cmdRetry.Stdout = &stdout
+			cmdRetry.Stderr = &stderr
+			err = cmdRetry.Run()
+		}
+		if err != nil && stdout.Len() == 0 {
+			cleanStderr := resolver.CleanYtDlpStderr(stderr.String())
+			return nil, "", fmt.Errorf("yt-dlp error: %w: %s", err, cleanStderr)
+		}
 	}
 
 	type YtReleaseItem struct {

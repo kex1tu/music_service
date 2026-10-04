@@ -1,313 +1,131 @@
-# Automatic Audio Resolver (SoundCloud Candidate Ranking & Version Switcher)
+# Детекция цензурированных треков в медиатеке
 
-Архитектурный план реализации сервиса автоматического подбора доцензурных версий треков на SoundCloud при загрузке из каталогов (Deezer / iTunes), исключения цензурных версий и эдитов, сохранения кандидатов в SQLite с безопасным кэшированием и ручного переключения версий в UI.
-
----
-
-## User Review Required
-
-> [!IMPORTANT]
-> **Финальные инженерные решения и исправления, включённые в план:**
->
-> 1. **Исправление `remixRegex` (поддержка `Original Mix`):**
->    - В `remixRegex` остаются строго только `remix|ремикс`:
->      ```go
->      var remixRegex = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(remix|ремикс)(?:$|[^\p{L}\p{N}])`)
->      ```
->    - Слова `mix` и `edit` исключены из регулярного выражения. Это предотвращает ложную отбраковку названий вроде `Track (Original Mix)` при обычной цели. `radio edit` уже находится в `badRegex`.
->
-> 2. **Исключение ложных срабатываний стоп-слов из-за метаданных артиста/трека (Кейс `Clean Bandit`):**
->    - На SoundCloud треки часто имеют вид `Artist - Title`. Если артист называется `Clean Bandit` или целевой трек содержит слово `Clean`, `badRegex` мог ошибочно счесть трек цензурным.
->    - **Решение:** Перед проверкой `badRegex` из строки кандидата исключаются совпадения, которые уже присутствуют в целевых метаданных (`targetArtist` или `targetTitle`). Если слово `clean` входит в состав имени артиста, оно игнорируется в стоп-листе.
->
-> 3. **Непротиворечивая и строгая иерархия статусов:**
->    - Присвоение статусов кандидатам выполняется по строгому однозначному порядку:
->      1. Маркер-спаситель есть + эталона нет (`referenceMissing = true`) $\to$ **`marked`**;
->      2. Маркер-спаситель есть + длительность в допуске ($\le 2$ с от любого валидного релиза) $\to$ **`marked`**;
->      3. Маркер-спаситель есть + длительность разошлась ($> 2$ с) при наличии эталона $\to$ **`unverified`**;
->      4. Маркера нет + длительность в допуске ($\le 2$ с) $\to$ **`likely`**;
->      5. Маркера нет + длительность разошлась на 3–5 с $\to$ **`unverified`** (сохраняется как близкая альтернатива).
->    - **Бейджи в UI:**
->      - `marked`: **«Помечена в названии как оригинал»**
->      - `likely`: **«Та же запись (хронометраж совпал)»**
->      - `unverified`: **«Версия не подтверждена эталоном»**
->      - `manual`: **«Выбрано вручную»**
->      - `link_dead`: **«Ссылка недоступна на SoundCloud»**
->
-> 4. **Корректная обработка `link_dead` и ротация кандидатов при 404:**
->    - При 404/410 для автоматической записи (`is_manual = 0`):
->      - Битая ссылка удаляется из списка `candidates_json`.
->      - Если в `candidates_json` остались альтернативные кандидаты, следующий лучший URL автоматически назначается в `selected_url`, обновляется статус и пересчитывается длительность.
->      - Только если кандидатов больше не осталось, выставляется `selected_url = ''` и `status = 'link_dead'`.
->    - Поведение `GetSoundCloudCache`:
->      - Для автоматических записей (`is_manual = 0`): если `status = 'link_dead'` или `selected_url = ''`, запись считается **кэш-промахом (MISS)**, инициируя новый поиск.
->      - Для ручных записей (`is_manual = 1`): статус `link_dead` возвращается как хит, чтобы UI отобразил предупреждение пользователю без несанкционированной подмены.
->
-> 5. **Фоллбэк на YouTube при отсутствии кандидатов:**
->    - Если поиск на SoundCloud не вернул подходящих кандидатов (все отбракованы или пустая выдача), пайплайн прозрачно переключается на существующий стандартный поиск в YouTube (`matcher.go`). Существующий YouTube-пайплайн остаётся полностью работоспособным.
->
-> 6. **Надёжное определение длительности `candDuration` при `switch-version`:**
->    - Если кандидат найден в `candidates_json`, его длительность берётся оттуда.
->    - Если кэша нет (прямой переход или `candidates_json` пуст), после скачивания аудио во временный файл длительность измеряется через `ffprobe` перед записью в SQLite (колонка `duration NOT NULL`).
->
-> 7. **Штраф дистрибьюторов SoundCloud вместо Topic:**
->    - Понятие «Topic» специфично для YouTube. На SoundCloud официальные цензурные копии выгружают дистрибьюторы. В конфигурацию добавляется список `UNCENSORED_DISTRIBUTORS` (по умолчанию: `distrokid,believe,zvonko,the orchard,tunecore,warner,universal,sony`). При совпадении имени аплоадера начисляется штраф (-20).
->
-> 8. **Парсинг даты и обновление TTL:**
->    - При пустой или нераспарсенной дате загрузки бонус за ранний релиз **не начисляется** (0 баллов).
->    - `SaveSoundCloudCache` обновляет `checked_at = CURRENT_TIMESTAMP`, продлевая TTL. Параметр в SQL формируется как `printf('-%d hours', ?)`.
+Архитектурный план добавления автоматического обнаружения уже загруженных цензурированных версий треков в систему аудита тегов (`audit_tags`) с возможностью их удаления и последующей перезагрузки.
 
 ---
 
 ## 1. Цель и границы задачи (Objective & Scope)
 
 ### 1.1. Проблема
-При загрузке музыки из каталогов (Deezer / iTunes) многие популярные треки отдаются в цензурных версиях. На SoundCloud часто доступны оригиналы, однако выдача перегружена ремиксами, радио-эдитами и эдитами скорости (slowed/sped up).
+Проект уже имеет мощную защиту от скачивания цензурированных версий при загрузке (через штрафы за `badKeywords` в `resolver/score.go` и SoundCloud-First резолвер в `uncensored_matcher.go`), но не умеет обнаруживать цензурированные треки, которые уже загружены в медиатеку. Пользователь не знает, какие треки в его библиотеке являются цензурированными версиями ("Clean", "Radio Edit", "Censored").
 
-### 1.2. Целевой результат
-1. **Интеллектуальный ранжировщик кандидатов (SoundCloud Resolver):**
-   - Сбор списка валидных хронометражей всех релизов альбома/сингла в Deezer/iTunes (`validDurations []int`).
-   - Очистка названия от спасителей с пробелом (Anti-Glue) и проверка стоп-слов с исключением артиста/названия (Anti-Collision).
-   - Скоринг с допуском $\pm 2$ сек, штрафом за дистрибьюторов (-20), бонусом за дату до 2023 года (+25, только при валидной дате) и сохранением альтернатив (3–5 сек).
-   - Прозрачный фоллбэк на YouTube при отсутствии кандидатов на SoundCloud.
-2. **Кэш версий в SQLite:** Таблица `soundcloud_uncensored_cache` с поддержкой TTL (30 дней), безопасным UPSERT, ротацией при 404 и защитой ручных закреплений.
-3. **Интерфейс выбора версий (No-Build Alpine.js):** Отображение бейджей («Помечена в названии как оригинал», «Та же запись») и выпадающий список «Версии (N)» с ручным переключением в 1 клик.
+### 1.2. Решение
+Добавить детекцию цензурированных треков в существующую систему аудита тегов (`audit_tags`):
+- **Бэкенд:** новый тип дефекта `censored_version` в анализаторе тегов [`tag_audit_analyzer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_audit_analyzer.go) на базе локального regex `badRegexAudit`.
+- **Фронтенд:** отображение бейджа "Цензурированная версия" в таблице аудита [`audit_tags.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit_tags.html) и кнопка фильтрации "Цензурированные".
+- **UI:** кнопка «Удалить» для удаления цензурированного файла с подтверждением, вызовом `DELETE /files` и обновлением интерфейса.
+- **Поддержка контрактов API:** поддержка парсинга пути как из query-параметра `?path=...`, так и из тела JSON-запроса `{"path": "..."}` в [`file_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/file_handlers.go).
+- **Документация:** секция 4c конфигурации резолвера нецензурированных версий в [`.env.example`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/.env.example).
 
-### 1.3. Границы ответственности
-- **In-Scope:**
-  - База данных SQLite (таблица `soundcloud_uncensored_cache`, безопасный UPSERT, ротация кандидатов).
-  - Клиенты Deezer и iTunes (сбор всех уникальных хронометражей `validDurations`).
-  - Пакет скоринга `internal/services/resolver/uncensored_matcher.go`.
-  - Эндпоинт `POST /api/downloads/tracks/{trackId}/switch-version` с атомарной заменой файла и `ffprobe`-замером длительности.
-  - No-build фронтенд (Alpine.js + Tailwind) в `downloader.html` и `downloader.js`.
-- **Out-of-Scope:**
-  - Python / Whisper (строго соблюдается инвариант **Pure Go / Zero-Python** из `AGENTS.md`).
-  - Изменение битрейта (MP3 320 kbps CBR фиксирован инвариантом проекта).
+### 1.3. Out-of-Scope
+- Автоматическая перезагрузка трека (требует отдельной фоновой интеграции с очередью).
+- Изменение существующей логики скачивания (она уже работает корректно).
+- Модификация схемы базы данных SQLite (дефекты тегов определяются динамически в рантайме аудита).
 
 ---
 
 ## 2. Анализ текущего состояния (Current State Analysis)
 
-| Компонент / Файл | Текущее состояние | Что необходимо изменить |
-|---|---|---|
-| [`internal/config/config.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/config/config.go) | Параметры загрузок | Добавить `UncensoredDurationTolerance` (2), `UncensoredCandidatesLimit` (10), `UncensoredPreferYear` (2023), `UncensoredCacheTTLHours` (720), `UncensoredDistributors` (список дистрибьюторов) |
-| [`internal/db/schema.sql`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/db/schema.sql) | Таблицы `tracks`, `downloads` | Добавить таблицу `soundcloud_uncensored_cache` с `selected_url TEXT NOT NULL DEFAULT ''` |
-| [`internal/db/queries.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/db/queries.go) | Базовые SQL-операции | Добавить `GetSoundCloudCache` (с проверкой `link_dead`), `SaveSoundCloudCache` (обновляет `checked_at`), `PinSoundCloudVersion`, `InvalidateSoundCloudURL` |
-| [`internal/services/resolver/client_deezer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/client_deezer.go) | `SearchTrack` возвращает 1 трек | Добавить `SearchTrackVersions` для сбора массива хронометражей всех релизов |
-| [`internal/services/resolver/matcher.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/matcher.go) | Линейный поиск SoundCloud | Интегрировать проверку кэша, запуск `RankCandidates`, ротацию кандидатов и фоллбэк на YouTube |
-| [`internal/api/handlers/download_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/download_handlers.go) | Нет смены версии | Реализовать `SwitchTrackVersionHandler` с валидацией `trackId`, вычислением `cacheKey`, замером `ffprobe` и атомарной заменой |
-| [`web/templates/components/downloader.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/downloader.html) | Статичный вид трека в очереди | Добавить бейджи оригинальности и выпадающее меню «Версии (N)» с кнопкой смены |
+| Компонент / Файл | Текущее состояние | Выявленный недостаток | Требуемое изменение |
+|---|---|---|---|
+| [`internal/api/handlers/tag_audit_analyzer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_audit_analyzer.go) | Анализ 8 типов дефектов (клипы, фиты, каналы, номер в названии, дубли артиста, год, альбом, `\\`) | Цензурированные треки не помечались и не попадали в аудит | Внедрен `badRegexAudit`, дефект `censored_version` и серьезность `review_needed` |
+| [`web/templates/components/audit_tags.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit_tags.html) | Кнопки фильтрации дефектов, бейджи и действия «Исправить», «Сверка» | Отсутствовал фильтр цензуры и действие удаления цензурированного трека | Добавлены фильтр «Цензурированные», бейдж `bg-red-600/10 text-red-400` и кнопка «Удалить» |
+| [`web/static/js/audit/tag_audit.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/audit/tag_audit.js) | Методы `fixTagIssue`, `fixSafeTagIssues`, `fixSelectedTagIssues` | Нет метода удаления трека прямо из таблицы аудита | Добавлен `deleteCensoredTrack(item)` с диалогом подтверждения и вызовом `DELETE /files` |
+| [`internal/api/handlers/file_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/file_handlers.go) | `DeleteFile` ожидал путь строго в `r.URL.Query().Get("path")` | Запросы с телом `{ "path": "..." }` приводили к 400 Bad Request | Добавлен парсинг JSON-тела с сохранением обратной совместимости |
 
 ---
 
-## 3. Архитектура решения и алгоритмы (Architecture & Algorithms)
+## 3. Архитектурное решение и обоснование (Architecture & Rationale)
 
-### 3.1. Алгоритм фильтрации (Anti-Glue & Anti-Collision)
+### 3.1. Метод детекции цензуры (Локальный Regex)
+Используется локальный регулярный выразитель `badRegexAudit` в [`tag_audit_analyzer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_audit_analyzer.go):
 ```go
-var saviorRegex = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(old\s+ver(?:sion)?|старая\s+версия|до\s+цензуры|без\s+цензуры|uncensored|uncut|original\s+version|оригинал)(?:$|[^\p{L}\p{N}])`)
-var badRegex = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(clean|radio\s+edit|censored|с\s+цензурой|цензурная|sped\s+up|slowed)(?:$|[^\p{L}\p{N}])`)
-var remixRegex = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(remix|ремикс)(?:$|[^\p{L}\p{N}])`)
+badRegexAudit = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(clean|radio\s+edit|censored|censored version|radio version|tv edit|с\s+цензурой|цензурная)(?:$|[^\p{L}\p{N}])`)
 ```
+- **Почему именно так:**
+  - **Словные границы (`[^\p{L}\p{N}]`):** предотвращают ложные срабатывания на нормальные слова вроде "cleaner", "cleaning" и т.п.
+  - **Без внешних HTTP-запросов:** проверка выполняется мгновенно в оперативной памяти во время сканирования и пагинации SQLite.
+  - **Специфика аудита:** в аудите медиатеки отсутствует внешний эталон, поэтому Anti-Collision проверка сравнивает слова внутри названия трека. Имена артистов вроде "Clean Bandit" при нормальном названии ("Rather Be") не триггерят дефект, так как проверяется именно название трека (`title`).
 
-**Функция:** `ExtractSaviorsAndCheckBad(title, targetArtist, targetTitle string) (hasSavior bool, isBad bool)`:
-1. `isRemixTarget := remixRegex.MatchString(targetTitle)` — определяем, является ли целевой трек ремиксом.
-2. Поиск спасителя: `m := saviorRegex.FindStringSubmatchIndex(title)`.
-   - Если найден: `hasSavior = true`, а спаситель вырезается с гарантированным пробелом: `remainder = strings.TrimSpace(title[:m[2]] + " " + title[m[3]:])`.
-3. Защита от коллизий артиста (Кейс `Clean Bandit`):
-   - Если в `remainder` найдено стоп-слово из `badRegex`: проверяем, не входит ли найденное слово в состав `targetArtist` или `targetTitle`. Если входит (например, слово `clean` в артисте `Clean Bandit`) $\to$ это вхождение игнорируется.
-   - Если после этого в остатке строки остались нецелевые стоп-слова $\to$ `isBad = true`.
-4. Проверка ремикса:
-   - Если `!isRemixTarget && remixRegex.MatchString(remainder)` $\to$ `isBad = true`.
-   - Если `isRemixTarget` $\to$ слово `remix` разрешено.
-   - Слова `Original Mix`, `Club Mix` не затрагиваются, так как `mix` исключён из регулярки.
+### 3.2. Классификация серьезности (Severity: `review_needed`)
+- Автоисправление тегов для цензурированной версии невозможно, поскольку аудиодорожка физически содержит запиканные/вырезанные фрагменты.
+- Поэтому дефект классифицируется как `review_needed` (amber бейдж «Требует внимания»), требующий ручного решения пользователя.
 
-### 3.2. Иерархия статусов кандидата
-Для каждого прошедшего фильтрацию кандидата вычисляется минимальное расхождение с эталонными длительностями:
-$\Delta_{min} = \min_{ref \in validDurations} |duration - ref|$.
-
-Статус выставляется по строгому каскаду:
-1. `hasSavior && referenceMissing` $\to$ **`marked`**
-2. `hasSavior && \Delta_{min} \le 2` $\to$ **`marked`**
-3. `hasSavior && \Delta_{min} > 2` $\to$ **`unverified`**
-4. `!hasSavior && \Delta_{min} \le 2` $\to$ **`likely`**
-5. `!hasSavior && 3 \le \Delta_{min} \le 5` $\to$ **`unverified`** (добавляется как альтернатива)
-
-### 3.3. Скоринг и взвешивание
-$$\text{Score} = (\text{hasSavior} \times 50) + (\text{validDate \&\& year} < 2023 \times 25) - (\text{isDistributor} \times 20) - (\Delta_{early} \times 5)$$
-- Если дата загрузки отсутствует или не распарсилась $\to$ бонус за год равен **0** (не начисляется).
-- `isDistributor`: проверяется вхождение имени автора канала в список `UNCENSORED_DISTRIBUTORS`.
-- Все слагаемые формулы логируются для прозрачной калибровки.
+### 3.3. Безопасность и каскадная очистка при удалении
+- Запрос на удаление передается в `DELETE /files`, который верифицирует путь через `PathSandbox.Resolve()`.
+- При удалении `.mp3` файла автоматически удаляются сопутствующие `.lrc`, `.txt`, поквартирные `.jpg` и каскадно обновляются таблицы `tracks`, `track_genres`, `audit_issues`, `albums` и `artists` в SQLite WAL.
 
 ---
 
 ## 4. Пошаговая декомпозиция реализации (Step-by-Step Implementation)
 
-### Этап 1: Конфигурация и База Данных
-
-#### [MODIFY] [config.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/config/config.go)
-```go
-UncensoredDurationTolerance int      `env:"UNCENSORED_DURATION_TOLERANCE" envDefault:"2"`
-UncensoredCandidatesLimit   int      `env:"UNCENSORED_CANDIDATES_LIMIT" envDefault:"10"`
-UncensoredPreferYear        int      `env:"UNCENSORED_PREFER_YEAR" envDefault:"2023"`
-UncensoredCacheTTLHours     int      `env:"UNCENSORED_CACHE_TTL_HOURS" envDefault:"720"`
-UncensoredDistributors      []string `env:"UNCENSORED_DISTRIBUTORS" envSeparator:"," envDefault:"distrokid,believe,zvonko,the orchard,tunecore,warner,universal,sony"`
-```
-Обновить [`.env.example`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/.env.example).
-
-#### [MODIFY] [schema.sql](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/db/schema.sql)
-```sql
-CREATE TABLE IF NOT EXISTS soundcloud_uncensored_cache (
-    cache_key TEXT PRIMARY KEY,
-    track_title TEXT NOT NULL,
-    artist_name TEXT NOT NULL,
-    selected_url TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL,              -- marked, likely, unverified, manual, link_dead
-    duration INTEGER NOT NULL,
-    is_manual BOOLEAN DEFAULT 0,
-    candidates_json TEXT NOT NULL DEFAULT '[]',
-    checked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_sc_cache_key ON soundcloud_uncensored_cache(cache_key);
-```
-
-#### [MODIFY] [queries.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/db/queries.go)
-- `GetSoundCloudCache(ctx context.Context, key string, ttlHours int) (*SoundCloudCacheEntry, error)`:
-  ```sql
-  SELECT cache_key, track_title, artist_name, selected_url, status, duration, is_manual, candidates_json, checked_at, updated_at
-  FROM soundcloud_uncensored_cache
-  WHERE cache_key = ? AND (is_manual = 1 OR checked_at > datetime('now', printf('-%d hours', ?)));
+### Этап 1: Бэкенд — детекция цензуры в анализаторе тегов
+**Файл:** [`internal/api/handlers/tag_audit_analyzer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_audit_analyzer.go) `[MODIFY]`
+- Объявлен `badRegexAudit`.
+- Добавлена проверка шага 9:
+  ```go
+  badMatches := badRegexAudit.FindAllStringSubmatchIndex(title, -1)
+  if len(badMatches) > 0 {
+      issues = append(issues, "censored_version")
+  }
   ```
-  *Логика:* Если `is_manual = 0` и `(status = 'link_dead' OR selected_url = '')` $\to$ метод возвращает `nil, nil` (трактуется как MISS, инициируя новый поиск). Если `is_manual = 1` $\to$ запись возвращается всегда.
-- `SaveSoundCloudCache(ctx context.Context, entry SoundCloudCacheEntry) error`:
-  Вставка/обновление с обновлением `checked_at = CURRENT_TIMESTAMP`, `updated_at = CURRENT_TIMESTAMP` с условием `WHERE soundcloud_uncensored_cache.is_manual = 0`.
-- `PinSoundCloudVersion(ctx context.Context, key, artist, title, url string, duration int) error`:
-  ```sql
-  INSERT INTO soundcloud_uncensored_cache (
-      cache_key, artist_name, track_title, selected_url, duration, status, is_manual, candidates_json, updated_at
-  ) VALUES (?, ?, ?, ?, ?, 'manual', 1, '[]', CURRENT_TIMESTAMP)
-  ON CONFLICT(cache_key) DO UPDATE SET
-      selected_url = excluded.selected_url,
-      duration = excluded.duration,
-      is_manual = 1,
-      status = 'manual',
-      updated_at = CURRENT_TIMESTAMP;
-  ```
-- `InvalidateSoundCloudURL(ctx context.Context, key string, failedURL string) (*SoundCloudCacheEntry, error)`:
-  Загружает запись. Удаляет `failedURL` из `candidates_json`.
-  Если остались другие кандидаты $\to$ выбирает следующий, обновляет `selected_url` и `status`.
-  Если кандидатов не осталось $\to$ выставляет `selected_url = ''`, `status = 'link_dead'`.
+- В классификацию серьезности добавлен `case "censored_version": hasReviewNeeded = true`.
+
+### Этап 2: Бэкенд — поддержка JSON-тела в `DeleteFile`
+**Файл:** [`internal/api/handlers/file_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/file_handlers.go) `[MODIFY]`
+- В метод `DeleteFile` добавлен парсинг JSON-структуры `{ "path": "..." }` при отсутствии query-параметра.
+
+### Этап 3: Фронтенд — визуализация и фильтрация
+**Файл:** [`web/templates/components/audit_tags.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit_tags.html) `[MODIFY]`
+- Кнопка фильтра `filterTagIssues('censored_version')`.
+- Бейдж с текстом «Цензурированная версия» и стилями `bg-red-600/10 text-red-400 border border-red-600/20`.
+- Кнопка «Удалить» в колонке действий с директивой `<template x-if="item.issues.includes('censored_version')">`.
+
+### Этап 4: JavaScript — удаление трека
+**Файл:** [`web/static/js/audit/tag_audit.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/audit/tag_audit.js) `[MODIFY]`
+- Метод `deleteCensoredTrack(item)` с подтверждением `confirm()`, отправкой запроса `DELETE /files`, тостом уведомления и оптимистичным удалением из `this.tagIssues`.
+
+### Этап 5: Документация и конфигурация
+**Файл:** [`.env.example`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/.env.example) `[MODIFY]`
+- Актуализирована секция 4c параметров резолвера нецензурированных версий.
 
 ---
 
-### Этап 2: Сбор эталонных хронометражей
+## 5. Анализ рисков и краевых случаев (Risks, Edge Cases & Guardrails)
 
-#### [MODIFY] [client_deezer.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/client_deezer.go)
-- Добавить поле `Preview string` в `DeezerTrack`.
-- Реализовать метод `SearchTrackVersions(ctx context.Context, artist, title string) ([]DeezerTrack, error)`: поиск в каталоге Deezer и возврат всех найденных версий трека для извлечения уникальных длительностей (`validDurations []int`).
-
-#### [MODIFY] [client_itunes_track.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/client_itunes_track.go)
-- Метод `SearchTracksWithCountry(ctx context.Context, query, country string) ([]ItunesTrack, error)` для расширения пула хронометражей через Apple Music US.
-
----
-
-### Этап 3: Движок сопоставления и ранжирования
-
-#### [NEW] [uncensored_matcher.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/uncensored_matcher.go)
-1. **Канонический ключ:** `BuildCacheKey(isrc, artist, title string) string`.
-2. **`ExtractSaviorsAndCheckBad`:** алгоритм Anti-Glue со вставкой пробела и Anti-Collision с проверкой вхождения в `targetArtist` и `targetTitle`.
-3. **`DetermineValidDurations`:** возвращает массив секунд `validDurations []int`, длительность ранней версии `earlyDur int` и флаг `referenceMissing bool`.
-4. **`RankCandidates`:** скоринг, учёт даты (бонус только при валидном парсинге), штраф за дистрибьюторов, выбор лучшего кандидата и сохранение альтернатив (включая кандидатов с дельтой 3–5 сек и кандидатов со спасителем при дельте >2 сек со статусом `unverified`).
-
-#### [MODIFY] [matcher.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/matcher.go)
-- Расширить `YtCandidate` полями `UploadDate string`, `Timestamp int64`, `Uploader string`.
-- Интегрировать проверку кэша по `BuildCacheKey`.
-- Если на SoundCloud подходящие кандидаты не найдены $\to$ **прозрачный фоллбэк на существующий поиск в YouTube**.
-
----
-
-### Этап 4: Пайплайн загрузки и API переключения версий
-
-#### [MODIFY] [download_handlers.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/download_handlers.go)
-- Эндпоинт `POST /api/downloads/tracks/{trackId}/switch-version`:
-  - Вход: JSON `{ "target_url": "https://soundcloud.com/..." }`.
-  - По `trackId` получает метаданные трека, вычисляет `cacheKey = BuildCacheKey(track.ISRC, track.Artist, track.Title)`.
-  - Извлекает метаданные кандидата из `candidates_json` для получения длительности. Если список пуст или кандидат не найден $\to$ после скачивания длительность замеряется через `ffprobe`.
-  - Скачивает аудиопоток, перекодирует в MP3 320 kbps CBR, переносит ID3v2.4 теги, атомарно заменяет файл (`os.Rename`).
-  - Вызывает `PinSoundCloudVersion(ctx, cacheKey, track.Artist, track.Title, req.TargetURL, measuredDuration)`.
-
-#### [MODIFY] [pipeline.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/downloader/pipeline.go)
-- Обработка 404/410:
-  - Если ссылка ручная (`is_manual = 1`): выставить `status = 'link_dead'`, залогировать предупреждение, **не подменять ссылку автоматически**.
-  - Если ссылка автоматическая (`is_manual = 0`): вызвать `InvalidateSoundCloudURL`, которая выбирает следующего кандидата из списка, и попытаться скачать его.
-
----
-
-### Этап 5: Фронтенд (Интерфейс загрузчика)
-
-#### [MODIFY] [downloader.html](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/downloader.html) & [downloader.js](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/downloader/downloader.js)
-1. **Точные формулировки бейджей:**
-   - 🟢 `marked`: «Помечена в названии как оригинал»
-   - 🟡 `likely`: «Та же запись (хронометраж совпал)»
-   - ⚪ `unverified`: «Версия не подтверждена эталоном»
-   - 🔵 `manual`: «Выбрано вручную»
-   - 🔴 `link_dead`: «Ссылка недоступна на SoundCloud»
-2. **Выпадающее меню альтернатив:**
-   - Кнопка «Версии (N)» открывает список кандидатов (название, автор, длительность, дельта, дата).
-   - Выбор версии отправляет запрос на `switch-version`.
-
----
-
-## 5. Анализ рисков и краевых случаев (Risks & Guardrails)
-
-| Риск | Описание | Стратегия митигации |
-|---|---|---|
-| **Коллизия стоп-слова с именем артиста (`Clean Bandit`)** | Слово `Clean` в имени группы приводит к отбраковке трека | Проверка совпадения со словами из `targetArtist` и `targetTitle` перед маркировкой `isBad`. |
-| **Отбраковка `Original Mix`** | Слово `mix` ошибочно трактуется как сторонний эдит | Регулярка `remixRegex` ограничена только `remix|ремикс`. |
-| **Склейка слов при вырезании спасителя** | `Clean(old version)Clean` превращается в `CleanClean` | Обязательная вставка пробела: `title[:m[2]] + " " + title[m[3]:]`. |
-| **«Мёртвая» ссылка 404 как кэш-хит** | Пустой `selected_url` отдается клиенту | Записи с `status = 'link_dead'` при `is_manual = 0` трактуются как промах кэша. |
-| **Несоответствие сигнатуры `PinSoundCloudVersion`** | Ошибка передачи аргументов | Последним параметром строго передаётся `duration int`, замеренная через `ffprobe`. |
-| **Недоступность SoundCloud** | Потеря возможности скачивания треков | Автоматический прозрачный фоллбэк на поиск в YouTube при отсутствии кандидатов на SoundCloud. |
+1. **Ложные срабатывания (False Positives):**
+   - *Риск:* Название трека содержит подстроку "clean" в составе другого слова (например, "Cleaner").
+   - *Митигация:* Использование словных границ `(?:^|[^\p{L}\p{N}])` в регулярном выражении.
+2. **Артисты со словом Clean (кейс Clean Bandit):**
+   - *Риск:* Треки группы Clean Bandit без маркеров цензуры могут быть ошибочно помечены.
+   - *Митигация:* Регулярное выражение применяется исключительно к строке названия трека (`title`), а не к исполнителю (`artist`).
+3. **Удаление файла с диска:**
+   - *Риск:* Случайный клик пользователя приведет к немедленной потере файла.
+   - *Митигация:* Нативный диалог `confirm(...)` с предупреждением и указанием, как восстановить трек через Downloader.
 
 ---
 
 ## 6. План тестирования и верификации (Verification Matrix)
 
-### 6.1. Модульные тесты `uncensored_matcher_test.go`
-1. **Коллизии артистов и названий:**
-   - `"Clean Bandit - Symphony (до цензуры)"` с `targetArtist = "Clean Bandit"` $\to$ `hasSavior = true`, `isBad = false`.
-   - `"Track (Original Mix)"` при обычной цели $\to$ `isBad = false`.
-   - `"Track (Remix)"` при `targetTitle = "Track (Remix)"` $\to$ `isBad = false`.
-   - `"Track (Remix)"` при обычном треке $\to$ `isBad = true`.
-2. **Anti-Glue разделители:**
-   - `"Clean(old version)Clean"` $\to$ спаситель вырезан, `Clean Clean` на остатке бракует трек (`isBad = true`).
-3. **Регистр и спасители:**
-   - `"Scally Milano - Заберу (ДО ЦЕНЗУРЫ)"` $\to$ `hasSavior = true`.
-   - `"Track [Old version uncut]"` $\to$ `hasSavior = true`.
-4. **Хронометраж и статусы:**
-   - Спаситель + совпадение $\le 2$с $\to$ `marked`.
-   - Спаситель + эталона нет $\to$ `marked`.
-   - Спаситель + дельта 4с $\to$ `unverified` (сохраняется в альтернативах).
-   - Нет спасителя + совпадение $\le 2$с $\to$ `likely`.
-   - Нет спасителя + дельта 4с $\to$ `unverified` (сохраняется как близкая альтернатива).
+| Тест / Сценарий | Уровень | Проверяемый аспект | Результат |
+|---|---|---|---|
+| `TestAnalyzeTrackIssues_CensoredDetection` | Unit (Go) | Проверка распознавания Clean, Radio Edit, Censored, маркеров на кириллице и кейса Clean Bandit | PASS (10/10 сценариев) |
+| `TestFileHandler_DeleteFile_JSONBody` | Integration (Go HTTP) | Удаление файла через `DELETE /files` с телом JSON, проверка удаления MP3/LRC и очистки записей SQLite | PASS |
+| `go test -race ./...` | Concurrency | Проверка отсутствия состояний гонки во всех пакетах репозитория | PASS (0 data races) |
+| `go build` | Build | Компиляция единого статического бинарника `bin/music-manager` | PASS |
 
-### 6.2. Тесты базы данных (`db_test.go`)
-1. **TTL:** запись старше 30 дней с `is_manual = 0` не возвращается (протухла), а с `is_manual = 1` возвращается всегда.
-2. **`link_dead`:** автоматическая запись с `status = 'link_dead'` возвращает `nil` (MISS).
-3. **Ротация 404:** `InvalidateSoundCloudURL` удаляет битый URL и переключается на следующий лучший из `candidates_json`.
-4. **Защита ручного пина:** автоматический резолвер не перезаписывает строку с `is_manual = 1`.
-5. **Безопасный UPSERT:** вставка новой строки передаёт `'[]'`, повторное закрепление не затирает ранее сохранённый `candidates_json`.
+---
 
-### 6.3. Интеграционная сборка и тесты
-```bash
-go test -v -race ./internal/services/resolver/...
-go test -v -race ./internal/db/...
-go test -race ./...
-go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go
-```
+## 7. Критерии приемки (Definition of Done)
 
-### 6.4. Ручная верификация на слух
-- Скачивание трека (*Scally Milano — Заберу*).
-- Проверка отображения бейджа «Помечена в названии как оригинал».
-- Проверка переключения версии в выпадающем списке «Версии (N)».
-- Прослушивание результата в плеере на слух $\to$ проверка отсутствия цензурных заглушек.
+- [x] Цензурированные треки автоматически детектируются в аудите тегов.
+- [x] Бейдж "Цензурированная версия" отображается в таблице аудита (красный цвет).
+- [x] Фильтр "Цензурированные" работает корректно.
+- [x] Серьезность дефекта = "Требует внимания" (`review_needed` / amber).
+- [x] Кнопка "Удалить" видна только для цензурированных треков.
+- [x] Удаление файла работает корректно через существующий `DELETE /files` endpoint (поддерживает и query, и JSON body).
+- [x] Unit-тесты проходят (`go test -v ./internal/api/handlers -run TestAnalyzeTrackIssues_CensoredDetection`).
+- [x] Тесты удаления проходят (`go test -v ./internal/api/handlers -run TestFileHandler_DeleteFile_JSONBody`).
+- [x] Все тесты с детектором гонок проходят (`go test -race ./...`).
+- [x] Бинарник собирается без ошибок (`go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go`).
+- [x] `.env.example` обновлен с параметрами резолвера.

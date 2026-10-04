@@ -64,6 +64,7 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 		}
 	}
 
+	useCookies := IsValidNetscapeCookiesFile(r.cookiesPath)
 	args := []string{
 		"--ignore-config",
 		"--no-download-archive",
@@ -72,11 +73,11 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 		"--no-warnings",
 		"--ignore-errors",
 		"--extractor-args", "youtube:player_client=tv_embedded,web_embedded,android,ios",
-		targetURL,
 	}
-	if r.cookiesPath != "" {
+	if useCookies {
 		args = append(args, "--cookies", r.cookiesPath)
 	}
+	args = append(args, targetURL)
 
 	// Увеличиваем таймаут для дискографий исполнителей (может быть много релизов)
 	timeout := 60 * time.Second
@@ -131,56 +132,96 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 	// Обработка возрастных ограничений (Age Gate) и сбоев прямого извлечения
 	if (runErr != nil && len(entries) == 0) || len(entries) == 0 {
 		stderrStr := stderr.String()
-		isAgeOrVideo := strings.Contains(stderrStr, "Sign in to confirm your age") ||
-			strings.Contains(stderrStr, "inappropriate") ||
-			strings.Contains(stderrStr, "age gate") ||
-			strings.Contains(rawURL, "watch?v=") || strings.Contains(rawURL, "youtu.be/")
 
-		if isAgeOrVideo {
-			if parsed, thumb, oErr := fetchYouTubeOEmbed(ctx, rawURL); oErr == nil && parsed != nil && parsed.Title != "" {
-				tot := 1
-				artists := parsed.Artists
-				if len(artists) == 0 && parsed.Artist != "" {
-					artists = []string{parsed.Artist}
+		// Fallback: если yt-dlp отклонил куки, повторяем попытку в гостевом режиме без флага --cookies
+		if useCookies && strings.Contains(stderrStr, "does not look like a Netscape format cookies file") {
+			argsNoCookies := make([]string, 0, len(args))
+			for i := 0; i < len(args); i++ {
+				if args[i] == "--cookies" {
+					i++
+					continue
 				}
-				if r.featEnricher != nil {
-					artists = r.featEnricher.EnrichTrackArtists(ctx, parsed.Title, artists)
+				argsNoCookies = append(argsNoCookies, args[i])
+			}
+			cmdRetry := exec.CommandContext(cmdCtx, "yt-dlp", argsNoCookies...)
+			stdout.Reset()
+			stderr.Reset()
+			cmdRetry.Stdout = &stdout
+			cmdRetry.Stderr = &stderr
+			if retryErr := cmdRetry.Run(); retryErr == nil && stdout.Len() > 0 {
+				scannerRetry := bufio.NewScanner(&stdout)
+				buf := make([]byte, 1024*1024)
+				scannerRetry.Buffer(buf, 10*1024*1024)
+				for scannerRetry.Scan() {
+					line := scannerRetry.Bytes()
+					if len(line) == 0 {
+						continue
+					}
+					var e YtEntry
+					if err := json.Unmarshal(line, &e); err == nil && (e.ID != "" || e.URL != "") {
+						entries = append(entries, e)
+					}
 				}
-				fmtArt := parsed.Artist
-				albArt := parsed.Artist
-				if len(artists) > 0 {
-					fmtArt = id3.FormatMultiValue(artists)
-					albArt = artists[0]
+				if len(entries) > 0 {
+					runErr = nil
 				}
-				meta := &ReleaseMetadata{
-					AlbumTitle:  parsed.Title,
-					AlbumArtist: fmtArt,
-					CoverURL:    thumb,
-					TotalTracks: 1,
-				}
-				tr := ResolvedTrack{
-					TrackID:        "yt_oembed",
-					TrackNumber:    1,
-					TrackTotal:     &tot,
-					DiscNumber:     1,
-					Title:          parsed.Title,
-					Artist:         fmtArt,
-					Album:          parsed.Title,
-					AlbumArtist:    albArt,
-					AudioSourceURL: "", // пустое поле triggers AudioMatcher fallback to SoundCloud
-					Status:         "pending",
-				}
-				if thumb != "" {
-					tr.CoverURL = &thumb
-				}
-				return meta, []ResolvedTrack{tr}, nil
 			}
 		}
 
-		if len(entries) == 0 && runErr == nil {
-			return nil, nil, fmt.Errorf("не найдено треков по ссылке %s", rawURL)
+		if runErr != nil || len(entries) == 0 {
+			stderrStr = stderr.String()
+			isAgeOrVideo := strings.Contains(stderrStr, "Sign in to confirm your age") ||
+				strings.Contains(stderrStr, "inappropriate") ||
+				strings.Contains(stderrStr, "age gate") ||
+				strings.Contains(rawURL, "watch?v=") || strings.Contains(rawURL, "youtu.be/")
+
+			if isAgeOrVideo {
+				if parsed, thumb, oErr := fetchYouTubeOEmbed(ctx, rawURL); oErr == nil && parsed != nil && parsed.Title != "" {
+					tot := 1
+					artists := parsed.Artists
+					if len(artists) == 0 && parsed.Artist != "" {
+						artists = []string{parsed.Artist}
+					}
+					if r.featEnricher != nil {
+						artists = r.featEnricher.EnrichTrackArtists(ctx, parsed.Title, artists)
+					}
+					fmtArt := parsed.Artist
+					albArt := parsed.Artist
+					if len(artists) > 0 {
+						fmtArt = id3.FormatMultiValue(artists)
+						albArt = artists[0]
+					}
+					meta := &ReleaseMetadata{
+						AlbumTitle:  parsed.Title,
+						AlbumArtist: fmtArt,
+						CoverURL:    thumb,
+						TotalTracks: 1,
+					}
+					tr := ResolvedTrack{
+						TrackID:        "yt_oembed",
+						TrackNumber:    1,
+						TrackTotal:     &tot,
+						DiscNumber:     1,
+						Title:          parsed.Title,
+						Artist:         fmtArt,
+						Album:          parsed.Title,
+						AlbumArtist:    albArt,
+						AudioSourceURL: "", // пустое поле triggers AudioMatcher fallback to SoundCloud
+						Status:         "pending",
+					}
+					if thumb != "" {
+						tr.CoverURL = &thumb
+					}
+					return meta, []ResolvedTrack{tr}, nil
+				}
+			}
+
+			if len(entries) == 0 && runErr == nil {
+				return nil, nil, fmt.Errorf("не найдено треков по ссылке %s", rawURL)
+			}
+			cleanStderr := CleanYtDlpStderr(stderr.String())
+			return nil, nil, fmt.Errorf("yt-dlp extraction failed: %w: %s", runErr, cleanStderr)
 		}
-		return nil, nil, fmt.Errorf("yt-dlp extraction failed: %w: %s", runErr, stderrStr)
 	}
 
 	// Извлекаем артиста и альбом первого элемента для релиза
@@ -309,3 +350,4 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 
 	return meta, tracks, nil
 }
+

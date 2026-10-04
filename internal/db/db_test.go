@@ -223,3 +223,114 @@ func TestSoundCloudCache(t *testing.T) {
 	}
 }
 
+func TestDB_SearchLibrary(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "db_search_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	database, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer database.Close()
+
+	ctx := context.Background()
+
+	// Вставляем артиста
+	resArt, err := database.Conn().ExecContext(ctx,
+		"INSERT INTO artists (name, clean_name) VALUES ('Black Eyed Peas', 'black eyed peas')",
+	)
+	if err != nil {
+		t.Fatalf("failed to insert artist: %v", err)
+	}
+	artID, _ := resArt.LastInsertId()
+
+	// Вставляем альбом
+	resAlb, err := database.Conn().ExecContext(ctx,
+		"INSERT INTO albums (artist_id, title, clean_title, album_artist, year, folder_path, has_cover) VALUES (?, 'Elephunk', 'elephunk', 'Black Eyed Peas', 2003, 'Black Eyed Peas/Elephunk', 1)",
+		artID,
+	)
+	if err != nil {
+		t.Fatalf("failed to insert album: %v", err)
+	}
+	albID, _ := resAlb.LastInsertId()
+
+	// Вставляем трек
+	_, err = database.Conn().ExecContext(ctx,
+		"INSERT INTO tracks (album_id, artist_id, title, clean_title, track_number, duration, file_path, file_size, mtime, lyrics_status) VALUES (?, ?, 'Where Is The Love?', 'where is the love?', 1, 272.0, 'Black Eyed Peas/Elephunk/01. Where Is The Love.mp3', 1000, 0, 'lrc')",
+		albID, artID,
+	)
+	if err != nil {
+		t.Fatalf("failed to insert track: %v", err)
+	}
+
+	// 1. Поиск по артисту
+	res, err := database.SearchLibrary(ctx, "black", 10)
+	if err != nil {
+		t.Fatalf("SearchLibrary failed: %v", err)
+	}
+	if len(res.Artists) != 1 {
+		t.Fatalf("expected 1 artist, got %d", len(res.Artists))
+	}
+	art := res.Artists[0]
+	if art.Name != "Black Eyed Peas" || art.Title != "Black Eyed Peas" {
+		t.Errorf("unexpected artist name: %+v", art)
+	}
+	if art.TrackCount != 1 {
+		t.Errorf("expected track_count 1, got %d", art.TrackCount)
+	}
+	if art.FolderPath != "Black Eyed Peas" {
+		t.Errorf("expected folder_path 'Black Eyed Peas', got %q", art.FolderPath)
+	}
+
+	// 2. Поиск по альбому
+	albRes, err := database.SearchLibrary(ctx, "elephunk", 10)
+	if err != nil {
+		t.Fatalf("SearchLibrary failed: %v", err)
+	}
+	if len(albRes.Albums) != 1 {
+		t.Fatalf("expected 1 album, got %d", len(albRes.Albums))
+	}
+	alb := albRes.Albums[0]
+	if alb.Album != "Elephunk" || alb.Title != "Elephunk" {
+		t.Errorf("unexpected album title: %+v", alb)
+	}
+	if alb.AlbumArtist != "Black Eyed Peas" || alb.Artist != "Black Eyed Peas" {
+		t.Errorf("unexpected album artist: %+v", alb)
+	}
+	if alb.Year != 2003 {
+		t.Errorf("expected year 2003, got %d", alb.Year)
+	}
+	if alb.Path != "Black Eyed Peas/Elephunk" {
+		t.Errorf("unexpected album path: %q", alb.Path)
+	}
+	if alb.TrackCount != 1 {
+		t.Errorf("expected track_count 1, got %d", alb.TrackCount)
+	}
+
+	// 3. Поиск по треку
+	trkRes, err := database.SearchLibrary(ctx, "love", 10)
+	if err != nil {
+		t.Fatalf("SearchLibrary failed: %v", err)
+	}
+	if len(trkRes.Tracks) != 1 {
+		t.Fatalf("expected 1 track, got %d", len(trkRes.Tracks))
+	}
+	trk := trkRes.Tracks[0]
+	if trk.Title != "Where Is The Love?" {
+		t.Errorf("unexpected track title: %+v", trk)
+	}
+	if trk.Artist != "Black Eyed Peas" {
+		t.Errorf("unexpected track artist: %+v", trk)
+	}
+	if trk.LyricsStatus != "lrc" {
+		t.Errorf("expected lyrics_status 'lrc', got %q", trk.LyricsStatus)
+	}
+	if trk.Path != "Black Eyed Peas/Elephunk/01. Where Is The Love.mp3" {
+		t.Errorf("unexpected track path: %q", trk.Path)
+	}
+}
+

@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -315,10 +314,9 @@ func (m *AudioMatcher) runSearch(ctx context.Context, query string) ([]YtCandida
 		"--ignore-errors",
 		query,
 	}
-	if m.cookiesPath != "" {
-		if _, err := os.Stat(m.cookiesPath); err == nil {
-			args = append(args, "--cookies", m.cookiesPath)
-		}
+	useCookies := IsValidNetscapeCookiesFile(m.cookiesPath)
+	if useCookies {
+		args = append(args, "--cookies", m.cookiesPath)
 	}
 
 	cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -330,8 +328,25 @@ func (m *AudioMatcher) runSearch(ctx context.Context, query string) ([]YtCandida
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		if stdout.Len() == 0 {
-			return nil, fmt.Errorf("yt-dlp search error: %w: %s", err, stderr.String())
+		if useCookies && strings.Contains(stderr.String(), "does not look like a Netscape format cookies file") {
+			argsNoCookies := make([]string, 0, len(args))
+			for i := 0; i < len(args); i++ {
+				if args[i] == "--cookies" {
+					i++
+					continue
+				}
+				argsNoCookies = append(argsNoCookies, args[i])
+			}
+			cmdRetry := exec.CommandContext(cmdCtx, "yt-dlp", argsNoCookies...)
+			stdout.Reset()
+			stderr.Reset()
+			cmdRetry.Stdout = &stdout
+			cmdRetry.Stderr = &stderr
+			err = cmdRetry.Run()
+		}
+		if err != nil && stdout.Len() == 0 {
+			cleanStderr := CleanYtDlpStderr(stderr.String())
+			return nil, fmt.Errorf("yt-dlp search error: %w: %s", err, cleanStderr)
 		}
 	}
 

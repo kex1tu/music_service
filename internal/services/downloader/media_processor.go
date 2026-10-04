@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"music-manager/internal/services/resolver"
 )
 
 var progressRegex = regexp.MustCompile(`(?:\[download\]|\bdownload:)?\s*(\d+(?:\.\d+)?)%`)
@@ -36,10 +38,9 @@ func (s *Service) downloadRawStream(ctx context.Context, sourceURL, outputTempla
 		"--add-header", "Accept-Language:ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
 	}
 
-	if s.cookiesPath != "" {
-		if _, err := os.Stat(s.cookiesPath); err == nil {
-			args = append(args, "--cookies", s.cookiesPath)
-		}
+	useCookies := resolver.IsValidNetscapeCookiesFile(s.cookiesPath)
+	if useCookies {
+		args = append(args, "--cookies", s.cookiesPath)
 	}
 	args = append(args, sourceURL)
 
@@ -67,16 +68,52 @@ func (s *Service) downloadRawStream(ctx context.Context, sourceURL, outputTempla
 	}
 
 	if err := cmd.Wait(); err != nil {
+		// Fallback: если yt-dlp отклонил куки, повторяем загрузку в гостевом режиме
+		if useCookies && strings.Contains(stderr.String(), "does not look like a Netscape format cookies file") {
+			argsNoCookies := make([]string, 0, len(args))
+			for i := 0; i < len(args); i++ {
+				if args[i] == "--cookies" {
+					i++
+					continue
+				}
+				argsNoCookies = append(argsNoCookies, args[i])
+			}
+			cmdRetry := exec.CommandContext(ctx, "yt-dlp", argsNoCookies...)
+			stdoutRetry, pErr := cmdRetry.StdoutPipe()
+			if pErr == nil {
+				var stderrRetry bytes.Buffer
+				cmdRetry.Stderr = &stderrRetry
+				if sErr := cmdRetry.Start(); sErr == nil {
+					scannerRetry := bufio.NewScanner(stdoutRetry)
+					for scannerRetry.Scan() {
+						line := scannerRetry.Text()
+						match := progressRegex.FindStringSubmatch(line)
+						if len(match) >= 2 && onProgress != nil {
+							if val, valErr := strconv.ParseFloat(match[1], 64); valErr == nil {
+								onProgress(val)
+							}
+						}
+					}
+					if wErr := cmdRetry.Wait(); wErr == nil {
+						return s.findDownloadedFile(outputTemplate)
+					}
+					stderr = stderrRetry
+				}
+			}
+		}
 		return "", fmt.Errorf("yt-dlp download failed: %w: %s", err, stderr.String())
 	}
 
+	return s.findDownloadedFile(outputTemplate)
+}
+
+func (s *Service) findDownloadedFile(outputTemplate string) (string, error) {
 	dir := filepath.Dir(outputTemplate)
 	pattern := filepath.Base(strings.Replace(outputTemplate, "%(ext)s", "*", 1))
 	matches, err := filepath.Glob(filepath.Join(dir, pattern))
 	if err != nil || len(matches) == 0 {
 		return "", fmt.Errorf("downloaded audio file not found matching template %s", outputTemplate)
 	}
-
 	return matches[0], nil
 }
 

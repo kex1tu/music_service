@@ -60,6 +60,17 @@
                             <span>Назад</span>
                         </button>
                     </template>
+                    <template x-if="currentPath && currentPath.length > 0">
+                        <button
+                            @click="editCurrentFolderTags()"
+                            title="Редактировать теги текущего релиза"
+                            class="px-3 py-1.5 bg-brand hover:bg-brand-hover text-white text-xs font-semibold rounded-lg transition flex items-center space-x-1.5 shadow-md shadow-brand/20 active:scale-95 shrink-0">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M4 21q-.425 0-.712-.288T3 20v-2.425q0-.4.15-.763t.425-.637L16.2 3.575q.3-.275.663-.425t.762-.15t.775.15t.65.45L20.425 5q.3.275.437.65T21 6.4q0 .4-.138.763t-.437.662l-12.6 12.6q-.275.275-.638.425t-.762.15zM17.6 7.8L19 6.4L17.6 5l-1.4 1.4z"/>
+                            </svg>
+                            <span>Редактировать теги</span>
+                        </button>
+                    </template>
                     <button
                         @click="loadDirectory(currentPath)"
                         class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-content-primary text-xs font-medium rounded-lg transition border border-surface-border flex items-center space-x-1.5 shadow-sm active:scale-95 shrink-0">

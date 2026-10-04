@@ -31,10 +31,16 @@ function headerSearchComponent() {
             }
         },
 
+        getTrackDir(path) {
+            if (!path || typeof path !== 'string') return '';
+            const idx = path.lastIndexOf('/');
+            return idx !== -1 ? path.substring(0, idx) : '';
+        },
+
         navigateToDir(path) {
             this.isOpen = false;
             Alpine.store('app').activeTab = 'files';
-            window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: path }));
+            window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: path || '' }));
         }
     };
 }

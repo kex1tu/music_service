@@ -43,6 +43,10 @@ function fileManagerComponent() {
             return Math.max(1, Math.ceil(len / this.pageSize));
         },
 
+        get hasAudioTracksInCurrentFolder() {
+            return (this.items || []).some(item => item.type === 'file' && item.extension === '.mp3');
+        },
+
         get paginatedItems() {
             const list = this.filteredItems;
             if (this.pageSize === 0) return list;
@@ -172,6 +176,15 @@ function fileManagerComponent() {
             if (this.parentPath !== null && this.parentPath !== undefined) {
                 this.loadDirectory(this.parentPath);
             }
+        },
+
+        editCurrentFolderTags() {
+            if (!this.currentPath) return;
+            this.openInTagEditor({
+                type: 'directory',
+                path: this.currentPath,
+                name: this.currentPath.split('/').pop() || this.currentPath
+            });
         },
 
         async openInTagEditor(item) {

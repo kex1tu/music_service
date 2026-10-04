@@ -114,7 +114,54 @@ func (db *DB) GetAllJobs(ctx context.Context) ([]DownloadJobEntity, error) {
 	return list, nil
 }
 
-// SearchResultItem универсальная сущность результата глобального поиска.
+// SearchTrackItem представляет трек в результатах глобального поиска.
+type SearchTrackItem struct {
+	ID           int64   `json:"id"`
+	Title        string  `json:"title"`
+	Artist       string  `json:"artist"`
+	Album        string  `json:"album"`
+	Year         int     `json:"year,omitempty"`
+	Duration     float64 `json:"duration"`
+	Path         string  `json:"path"`
+	LyricsStatus string  `json:"lyrics_status,omitempty"`
+	HasCover     bool    `json:"has_cover"`
+	CoverPath    string  `json:"cover_path,omitempty"`
+}
+
+// SearchAlbumItem представляет альбом в результатах глобального поиска.
+type SearchAlbumItem struct {
+	ID          int64  `json:"id"`
+	Title       string `json:"title"`
+	Album       string `json:"album"`
+	Artist      string `json:"artist"`
+	AlbumArtist string `json:"album_artist"`
+	Year        int    `json:"year,omitempty"`
+	Path        string `json:"path"`
+	HasCover    bool   `json:"has_cover"`
+	CoverPath   string `json:"cover_path,omitempty"`
+	TrackCount  int    `json:"track_count"`
+}
+
+// SearchArtistItem представляет исполнителя в результатах глобального поиска.
+type SearchArtistItem struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Title      string `json:"title"`
+	TrackCount int    `json:"track_count"`
+	FolderPath string `json:"folder_path,omitempty"`
+	FirstPath  string `json:"first_path,omitempty"`
+}
+
+// SearchLibraryResult объединяет результаты поиска по трекам, альбомам и артистам.
+type SearchLibraryResult struct {
+	Query        string             `json:"query"`
+	Artists      []SearchArtistItem `json:"artists"`
+	Albums       []SearchAlbumItem  `json:"albums"`
+	Tracks       []SearchTrackItem  `json:"tracks"`
+	TotalMatches int                `json:"total_matches"`
+}
+
+// SearchResultItem сохранен для обратной совместимости.
 type SearchResultItem struct {
 	ID        int64   `json:"id"`
 	Title     string  `json:"title"`
@@ -128,12 +175,19 @@ type SearchResultItem struct {
 }
 
 // SearchLibrary выполняет быстрый поиск по трекам, альбомам и артистам.
-func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (tracks []SearchResultItem, albums []SearchResultItem, artists []SearchResultItem, err error) {
+func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (*SearchLibraryResult, error) {
+	if limit <= 0 {
+		limit = 50
+	}
 	term := "%" + query + "%"
+
+	tracks := make([]SearchTrackItem, 0)
+	albums := make([]SearchAlbumItem, 0)
+	artists := make([]SearchArtistItem, 0)
 
 	// 1. Поиск по трекам
 	trackQuery := `
-	SELECT t.id, t.title, ar.name AS artist, al.title AS album, al.year, t.duration, t.file_path, al.has_cover, al.cover_path
+	SELECT t.id, t.title, ar.name AS artist, al.title AS album, al.year, t.duration, t.file_path, t.lyrics_status, al.has_cover, al.cover_path
 	FROM tracks t
 	JOIN albums al ON t.album_id = al.id
 	JOIN artists ar ON t.artist_id = ar.id
@@ -144,12 +198,28 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (track
 	if err == nil {
 		defer tRows.Close()
 		for tRows.Next() {
-			var it SearchResultItem
+			var it SearchTrackItem
+			var artName sql.NullString
+			var albTitle sql.NullString
 			var yr sql.NullInt64
+			var fPath sql.NullString
+			var lyrStatus sql.NullString
 			var covPath sql.NullString
-			if err := tRows.Scan(&it.ID, &it.Title, &it.Artist, &it.Album, &yr, &it.Duration, &it.Path, &it.HasCover, &covPath); err == nil {
+			if err := tRows.Scan(&it.ID, &it.Title, &artName, &albTitle, &yr, &it.Duration, &fPath, &lyrStatus, &it.HasCover, &covPath); err == nil {
+				if artName.Valid {
+					it.Artist = artName.String
+				}
+				if albTitle.Valid {
+					it.Album = albTitle.String
+				}
 				if yr.Valid {
 					it.Year = int(yr.Int64)
+				}
+				if fPath.Valid {
+					it.Path = filepath.ToSlash(fPath.String)
+				}
+				if lyrStatus.Valid {
+					it.LyricsStatus = lyrStatus.String
 				}
 				if covPath.Valid {
 					it.CoverPath = covPath.String
@@ -161,7 +231,8 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (track
 
 	// 2. Поиск по альбомам
 	albumQuery := `
-	SELECT al.id, al.title, ar.name AS artist, al.year, al.folder_path, al.has_cover, al.cover_path
+	SELECT al.id, al.title, COALESCE(NULLIF(al.album_artist, ''), ar.name) AS album_artist, al.year, al.folder_path, al.has_cover, al.cover_path,
+	       (SELECT COUNT(1) FROM tracks WHERE album_id = al.id) AS track_count
 	FROM albums al
 	JOIN artists ar ON al.artist_id = ar.id
 	WHERE al.title LIKE ? OR al.clean_title LIKE ?
@@ -171,12 +242,22 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (track
 	if err == nil {
 		defer aRows.Close()
 		for aRows.Next() {
-			var it SearchResultItem
+			var it SearchAlbumItem
+			var albArtist sql.NullString
 			var yr sql.NullInt64
+			var fPath sql.NullString
 			var covPath sql.NullString
-			if err := aRows.Scan(&it.ID, &it.Title, &it.Artist, &yr, &it.Path, &it.HasCover, &covPath); err == nil {
+			if err := aRows.Scan(&it.ID, &it.Title, &albArtist, &yr, &fPath, &it.HasCover, &covPath, &it.TrackCount); err == nil {
+				it.Album = it.Title
+				if albArtist.Valid {
+					it.AlbumArtist = albArtist.String
+					it.Artist = albArtist.String
+				}
 				if yr.Valid {
 					it.Year = int(yr.Int64)
+				}
+				if fPath.Valid {
+					it.Path = filepath.ToSlash(fPath.String)
 				}
 				if covPath.Valid {
 					it.CoverPath = covPath.String
@@ -186,25 +267,48 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (track
 		}
 	}
 
-	// 3. Поиск по артистам
+	// 3. Поиск по артистам с подсчетом треков и вычислением пути к каталогу
 	artistQuery := `
-	SELECT id, name
-	FROM artists
-	WHERE name LIKE ? OR clean_name LIKE ?
+	SELECT ar.id, ar.name,
+	       COUNT(DISTINCT t.id) AS track_count,
+	       COALESCE(MIN(al.folder_path), MIN(t.file_path), '') AS first_path
+	FROM artists ar
+	LEFT JOIN tracks t ON t.artist_id = ar.id
+	LEFT JOIN albums al ON al.artist_id = ar.id
+	WHERE ar.name LIKE ? OR ar.clean_name LIKE ?
+	GROUP BY ar.id, ar.name
 	LIMIT ?;
 	`
 	arRows, err := db.conn.QueryContext(ctx, artistQuery, term, term, limit)
 	if err == nil {
 		defer arRows.Close()
 		for arRows.Next() {
-			var it SearchResultItem
-			if err := arRows.Scan(&it.ID, &it.Title); err == nil {
+			var it SearchArtistItem
+			var firstPath sql.NullString
+			if err := arRows.Scan(&it.ID, &it.Name, &it.TrackCount, &firstPath); err == nil {
+				it.Title = it.Name
+				if firstPath.Valid && firstPath.String != "" {
+					fp := filepath.ToSlash(firstPath.String)
+					it.FirstPath = fp
+					parts := strings.Split(fp, "/")
+					if len(parts) > 1 {
+						it.FolderPath = parts[0]
+					} else {
+						it.FolderPath = fp
+					}
+				}
 				artists = append(artists, it)
 			}
 		}
 	}
 
-	return tracks, albums, artists, nil
+	return &SearchLibraryResult{
+		Query:        query,
+		Artists:      artists,
+		Albums:       albums,
+		Tracks:       tracks,
+		TotalMatches: len(artists) + len(albums) + len(tracks),
+	}, nil
 }
 
 // InvalidPathRecord представляет трек с нарушением канонического пути.
