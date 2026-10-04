@@ -76,6 +76,7 @@ func NewJobManager(database *db.DB) *JobManager {
 	return jm
 }
 
+
 func (m *JobManager) syncJob(job *DownloadJob) {
 	if m == nil || m.database == nil || job == nil {
 		return

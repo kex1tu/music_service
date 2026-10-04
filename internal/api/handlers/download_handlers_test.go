@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/services/downloader"
@@ -158,4 +161,43 @@ func TestDownloadHandler_ListDownloads_StatusPriority(t *testing.T) {
 		t.Errorf("expected 5th job to be job-error, got %s (%s)", returnedJobs[4].ID, returnedJobs[4].Status)
 	}
 }
+
+func TestDownloadHandler_SwitchTrackVersion(t *testing.T) {
+	tempDir := t.TempDir()
+	tmpSb, err := sandbox.NewPathSandbox(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	musicSb, err := sandbox.NewPathSandbox(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	jobMgr := downloader.NewJobManager(nil)
+	svc := downloader.NewService(context.Background(), jobMgr, nil, tmpSb, musicSb, "", 2)
+	defer svc.Close()
+	handler := NewDownloadHandler(svc, nil)
+
+	// 1. Missing target_url
+	req := httptest.NewRequest(http.MethodPost, "/downloads/tracks/tr-1/switch-version", strings.NewReader(`{"target_url":""}`))
+	rec := httptest.NewRecorder()
+	handler.SwitchTrackVersion(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for empty target_url, got %d", rec.Code)
+	}
+
+	// 2. Track not found
+	req = httptest.NewRequest(http.MethodPost, "/downloads/tracks/nonexistent/switch-version", strings.NewReader(`{"target_url":"https://soundcloud.com/artist/track"}`))
+	// Set chi url param
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("trackId", "nonexistent")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	rec = httptest.NewRecorder()
+	handler.SwitchTrackVersion(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 when track is not found, got %d", rec.Code)
+	}
+}
+
 

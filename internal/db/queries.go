@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -377,5 +378,206 @@ func (db *DB) UpdateTrackHash(ctx context.Context, trackID int64, hash string) e
 	query := `UPDATE tracks SET file_hash = ? WHERE id = ?;`
 	_, err := db.conn.ExecContext(ctx, query, hash, trackID)
 	return err
+}
+
+// SoundCloudCandidateItem представляет сериализуемого кандидата из candidates_json.
+type SoundCloudCandidateItem struct {
+	URL        string `json:"url"`
+	Title      string `json:"title"`
+	Uploader   string `json:"uploader,omitempty"`
+	Duration   int    `json:"duration"`
+	Delta      int    `json:"delta"`
+	Score      int    `json:"score"`
+	Status     string `json:"status"` // marked, likely, unverified, manual, link_dead
+	UploadDate string `json:"upload_date,omitempty"`
+}
+
+// SoundCloudCacheEntry представляет запись кэша SoundCloud в SQLite.
+type SoundCloudCacheEntry struct {
+	CacheKey       string                   `json:"cache_key"`
+	TrackTitle     string                   `json:"track_title"`
+	ArtistName     string                   `json:"artist_name"`
+	SelectedURL    string                   `json:"selected_url"`
+	Status         string                   `json:"status"`
+	Duration       int                      `json:"duration"`
+	IsManual       bool                     `json:"is_manual"`
+	CandidatesJSON string                   `json:"candidates_json"`
+	Candidates     []SoundCloudCandidateItem `json:"candidates,omitempty"`
+	CheckedAt      time.Time                `json:"checked_at"`
+	UpdatedAt      time.Time                `json:"updated_at"`
+}
+
+// GetSoundCloudCache возвращает кэшированную запись SoundCloud по ключу с учетом TTL.
+func (db *DB) GetSoundCloudCache(ctx context.Context, key string, ttlHours int) (*SoundCloudCacheEntry, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil, nil
+	}
+	if ttlHours <= 0 {
+		ttlHours = 720
+	}
+
+	query := `
+	SELECT cache_key, track_title, artist_name, selected_url, status, duration, is_manual, candidates_json, checked_at, updated_at
+	FROM soundcloud_uncensored_cache
+	WHERE cache_key = ? AND (is_manual = 1 OR checked_at > datetime('now', printf('-%d hours', ?)));
+	`
+	row := db.conn.QueryRowContext(ctx, query, key, ttlHours)
+	var e SoundCloudCacheEntry
+	err := row.Scan(
+		&e.CacheKey, &e.TrackTitle, &e.ArtistName, &e.SelectedURL,
+		&e.Status, &e.Duration, &e.IsManual, &e.CandidatesJSON,
+		&e.CheckedAt, &e.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if e.CandidatesJSON != "" && e.CandidatesJSON != "[]" {
+		_ = json.Unmarshal([]byte(e.CandidatesJSON), &e.Candidates)
+	}
+
+	// Если is_manual = 0 и (status = 'link_dead' ИЛИ selected_url = '') -> трактуется как MISS (nil, nil)
+	if !e.IsManual && (e.Status == "link_dead" || e.SelectedURL == "") {
+		return nil, nil
+	}
+
+	return &e, nil
+}
+
+// SaveSoundCloudCache сохраняет или обновляет запись автоматического кэша в SQLite.
+// Если запись была закреплена вручную (is_manual = 1), автоматическое обновление игнорируется.
+func (db *DB) SaveSoundCloudCache(ctx context.Context, entry SoundCloudCacheEntry) error {
+	if entry.CandidatesJSON == "" {
+		if len(entry.Candidates) > 0 {
+			if data, err := json.Marshal(entry.Candidates); err == nil {
+				entry.CandidatesJSON = string(data)
+			} else {
+				entry.CandidatesJSON = "[]"
+			}
+		} else {
+			entry.CandidatesJSON = "[]"
+		}
+	}
+
+	query := `
+	INSERT INTO soundcloud_uncensored_cache (
+		cache_key, track_title, artist_name, selected_url, status, duration, is_manual, candidates_json, checked_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	ON CONFLICT(cache_key) DO UPDATE SET
+		track_title = excluded.track_title,
+		artist_name = excluded.artist_name,
+		selected_url = excluded.selected_url,
+		status = excluded.status,
+		duration = excluded.duration,
+		candidates_json = excluded.candidates_json,
+		checked_at = CURRENT_TIMESTAMP,
+		updated_at = CURRENT_TIMESTAMP
+	WHERE soundcloud_uncensored_cache.is_manual = 0;
+	`
+	_, err := db.conn.ExecContext(ctx, query,
+		entry.CacheKey, entry.TrackTitle, entry.ArtistName,
+		entry.SelectedURL, entry.Status, entry.Duration,
+		entry.IsManual, entry.CandidatesJSON,
+	)
+	return err
+}
+
+// PinSoundCloudVersion фиксирует выбранную вручную версию трека с защитой от перезаписи автоматическим резолвером.
+func (db *DB) PinSoundCloudVersion(ctx context.Context, key, artist, title, url string, duration int) error {
+	query := `
+	INSERT INTO soundcloud_uncensored_cache (
+		cache_key, artist_name, track_title, selected_url, duration, status, is_manual, candidates_json, checked_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, 'manual', 1, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	ON CONFLICT(cache_key) DO UPDATE SET
+		selected_url = excluded.selected_url,
+		duration = excluded.duration,
+		is_manual = 1,
+		status = 'manual',
+		checked_at = CURRENT_TIMESTAMP,
+		updated_at = CURRENT_TIMESTAMP;
+	`
+	_, err := db.conn.ExecContext(ctx, query, key, artist, title, url, duration)
+	return err
+}
+
+// InvalidateSoundCloudURL обрабатывает недоступность URL (404/410).
+// Для ручных версий выставляет status = 'link_dead'.
+// Для автоматических версий исключает ссылку из списка кандидатов и ротирует на следующую.
+func (db *DB) InvalidateSoundCloudURL(ctx context.Context, key string, failedURL string) (*SoundCloudCacheEntry, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil, nil
+	}
+
+	query := `
+	SELECT cache_key, track_title, artist_name, selected_url, status, duration, is_manual, candidates_json, checked_at, updated_at
+	FROM soundcloud_uncensored_cache
+	WHERE cache_key = ?;
+	`
+	row := db.conn.QueryRowContext(ctx, query, key)
+	var entry SoundCloudCacheEntry
+	err := row.Scan(
+		&entry.CacheKey, &entry.TrackTitle, &entry.ArtistName, &entry.SelectedURL,
+		&entry.Status, &entry.Duration, &entry.IsManual, &entry.CandidatesJSON,
+		&entry.CheckedAt, &entry.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if entry.CandidatesJSON != "" && entry.CandidatesJSON != "[]" {
+		_ = json.Unmarshal([]byte(entry.CandidatesJSON), &entry.Candidates)
+	}
+
+	if entry.IsManual {
+		entry.Status = "link_dead"
+		_, err = db.conn.ExecContext(ctx,
+			"UPDATE soundcloud_uncensored_cache SET status = 'link_dead', updated_at = CURRENT_TIMESTAMP WHERE cache_key = ?;",
+			key,
+		)
+		return &entry, err
+	}
+
+	var remaining []SoundCloudCandidateItem
+	for _, c := range entry.Candidates {
+		if c.URL != failedURL && c.URL != "" {
+			remaining = append(remaining, c)
+		}
+	}
+	entry.Candidates = remaining
+
+	if len(remaining) > 0 {
+		next := remaining[0]
+		candJSON, _ := json.Marshal(remaining)
+		entry.SelectedURL = next.URL
+		entry.Status = next.Status
+		entry.Duration = next.Duration
+		entry.CandidatesJSON = string(candJSON)
+
+		_, err = db.conn.ExecContext(ctx, `
+			UPDATE soundcloud_uncensored_cache
+			SET selected_url = ?, status = ?, duration = ?, candidates_json = ?, updated_at = CURRENT_TIMESTAMP
+			WHERE cache_key = ?;
+		`, entry.SelectedURL, entry.Status, entry.Duration, entry.CandidatesJSON, key)
+	} else {
+		entry.SelectedURL = ""
+		entry.Status = "link_dead"
+		entry.CandidatesJSON = "[]"
+
+		_, err = db.conn.ExecContext(ctx, `
+			UPDATE soundcloud_uncensored_cache
+			SET selected_url = '', status = 'link_dead', candidates_json = '[]', updated_at = CURRENT_TIMESTAMP
+			WHERE cache_key = ?;
+		`, key)
+	}
+
+	return &entry, err
 }
 

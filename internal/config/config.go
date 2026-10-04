@@ -29,6 +29,13 @@ type Config struct {
 	YandexMusicToken       string
 	YandexMusicProxy       string
 	Debug                  bool
+
+	// Uncensored SoundCloud Resolver
+	UncensoredDurationTolerance int
+	UncensoredCandidatesLimit   int
+	UncensoredPreferYear        int
+	UncensoredCacheTTLHours     int
+	UncensoredDistributors      []string
 }
 
 // Load загружает настройки из .env и переменных окружения, а также проверяет права на запись.
@@ -46,23 +53,40 @@ func Load() (*Config, error) {
 	tmpDir := getEnv("TMP_DIR", "tmp_downloads")
 	dbPath := getEnv("DATABASE_PATH", "data/library.db")
 
+	uncensoredTolerance, _ := strconv.Atoi(getEnv("UNCENSORED_DURATION_TOLERANCE", "2"))
+	uncensoredLimit, _ := strconv.Atoi(getEnv("UNCENSORED_CANDIDATES_LIMIT", "10"))
+	uncensoredPreferYear, _ := strconv.Atoi(getEnv("UNCENSORED_PREFER_YEAR", "2023"))
+	uncensoredTTLHours, _ := strconv.Atoi(getEnv("UNCENSORED_CACHE_TTL_HOURS", "720"))
+	distributorsRaw := getEnv("UNCENSORED_DISTRIBUTORS", "distrokid,believe,zvonko,the orchard,tunecore,warner,universal,sony")
+	var distributors []string
+	for _, d := range strings.Split(distributorsRaw, ",") {
+		if trimmed := strings.TrimSpace(d); trimmed != "" {
+			distributors = append(distributors, strings.ToLower(trimmed))
+		}
+	}
+
 	cfg := &Config{
-		Host:                   getEnv("HOST", "127.0.0.1"),
-		Port:                   port,
-		MusicDir:               musicDir,
-		TmpDir:                 tmpDir,
-		DatabasePath:           dbPath,
-		SecretKey:              getEnv("SECRET_KEY", "dev_secret_key_at_least_32_characters_long_123456"),
-		AdminLogin:             getEnv("ADMIN_LOGIN", "admin"),
-		AdminPasswordHash:      getEnv("ADMIN_PASSWORD_HASH", "$2b$12$wozlKXTTPPu7agkeGiiLYuZz36hysQzOES/6c6ZCQ2GfyCNrnYLBm"),
-		SessionCookieName:      getEnv("SESSION_COOKIE_NAME", "music_manager_session"),
-		SessionTTL:             sessionTTL,
-		SessionCookieSecure:    cookieSecure,
-		MaxConcurrentDownloads: maxDownloads,
-		CookiesFile:            getEnv("YTDLP_COOKIES_PATH", "cookies.txt"),
-		YandexMusicToken:       getEnv("YANDEX_MUSIC_TOKEN", ""),
-		YandexMusicProxy:       getEnv("YANDEX_MUSIC_PROXY", ""),
-		Debug:                  debug,
+		Host:                        getEnv("HOST", "127.0.0.1"),
+		Port:                        port,
+		MusicDir:                    musicDir,
+		TmpDir:                      tmpDir,
+		DatabasePath:                dbPath,
+		SecretKey:                   getEnv("SECRET_KEY", "dev_secret_key_at_least_32_characters_long_123456"),
+		AdminLogin:                  getEnv("ADMIN_LOGIN", "admin"),
+		AdminPasswordHash:           getEnv("ADMIN_PASSWORD_HASH", "$2b$12$wozlKXTTPPu7agkeGiiLYuZz36hysQzOES/6c6ZCQ2GfyCNrnYLBm"),
+		SessionCookieName:           getEnv("SESSION_COOKIE_NAME", "music_manager_session"),
+		SessionTTL:                  sessionTTL,
+		SessionCookieSecure:         cookieSecure,
+		MaxConcurrentDownloads:      maxDownloads,
+		CookiesFile:                 getEnv("YTDLP_COOKIES_PATH", "cookies.txt"),
+		YandexMusicToken:            getEnv("YANDEX_MUSIC_TOKEN", ""),
+		YandexMusicProxy:            getEnv("YANDEX_MUSIC_PROXY", ""),
+		Debug:                       debug,
+		UncensoredDurationTolerance: uncensoredTolerance,
+		UncensoredCandidatesLimit:   uncensoredLimit,
+		UncensoredPreferYear:        uncensoredPreferYear,
+		UncensoredCacheTTLHours:     uncensoredTTLHours,
+		UncensoredDistributors:      distributors,
 	}
 
 	// Fail-fast проверка прав на запись в директории

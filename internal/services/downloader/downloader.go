@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"music-manager/internal/core/sandbox"
+	"music-manager/internal/db"
 	"music-manager/internal/services/resolver"
 )
 
@@ -79,6 +80,24 @@ func (s *Service) Resolver() *resolver.SourceResolver {
 // CookiesPath returns the configured cookies file path.
 func (s *Service) CookiesPath() string {
 	return s.cookiesPath
+}
+
+// TmpSandbox returns the temporary buffer PathSandbox.
+func (s *Service) TmpSandbox() *sandbox.PathSandbox {
+	return s.tmpSandbox
+}
+
+// MusicSandbox returns the permanent music library PathSandbox.
+func (s *Service) MusicSandbox() *sandbox.PathSandbox {
+	return s.musicSandbox
+}
+
+// Database returns the underlying SQLite database via JobManager.
+func (s *Service) Database() *db.DB {
+	if s.jobs != nil {
+		return s.jobs.Database()
+	}
+	return nil
 }
 
 func generateUUID() string {

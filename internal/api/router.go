@@ -94,6 +94,12 @@ func NewRouter(p RouterParams) http.Handler {
 		r.Delete("/{id}", p.DownloadHandler.DeleteDownload)
 		r.Post("/{id}/retry", p.DownloadHandler.RetryDownload)
 		r.Get("/{id}/tracks", p.DownloadHandler.GetDownloadTracks)
+		r.Post("/tracks/{trackId}/switch-version", p.DownloadHandler.SwitchTrackVersion)
+	})
+
+	r.Route("/api/downloads", func(r chi.Router) {
+		r.Use(authMiddleware)
+		r.Post("/tracks/{trackId}/switch-version", p.DownloadHandler.SwitchTrackVersion)
 	})
 
 	// Tags API

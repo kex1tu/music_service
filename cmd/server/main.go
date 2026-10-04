@@ -63,6 +63,9 @@ func main() {
 
 	deezerClient := resolver.NewDeezerClient()
 	audioMatcher := resolver.NewAudioMatcher(cfg.CookiesFile)
+	audioMatcher.SetDB(database)
+	audioMatcher.SetConfig(cfg)
+	audioMatcher.SetCatalogClients(deezerClient, resolver.NewITunesClient(nil))
 	sourceResolver := resolver.NewSourceResolver(
 		deezerClient,
 		audioMatcher,

@@ -153,3 +153,18 @@ CREATE TABLE IF NOT EXISTS download_jobs (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_download_jobs_status ON download_jobs(status);
+
+-- 8. Кэш доцензурных версий SoundCloud
+CREATE TABLE IF NOT EXISTS soundcloud_uncensored_cache (
+    cache_key TEXT PRIMARY KEY,
+    track_title TEXT NOT NULL,
+    artist_name TEXT NOT NULL,
+    selected_url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,              -- marked, likely, unverified, manual, link_dead
+    duration INTEGER NOT NULL,
+    is_manual BOOLEAN DEFAULT 0,
+    candidates_json TEXT NOT NULL DEFAULT '[]',
+    checked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_sc_cache_key ON soundcloud_uncensored_cache(cache_key);

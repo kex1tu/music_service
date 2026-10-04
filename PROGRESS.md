@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 50 блоков задач полностью реализованы и протестированы).
+- **Статус готовности:** **100% DONE** (Все 52 блока задач полностью реализованы и протестированы).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 15 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit & integration tests (146/146 тестов пройдено, `go test -race ./...` — **0 data races**, все 12 пакетов зеленые).
@@ -221,6 +221,31 @@
     - Реализована утилита нормализации `NormalizeNavidromeLibrary`, рекурсивно исправляющая права доступа (0644/0755), расщепляющая устаревшие разделители `\\` в `TPE1`/`TPE2`, удаляющая паразитные `TXXX` и перезаписывающая чистые теги ID3v2.4 с null-байтами `\x00`.
     - В заголовок раздела «Аудит медиатеки» добавлена кнопка «Для Navidrome».
 
+- **Блок 52 (SoundCloud Candidate Ranking & Version Switcher — Automatic Audio Resolver):**
+  - **Этап 1: Config & Database:**
+    - Добавлены параметры SoundCloud резолвера в `internal/config/config.go` (`UncensoredDurationTolerance`, `UncensoredCandidatesLimit`, `UncensoredPreferYear`, `UncensoredCacheTTLHours`, `UncensoredDistributors`) и секция `4c` в `.env.example`.
+    - Создана SQLite таблица `soundcloud_uncensored_cache` с индексом `idx_sc_cache_key`.
+    - Реализованы методы в `internal/db/queries.go`: `GetSoundCloudCache`, `SaveSoundCloudCache`, `PinSoundCloudVersion`, `InvalidateSoundCloudURL` с защитой ручных пинов (`manual = 1`), TTL экспирацией и ротацией при 404/410. Покрыто тестами `TestSoundCloudCache`.
+  - **Этап 2: Сбор эталонных хронометражей (Catalog Durations):**
+    - Метод `SearchTrackVersions` в `internal/services/resolver/client_deezer.go` для извлечения всех версий трека (синглы, альбомы, делюксы, explicit).
+    - Метод `SearchTracksWithCountry` в `internal/services/resolver/client_itunes_track.go` для поиска по региональным витринам iTunes (US, GB, DE) с юнит-тестами.
+  - **Этап 3: Движок сопоставления и ранжирования (Matching & Ranking Engine):**
+    - Создан модуль `internal/services/resolver/uncensored_matcher.go`:
+      - Алгоритм Anti-Glue с отступами пробелов и Anti-Collision для артистов (Clean Bandit, The Cleaners from Venus и т.д.).
+      - Определение допустимого диапазона хронометражей по эталонам Deezer/iTunes с настраиваемым допуском (`tolerance`).
+      - Каскад статусов оригинальности: `marked` > `likely` > `unverified`.
+      - Штрафы за сторонних дистрибьюторов (TuneCore, DistroKid, CDBaby и др.) и бонус за соответствие года релиза.
+      - Прозрачный fallback на YouTube при отсутствии подходящих SoundCloud кандидатов.
+    - Реализованы юнит-тесты `internal/services/resolver/uncensored_matcher_test.go`.
+  - **Этап 4: Пайплайн загрузки и API переключения версий (Download Pipeline & Version Switch API):**
+    - Пайплайн загрузки (`pipeline.go`) обновлен: проброс статусов оригинальности и кандидатов в `ResolvedTrack`, обработка 404/410 с инвалидацией и ротацией кандидатов / fallback на YouTube.
+    - Метод `SwitchTrackVersion` в `internal/services/downloader/switch_version.go`: загрузка выбранного SoundCloud URL, перекодирование в MP3 320k CBR, замер ffprobe, перенос ID3v2.4 тегов и обложки через `PathSandbox.Resolve()`, атомарная замена файла и фиксация ручного пина в SQLite.
+    - Эндпоинты `POST /api/downloads/tracks/{trackId}/switch-version` и `POST /downloads/tracks/{trackId}/switch-version`.
+    - Юнит-тесты `TestDownloadHandler_SwitchTrackVersion`.
+  - **Этап 5: Фронтенд (UI статусов и селектор версий):**
+    - Модуль `web/static/js/downloader/versions.js` (`window.DownloaderVersions`): переключение версий в 1 клик, бейджи оригинальности (🟢 marked, 🟡 likely, ⚪ unverified, 🔵 manual, 🔴 link_dead), форматирование дельты хронометража и дат.
+    - Интеграция в `downloader.js`, `downloader_active.html`, `downloader_queue.html` (аккордеон «Треки (N)» и выпадающий список кандидатов «Версии (N)» с кнопкой «Выбрать»), а также отображение бейджей в Tag Editor (`tag_editor_flat.html`, `tag_editor_grouped_tracks.html`).
+
 ---
 
 ## 4. Верификация
@@ -233,6 +258,6 @@
    ```bash
    go test -race ./...
    ```
-   **Результат:** 100% PASS, 0 race conditions во всех 12 пакетах.
+   **Результат:** 100% PASS, 0 race conditions во всех пакетах.
 
 

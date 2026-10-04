@@ -91,3 +91,43 @@ func TestITunesClient_SearchTracks_Error(t *testing.T) {
 		t.Fatalf("expected error on HTTP 500, got nil")
 	}
 }
+
+func TestITunesClient_SearchTracksWithCountry(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		country := r.URL.Query().Get("country")
+		if country != "US" {
+			http.Error(w, "expected country US", http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"resultCount": 1,
+			"results": [
+				{
+					"trackName": "US Track",
+					"artistName": "US Artist",
+					"collectionName": "US Album",
+					"releaseDate": "2023-01-01T00:00:00Z",
+					"trackNumber": 1,
+					"trackTimeMillis": 180000,
+					"artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/100x100bb.jpg"
+				}
+			]
+		}`))
+	}))
+	defer mockServer.Close()
+
+	client := NewITunesClient(mockServer.Client())
+	client.SetBaseURL(mockServer.URL)
+
+	results, err := client.SearchTracksWithCountry(context.Background(), "US Query", "US")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 || results[0].Title != "US Track" || results[0].Duration != 180 {
+		t.Fatalf("unexpected result: %+v", results)
+	}
+}
+

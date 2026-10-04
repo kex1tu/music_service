@@ -185,3 +185,39 @@ func (h *DownloadHandler) RetryDownload(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(job)
 }
+
+type switchVersionRequest struct {
+	TargetURL string `json:"target_url"`
+}
+
+// SwitchTrackVersion переключает версию трека на выбранный SoundCloud URL.
+func (h *DownloadHandler) SwitchTrackVersion(w http.ResponseWriter, r *http.Request) {
+	trackID := chi.URLParam(r, "trackId")
+	if trackID == "" {
+		http.Error(w, `{"error":"trackId is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req switchVersionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid json body"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.TargetURL == "" {
+		http.Error(w, `{"error":"target_url is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	result, err := h.service.SwitchTrackVersion(r.Context(), trackID, req.TargetURL)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+

@@ -45,9 +45,20 @@ func (c *ITunesClient) SetBaseURL(u string) {
 	c.baseURL = strings.TrimRight(u, "/")
 }
 
+// ItunesTrack is an alias for ITunesTrackMatch for consistency with catalog clients.
+type ItunesTrack = ITunesTrackMatch
+
 // SearchTracks searches iTunes for tracks matching the given query string.
 func (c *ITunesClient) SearchTracks(ctx context.Context, query string) ([]ITunesTrackMatch, error) {
-	u := fmt.Sprintf("%s/search?term=%s&entity=song&limit=10", c.baseURL, url.QueryEscape(query))
+	return c.SearchTracksWithCountry(ctx, query, "")
+}
+
+// SearchTracksWithCountry searches iTunes for tracks matching the given query string in a specific country storefront (e.g. "US").
+func (c *ITunesClient) SearchTracksWithCountry(ctx context.Context, query, country string) ([]ITunesTrackMatch, error) {
+	u := fmt.Sprintf("%s/search?term=%s&entity=song&limit=25", c.baseURL, url.QueryEscape(query))
+	if country != "" {
+		u += fmt.Sprintf("&country=%s", url.QueryEscape(country))
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {

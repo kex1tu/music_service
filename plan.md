@@ -1,212 +1,313 @@
-# План: Dedicated Studio Hi-Fi Player Tab (Блок 45)
+# Automatic Audio Resolver (SoundCloud Candidate Ranking & Version Switcher)
 
-**Дата:** 26 сентября 2026  
-**Статус:** `COMPLETED`  
-**Целевые компоненты:** `web/templates/components/`, `web/templates/`, `web/static/js/`, `internal/api/handlers/`.
+Архитектурный план реализации сервиса автоматического подбора доцензурных версий треков на SoundCloud при загрузке из каталогов (Deezer / iTunes), исключения цензурных версий и эдитов, сохранения кандидатов в SQLite с безопасным кэшированием и ручного переключения версий в UI.
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Финальные инженерные решения и исправления, включённые в план:**
+>
+> 1. **Исправление `remixRegex` (поддержка `Original Mix`):**
+>    - В `remixRegex` остаются строго только `remix|ремикс`:
+>      ```go
+>      var remixRegex = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(remix|ремикс)(?:$|[^\p{L}\p{N}])`)
+>      ```
+>    - Слова `mix` и `edit` исключены из регулярного выражения. Это предотвращает ложную отбраковку названий вроде `Track (Original Mix)` при обычной цели. `radio edit` уже находится в `badRegex`.
+>
+> 2. **Исключение ложных срабатываний стоп-слов из-за метаданных артиста/трека (Кейс `Clean Bandit`):**
+>    - На SoundCloud треки часто имеют вид `Artist - Title`. Если артист называется `Clean Bandit` или целевой трек содержит слово `Clean`, `badRegex` мог ошибочно счесть трек цензурным.
+>    - **Решение:** Перед проверкой `badRegex` из строки кандидата исключаются совпадения, которые уже присутствуют в целевых метаданных (`targetArtist` или `targetTitle`). Если слово `clean` входит в состав имени артиста, оно игнорируется в стоп-листе.
+>
+> 3. **Непротиворечивая и строгая иерархия статусов:**
+>    - Присвоение статусов кандидатам выполняется по строгому однозначному порядку:
+>      1. Маркер-спаситель есть + эталона нет (`referenceMissing = true`) $\to$ **`marked`**;
+>      2. Маркер-спаситель есть + длительность в допуске ($\le 2$ с от любого валидного релиза) $\to$ **`marked`**;
+>      3. Маркер-спаситель есть + длительность разошлась ($> 2$ с) при наличии эталона $\to$ **`unverified`**;
+>      4. Маркера нет + длительность в допуске ($\le 2$ с) $\to$ **`likely`**;
+>      5. Маркера нет + длительность разошлась на 3–5 с $\to$ **`unverified`** (сохраняется как близкая альтернатива).
+>    - **Бейджи в UI:**
+>      - `marked`: **«Помечена в названии как оригинал»**
+>      - `likely`: **«Та же запись (хронометраж совпал)»**
+>      - `unverified`: **«Версия не подтверждена эталоном»**
+>      - `manual`: **«Выбрано вручную»**
+>      - `link_dead`: **«Ссылка недоступна на SoundCloud»**
+>
+> 4. **Корректная обработка `link_dead` и ротация кандидатов при 404:**
+>    - При 404/410 для автоматической записи (`is_manual = 0`):
+>      - Битая ссылка удаляется из списка `candidates_json`.
+>      - Если в `candidates_json` остались альтернативные кандидаты, следующий лучший URL автоматически назначается в `selected_url`, обновляется статус и пересчитывается длительность.
+>      - Только если кандидатов больше не осталось, выставляется `selected_url = ''` и `status = 'link_dead'`.
+>    - Поведение `GetSoundCloudCache`:
+>      - Для автоматических записей (`is_manual = 0`): если `status = 'link_dead'` или `selected_url = ''`, запись считается **кэш-промахом (MISS)**, инициируя новый поиск.
+>      - Для ручных записей (`is_manual = 1`): статус `link_dead` возвращается как хит, чтобы UI отобразил предупреждение пользователю без несанкционированной подмены.
+>
+> 5. **Фоллбэк на YouTube при отсутствии кандидатов:**
+>    - Если поиск на SoundCloud не вернул подходящих кандидатов (все отбракованы или пустая выдача), пайплайн прозрачно переключается на существующий стандартный поиск в YouTube (`matcher.go`). Существующий YouTube-пайплайн остаётся полностью работоспособным.
+>
+> 6. **Надёжное определение длительности `candDuration` при `switch-version`:**
+>    - Если кандидат найден в `candidates_json`, его длительность берётся оттуда.
+>    - Если кэша нет (прямой переход или `candidates_json` пуст), после скачивания аудио во временный файл длительность измеряется через `ffprobe` перед записью в SQLite (колонка `duration NOT NULL`).
+>
+> 7. **Штраф дистрибьюторов SoundCloud вместо Topic:**
+>    - Понятие «Topic» специфично для YouTube. На SoundCloud официальные цензурные копии выгружают дистрибьюторы. В конфигурацию добавляется список `UNCENSORED_DISTRIBUTORS` (по умолчанию: `distrokid,believe,zvonko,the orchard,tunecore,warner,universal,sony`). При совпадении имени аплоадера начисляется штраф (-20).
+>
+> 8. **Парсинг даты и обновление TTL:**
+>    - При пустой или нераспарсенной дате загрузки бонус за ранний релиз **не начисляется** (0 баллов).
+>    - `SaveSoundCloudCache` обновляет `checked_at = CURRENT_TIMESTAMP`, продлевая TTL. Параметр в SQL формируется как `printf('-%d hours', ?)`.
 
 ---
 
 ## 1. Цель и границы задачи (Objective & Scope)
 
 ### 1.1. Проблема
-В Блоке 44 был успешно внедрен бэкенд стриминга (HTTP RFC 7233 Range, Zero-Copy sendfile, детерминированные TrackID) и базовый нижний sticky-миниплеер.
-Однако для полноценного, эстетически выверенного взаимодействия с медиатекой пользователю требуется **выделенная вкладка «Плеер»** с бескомпромиссным, профессиональным дизайном («не нейрослоп», отказ от шаблонных градиентных карточек, характерный индустриальный Hi-Fi стиль **Teenage Engineering / Studio Console**).
+При загрузке музыки из каталогов (Deezer / iTunes) многие популярные треки отдаются в цензурных версиях. На SoundCloud часто доступны оригиналы, однако выдача перегружена ремиксами, радио-эдитами и эдитами скорости (slowed/sped up).
 
-### 1.2. Решения пользователя по интерфейсу и функционалу
-По результатам интерактивного брифа согласованы следующие требования:
-1. **Эстетическое направление:** Студийный Hi-Fi / Teenage Engineering — глубокий матовый графит (`#0d0f12`, `#14171f`), тактильные переключатели с физической окантовкой, точная моноширинная телеметрия, CRT-дисплей с частотным спектром и аналоговые светодиодные янтарно-изумрудные индикаторы.
-2. **Интерактивные модули (все 4 согласованы):**
-   - **Synced Scrolling Lyrics (`.lrc`):** Караоке-подсветка текущей строчки, плавный автоскролл, перемотка по клику на строчку.
-   - **Real-time Canvas Audio Visualizer:** Web Audio API (`AudioContext`, `AnalyserNode`), 32 частотные полосы с пик-холдом (падающие маркеры пиков), частотная сетка (`32Hz` – `16kHz`).
-   - **Интерактивная очередь (Queue / Tape Rack):** Треклист с удалением, перемещением выше/ниже, очисткой, прямым переходом и анимированным мини-эквалайзером на активном треке.
-   - **Технический паспорт трека (Audiophile Specs):** Битрейт (320 kbps CBR), частота дискретизации (44.1 kHz), размер файла, стандарт тегов (ID3v2.4 UTF-8 с null-разделителями), 16-символьный SHA-256 хэш трека.
-3. **Поведение мини-плеера:** Липкая нижняя плашка остаётся на всех вкладках, а при клике по ней (или кнопке разворота) открывается вкладка «Плеер».
+### 1.2. Целевой результат
+1. **Интеллектуальный ранжировщик кандидатов (SoundCloud Resolver):**
+   - Сбор списка валидных хронометражей всех релизов альбома/сингла в Deezer/iTunes (`validDurations []int`).
+   - Очистка названия от спасителей с пробелом (Anti-Glue) и проверка стоп-слов с исключением артиста/названия (Anti-Collision).
+   - Скоринг с допуском $\pm 2$ сек, штрафом за дистрибьюторов (-20), бонусом за дату до 2023 года (+25, только при валидной дате) и сохранением альтернатив (3–5 сек).
+   - Прозрачный фоллбэк на YouTube при отсутствии кандидатов на SoundCloud.
+2. **Кэш версий в SQLite:** Таблица `soundcloud_uncensored_cache` с поддержкой TTL (30 дней), безопасным UPSERT, ротацией при 404 и защитой ручных закреплений.
+3. **Интерфейс выбора версий (No-Build Alpine.js):** Отображение бейджей («Помечена в названии как оригинал», «Та же запись») и выпадающий список «Версии (N)» с ручным переключением в 1 клик.
 
-### 1.3. In-Scope (что входит в задачу)
-1. **Навигация:** Добавление 4-й вкладки «Плеер» в шапку [`web/templates/components/header.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/header.html) с сохранением состояния `$store.app.activeTab = 'player'`.
-2. **Шаблон студийной консоли:** Создание [`web/templates/components/player_tab.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/player_tab.html) с 3-палубной архитектурой (Left Deck: Cassette & Transport, Center Deck: Multi-monitor CRT, Right Deck: Tape Queue).
-3. **Включение в базовый шаблон:** Подключение компонента в [`web/templates/index.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/index.html).
-4. **Реактивный движок плеера:** Расширение [`web/static/js/player.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/player.js):
-   - Инициализация Web Audio API `AudioContext` + `AnalyserNode` (обработка политик автоплея и однократного создания `createMediaElementSource`).
-   - Рендер-луп спектроанализатора на HTML5 Canvas (32 бара + peak hold).
-   - Парсер LRC-таймкодов и караоке-трекер с кликабельным `seek(time)`.
-   - Операции управления очередью (`removeFromQueue`, `moveInQueue`, `clearQueue`).
-   - Переход во вкладку плеера (`openPlayerTab()`).
-5. **Связка с мини-плеером:** Добавление кнопки «Развернуть консоль» и клика по обложке/названию в [`web/templates/components/audio_player.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audio_player.html).
-6. **Обогащение метаданных бэкенда:** Добавление полей `file_size` и `track_number` в `TrackMetadataResponse` в [`internal/api/handlers/stream_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/stream_handlers.go).
-
-### 1.4. Out-of-Scope (что явно не входит)
-- Внедрение внешних NPM-библиотек или frontend-сборщиков (строго инвариант №1: Pure Go + No-Build Alpine.js + Tailwind CDN).
-- Транскодинг на лету (все файлы в медиатеке соответствуют стандарту MP3 320 kbps).
+### 1.3. Границы ответственности
+- **In-Scope:**
+  - База данных SQLite (таблица `soundcloud_uncensored_cache`, безопасный UPSERT, ротация кандидатов).
+  - Клиенты Deezer и iTunes (сбор всех уникальных хронометражей `validDurations`).
+  - Пакет скоринга `internal/services/resolver/uncensored_matcher.go`.
+  - Эндпоинт `POST /api/downloads/tracks/{trackId}/switch-version` с атомарной заменой файла и `ffprobe`-замером длительности.
+  - No-build фронтенд (Alpine.js + Tailwind) в `downloader.html` и `downloader.js`.
+- **Out-of-Scope:**
+  - Python / Whisper (строго соблюдается инвариант **Pure Go / Zero-Python** из `AGENTS.md`).
+  - Изменение битрейта (MP3 320 kbps CBR фиксирован инвариантом проекта).
 
 ---
 
 ## 2. Анализ текущего состояния (Current State Analysis)
 
-| Файл | Текущее состояние | Что необходимо изменить |
+| Компонент / Файл | Текущее состояние | Что необходимо изменить |
 |---|---|---|
-| [`header.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/header.html) | Вкладки: Загрузчик, Файлы, Аудит | Добавить кнопку вкладки «Плеер» с иконкой студийной деки и индикатором воспроизведения |
-| [`index.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/index.html) | Включает `downloader`, `file_manager`, `audit` | Добавить `{{ template "player_tab" . }}` в блок `<main>` |
-| [`player.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/player.js) | Управляет `audioElement`, базовым воспроизведением и громкостью | Добавить Web Audio API Analyser, LRC-парсер, караоке-скроллер, расширенное управление очередью |
-| [`audio_player.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audio_player.html) | Стики-миниплеер внизу экрана | Добавить кнопку открытия вкладки «Плеер» и клик по треку |
-| [`player_tab.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/player_tab.html) | Отсутствует | **[NEW]** Создать полноразмерный студийный интерфейс в стиле Teenage Engineering |
-| [`stream_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/stream_handlers.go) | `TrackMetadataResponse` отдает базовые поля | Добавить `file_size`, `track_number`, `sample_rate` |
+| [`internal/config/config.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/config/config.go) | Параметры загрузок | Добавить `UncensoredDurationTolerance` (2), `UncensoredCandidatesLimit` (10), `UncensoredPreferYear` (2023), `UncensoredCacheTTLHours` (720), `UncensoredDistributors` (список дистрибьюторов) |
+| [`internal/db/schema.sql`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/db/schema.sql) | Таблицы `tracks`, `downloads` | Добавить таблицу `soundcloud_uncensored_cache` с `selected_url TEXT NOT NULL DEFAULT ''` |
+| [`internal/db/queries.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/db/queries.go) | Базовые SQL-операции | Добавить `GetSoundCloudCache` (с проверкой `link_dead`), `SaveSoundCloudCache` (обновляет `checked_at`), `PinSoundCloudVersion`, `InvalidateSoundCloudURL` |
+| [`internal/services/resolver/client_deezer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/client_deezer.go) | `SearchTrack` возвращает 1 трек | Добавить `SearchTrackVersions` для сбора массива хронометражей всех релизов |
+| [`internal/services/resolver/matcher.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/matcher.go) | Линейный поиск SoundCloud | Интегрировать проверку кэша, запуск `RankCandidates`, ротацию кандидатов и фоллбэк на YouTube |
+| [`internal/api/handlers/download_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/download_handlers.go) | Нет смены версии | Реализовать `SwitchTrackVersionHandler` с валидацией `trackId`, вычислением `cacheKey`, замером `ffprobe` и атомарной заменой |
+| [`web/templates/components/downloader.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/downloader.html) | Статичный вид трека в очереди | Добавить бейджи оригинальности и выпадающее меню «Версии (N)» с кнопкой смены |
 
 ---
 
-## 3. Архитектурное решение и обоснование (Architecture & Rationale)
+## 3. Архитектура решения и алгоритмы (Architecture & Algorithms)
 
-### 3.1. Дизайн-система: Teenage Engineering / Studio Console Hi-Fi
-Вместо типового «нейрослопа» (мягкие розово-фиолетовые градиенты, полупрозрачные карточки с размытием, размазанные тени) интерфейс строится по законам индустриального дизайна профессионального звукового оборудования:
-- **Палитра:**
-  - Шасси (Base): `#0d0f12` — глубокий матовый графит.
-  - Модульные рэковые панели: `#14171f` — фактурная металлическая поверхность.
-  - Углубления регуляторов (Wells): `#191e28` — тактильные гнезда.
-  - Линии разметки: `#262d3d` и `border-white/10` — строгая гравировка 1px.
-  - Индикаторы Amber: `#f59e0b` / `#d97706` — лампа накаливания / винтажный индикатор записи.
-  - Индикаторы Emerald: `#10b981` / `#059669` — студийный светодиод активности / пик-метр.
-- **Типографика:**
-  - Чистый гротеск для названий треков и артистов.
-  - Строгий моноширинный шрифт (`font-mono tracking-wider`) для всех параметров: `CH-01`, `03:42.18`, `320 KBPS / 44.1 KHZ`, `ID3v2.4 UTF-8`, `43.8 MB`.
-- **Компоновка (3-Deck Rack):**
-  - **Left Deck (Cassette & Master Controls):** Физический картридж трека (крупная обложка с виниловым акцентом), название, артист, блок тяжелых тактильных кнопок управления, стерео-VU пиковые индикаторы, шкала воспроизведения с миллисекундной точностью, ползунок уровня громкости.
-  - **Center Deck (Multi-Function Monitor):** Переключаемый CRT-экран с тремя режимами:
-    1. *SPECTRUM:* Реалтайм эквалайзер на Canvas с пик-холдом.
-    2. *LYRICS:* Синхронизированный караоке-текст песни с интерактивной перемоткой.
-    3. *PASSPORT:* Технический паспорт файла и спецификация тегов.
-  - **Right Deck (Tape Queue Rack):** Очередь треков с живым эквалайзером, кнопками смены порядка, удаления и счетчиками длительности.
-
-### 3.2. Архитектура Web Audio API & Canvas Visualizer
-```text
-┌───────────────────────────────────────────────────────────────┐
-│                    HTML5 <audio> Element                      │
-└──────────────────────────────┬────────────────────────────────┘
-                               │ createMediaElementSource() (once)
-                               ▼
-┌───────────────────────────────────────────────────────────────┐
-│              Web Audio API: AnalyserNode (fftSize=64)         │
-│                 32 частотных бина (0 - 22.05 kHz)             │
-└──────────────┬────────────────────────────────┬───────────────┘
-               │ connect                        │ getByteFrequencyData()
-               ▼                                ▼
-┌──────────────────────────────┐ ┌──────────────────────────────┐
-│ AudioContext.destination     │ │   Canvas Render Loop (rAF)   │
-│ (Аудиовыход на динамики)     │ │ - 32 изумрудных полосы       │
-└──────────────────────────────┘ │ - Peak-hold с гравитацией    │
-                                 │ - Частотная шкала (Гц/кГц)   │
-                                 └──────────────────────────────┘
+### 3.1. Алгоритм фильтрации (Anti-Glue & Anti-Collision)
+```go
+var saviorRegex = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(old\s+ver(?:sion)?|старая\s+версия|до\s+цензуры|без\s+цензуры|uncensored|uncut|original\s+version|оригинал)(?:$|[^\p{L}\p{N}])`)
+var badRegex = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(clean|radio\s+edit|censored|с\s+цензурой|цензурная|sped\s+up|slowed)(?:$|[^\p{L}\p{N}])`)
+var remixRegex = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(remix|ремикс)(?:$|[^\p{L}\p{N}])`)
 ```
-**Важные технические гарантии:**
-1. Метод `audioCtx.createMediaElementSource(audioEl)` вызывается строго один раз и кэшируется в `$store.player.audioSourceNode` во избежание ошибки `InvalidStateError`.
-2. Перед возобновлением воспроизведения проверяется состояние `audioCtx.state === 'suspended'`: вызывается `audioCtx.resume()` по жесту пользователя.
-3. Цикл `requestAnimationFrame` активен только тогда, когда открыта вкладка `player` и `isPlaying === true`. При переходе на другую вкладку или паузе рендеринг засыпает, гарантируя 0% паразитной нагрузки на CPU/GPU.
 
-### 3.3. Архитектура движка Synced LRC Lyrics
-1. При смене трека `$store.player` вызывает `GET /lyrics?path={path}`.
-2. Текст парсится регулярным выражением `/\[(\d{2}):(\d{2}(?:\.\d{2,3})?)\](.*)/g`.
-3. Каждая строка преобразуется в объект `{ time: seconds, text: string }`.
-4. В процессе воспроизведения (`timeupdate`) вычисляется индекс активной строки `currentLyricIndex`.
-5. Автоскролл: контейнер плавно центрирует активную строку через `scrollIntoView({ behavior: 'smooth', block: 'center' })`.
-6. Пользовательский скролл не блокируется; при клике на любую строку вызывается `seek(line.time)` с мгновенным переходом.
+**Функция:** `ExtractSaviorsAndCheckBad(title, targetArtist, targetTitle string) (hasSavior bool, isBad bool)`:
+1. `isRemixTarget := remixRegex.MatchString(targetTitle)` — определяем, является ли целевой трек ремиксом.
+2. Поиск спасителя: `m := saviorRegex.FindStringSubmatchIndex(title)`.
+   - Если найден: `hasSavior = true`, а спаситель вырезается с гарантированным пробелом: `remainder = strings.TrimSpace(title[:m[2]] + " " + title[m[3]:])`.
+3. Защита от коллизий артиста (Кейс `Clean Bandit`):
+   - Если в `remainder` найдено стоп-слово из `badRegex`: проверяем, не входит ли найденное слово в состав `targetArtist` или `targetTitle`. Если входит (например, слово `clean` в артисте `Clean Bandit`) $\to$ это вхождение игнорируется.
+   - Если после этого в остатке строки остались нецелевые стоп-слова $\to$ `isBad = true`.
+4. Проверка ремикса:
+   - Если `!isRemixTarget && remixRegex.MatchString(remainder)` $\to$ `isBad = true`.
+   - Если `isRemixTarget` $\to$ слово `remix` разрешено.
+   - Слова `Original Mix`, `Club Mix` не затрагиваются, так как `mix` исключён из регулярки.
 
-### 3.4. Сравнительная таблица альтернатив
-| Критерий | Вариант 1 (Студийный 3-Deck Hi-Fi) | Вариант 2 (Шаблонный Tailwind SaaS плеер) | Вариант 3 (Только мини-плеер внизу) |
-|---|---|---|---|
-| **Уникальность стиля** | **Бескомпромиссная (Teenage Engineering)** | Низкая («нейрослоп», типовые карточки) | Минимальная |
-| **Визуализатор** | **Реалтайм Canvas с пик-холдом** | Фейковый CSS-вейвформ | Отсутствует |
-| **Синхронный караоке-текст** | **Интерактивный с кликом и автоскроллом** | Статичный блок текста | Нет |
-| **Управление очередью** | **Полнофункциональный рэк** | Простой выпадающий список | Только кнопки след/пред |
-| **Нагрузка на браузер** | **Минимальная (отключение при скрытии)** | Низкая | Минимальная |
+### 3.2. Иерархия статусов кандидата
+Для каждого прошедшего фильтрацию кандидата вычисляется минимальное расхождение с эталонными длительностями:
+$\Delta_{min} = \min_{ref \in validDurations} |duration - ref|$.
+
+Статус выставляется по строгому каскаду:
+1. `hasSavior && referenceMissing` $\to$ **`marked`**
+2. `hasSavior && \Delta_{min} \le 2` $\to$ **`marked`**
+3. `hasSavior && \Delta_{min} > 2` $\to$ **`unverified`**
+4. `!hasSavior && \Delta_{min} \le 2` $\to$ **`likely`**
+5. `!hasSavior && 3 \le \Delta_{min} \le 5` $\to$ **`unverified`** (добавляется как альтернатива)
+
+### 3.3. Скоринг и взвешивание
+$$\text{Score} = (\text{hasSavior} \times 50) + (\text{validDate \&\& year} < 2023 \times 25) - (\text{isDistributor} \times 20) - (\Delta_{early} \times 5)$$
+- Если дата загрузки отсутствует или не распарсилась $\to$ бонус за год равен **0** (не начисляется).
+- `isDistributor`: проверяется вхождение имени автора канала в список `UNCENSORED_DISTRIBUTORS`.
+- Все слагаемые формулы логируются для прозрачной калибровки.
 
 ---
 
 ## 4. Пошаговая декомпозиция реализации (Step-by-Step Implementation)
 
-### Этап 1: Доработка бэкенда метаданных
-- **`[MODIFY]` [`internal/api/handlers/stream_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/stream_handlers.go)**:
-  - Добавить поля `file_size`, `track_number`, `sample_rate` в структуру `TrackMetadataResponse`.
-  - Заполнить их в `GetTrackMetadata` из `TrackEntity` или через `id3.ReadTags` и `os.Stat`.
+### Этап 1: Конфигурация и База Данных
 
-### Этап 2: Расширение JavaScript движка плеера
-- **`[MODIFY]` [`web/static/js/player.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/player.js)**:
-  - Добавить поля состояния:
-    - `audioCtx`, `analyserNode`, `audioSourceNode`, `visualizerRunning`
-    - `centerDeckMode` (`'spectrum'`, `'lyrics'`, `'specs'`)
-    - `lyricsLines`, `currentLyricIndex`, `lyricsLoading`, `lyricsError`, `lyricsType`
-    - `stereoPeakL`, `stereoPeakR` (VU levels)
-  - Методы:
-    - `initAudioVisualizer(canvasEl)`: подключение Web Audio API к `<audio>` и запуск Canvas loop.
-    - `loadLyrics(track)`: загрузка и парсинг `.lrc`/`.txt`.
-    - `updateLyrics(currentTime)`: подсветка строки и плавный скролл.
-    - `removeFromQueue(index)`, `moveInQueue(fromIdx, toIdx)`, `clearQueue()`
-    - `openPlayerTab()`: переключение на `$store.app.activeTab = 'player'`.
+#### [MODIFY] [config.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/config/config.go)
+```go
+UncensoredDurationTolerance int      `env:"UNCENSORED_DURATION_TOLERANCE" envDefault:"2"`
+UncensoredCandidatesLimit   int      `env:"UNCENSORED_CANDIDATES_LIMIT" envDefault:"10"`
+UncensoredPreferYear        int      `env:"UNCENSORED_PREFER_YEAR" envDefault:"2023"`
+UncensoredCacheTTLHours     int      `env:"UNCENSORED_CACHE_TTL_HOURS" envDefault:"720"`
+UncensoredDistributors      []string `env:"UNCENSORED_DISTRIBUTORS" envSeparator:"," envDefault:"distrokid,believe,zvonko,the orchard,tunecore,warner,universal,sony"`
+```
+Обновить [`.env.example`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/.env.example).
 
-### Этап 3: Навигация в шапке
-- **`[MODIFY]` [`web/templates/components/header.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/header.html)**:
-  - Добавить 4-ю кнопку «Плеер» в навигационный блок:
-    ```html
-    <button
-        @click="$store.app.activeTab = 'player'; $store.player.onTabOpened()"
-        :class="$store.app.activeTab === 'player' ? 'bg-emerald-600 text-white font-medium shadow' : 'text-gray-400 hover:text-gray-200'"
-        class="px-3 sm:px-4 py-1.5 rounded-md text-sm transition-all flex items-center space-x-2">
-        <svg class="w-4 h-4" ...>...</svg>
-        <span>Плеер</span>
-        <span x-show="$store.player.isPlaying" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-    </button>
-    ```
+#### [MODIFY] [schema.sql](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/db/schema.sql)
+```sql
+CREATE TABLE IF NOT EXISTS soundcloud_uncensored_cache (
+    cache_key TEXT PRIMARY KEY,
+    track_title TEXT NOT NULL,
+    artist_name TEXT NOT NULL,
+    selected_url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,              -- marked, likely, unverified, manual, link_dead
+    duration INTEGER NOT NULL,
+    is_manual BOOLEAN DEFAULT 0,
+    candidates_json TEXT NOT NULL DEFAULT '[]',
+    checked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_sc_cache_key ON soundcloud_uncensored_cache(cache_key);
+```
 
-### Этап 4: Разработка шаблона выделенной вкладки плеера
-- **`[NEW]` [`web/templates/components/player_tab.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/player_tab.html)**:
-  - Корневой контейнер с условием `x-show="$store.app.activeTab === 'player'"`.
-  - Студийная рамка с аппаратной гравировкой, светодиодными индикаторами питания и стереоканала.
-  - **Левая палуба:** Кассета трека, большой виниловый диск/обложка, кнопки воспроизведения, VU-метр, слайдер времени и громкости.
-  - **Центральная палуба:** CRT-монитор с тумблером режимов (Спектроанализатор / Караоке LRC / Паспорт аудио).
-  - **Правая палуба:** Очередь треков с динамическим эквалайзером, драгом/перемещением и мгновенным запуском.
-
-### Этап 5: Интеграция в index.html и мини-плеер
-- **`[MODIFY]` [`web/templates/index.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/index.html)**:
-  - Включение `{{ template "player_tab" . }}` внутри тега `<main>`.
-- **`[MODIFY]` [`web/templates/components/audio_player.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audio_player.html)**:
-  - Добавление кнопки «Развернуть консоль» и клика по названию/обложке для вызова `$store.player.openPlayerTab()`.
+#### [MODIFY] [queries.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/db/queries.go)
+- `GetSoundCloudCache(ctx context.Context, key string, ttlHours int) (*SoundCloudCacheEntry, error)`:
+  ```sql
+  SELECT cache_key, track_title, artist_name, selected_url, status, duration, is_manual, candidates_json, checked_at, updated_at
+  FROM soundcloud_uncensored_cache
+  WHERE cache_key = ? AND (is_manual = 1 OR checked_at > datetime('now', printf('-%d hours', ?)));
+  ```
+  *Логика:* Если `is_manual = 0` и `(status = 'link_dead' OR selected_url = '')` $\to$ метод возвращает `nil, nil` (трактуется как MISS, инициируя новый поиск). Если `is_manual = 1` $\to$ запись возвращается всегда.
+- `SaveSoundCloudCache(ctx context.Context, entry SoundCloudCacheEntry) error`:
+  Вставка/обновление с обновлением `checked_at = CURRENT_TIMESTAMP`, `updated_at = CURRENT_TIMESTAMP` с условием `WHERE soundcloud_uncensored_cache.is_manual = 0`.
+- `PinSoundCloudVersion(ctx context.Context, key, artist, title, url string, duration int) error`:
+  ```sql
+  INSERT INTO soundcloud_uncensored_cache (
+      cache_key, artist_name, track_title, selected_url, duration, status, is_manual, candidates_json, updated_at
+  ) VALUES (?, ?, ?, ?, ?, 'manual', 1, '[]', CURRENT_TIMESTAMP)
+  ON CONFLICT(cache_key) DO UPDATE SET
+      selected_url = excluded.selected_url,
+      duration = excluded.duration,
+      is_manual = 1,
+      status = 'manual',
+      updated_at = CURRENT_TIMESTAMP;
+  ```
+- `InvalidateSoundCloudURL(ctx context.Context, key string, failedURL string) (*SoundCloudCacheEntry, error)`:
+  Загружает запись. Удаляет `failedURL` из `candidates_json`.
+  Если остались другие кандидаты $\to$ выбирает следующий, обновляет `selected_url` и `status`.
+  Если кандидатов не осталось $\to$ выставляет `selected_url = ''`, `status = 'link_dead'`.
 
 ---
 
-## 5. Анализ рисков и краевых случаев (Risks, Edge Cases & Guardrails)
+### Этап 2: Сбор эталонных хронометражей
+
+#### [MODIFY] [client_deezer.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/client_deezer.go)
+- Добавить поле `Preview string` в `DeezerTrack`.
+- Реализовать метод `SearchTrackVersions(ctx context.Context, artist, title string) ([]DeezerTrack, error)`: поиск в каталоге Deezer и возврат всех найденных версий трека для извлечения уникальных длительностей (`validDurations []int`).
+
+#### [MODIFY] [client_itunes_track.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/client_itunes_track.go)
+- Метод `SearchTracksWithCountry(ctx context.Context, query, country string) ([]ItunesTrack, error)` для расширения пула хронометражей через Apple Music US.
+
+---
+
+### Этап 3: Движок сопоставления и ранжирования
+
+#### [NEW] [uncensored_matcher.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/uncensored_matcher.go)
+1. **Канонический ключ:** `BuildCacheKey(isrc, artist, title string) string`.
+2. **`ExtractSaviorsAndCheckBad`:** алгоритм Anti-Glue со вставкой пробела и Anti-Collision с проверкой вхождения в `targetArtist` и `targetTitle`.
+3. **`DetermineValidDurations`:** возвращает массив секунд `validDurations []int`, длительность ранней версии `earlyDur int` и флаг `referenceMissing bool`.
+4. **`RankCandidates`:** скоринг, учёт даты (бонус только при валидном парсинге), штраф за дистрибьюторов, выбор лучшего кандидата и сохранение альтернатив (включая кандидатов с дельтой 3–5 сек и кандидатов со спасителем при дельте >2 сек со статусом `unverified`).
+
+#### [MODIFY] [matcher.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/matcher.go)
+- Расширить `YtCandidate` полями `UploadDate string`, `Timestamp int64`, `Uploader string`.
+- Интегрировать проверку кэша по `BuildCacheKey`.
+- Если на SoundCloud подходящие кандидаты не найдены $\to$ **прозрачный фоллбэк на существующий поиск в YouTube**.
+
+---
+
+### Этап 4: Пайплайн загрузки и API переключения версий
+
+#### [MODIFY] [download_handlers.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/download_handlers.go)
+- Эндпоинт `POST /api/downloads/tracks/{trackId}/switch-version`:
+  - Вход: JSON `{ "target_url": "https://soundcloud.com/..." }`.
+  - По `trackId` получает метаданные трека, вычисляет `cacheKey = BuildCacheKey(track.ISRC, track.Artist, track.Title)`.
+  - Извлекает метаданные кандидата из `candidates_json` для получения длительности. Если список пуст или кандидат не найден $\to$ после скачивания длительность замеряется через `ffprobe`.
+  - Скачивает аудиопоток, перекодирует в MP3 320 kbps CBR, переносит ID3v2.4 теги, атомарно заменяет файл (`os.Rename`).
+  - Вызывает `PinSoundCloudVersion(ctx, cacheKey, track.Artist, track.Title, req.TargetURL, measuredDuration)`.
+
+#### [MODIFY] [pipeline.go](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/downloader/pipeline.go)
+- Обработка 404/410:
+  - Если ссылка ручная (`is_manual = 1`): выставить `status = 'link_dead'`, залогировать предупреждение, **не подменять ссылку автоматически**.
+  - Если ссылка автоматическая (`is_manual = 0`): вызвать `InvalidateSoundCloudURL`, которая выбирает следующего кандидата из списка, и попытаться скачать его.
+
+---
+
+### Этап 5: Фронтенд (Интерфейс загрузчика)
+
+#### [MODIFY] [downloader.html](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/downloader.html) & [downloader.js](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/downloader/downloader.js)
+1. **Точные формулировки бейджей:**
+   - 🟢 `marked`: «Помечена в названии как оригинал»
+   - 🟡 `likely`: «Та же запись (хронометраж совпал)»
+   - ⚪ `unverified`: «Версия не подтверждена эталоном»
+   - 🔵 `manual`: «Выбрано вручную»
+   - 🔴 `link_dead`: «Ссылка недоступна на SoundCloud»
+2. **Выпадающее меню альтернатив:**
+   - Кнопка «Версии (N)» открывает список кандидатов (название, автор, длительность, дельта, дата).
+   - Выбор версии отправляет запрос на `switch-version`.
+
+---
+
+## 5. Анализ рисков и краевых случаев (Risks & Guardrails)
 
 | Риск | Описание | Стратегия митигации |
 |---|---|---|
-| **InvalidStateError в Web Audio API** | Повторный вызов `createMediaElementSource(audioEl)` выбрасывает исключение | Сохранять `audioSourceNode` в инстансе стора и вызывать конструктор источника строго один раз. |
-| **Блокировка AudioContext политикой автоплея** | Браузер переводит `AudioContext` в состояние `suspended` до клика | Автоматический вызов `audioCtx.resume()` внутри обработчика `playTrack()` и `togglePlay()`. |
-| **Утечка ресурсов при фоновом рендеринге** | Canvas перерисовывается в цикле rAF при скрытой вкладке | Проверять флаг `$store.app.activeTab === 'player' && $store.player.isPlaying`. Если вкладка скрыта — прерывать rAF-луп. |
-| **Трек без LRC (только TXT или без слов)** | Нет таймкодов для караоке | Отображать структурированный чистый текст с моноширинными номерами строк или плашку «Текст отсутствует» с кнопкой поиска в LRCLIB. |
-| **Пустая очередь воспроизведения** | Пользователь открыл вкладку до запуска какого-либо трека | Отображать элегантный standby-экран студийной деки («NO TAPE LOADED», индикаторы в режиме ожидания, кнопка выбора трека из медиатеки). |
+| **Коллизия стоп-слова с именем артиста (`Clean Bandit`)** | Слово `Clean` в имени группы приводит к отбраковке трека | Проверка совпадения со словами из `targetArtist` и `targetTitle` перед маркировкой `isBad`. |
+| **Отбраковка `Original Mix`** | Слово `mix` ошибочно трактуется как сторонний эдит | Регулярка `remixRegex` ограничена только `remix|ремикс`. |
+| **Склейка слов при вырезании спасителя** | `Clean(old version)Clean` превращается в `CleanClean` | Обязательная вставка пробела: `title[:m[2]] + " " + title[m[3]:]`. |
+| **«Мёртвая» ссылка 404 как кэш-хит** | Пустой `selected_url` отдается клиенту | Записи с `status = 'link_dead'` при `is_manual = 0` трактуются как промах кэша. |
+| **Несоответствие сигнатуры `PinSoundCloudVersion`** | Ошибка передачи аргументов | Последним параметром строго передаётся `duration int`, замеренная через `ffprobe`. |
+| **Недоступность SoundCloud** | Потеря возможности скачивания треков | Автоматический прозрачный фоллбэк на поиск в YouTube при отсутствии кандидатов на SoundCloud. |
 
 ---
 
 ## 6. План тестирования и верификации (Verification Matrix)
 
-1. **Автоматизированные тесты бэкенда:**
-   - Запуск `go test -v -race ./...` (все тесты зеленые, 0 гонок).
-2. **Сборка бинарного файла:**
-   - `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go`
-3. **Ручная верификация UI:**
-   - Переход на вкладку «Плеер» через шапку и через клик по мини-плееру.
-   - Запуск трека: проверка анимации частотного спектра на Canvas.
-   - Переключение в режим «Текст»: проверка плавного караоке-скроллинга и перемотки по клику на строчку.
-   - Переключение в режим «Паспорт»: проверка корректности битрейта, размера файла и ID3-тегов.
-   - Управление очередью: переключение треков, удаление трека из очереди, проверка живого эквалайзера рядом с текущим треком.
-   - Проверка энергоэффективности: сворачивание вкладки «Плеер» останавливает rAF-цикл.
+### 6.1. Модульные тесты `uncensored_matcher_test.go`
+1. **Коллизии артистов и названий:**
+   - `"Clean Bandit - Symphony (до цензуры)"` с `targetArtist = "Clean Bandit"` $\to$ `hasSavior = true`, `isBad = false`.
+   - `"Track (Original Mix)"` при обычной цели $\to$ `isBad = false`.
+   - `"Track (Remix)"` при `targetTitle = "Track (Remix)"` $\to$ `isBad = false`.
+   - `"Track (Remix)"` при обычном треке $\to$ `isBad = true`.
+2. **Anti-Glue разделители:**
+   - `"Clean(old version)Clean"` $\to$ спаситель вырезан, `Clean Clean` на остатке бракует трек (`isBad = true`).
+3. **Регистр и спасители:**
+   - `"Scally Milano - Заберу (ДО ЦЕНЗУРЫ)"` $\to$ `hasSavior = true`.
+   - `"Track [Old version uncut]"` $\to$ `hasSavior = true`.
+4. **Хронометраж и статусы:**
+   - Спаситель + совпадение $\le 2$с $\to$ `marked`.
+   - Спаситель + эталона нет $\to$ `marked`.
+   - Спаситель + дельта 4с $\to$ `unverified` (сохраняется в альтернативах).
+   - Нет спасителя + совпадение $\le 2$с $\to$ `likely`.
+   - Нет спасителя + дельта 4с $\to$ `unverified` (сохраняется как близкая альтернатива).
 
----
+### 6.2. Тесты базы данных (`db_test.go`)
+1. **TTL:** запись старше 30 дней с `is_manual = 0` не возвращается (протухла), а с `is_manual = 1` возвращается всегда.
+2. **`link_dead`:** автоматическая запись с `status = 'link_dead'` возвращает `nil` (MISS).
+3. **Ротация 404:** `InvalidateSoundCloudURL` удаляет битый URL и переключается на следующий лучший из `candidates_json`.
+4. **Защита ручного пина:** автоматический резолвер не перезаписывает строку с `is_manual = 1`.
+5. **Безопасный UPSERT:** вставка новой строки передаёт `'[]'`, повторное закрепление не затирает ранее сохранённый `candidates_json`.
 
-## 7. Критерии приёмки (Definition of Done)
+### 6.3. Интеграционная сборка и тесты
+```bash
+go test -v -race ./internal/services/resolver/...
+go test -v -race ./internal/db/...
+go test -race ./...
+go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go
+```
 
-- [x] Вкладка «Плеер» доступна в шапке сайта и открывается по клику на нижний мини-плеер.
-- [x] Дизайн выполнен строго в индустриальном стиле Teenage Engineering / Studio Console (без шаблонного градиентного «нейрослопа»).
-- [x] Реалтайм эквалайзер на Canvas работает через Web Audio API с частотной сеткой и пик-холдом.
-- [x] Синхронизированный караоке-текст плавно скроллится и позволяет мгновенно перематывать трек по клику.
-- [x] Очередь треков поддерживает интерактивное управление и индикацию активного трека.
-- [x] Аудиофильский паспорт трека отображает полные технические параметры.
-- [x] `go test -race ./...` проходит на 100% без ошибок.
-- [x] Бинарный файл успешно компилируется.
-
+### 6.4. Ручная верификация на слух
+- Скачивание трека (*Scally Milano — Заберу*).
+- Проверка отображения бейджа «Помечена в названии как оригинал».
+- Проверка переключения версии в выпадающем списке «Версии (N)».
+- Прослушивание результата в плеере на слух $\to$ проверка отсутствия цензурных заглушек.

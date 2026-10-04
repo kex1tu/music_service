@@ -29,6 +29,7 @@ type DeezerTrack struct {
 	DiskNumber     int            `json:"disk_number"`
 	ISRC           string         `json:"isrc"`
 	Link           string         `json:"link"`
+	Preview        string         `json:"preview"`
 	ExplicitLyrics bool           `json:"explicit_lyrics"`
 	Artist         DeezerArtist   `json:"artist"`
 	Album          *DeezerAlbum   `json:"album,omitempty"`
@@ -355,6 +356,33 @@ func (c *DeezerClient) SearchTracks(ctx context.Context, query string) ([]Deezer
 	}
 
 	return nil, fmt.Errorf("no tracks found on deezer")
+}
+
+// SearchTrackVersions searches Deezer for all versions of a track by artist and title.
+func (c *DeezerClient) SearchTrackVersions(ctx context.Context, artist, title string) ([]DeezerTrack, error) {
+	q := strings.TrimSpace(fmt.Sprintf("%s %s", artist, title))
+	if q == "" {
+		return nil, fmt.Errorf("empty query")
+	}
+
+	tracks, err := c.SearchTracks(ctx, q)
+	if err == nil && len(tracks) > 0 {
+		return tracks, nil
+	}
+
+	for _, alias := range TransliterateArtist(artist) {
+		if strings.EqualFold(alias, artist) {
+			continue
+		}
+		if t, err := c.SearchTracks(ctx, fmt.Sprintf("%s %s", alias, title)); err == nil && len(t) > 0 {
+			return t, nil
+		}
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("no versions found on deezer for %s - %s", artist, title)
 }
 
 // DownloadCoverBytes downloads an image from coverURL.

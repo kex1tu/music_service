@@ -43,7 +43,7 @@ type DownloadJob struct {
 	UpdatedAt         time.Time                `json:"-"`
 	CoverRelativePath string                   `json:"-"`
 	AlbumMetadata     resolver.ReleaseMetadata `json:"-"`
-	Tracks            []resolver.ResolvedTrack `json:"-"`
+	Tracks            []resolver.ResolvedTrack `json:"tracks,omitempty"`
 	trackProgress     []float64                `json:"-"`
 	cancelFunc        func()                   `json:"-"`
 	onUpdate          func()                   `json:"-"`

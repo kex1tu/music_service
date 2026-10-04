@@ -24,6 +24,7 @@ function downloaderComponent() {
         // Подмешиваем функционал специализированных модулей
         ...(window.DownloaderTorrent || {}),
         ...(window.DownloaderDiscography || {}),
+        ...(window.DownloaderVersions || {}),
 
         setMode(mode) {
             this.inputMode = mode;

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"music-manager/internal/db"
 )
 
 var allowedDomains = []string{
@@ -19,24 +21,26 @@ var allowedDomains = []string{
 
 // ResolvedTrack defines the standardized track model across all sources.
 type ResolvedTrack struct {
-	TrackID        string  `json:"track_id"`
-	TrackNumber    int     `json:"track_number"`
-	TrackTotal     *int    `json:"track_total,omitempty"`
-	DiscNumber     int     `json:"disc_number"`
-	DiscTotal      *int    `json:"disc_total,omitempty"`
-	Title          string  `json:"title"`
-	Artist         string  `json:"artist"`
-	Album          string  `json:"album"`
-	AlbumArtist    string  `json:"album_artist"`
-	Year           *int    `json:"year,omitempty"`
-	Genre          *string `json:"genre,omitempty"`
-	Duration       int     `json:"duration"`
-	ISRC           *string `json:"isrc,omitempty"`
-	CoverURL       *string `json:"cover_url,omitempty"`
-	AudioSourceURL string  `json:"audio_source_url"`
-	ConvertedPath  *string `json:"converted_path,omitempty"`
-	Status         string  `json:"status"` // pending, downloading, converting, ready, error
-	Error          *string `json:"error,omitempty"`
+	TrackID        string                     `json:"track_id"`
+	TrackNumber    int                        `json:"track_number"`
+	TrackTotal     *int                       `json:"track_total,omitempty"`
+	DiscNumber     int                        `json:"disc_number"`
+	DiscTotal      *int                       `json:"disc_total,omitempty"`
+	Title          string                     `json:"title"`
+	Artist         string                     `json:"artist"`
+	Album          string                     `json:"album"`
+	AlbumArtist    string                     `json:"album_artist"`
+	Year           *int                       `json:"year,omitempty"`
+	Genre          *string                    `json:"genre,omitempty"`
+	Duration       int                        `json:"duration"`
+	ISRC           *string                    `json:"isrc,omitempty"`
+	CoverURL       *string                    `json:"cover_url,omitempty"`
+	AudioSourceURL string                     `json:"audio_source_url"`
+	ConvertedPath  *string                    `json:"converted_path,omitempty"`
+	Status         string                     `json:"status"` // pending, downloading, converting, ready, error
+	Error          *string                    `json:"error,omitempty"`
+	VersionStatus  string                     `json:"version_status,omitempty"`
+	Candidates     []db.SoundCloudCandidateItem `json:"candidates,omitempty"`
 }
 
 // ReleaseMetadata holds album-level metadata.

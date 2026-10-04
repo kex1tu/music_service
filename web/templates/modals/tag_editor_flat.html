@@ -69,7 +69,16 @@
                                                     class="w-12 bg-surface-input border border-surface-border rounded px-1.5 py-1 text-center text-content-primary focus:outline-none focus:border-brand font-mono">
                                             </td>
                                             <td class="py-2 px-3">
-                                                <div class="flex items-center space-x-1">
+                                                <div class="flex items-center space-x-1.5">
+                                                    <template x-if="track.version_status">
+                                                        <span
+                                                            class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold border shrink-0 transition"
+                                                            :class="window.DownloaderVersions ? window.DownloaderVersions.getVersionBadge(track.version_status).badgeClass : ''"
+                                                            :title="window.DownloaderVersions ? window.DownloaderVersions.getVersionBadge(track.version_status).tooltip : ''">
+                                                            <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="window.DownloaderVersions ? window.DownloaderVersions.getVersionBadge(track.version_status).dotClass : ''"></span>
+                                                            <span x-text="window.DownloaderVersions ? window.DownloaderVersions.getVersionBadge(track.version_status).label : ''"></span>
+                                                        </span>
+                                                    </template>
                                                     <input
                                                         type="text"
                                                         x-model="track.title"

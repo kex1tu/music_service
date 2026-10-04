@@ -48,6 +48,10 @@ window.QueueEditorBridge = {
                 cover_path: coverPath,
                 cover_preview_url: t.cover_url || coverPreview,
                 job_id: jobId,
+                track_id: t.track_id,
+                version_status: t.version_status,
+                candidates: t.candidates,
+                audio_source_url: t.audio_source_url,
             }));
 
             Alpine.store('app').openTagEditor({
@@ -180,6 +184,10 @@ window.QueueEditorBridge = {
                         cover_path: trkCoverPath,
                         cover_preview_url: trkCoverUrl || defaultCoverPreview,
                         job_id: jobId,
+                        track_id: t.track_id,
+                        version_status: t.version_status,
+                        candidates: t.candidates,
+                        audio_source_url: t.audio_source_url,
                     });
                 });
             });
