@@ -93,6 +93,15 @@
                                                             <path d="M19.36 2.72l1.42 1.42a1.996 1.996 0 0 1 0 2.83l-1.42 1.42l-4.24-4.24l1.41-1.43a2 2 0 0 1 2.83 0M3 21v-4.24l10.6-10.6l4.25 4.24L7.24 21zm3.5-2H7.5l7.66-7.66l-.96-.95l-7.7 7.7z"/>
                                                         </svg>
                                                     </button>
+                                                    <button
+                                                        type="button"
+                                                        @click="openDeezerSearchForTrack(track, index)"
+                                                        title="Найти трек в Deezer и применить соавторов/теги"
+                                                        class="text-content-muted hover:text-purple-400 p-1 transition flex-shrink-0">
+                                                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                                            <path d="M12 3a9 9 0 0 0-9 9a9 9 0 0 0 9 9a9 9 0 0 0 9-9a9 9 0 0 0-9-9m0 16a7 7 0 0 1-7-7a7 7 0 0 1 7-7a7 7 0 0 1 7 7a7 7 0 0 1 7 7a7 7 0 0 1-7 7m0-10a3 3 0 0 0-3 3a3 3 0 0 0 3 3a3 3 0 0 0 3-3a3 3 0 0 0-3-3m0 4a1 1 0 0 1-1-1a1 1 0 0 1 1-1a1 1 0 0 1 1 1a1 1 0 0 1-1 1"/>
+                                                        </svg>
+                                                    </button>
                                                 </div>
                                             </td>
                                             <td class="py-2 px-3">

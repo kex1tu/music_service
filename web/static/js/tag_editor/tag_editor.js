@@ -59,8 +59,10 @@ function tagEditorComponent() {
         singlesMode: false,
         groupByAlbum: true,
 
-        // Album Metadata Search (Deezer)
+        // Album & Track Metadata Search (Deezer)
         showDeezerModal: false,
+        deezerSearchType: 'album',
+        deezerTargetTrack: null,
         deezerQuery: '',
         isSearchingDeezer: false,
         deezerResults: [],

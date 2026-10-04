@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,9 +9,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/organizer"
+	"music-manager/internal/services/resolver"
 )
 
 func setupTestTagHandler(t *testing.T) (*TagHandler, *sandbox.PathSandbox, string) {
@@ -172,5 +176,231 @@ func TestTagHandler_GetTags_SingleFile(t *testing.T) {
 	}
 	if resp.Title != "21 Guns" {
 		t.Errorf("expected backwards-compatible title '21 Guns', got %q", resp.Title)
+	}
+}
+
+func TestTagHandler_GetDeezerAlbumDetails_ResolvesContributors(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/album/123":
+			_, _ = w.Write([]byte(`{
+				"id": 123,
+				"title": "AA LANGUAGE",
+				"artist": {"id": 1, "name": "Aarne"},
+				"release_date": "2022-08-12",
+				"cover_xl": "https://e-cdns-images.dzcdn.net/cover_xl.jpg",
+				"genres": {"data": [{"id": 1, "name": "Hip Hop"}]},
+				"tracks": {
+					"data": [
+						{
+							"id": 1001,
+							"title": "Тесно",
+							"track_position": 1,
+							"disk_number": 1,
+							"duration": 158,
+							"artist": {"id": 1, "name": "Aarne"}
+						}
+					]
+				}
+			}`))
+		case "/track/1001":
+			_, _ = w.Write([]byte(`{
+				"id": 1001,
+				"title": "Тесно",
+				"track_position": 1,
+				"disk_number": 1,
+				"duration": 158,
+				"isrc": "RUA123456789",
+				"artist": {"id": 1, "name": "Aarne"},
+				"album": {
+					"id": 123,
+					"title": "AA LANGUAGE",
+					"release_date": "2022-08-12",
+					"cover_xl": "https://e-cdns-images.dzcdn.net/cover_xl.jpg"
+				},
+				"contributors": [
+					{"id": 1, "name": "Aarne"},
+					{"id": 2, "name": "Bushido Zho"},
+					{"id": 3, "name": "ANIKV"}
+				]
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockServer.Close()
+
+	t.Setenv("DEEZER_API_BASE", mockServer.URL)
+	t.Setenv("DEEZER_FALLBACK_API_BASE", mockServer.URL)
+
+	h, _, _ := setupTestTagHandler(t)
+	deezerClient := resolver.NewDeezerClient()
+	h.deezer = deezerClient
+
+	req := httptest.NewRequest(http.MethodGet, "/tags/deezer/albums/123", nil)
+	// chi route context with URL param "id"
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "123")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	w := httptest.NewRecorder()
+	h.GetDeezerAlbumDetails(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Artist string `json:"artist"`
+		Tracks []struct {
+			TrackNumber  int      `json:"track_number"`
+			Title        string   `json:"title"`
+			Artist       string   `json:"artist"`
+			Contributors []string `json:"contributors"`
+			ISRC         string   `json:"isrc"`
+		} `json:"tracks"`
+	}
+
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.Tracks) != 1 {
+		t.Fatalf("expected 1 track, got %d", len(resp.Tracks))
+	}
+
+	expectedArtist := `Aarne\\Bushido Zho\\ANIKV`
+	if resp.Tracks[0].Artist != expectedArtist {
+		t.Errorf("expected track artist %q with contributors, got %q", expectedArtist, resp.Tracks[0].Artist)
+	}
+	if resp.Tracks[0].ISRC != "RUA123456789" {
+		t.Errorf("expected track ISRC 'RUA123456789', got %q", resp.Tracks[0].ISRC)
+	}
+	if len(resp.Tracks[0].Contributors) != 3 {
+		t.Errorf("expected 3 contributors, got %v", resp.Tracks[0].Contributors)
+	}
+}
+
+func TestTagHandler_SearchDeezerTracks_And_GetDetails(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/search/track":
+			_, _ = w.Write([]byte(`{
+				"data": [
+					{
+						"id": 2002,
+						"title": "Deja Vu",
+						"duration": 180,
+						"artist": {"id": 10, "name": "Big Baby Tape"},
+						"album": {
+							"id": 500,
+							"title": "Bandana I",
+							"release_date": "2021-10-22",
+							"cover_xl": "https://e-cdns-images.dzcdn.net/bandana.jpg"
+						},
+						"contributors": [
+							{"id": 10, "name": "Big Baby Tape"},
+							{"id": 11, "name": "Kizaru"}
+						]
+					}
+				]
+			}`))
+		case "/track/2002":
+			_, _ = w.Write([]byte(`{
+				"id": 2002,
+				"title": "Deja Vu",
+				"track_position": 2,
+				"disk_number": 1,
+				"duration": 180,
+				"isrc": "RU9999999999",
+				"artist": {"id": 10, "name": "Big Baby Tape"},
+				"album": {
+					"id": 500,
+					"title": "Bandana I",
+					"release_date": "2021-10-22",
+					"cover_xl": "https://e-cdns-images.dzcdn.net/bandana.jpg",
+					"artist": {"id": 10, "name": "Big Baby Tape"}
+				},
+				"contributors": [
+					{"id": 10, "name": "Big Baby Tape"},
+					{"id": 11, "name": "Kizaru"}
+				]
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockServer.Close()
+
+	t.Setenv("DEEZER_API_BASE", mockServer.URL)
+	t.Setenv("DEEZER_FALLBACK_API_BASE", mockServer.URL)
+
+	h, _, _ := setupTestTagHandler(t)
+	deezerClient := resolver.NewDeezerClient()
+	h.deezer = deezerClient
+
+	// Test Search
+	reqSearch := httptest.NewRequest(http.MethodGet, "/tags/deezer/tracks?query=Bandana", nil)
+	wSearch := httptest.NewRecorder()
+	h.SearchDeezerTracks(wSearch, reqSearch)
+
+	if wSearch.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", wSearch.Code, wSearch.Body.String())
+	}
+
+	var searchItems []struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Artist string `json:"artist"`
+		Album  string `json:"album"`
+	}
+	if err := json.NewDecoder(wSearch.Body).Decode(&searchItems); err != nil {
+		t.Fatalf("failed to decode search: %v", err)
+	}
+	if len(searchItems) != 1 {
+		t.Fatalf("expected 1 search result, got %d", len(searchItems))
+	}
+	if searchItems[0].Artist != `Big Baby Tape\\Kizaru` {
+		t.Errorf("expected multi-artist 'Big Baby Tape\\\\Kizaru', got %q", searchItems[0].Artist)
+	}
+
+	// Test Details
+	reqDetails := httptest.NewRequest(http.MethodGet, "/tags/deezer/tracks/2002", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "2002")
+	reqDetails = reqDetails.WithContext(context.WithValue(reqDetails.Context(), chi.RouteCtxKey, rctx))
+
+	wDetails := httptest.NewRecorder()
+	h.GetDeezerTrackDetails(wDetails, reqDetails)
+
+	if wDetails.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", wDetails.Code, wDetails.Body.String())
+	}
+
+	var trackDetails struct {
+		ID           string   `json:"id"`
+		Title        string   `json:"title"`
+		Artist       string   `json:"artist"`
+		Contributors []string `json:"contributors"`
+		Album        string   `json:"album"`
+		AlbumArtist  string   `json:"album_artist"`
+		Year         int      `json:"year"`
+		TrackNumber  int      `json:"track_number"`
+	}
+	if err := json.NewDecoder(wDetails.Body).Decode(&trackDetails); err != nil {
+		t.Fatalf("failed to decode details: %v", err)
+	}
+	if trackDetails.Artist != `Big Baby Tape\\Kizaru` {
+		t.Errorf("expected track artist 'Big Baby Tape\\\\Kizaru', got %q", trackDetails.Artist)
+	}
+	if len(trackDetails.Contributors) != 2 {
+		t.Errorf("expected 2 contributors, got %v", trackDetails.Contributors)
+	}
+	if trackDetails.Album != "Bandana I" {
+		t.Errorf("expected album 'Bandana I', got %q", trackDetails.Album)
 	}
 }

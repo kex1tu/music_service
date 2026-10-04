@@ -1,5 +1,5 @@
 {{ define "tag_editor_deezer_modal" }}
-            <!-- Всплывающее окно поиска альбомов в Deezer -->
+            <!-- Всплывающее окно поиска в каталоге Deezer (Альбомы и Треки) -->
             <div
                 x-show="showDeezerModal"
                 x-cloak
@@ -8,17 +8,44 @@
                 class="fixed inset-0 z-[60] flex items-center justify-center modal-backdrop p-4">
                 <div
                     @click.stop
-                    class="bg-surface-panel border border-surface-border rounded-2xl max-w-xl w-full max-h-[80vh] flex flex-col shadow-panel overflow-hidden animate-scale-in">
-                    <!-- Заголовок -->
-                    <div class="px-6 py-4 border-b border-surface-border flex items-center justify-between bg-surface-base/80">
+                    class="bg-surface-panel border border-surface-border rounded-2xl max-w-xl w-full max-h-[85vh] flex flex-col shadow-panel overflow-hidden animate-scale-in">
+                    <!-- Заголовок и переключатель режимов -->
+                    <div class="px-6 py-4 border-b border-surface-border flex items-center justify-between bg-surface-base/80 flex-wrap gap-2">
                         <div class="flex items-center space-x-2">
                             <div class="w-7 h-7 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center">
                                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M12 3a9 9 0 0 0-9 9a9 9 0 0 0 9 9a9 9 0 0 0 9-9a9 9 0 0 0-9-9m0 16a7 7 0 0 1-7-7a7 7 0 0 1 7-7a7 7 0 0 1 7 7a7 7 0 0 1-7 7m0-10a3 3 0 0 0-3 3a3 3 0 0 0 3 3a3 3 0 0 0 3-3a3 3 0 0 0-3-3m0 4a1 1 0 0 1-1-1a1 1 0 0 1 1-1a1 1 0 0 1 1 1a1 1 0 0 1-1 1"/>
                                 </svg>
                             </div>
-                            <h3 class="text-sm font-bold text-content-primary">Поиск альбома в каталоге</h3>
+                            <h3 class="text-sm font-bold text-content-primary">Поиск в каталоге Deezer</h3>
                         </div>
+
+                        <!-- Переключатель: Альбомы / Треки -->
+                        <div class="flex items-center bg-surface-input p-0.5 rounded-lg border border-surface-border text-xs">
+                            <button
+                                type="button"
+                                @click="setDeezerSearchType('album')"
+                                :class="deezerSearchType === 'album' ? 'bg-purple-600 text-white font-semibold shadow-sm' : 'text-content-secondary hover:text-content-primary'"
+                                class="px-2.5 py-1 rounded-md transition flex items-center space-x-1"
+                                title="Искать альбомы в каталоге Deezer">
+                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5s-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1s1-.45 1-1s-.45-1-1-1z"/>
+                                </svg>
+                                <span>Альбомы</span>
+                            </button>
+                            <button
+                                type="button"
+                                @click="setDeezerSearchType('track')"
+                                :class="deezerSearchType === 'track' ? 'bg-purple-600 text-white font-semibold shadow-sm' : 'text-content-secondary hover:text-content-primary'"
+                                class="px-2.5 py-1 rounded-md transition flex items-center space-x-1"
+                                title="Искать отдельные треки и фиты в каталоге Deezer">
+                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3h-6z"/>
+                                </svg>
+                                <span>Треки</span>
+                            </button>
+                        </div>
+
                         <button
                             type="button"
                             @click="closeDeezerSearch()"
@@ -34,12 +61,12 @@
                         <input
                             type="text"
                             x-model="deezerQuery"
-                            @keydown.enter="searchDeezerAlbums()"
-                            placeholder="Введите название альбома или артиста (Deezer)..."
+                            @keydown.enter="searchDeezer()"
+                            :placeholder="deezerSearchType === 'album' ? 'Введите название альбома или артиста (Deezer)...' : 'Введите название трека или исполнителя (Deezer)...'"
                             class="flex-1 bg-surface-input border border-surface-border rounded-lg px-3 py-2 text-xs text-content-primary placeholder-content-muted focus:outline-none focus:border-purple-500">
                         <button
                             type="button"
-                            @click="searchDeezerAlbums()"
+                            @click="searchDeezer()"
                             :disabled="isSearchingDeezer || !deezerQuery.trim()"
                             class="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition flex items-center space-x-1.5 shrink-0 shadow-sm active:scale-95">
                             <template x-if="isSearchingDeezer">
@@ -59,39 +86,86 @@
                     <!-- Результаты поиска -->
                     <div class="flex-1 overflow-y-auto p-4 space-y-2">
                         <template x-if="deezerResults.length === 0 && !isSearchingDeezer">
-                            <p class="text-xs text-content-muted text-center py-6">Введите название альбома или исполнителя и нажмите «Найти»</p>
+                            <p class="text-xs text-content-muted text-center py-6" x-text="deezerSearchType === 'album' ? 'Введите название альбома или исполнителя и нажмите «Найти»' : 'Введите название трека или исполнителя и нажмите «Найти»'"></p>
                         </template>
-                        <template x-for="item in deezerResults" :key="item.id">
-                            <div class="flex items-center justify-between p-3 rounded-xl bg-surface-input/60 border border-surface-border hover:border-purple-500/50 hover:bg-surface-hover/50 transition">
-                                <div class="flex items-center space-x-3 min-w-0">
-                                    <template x-if="item.cover_url">
-                                        <img :src="item.cover_url" alt="Cover" class="w-12 h-12 rounded-lg object-cover bg-surface-base shrink-0 border border-surface-border">
-                                    </template>
-                                    <template x-if="!item.cover_url">
-                                        <div class="w-12 h-12 rounded-lg bg-surface-base border border-surface-border flex items-center justify-center text-content-muted shrink-0">
-                                            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
-                                                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3h-6z"/>
-                                            </svg>
-                                        </div>
-                                    </template>
-                                    <div class="min-w-0">
-                                        <h4 class="text-xs font-bold text-content-primary truncate" x-text="item.title"></h4>
-                                        <p class="text-[11px] text-content-secondary truncate" x-text="item.artist"></p>
-                                        <div class="flex items-center space-x-2 text-[10px] text-content-muted mt-0.5 font-mono">
-                                            <span x-text="`${item.nb_tracks || 0} треков`"></span>
-                                            <template x-if="item.year">
-                                                <span x-text="`• ${item.year}`"></span>
+
+                        <!-- Режим поиска Альбомов -->
+                        <template x-if="deezerSearchType === 'album'">
+                            <div class="space-y-2">
+                                <template x-for="item in deezerResults" :key="item.id">
+                                    <div class="flex items-center justify-between p-3 rounded-xl bg-surface-input/60 border border-surface-border hover:border-purple-500/50 hover:bg-surface-hover/50 transition">
+                                        <div class="flex items-center space-x-3 min-w-0">
+                                            <template x-if="item.cover_url">
+                                                <img :src="item.cover_url" alt="Cover" class="w-12 h-12 rounded-lg object-cover bg-surface-base shrink-0 border border-surface-border">
                                             </template>
+                                            <template x-if="!item.cover_url">
+                                                <div class="w-12 h-12 rounded-lg bg-surface-base border border-surface-border flex items-center justify-center text-content-muted shrink-0">
+                                                    <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                                                        <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3h-6z"/>
+                                                    </svg>
+                                                </div>
+                                            </template>
+                                            <div class="min-w-0">
+                                                <h4 class="text-xs font-bold text-content-primary truncate" x-text="item.title"></h4>
+                                                <p class="text-[11px] text-content-secondary truncate" x-text="item.artist"></p>
+                                                <div class="flex items-center space-x-2 text-[10px] text-content-muted mt-0.5 font-mono">
+                                                    <span x-text="`${item.nb_tracks || 0} треков`"></span>
+                                                    <template x-if="item.year">
+                                                        <span x-text="`• ${item.year}`"></span>
+                                                    </template>
+                                                </div>
+                                            </div>
                                         </div>
+                                        <button
+                                            type="button"
+                                            @click="applyDeezerAlbum(item.id)"
+                                            :disabled="isLoadingDeezerDetails"
+                                            class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg transition disabled:opacity-50 shrink-0 shadow-sm active:scale-95">
+                                            <span x-text="isLoadingDeezerDetails ? 'Применение...' : 'Применить'"></span>
+                                        </button>
                                     </div>
-                                </div>
-                                <button
-                                    type="button"
-                                    @click="applyDeezerAlbum(item.id)"
-                                    :disabled="isLoadingDeezerDetails"
-                                    class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg transition disabled:opacity-50 shrink-0 shadow-sm active:scale-95">
-                                    <span x-text="isLoadingDeezerDetails ? 'Применение...' : 'Применить'"></span>
-                                </button>
+                                </template>
+                            </div>
+                        </template>
+
+                        <!-- Режим поиска Треков -->
+                        <template x-if="deezerSearchType === 'track'">
+                            <div class="space-y-2">
+                                <template x-for="item in deezerResults" :key="item.id">
+                                    <div class="flex items-center justify-between p-3 rounded-xl bg-surface-input/60 border border-surface-border hover:border-purple-500/50 hover:bg-surface-hover/50 transition">
+                                        <div class="flex items-center space-x-3 min-w-0">
+                                            <template x-if="item.cover_url">
+                                                <img :src="item.cover_url" alt="Cover" class="w-12 h-12 rounded-lg object-cover bg-surface-base shrink-0 border border-surface-border">
+                                            </template>
+                                            <template x-if="!item.cover_url">
+                                                <div class="w-12 h-12 rounded-lg bg-surface-base border border-surface-border flex items-center justify-center text-content-muted shrink-0">
+                                                    <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                                                        <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3h-6z"/>
+                                                    </svg>
+                                                </div>
+                                            </template>
+                                            <div class="min-w-0">
+                                                <h4 class="text-xs font-bold text-content-primary truncate" x-text="item.title"></h4>
+                                                <p class="text-[11px] text-purple-400 font-medium truncate" x-text="item.artist" title="Исполнители и соавторы"></p>
+                                                <div class="flex items-center space-x-2 text-[10px] text-content-muted mt-0.5 truncate font-mono">
+                                                    <template x-if="item.album">
+                                                        <span class="truncate" x-text="item.album"></span>
+                                                    </template>
+                                                    <template x-if="item.year">
+                                                        <span x-text="`• ${item.year}`"></span>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            @click="applyDeezerTrack(item.id)"
+                                            :disabled="isLoadingDeezerDetails"
+                                            class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg transition disabled:opacity-50 shrink-0 shadow-sm active:scale-95">
+                                            <span x-text="isLoadingDeezerDetails ? 'Применение...' : 'Применить'"></span>
+                                        </button>
+                                    </div>
+                                </template>
                             </div>
                         </template>
                     </div>

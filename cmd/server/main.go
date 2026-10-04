@@ -115,7 +115,7 @@ func main() {
 	// 6. Initialize HTTP Handlers
 	authHandler := handlers.NewAuthHandler(cfg)
 	downloadHandler := handlers.NewDownloadHandler(downloadService, deezerClient)
-	tagHandler := handlers.NewTagHandler(musicSandbox, tmpSandbox, organizerService, deezerClient)
+	tagHandler := handlers.NewTagHandler(musicSandbox, tmpSandbox, organizerService, deezerClient, sourceResolver.Enricher())
 
 	yandexClient := resolver.NewYandexMusicClient(cfg.YandexMusicToken, cfg.YandexMusicProxy)
 	ytmusicClient := resolver.NewYouTubeMusicClient("")

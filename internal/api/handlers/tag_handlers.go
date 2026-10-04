@@ -20,6 +20,7 @@ type TagHandler struct {
 	tmpSandbox   *sandbox.PathSandbox
 	organizer    *organizer.Service
 	deezer       *resolver.DeezerClient
+	enricher     *resolver.FeatEnricher
 }
 
 func NewTagHandler(
@@ -27,13 +28,23 @@ func NewTagHandler(
 	tmpSandbox *sandbox.PathSandbox,
 	organizer *organizer.Service,
 	deezer *resolver.DeezerClient,
+	enricher ...*resolver.FeatEnricher,
 ) *TagHandler {
+	var e *resolver.FeatEnricher
+	if len(enricher) > 0 {
+		e = enricher[0]
+	}
 	return &TagHandler{
 		musicSandbox: musicSandbox,
 		tmpSandbox:   tmpSandbox,
 		organizer:    organizer,
 		deezer:       deezer,
+		enricher:     e,
 	}
+}
+
+func (h *TagHandler) SetEnricher(e *resolver.FeatEnricher) {
+	h.enricher = e
 }
 
 func (h *TagHandler) resolvePath(relPath string) (string, error) {

@@ -116,6 +116,10 @@ func NewRouter(p RouterParams) http.Handler {
 		r.Get("/deezer/albums", p.TagHandler.SearchDeezerAlbums)
 		r.Get("/deezer-album-details", p.TagHandler.GetDeezerAlbumDetails)
 		r.Get("/deezer/albums/{id}", p.TagHandler.GetDeezerAlbumDetails)
+		r.Get("/search-deezer-tracks", p.TagHandler.SearchDeezerTracks)
+		r.Get("/deezer/tracks", p.TagHandler.SearchDeezerTracks)
+		r.Get("/deezer-track-details", p.TagHandler.GetDeezerTrackDetails)
+		r.Get("/deezer/tracks/{id}", p.TagHandler.GetDeezerTrackDetails)
 	})
 
 	// Lyrics API

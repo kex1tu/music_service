@@ -288,6 +288,24 @@
     - Добавлен юнит-тест `TestYouTubeMusicClient_MusicShelfRenderer` в [`internal/services/resolver/client_ytmusic_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/client_ytmusic_test.go).
     - `go test -race ./...` — **100% PASS** (0 race conditions во всех 13 пакетах).
 
+- **Блок 56 (Full Contributors Resolution in Tag Editor Deezer Search & Track Search):**
+  - **Полная детекция соавторов для альбомов Deezer в редакторе тегов:**
+    - В [`internal/api/handlers/deezer_search_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/deezer_search_handlers.go) метод `GetDeezerAlbumDetails` расширен параллельным пулом горутин (семафор на 8 воркеров, таймаут 4с на контекст), запрашивающим эндпоинт `/track/{id}` для каждого трека альбома.
+    - Извлекаются оригинальные соавторы `track.Contributors` (`Main`, `Featured`), обогащаются через `FeatEnricher` и форматируются через `id3.FormatMultiValue` (`Artist 1\\Artist 2`). Сохраняются оригинальные `isrc` и `disc_number`.
+  - **Поиск и выбор отдельных треков в каталоге Deezer:**
+    - Реализован обработчик `SearchDeezerTracks` (`GET /tags/deezer/tracks` и алиас `/tags/search-deezer-tracks`) для поиска треков в Deezer с автоматическим форматированием соавторов.
+    - Реализован обработчик `GetDeezerTrackDetails` (`GET /tags/deezer/tracks/{id}` и алиас `/tags/deezer-track-details`) для получения полной карточки трека (соавторы через `\\`, обложка, альбом, год, жанр, номер диска и трека, ISRC).
+    - Маршруты зарегистрированы в [`internal/api/router.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/router.go).
+    - В [`cmd/server/main.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/cmd/server/main.go) и [`internal/api/handlers/tag_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_handlers.go) `TagHandler` подключен к `sourceResolver.Enricher()`.
+  - **Интерфейс Alpine.js и No-Build шаблоны:**
+    - В [`web/templates/modals/tag_editor_deezer.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/modals/tag_editor_deezer.html) добавлены сегментированные табы `[Альбомы]` / `[Треки]`, адаптивный поиск и карточки треков с подсветкой соавторов и кнопкой «Применить».
+    - В [`web/templates/modals/tag_editor_grouped_tracks.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/modals/tag_editor_grouped_tracks.html) и [`web/templates/modals/tag_editor_flat.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/modals/tag_editor_flat.html) добавлена кнопка Deezer-поиска трека рядом с кнопкой очистки названия на каждой строке трека.
+    - В [`web/static/js/tag_editor/deezer.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/tag_editor/deezer.js) добавлены методы `openDeezerSearchForTrack`, `searchDeezerTracks`, `setDeezerSearchType`, `applyDeezerTrack` и обновлен `applyDeezerAlbum`.
+  - **Тесты и верификация:**
+    - Добавлен unit-тест `TestTagHandler_GetDeezerAlbumDetails_ResolvesContributors` в `internal/api/handlers/tag_handlers_test.go` (проверяет корректное подтягивание соавторов и разделение `\\`).
+    - Добавлен unit-тест `TestTagHandler_SearchDeezerTracks_And_GetDetails` в `internal/api/handlers/tag_handlers_test.go` (проверяет поиск треков и применение соавторов).
+    - `go test -race ./...` — **100% PASS** (0 race conditions во всех 13 пакетах).
+
 ---
 
 ## 4. Верификация
