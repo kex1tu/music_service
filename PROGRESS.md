@@ -274,7 +274,7 @@
   - **Тесты и верификация:**
     - Добавлен unit-тест `TestAnalyzeTrackIssues_CensoredDetection` в [`internal/api/handlers/tag_audit_analyzer_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_audit_analyzer_test.go), проверяющий детекцию маркеров цензуры, спасители (`Uncensored`, `Uncut`), кейс артиста `Clean Bandit` и статус `review_needed`.
     - Добавлен интеграционный тест `TestFileHandler_DeleteFile_JSONBody` в [`internal/api/handlers/audit_handlers_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/audit_handlers_test.go), проверяющий физическое удаление файлов с диска и каскадную синхронизацию базы данных SQLite.
-    - Все 155 тестов зеленые (`go test -race ./...` — 0 data races).
+  - **Деплой:** Бинарник пересобран со статической линковкой, синхронизирован валидный `cookies.txt` и раскатан на боевой сервер `nl_music` (194.76.168.20), служба `music-manager.service` перезапущена и протестирована.
   - **Документация:** Секция `4c` в [`.env.example`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/.env.example) актуализирована.
 
 ---
