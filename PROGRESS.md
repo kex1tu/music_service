@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 60 блоков задач полностью реализованы и протестированы).
+- **Статус готовности:** **100% DONE** (Все 61 блок задач полностью реализованы и протестированы).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 15 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 13 пакетов зеленые).
@@ -417,7 +417,7 @@
     - Замена `strings.TrimPrefix` на `strings.TrimLeft(cleaned, "/")` для блокировки обходов через множественные слэши (`////../../etc/passwd`).
     - Нормализация Unicode fullwidth слэшей и точек (`\uff0f`, `\uff3c`, `\uff0e`) и немедленный возврат `ErrPathTraversal` при ведущих `../`.
   - **Защита от бессрочных сессионных токенов (SEC-02):**
-    - В [`ValidateSessionToken`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/core/auth/auth.go) добавлена проверка метки времени из будущего (`ts > now + 300`), исключающая уязвимость бессрочной жизни сессий. Санитизация двоеточий в логинах.
+    - В [`ValidateSessionToken`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/core/auth/auth.go) добавлена проверка метки времени из будущего (`ts > now + 300`), исключающая уязвимость бессрочной жизни сессий. Санитизация двоеточих в логинах.
   - **Нейтрализация SSRF и Argument Injection в загрузчике (SEC-03):**
     - В [`SwitchTrackVersion`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/downloader/switch_version.go) добавлена валидация схемы `http/https`, белого списка доменов `soundcloud.com` и запрет флагов, начинающихся с дефиса `-`.
     - В [`media_processor.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/downloader/media_processor.go) перед позиционным `sourceURL` в `yt-dlp` добавлен разделитель `--`.
@@ -433,6 +433,22 @@
     - В [`patterns.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/puddletag/patterns.js) ограничен размер строки шаблона (500 символов) для предотвращения ReDoS; подтверждено полное отсутствие опасных директив `x-html` и `innerHTML` во всем интерфейсе.
   - **Документация и отчетность:**
     - Сформирован сводный документ [`SECURITY_AUDIT_REPORT.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/SECURITY_AUDIT_REPORT.md).
+- **Блок 61 (Puddletag Workstation Bugfix & Performance Optimization in Files Tab):**
+  - **Устранение коллизии скриптов и сбоя инициализации компонента:**
+    - В `web/templates/index.html` скрипт `file_manager.js` загружался после `puddletag_workstation.js` и перезаписывал функцию `fileManagerComponent()` устаревшей моделью данных, что приводило к `displayTracks is undefined` и отсутствию рендера строк таблицы.
+    - В `web/static/js/file_manager.js` и `web/static/js/tag_editor/tag_editor.js` реализованы безопасные алиас-мосты к `puddletagWorkstationComponent()`.
+    - Версии кэш-бастеров обновлены на `v=20261013_02`.
+  - **Включение рекурсивного режима по умолчанию для медиатек с альбомами:**
+    - В медиатеках треки разложены по подкаталогам `{Album} - {Artist}/`, из-за чего прямой вызов `GET /files?path=` без рекурсии возвращал 0 треков при наличии тысяч альбомов.
+    - Установлен `recursiveMode: true` по умолчанию при открытии корневого каталога.
+  - **Оптимизация производительности рендеринга и пагинация:**
+    - Внедрена постраничная навигация (pagination): `currentPage: 1`, `pageSize: 100` (варианты: 50, 100, 200, 500, все), навигационные кнопки «, ‹, стр/всего, ›, » в нижней строке состояния.
+    - В пустом состоянии каталога добавлен фильтр поиска папок `dirFilter` и ограничение рендера кнопок папок (slice до 60 элементов) для исключения зависания браузера при 2600+ альбомах.
+    - Маппинг оригинального индекса трека `_trackIndex` во избежание рассинхронизации редактируемых ячеек и чекбоксов при фильтрации, сортировке и пагинации.
+    - Корректный URL превью обложки `/tags/cover?path=...`.
+  - **Полный цикл тестирования и деплоя:**
+    - Все тесты `go test -race ./...` пройдены успешно (0 data races).
+    - Развернуто на боевых серверах `nl_music` (194.76.168.20) и Сервер 2 (`13.143.193.207`).
 
 ---
 

@@ -59,9 +59,30 @@
                                         <div class="text-xs text-content-muted">Выберите нужную папку для перехода или нажмите кнопку ниже, чтобы загрузить сразу все треки</div>
                                     </div>
 
+                                    <!-- Кнопка рекурсивного открытия всей медиатеки в сетку -->
+                                    <div class="pt-1">
+                                        <button
+                                            type="button"
+                                            @click="recursiveMode = true; loadDirectory(currentPath)"
+                                            class="px-6 py-2.5 bg-brand hover:bg-brand-hover text-white text-xs font-bold rounded-xl transition shadow-md shadow-brand/20 active:scale-95 inline-flex items-center space-x-2">
+                                            <span>⚡ Загрузить все треки в таблицу (Включить «Включая подпапки»)</span>
+                                        </button>
+                                    </div>
+
+                                    <!-- Поиск по каталогам, если их много -->
+                                    <template x-if="directories.length > 9">
+                                        <div class="max-w-md mx-auto pt-2">
+                                            <input
+                                                type="text"
+                                                x-model="dirFilter"
+                                                placeholder="Быстрый поиск папки..."
+                                                class="w-full bg-surface-elevated text-content-primary text-xs rounded-lg px-3 py-1.5 border border-surface-border focus:border-brand outline-none transition font-mono">
+                                        </div>
+                                    </template>
+
                                     <!-- Сетка папок -->
-                                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 text-left pt-1">
-                                        <template x-for="dir in directories" :key="dir.path">
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 text-left pt-1 max-h-96 overflow-y-auto p-1">
+                                        <template x-for="dir in visibleDirectories" :key="dir.path">
                                             <button
                                                 type="button"
                                                 @click="navigateTo(dir.path)"
@@ -80,16 +101,6 @@
                                                 </svg>
                                             </button>
                                         </template>
-                                    </div>
-
-                                    <!-- Кнопка рекурсивного открытия всей медиатеки в сетку -->
-                                    <div class="pt-2">
-                                        <button
-                                            type="button"
-                                            @click="recursiveMode = true; loadDirectory(currentPath)"
-                                            class="px-5 py-2.5 bg-brand hover:bg-brand-hover text-white text-xs font-bold rounded-xl transition shadow-md shadow-brand/20 active:scale-95 inline-flex items-center space-x-2">
-                                            <span>⚡ Загрузить все треки в таблицу (Включить «Включая подпапки»)</span>
-                                        </button>
                                     </div>
                                 </div>
                             </template>
@@ -114,21 +125,21 @@
                 </template>
 
                 <!-- Строки треков -->
-                <template x-for="(track, index) in displayTracks" :key="track.path || index">
+                <template x-for="track in paginatedTracks" :key="track.path || track._trackIndex">
                     <tr
-                        @click="selectRow(index, $event)"
+                        @click="selectRow(track._trackIndex, $event)"
                         class="hover:bg-surface-elevated/70 transition-colors cursor-pointer group"
                         :class="{
-                            'bg-brand/15 text-white font-medium': isTrackSelected(index),
-                            'border-l-2 border-brand bg-brand-muted/20': isTrackDirty(index) && !isTrackSelected(index)
+                            'bg-brand/15 text-white font-medium': isTrackSelected(track._trackIndex),
+                            'border-l-2 border-brand bg-brand-muted/20': isTrackDirty(track._trackIndex) && !isTrackSelected(track._trackIndex)
                         }">
                         
                         <!-- Чекбокс выбора -->
                         <td class="py-1.5 px-2 text-center" @click.stop>
                             <input
                                 type="checkbox"
-                                :checked="isTrackSelected(index)"
-                                @click="selectRow(index, $event)"
+                                :checked="isTrackSelected(track._trackIndex)"
+                                @click="selectRow(track._trackIndex, $event)"
                                 class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 cursor-pointer">
                         </td>
 
@@ -161,9 +172,9 @@
                         <!-- Номер трека (Track #) -->
                         <td
                             class="py-1.5 px-2 text-center font-mono"
-                            :class="isCellDirty(index, 'track_number') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
-                            @dblclick="startEdit(index, 'track_number', $event)">
-                            <template x-if="editingCell && editingCell.index === index && editingCell.field === 'track_number'">
+                            :class="isCellDirty(track._trackIndex, 'track_number') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
+                            @dblclick="startEdit(track._trackIndex, 'track_number', $event)">
+                            <template x-if="editingCell && editingCell.index === track._trackIndex && editingCell.field === 'track_number'">
                                 <input
                                     x-ref="cellEditorInput"
                                     type="text"
@@ -172,7 +183,7 @@
                                     @keydown="onCellKeyDown($event)"
                                     class="w-10 bg-surface-input text-white border border-brand rounded px-1 py-0.5 text-center text-xs font-mono outline-none">
                             </template>
-                            <template x-if="!(editingCell && editingCell.index === index && editingCell.field === 'track_number')">
+                            <template x-if="!(editingCell && editingCell.index === track._trackIndex && editingCell.field === 'track_number')">
                                 <span x-text="track.track_number ? String(track.track_number).padStart(2, '0') : '—'"></span>
                             </template>
                         </td>
@@ -180,9 +191,9 @@
                         <!-- Номер диска (Disc #) -->
                         <td
                             class="py-1.5 px-2 text-center font-mono"
-                            :class="isCellDirty(index, 'disc_number') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
-                            @dblclick="startEdit(index, 'disc_number', $event)">
-                            <template x-if="editingCell && editingCell.index === index && editingCell.field === 'disc_number'">
+                            :class="isCellDirty(track._trackIndex, 'disc_number') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
+                            @dblclick="startEdit(track._trackIndex, 'disc_number', $event)">
+                            <template x-if="editingCell && editingCell.index === track._trackIndex && editingCell.field === 'disc_number'">
                                 <input
                                     x-ref="cellEditorInput"
                                     type="text"
@@ -191,7 +202,7 @@
                                     @keydown="onCellKeyDown($event)"
                                     class="w-10 bg-surface-input text-white border border-brand rounded px-1 py-0.5 text-center text-xs font-mono outline-none">
                             </template>
-                            <template x-if="!(editingCell && editingCell.index === index && editingCell.field === 'disc_number')">
+                            <template x-if="!(editingCell && editingCell.index === track._trackIndex && editingCell.field === 'disc_number')">
                                 <span x-text="track.disc_number || '1'"></span>
                             </template>
                         </td>
@@ -199,9 +210,9 @@
                         <!-- Название (Title) -->
                         <td
                             class="py-1.5 px-3 min-w-[180px]"
-                            :class="isCellDirty(index, 'title') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
-                            @dblclick="startEdit(index, 'title', $event)">
-                            <template x-if="editingCell && editingCell.index === index && editingCell.field === 'title'">
+                            :class="isCellDirty(track._trackIndex, 'title') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
+                            @dblclick="startEdit(track._trackIndex, 'title', $event)">
+                            <template x-if="editingCell && editingCell.index === track._trackIndex && editingCell.field === 'title'">
                                 <input
                                     x-ref="cellEditorInput"
                                     type="text"
@@ -210,7 +221,7 @@
                                     @keydown="onCellKeyDown($event)"
                                     class="w-full bg-surface-input text-white border border-brand rounded px-1.5 py-0.5 text-xs outline-none">
                             </template>
-                            <template x-if="!(editingCell && editingCell.index === index && editingCell.field === 'title')">
+                            <template x-if="!(editingCell && editingCell.index === track._trackIndex && editingCell.field === 'title')">
                                 <span class="truncate block" x-text="track.title || '—'"></span>
                             </template>
                         </td>
@@ -218,9 +229,9 @@
                         <!-- Исполнитель (Artist) -->
                         <td
                             class="py-1.5 px-3 min-w-[150px]"
-                            :class="isCellDirty(index, 'artist') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
-                            @dblclick="startEdit(index, 'artist', $event)">
-                            <template x-if="editingCell && editingCell.index === index && editingCell.field === 'artist'">
+                            :class="isCellDirty(track._trackIndex, 'artist') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
+                            @dblclick="startEdit(track._trackIndex, 'artist', $event)">
+                            <template x-if="editingCell && editingCell.index === track._trackIndex && editingCell.field === 'artist'">
                                 <input
                                     x-ref="cellEditorInput"
                                     type="text"
@@ -229,7 +240,7 @@
                                     @keydown="onCellKeyDown($event)"
                                     class="w-full bg-surface-input text-white border border-brand rounded px-1.5 py-0.5 text-xs outline-none">
                             </template>
-                            <template x-if="!(editingCell && editingCell.index === index && editingCell.field === 'artist')">
+                            <template x-if="!(editingCell && editingCell.index === track._trackIndex && editingCell.field === 'artist')">
                                 <span class="truncate block" x-text="track.artist || '—'"></span>
                             </template>
                         </td>
@@ -237,9 +248,9 @@
                         <!-- Альбом (Album) -->
                         <td
                             class="py-1.5 px-3 min-w-[150px]"
-                            :class="isCellDirty(index, 'album') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
-                            @dblclick="startEdit(index, 'album', $event)">
-                            <template x-if="editingCell && editingCell.index === index && editingCell.field === 'album'">
+                            :class="isCellDirty(track._trackIndex, 'album') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
+                            @dblclick="startEdit(track._trackIndex, 'album', $event)">
+                            <template x-if="editingCell && editingCell.index === track._trackIndex && editingCell.field === 'album'">
                                 <input
                                     x-ref="cellEditorInput"
                                     type="text"
@@ -248,7 +259,7 @@
                                     @keydown="onCellKeyDown($event)"
                                     class="w-full bg-surface-input text-white border border-brand rounded px-1.5 py-0.5 text-xs outline-none">
                             </template>
-                            <template x-if="!(editingCell && editingCell.index === index && editingCell.field === 'album')">
+                            <template x-if="!(editingCell && editingCell.index === track._trackIndex && editingCell.field === 'album')">
                                 <span class="truncate block" x-text="track.album || '—'"></span>
                             </template>
                         </td>
@@ -256,9 +267,9 @@
                         <!-- Год (Year) -->
                         <td
                             class="py-1.5 px-2 text-center font-mono"
-                            :class="isCellDirty(index, 'year') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
-                            @dblclick="startEdit(index, 'year', $event)">
-                            <template x-if="editingCell && editingCell.index === index && editingCell.field === 'year'">
+                            :class="isCellDirty(track._trackIndex, 'year') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
+                            @dblclick="startEdit(track._trackIndex, 'year', $event)">
+                            <template x-if="editingCell && editingCell.index === track._trackIndex && editingCell.field === 'year'">
                                 <input
                                     x-ref="cellEditorInput"
                                     type="text"
@@ -267,7 +278,7 @@
                                     @keydown="onCellKeyDown($event)"
                                     class="w-14 bg-surface-input text-white border border-brand rounded px-1 py-0.5 text-center text-xs font-mono outline-none">
                             </template>
-                            <template x-if="!(editingCell && editingCell.index === index && editingCell.field === 'year')">
+                            <template x-if="!(editingCell && editingCell.index === track._trackIndex && editingCell.field === 'year')">
                                 <span x-text="track.year || '—'"></span>
                             </template>
                         </td>
@@ -275,9 +286,9 @@
                         <!-- Жанр (Genre) -->
                         <td
                             class="py-1.5 px-2.5 min-w-[110px]"
-                            :class="isCellDirty(index, 'genre') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
-                            @dblclick="startEdit(index, 'genre', $event)">
-                            <template x-if="editingCell && editingCell.index === index && editingCell.field === 'genre'">
+                            :class="isCellDirty(track._trackIndex, 'genre') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
+                            @dblclick="startEdit(track._trackIndex, 'genre', $event)">
+                            <template x-if="editingCell && editingCell.index === track._trackIndex && editingCell.field === 'genre'">
                                 <input
                                     x-ref="cellEditorInput"
                                     type="text"
@@ -286,7 +297,7 @@
                                     @keydown="onCellKeyDown($event)"
                                     class="w-full bg-surface-input text-white border border-brand rounded px-1.5 py-0.5 text-xs outline-none">
                             </template>
-                            <template x-if="!(editingCell && editingCell.index === index && editingCell.field === 'genre')">
+                            <template x-if="!(editingCell && editingCell.index === track._trackIndex && editingCell.field === 'genre')">
                                 <span class="truncate block" x-text="track.genre || '—'"></span>
                             </template>
                         </td>
@@ -321,7 +332,7 @@
     </div>
 
     <!-- Нижняя строка состояния (Status Bar) -->
-    <div class="bg-surface-base/90 border-t border-surface-border px-4 py-2 flex flex-wrap items-center justify-between text-xs font-mono text-content-muted">
+    <div class="bg-surface-base/90 border-t border-surface-border px-4 py-2 flex flex-wrap items-center justify-between text-xs font-mono text-content-muted gap-2">
         <div class="flex items-center space-x-3">
             <span>
                 Выбрано: <strong class="text-content-primary" x-text="selectedTracksCount"></strong> из <strong class="text-content-primary" x-text="tracks.length"></strong>
@@ -333,6 +344,61 @@
             </template>
         </div>
 
+        <!-- Панель пагинации -->
+        <div class="flex items-center space-x-2" x-show="totalFiltered > 0">
+            <span class="text-content-secondary hidden sm:inline" x-text="`Показано ${paginationInfo}`"></span>
+            <div class="flex items-center space-x-1" x-show="totalPages > 1">
+                <button
+                    type="button"
+                    @click="setPage(1)"
+                    :disabled="currentPage === 1"
+                    title="В начало"
+                    class="px-2 py-0.5 bg-surface-elevated hover:bg-surface-hover disabled:opacity-30 rounded border border-surface-border text-content-primary text-[11px] transition">
+                    «
+                </button>
+                <button
+                    type="button"
+                    @click="prevPage()"
+                    :disabled="currentPage === 1"
+                    title="Назад"
+                    class="px-2 py-0.5 bg-surface-elevated hover:bg-surface-hover disabled:opacity-30 rounded border border-surface-border text-content-primary text-[11px] transition">
+                    ‹
+                </button>
+                <span class="px-1.5 text-[11px] text-content-primary font-bold">
+                    <span x-text="currentPage"></span> / <span x-text="totalPages"></span>
+                </span>
+                <button
+                    type="button"
+                    @click="nextPage()"
+                    :disabled="currentPage === totalPages"
+                    title="Вперед"
+                    class="px-2 py-0.5 bg-surface-elevated hover:bg-surface-hover disabled:opacity-30 rounded border border-surface-border text-content-primary text-[11px] transition">
+                    ›
+                </button>
+                <button
+                    type="button"
+                    @click="setPage(totalPages)"
+                    :disabled="currentPage === totalPages"
+                    title="В конец"
+                    class="px-2 py-0.5 bg-surface-elevated hover:bg-surface-hover disabled:opacity-30 rounded border border-surface-border text-content-primary text-[11px] transition">
+                    »
+                </button>
+            </div>
+            <div class="flex items-center space-x-1 ml-2">
+                <span class="hidden md:inline text-[11px]">На стр:</span>
+                <select
+                    x-model="pageSize"
+                    @change="currentPage = 1"
+                    class="bg-surface-elevated text-content-primary text-[11px] rounded px-1.5 py-0.5 border border-surface-border outline-none transition cursor-pointer">
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                    <option value="500">500</option>
+                    <option value="0">Все</option>
+                </select>
+            </div>
+        </div>
+
         <div class="flex items-center space-x-4">
             <template x-if="hasDirtyChanges">
                 <span class="text-amber-400 font-bold flex items-center space-x-1">
@@ -340,7 +406,7 @@
                     <span>Несохраненных изменений: <strong x-text="dirtyIndices.size"></strong></span>
                 </span>
             </template>
-            <span class="hidden sm:inline">Горячие клавиши: Enter / Tab / Esc / Ctrl+S</span>
+            <span class="hidden sm:inline">Ctrl+S для сохранения</span>
         </div>
     </div>
 </div>

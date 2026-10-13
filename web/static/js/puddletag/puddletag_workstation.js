@@ -24,10 +24,16 @@ function puddletagWorkstationComponent() {
         currentPath: '',
         parentPath: null,
         breadcrumbs: [],
+        directories: [],
+        dirFilter: '',
         isLoading: false,
-        recursiveMode: false,
+        recursiveMode: true,
         isDownloaderMode: false,
         jobId: null,
+
+        // Пагинация таблицы
+        currentPage: 1,
+        pageSize: 100,
 
         // Поиск и сортировка в таблице
         searchFilter: '',
@@ -90,7 +96,7 @@ function puddletagWorkstationComponent() {
 
         // Геттер отфильтрованных и отсортированных треков
         get displayTracks() {
-            let list = [...this.tracks];
+            let list = this.tracks.map((t, idx) => ({ ...t, _trackIndex: idx }));
 
             // 1. Поисковый фильтр
             if (this.searchFilter && this.searchFilter.trim()) {
@@ -99,6 +105,7 @@ function puddletagWorkstationComponent() {
                     return (t.title && t.title.toLowerCase().includes(q)) ||
                            (t.artist && t.artist.toLowerCase().includes(q)) ||
                            (t.album && t.album.toLowerCase().includes(q)) ||
+                           (t.genre && t.genre.toLowerCase().includes(q)) ||
                            (t.name && t.name.toLowerCase().includes(q));
                 });
             }
@@ -126,6 +133,56 @@ function puddletagWorkstationComponent() {
             }
 
             return list;
+        },
+
+        get totalFiltered() {
+            return this.displayTracks.length;
+        },
+
+        get totalPages() {
+            const size = Number(this.pageSize);
+            if (size <= 0 || isNaN(size)) return 1;
+            return Math.max(1, Math.ceil(this.totalFiltered / size));
+        },
+
+        get paginatedTracks() {
+            const list = this.displayTracks;
+            const size = Number(this.pageSize);
+            if (size <= 0 || isNaN(size)) return list;
+            const start = (this.currentPage - 1) * size;
+            return list.slice(start, start + size);
+        },
+
+        get paginationInfo() {
+            const total = this.totalFiltered;
+            if (total === 0) return '0 из 0';
+            const size = Number(this.pageSize);
+            if (size <= 0 || isNaN(size)) return `1–${total} из ${total}`;
+            const start = (this.currentPage - 1) * size + 1;
+            const end = Math.min(this.currentPage * size, total);
+            return `${start}–${end} из ${total}`;
+        },
+
+        setPage(p) {
+            const max = this.totalPages;
+            this.currentPage = Math.max(1, Math.min(max, p));
+        },
+
+        prevPage() {
+            if (this.currentPage > 1) this.currentPage--;
+        },
+
+        nextPage() {
+            if (this.currentPage < this.totalPages) this.currentPage++;
+        },
+
+        get visibleDirectories() {
+            const dirs = this.directories || [];
+            if (!this.dirFilter || !this.dirFilter.trim()) {
+                return dirs.slice(0, 60);
+            }
+            const q = this.dirFilter.toLowerCase().trim();
+            return dirs.filter(d => (d.name && d.name.toLowerCase().includes(q)) || (d.path && d.path.toLowerCase().includes(q))).slice(0, 60);
         },
 
         get isAllSelected() {
@@ -168,6 +225,18 @@ function puddletagWorkstationComponent() {
                 this.loadDirectory(path);
             });
 
+            window.addEventListener('refresh-file-manager', (e) => {
+                let targetPath = '';
+                if (typeof e?.detail === 'string') {
+                    targetPath = e.detail;
+                } else if (e?.detail && typeof e.detail.path === 'string') {
+                    targetPath = e.detail.path;
+                } else if (typeof this.currentPath === 'string') {
+                    targetPath = this.currentPath;
+                }
+                this.loadDirectory(targetPath);
+            });
+
             window.addEventListener('puddletag-load-job', (e) => {
                 if (e.detail) {
                     this.loadJobData(e.detail);
@@ -180,6 +249,14 @@ function puddletagWorkstationComponent() {
                     if (newData) {
                         this.loadJobData(newData);
                     }
+                });
+                this.$watch('$store.app.activeTab', (tab) => {
+                    if (tab === 'files' && this.tracks.length === 0 && !this.isLoading) {
+                        this.loadDirectory(this.currentPath || '');
+                    }
+                });
+                this.$watch('searchFilter', () => {
+                    this.currentPage = 1;
                 });
             }
 
@@ -196,6 +273,7 @@ function puddletagWorkstationComponent() {
             this.editingCell = null;
             this.dirtyIndices.clear();
             this.selectedIndices = [];
+            this.currentPage = 1;
 
             try {
                 const url = `/files?path=${encodeURIComponent(path || '')}&recursive=${this.recursiveMode ? 'true' : 'false'}&_t=${Date.now()}`;
@@ -236,7 +314,7 @@ function puddletagWorkstationComponent() {
                             bitrate: item.bitrate || 320,
                             lyrics_status: item.lyrics_status || 'none',
                             has_cover: !!item.has_cover,
-                            cover_preview_url: item.has_cover ? `/cover?path=${encodeURIComponent(item.path)}` : null
+                            cover_preview_url: item.has_cover ? `/tags/cover?path=${encodeURIComponent(item.path)}` : null
                         });
                     }
                 }
