@@ -5,7 +5,7 @@
 - **Размер бинарника:** 15 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 13 пакетов зеленые).
 - **Безопасность:** Проведен глубокий аудит безопасности и фаззинг, сформирован [`SECURITY_AUDIT_REPORT.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/SECURITY_AUDIT_REPORT.md).
-- **Продакшен-деплой:** Развернут под управлением `systemd` (`music-manager.service`) на боевом сервере `nl_music` (194.76.168.20 / `mymusicdownload.verymad.net`).
+- **Продакшен-деплой:** Развернут под управлением `systemd` (`music-manager.service`) на боевых серверах `nl_music` (194.76.168.20) и Сервер 2 (13.143.193.207 / `mymusicdownload.verymad.net`).
 
 
 ---
