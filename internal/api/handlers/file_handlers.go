@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -102,9 +103,15 @@ type fileItem struct {
 	Extension    *string `json:"extension,omitempty"`
 	TrackCount   *int    `json:"track_count,omitempty"`
 	TrackNumber  *int    `json:"track_number,omitempty"`
+	TrackTotal   *int    `json:"track_total,omitempty"`
+	DiscNumber   *int    `json:"disc_number,omitempty"`
+	DiscTotal    *int    `json:"disc_total,omitempty"`
 	Title        *string `json:"title,omitempty"`
 	Artist       *string `json:"artist,omitempty"`
 	Album        *string `json:"album,omitempty"`
+	AlbumArtist  *string `json:"album_artist,omitempty"`
+	Year         *int    `json:"year,omitempty"`
+	Genre        *string `json:"genre,omitempty"`
 	Duration     *int    `json:"duration,omitempty"`
 	HasCover     bool    `json:"has_cover"`
 	LyricsStatus string  `json:"lyrics_status"` // "none", "lrc", "txt"
@@ -149,9 +156,21 @@ func (h *FileHandler) buildFileItem(itemFull, itemRel string, sz int64) fileItem
 
 		if tags, err := id3.ReadTags(itemFull, cleanRel); err == nil && tags != nil {
 			fItem.TrackNumber = &tags.TrackNumber
+			fItem.TrackTotal = &tags.TrackTotal
+			fItem.DiscNumber = &tags.DiscNumber
+			fItem.DiscTotal = &tags.DiscTotal
 			fItem.Title = &tags.Title
 			fItem.Artist = &tags.Artist
 			fItem.Album = &tags.Album
+			if tags.AlbumArtist != "" {
+				fItem.AlbumArtist = &tags.AlbumArtist
+			}
+			if tags.Year > 0 {
+				fItem.Year = &tags.Year
+			}
+			if tags.Genre != "" {
+				fItem.Genre = &tags.Genre
+			}
 			dur := int(tags.Duration)
 			fItem.Duration = &dur
 			fItem.HasCover = tags.HasCover
@@ -206,10 +225,25 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		items := make([]fileItem, 0)
-		const maxTracks = 2000
+		// Optional limit query parameter (default: 100000 tracks - covers entire library)
+		maxTracks := 100000
+		if lStr := r.URL.Query().Get("limit"); lStr != "" {
+			if lVal, err := strconv.Atoi(lStr); err == nil {
+				if lVal <= 0 {
+					maxTracks = 1000000
+				} else {
+					maxTracks = lVal
+				}
+			}
+		}
 		const maxDepth = 20
 
+		var metaCache map[string]db.TrackMetadataCache
+		if h.database != nil {
+			metaCache, _ = h.database.GetTracksMetadataCache(r.Context())
+		}
+
+		items := make([]fileItem, 0)
 		_ = filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return nil
@@ -258,7 +292,45 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 				sz = info.Size()
 			}
 
-			items = append(items, h.buildFileItem(path, relToSandbox, sz))
+			cleanRel := filepath.ToSlash(relToSandbox)
+			if meta, found := metaCache[cleanRel]; found {
+				ext := filepath.Ext(name)
+				tHash := db.TrackHash(cleanRel)
+				streamURL := "/api/tracks/" + tHash + "/stream"
+				h.trackCache.Store(tHash, cleanRel)
+
+				fItem := fileItem{
+					Name:         name,
+					Path:         cleanRel,
+					Type:         "file",
+					Size:         &sz,
+					Extension:    &ext,
+					ID:           &tHash,
+					StreamURL:    &streamURL,
+					TrackNumber:  &meta.TrackNumber,
+					TrackTotal:   &meta.TrackTotal,
+					DiscNumber:   &meta.DiscNumber,
+					DiscTotal:    &meta.DiscTotal,
+					Title:        &meta.Title,
+					Artist:       &meta.Artist,
+					Album:        &meta.Album,
+					Duration:     &meta.Duration,
+					HasCover:     meta.HasCover,
+					LyricsStatus: meta.LyricsStatus,
+				}
+				if meta.AlbumArtist != "" {
+					fItem.AlbumArtist = &meta.AlbumArtist
+				}
+				if meta.Year > 0 {
+					fItem.Year = &meta.Year
+				}
+				if meta.Genre != "" {
+					fItem.Genre = &meta.Genre
+				}
+				items = append(items, fItem)
+			} else {
+				items = append(items, h.buildFileItem(path, relToSandbox, sz))
+			}
 			return nil
 		})
 

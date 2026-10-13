@@ -685,3 +685,82 @@ func (db *DB) InvalidateSoundCloudURL(ctx context.Context, key string, failedURL
 	return &entry, err
 }
 
+// TrackMetadataCache holds cached metadata for quick lookups during directory walks.
+type TrackMetadataCache struct {
+	TrackNumber  int
+	TrackTotal   int
+	DiscNumber   int
+	DiscTotal    int
+	Title        string
+	Artist       string
+	Album        string
+	AlbumArtist  string
+	Year         int
+	Genre        string
+	Duration     int
+	HasCover     bool
+	LyricsStatus string
+}
+
+// GetTracksMetadataCache loads metadata for all tracks from SQLite into a map keyed by slash-normalized file_path.
+func (db *DB) GetTracksMetadataCache(ctx context.Context) (map[string]TrackMetadataCache, error) {
+	query := `
+	SELECT 
+		t.file_path, 
+		t.track_number, 
+		t.track_total,
+		t.disc_number,
+		t.disc_total,
+		t.title, 
+		COALESCE(ar.name, ''), 
+		COALESCE(al.title, ''), 
+		COALESCE(al.album_artist, ''),
+		COALESCE(al.year, 0),
+		t.duration, 
+		(t.has_embedded_cover OR al.has_cover), 
+		COALESCE(t.lyrics_status, 'none'),
+		COALESCE((SELECT GROUP_CONCAT(g.name, '\\') FROM track_genres tg JOIN genres g ON tg.genre_id = g.id WHERE tg.track_id = t.id), '')
+	FROM tracks t
+	LEFT JOIN albums al ON t.album_id = al.id
+	LEFT JOIN artists ar ON t.artist_id = ar.id;
+	`
+	rows, err := db.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cache := make(map[string]TrackMetadataCache)
+	for rows.Next() {
+		var fPath sql.NullString
+		var trkNum, trkTot, discNum, discTot, yr sql.NullInt64
+		var title, artist, album, albArtist, lyrStatus, genre sql.NullString
+		var dur sql.NullFloat64
+		var hasCover sql.NullBool
+
+		if err := rows.Scan(&fPath, &trkNum, &trkTot, &discNum, &discTot, &title, &artist, &album, &albArtist, &yr, &dur, &hasCover, &lyrStatus, &genre); err != nil {
+			continue
+		}
+		if !fPath.Valid {
+			continue
+		}
+		cleanPath := filepath.ToSlash(fPath.String)
+		cache[cleanPath] = TrackMetadataCache{
+			TrackNumber:  int(trkNum.Int64),
+			TrackTotal:   int(trkTot.Int64),
+			DiscNumber:   int(discNum.Int64),
+			DiscTotal:    int(discTot.Int64),
+			Title:        title.String,
+			Artist:       artist.String,
+			Album:        album.String,
+			AlbumArtist:  albArtist.String,
+			Year:         int(yr.Int64),
+			Genre:        genre.String,
+			Duration:     int(dur.Float64),
+			HasCover:     hasCover.Bool,
+			LyricsStatus: lyrStatus.String,
+		}
+	}
+	return cache, nil
+}
+

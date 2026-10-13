@@ -404,4 +404,68 @@ func TestDB_ConcurrentWALStress(t *testing.T) {
 	}
 }
 
+func TestDB_GetTracksMetadataCache(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "db_cache_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	database, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer database.Close()
+
+	ctx := context.Background()
+
+	// Вставляем тестового артиста, альбом, жанр и трек
+	_, err = database.conn.ExecContext(ctx, `
+		INSERT INTO artists (id, name, clean_name) VALUES (1, 'Test Artist', 'test artist');
+		INSERT INTO albums (id, artist_id, title, clean_title, album_artist, year, folder_path, has_cover) 
+		VALUES (1, 1, 'Test Album', 'test album', 'Test Artist', 2024, 'Test Artist - Test Album', 1);
+		INSERT INTO genres (id, name) VALUES (1, 'Rock'), (2, 'Metal');
+		INSERT INTO tracks (id, album_id, artist_id, title, clean_title, track_number, track_total, disc_number, disc_total, duration, file_path, file_size, mtime, has_embedded_cover, lyrics_status)
+		VALUES (1, 1, 1, 'Test Song', 'test song', 3, 10, 1, 1, 215.5, 'Test Artist - Test Album/03. Test Song.mp3', 5000000, 1234567.0, 1, 'lrc');
+		INSERT INTO track_genres (track_id, genre_id) VALUES (1, 1), (1, 2);
+	`)
+	if err != nil {
+		t.Fatalf("failed to seed test data: %v", err)
+	}
+
+	cache, err := database.GetTracksMetadataCache(ctx)
+	if err != nil {
+		t.Fatalf("GetTracksMetadataCache failed: %v", err)
+	}
+
+	if len(cache) != 1 {
+		t.Fatalf("expected 1 cached track, got %d", len(cache))
+	}
+
+	meta, found := cache["Test Artist - Test Album/03. Test Song.mp3"]
+	if !found {
+		t.Fatalf("expected key 'Test Artist - Test Album/03. Test Song.mp3' in cache")
+	}
+
+	if meta.Title != "Test Song" || meta.Artist != "Test Artist" || meta.Album != "Test Album" {
+		t.Errorf("unexpected track meta: %+v", meta)
+	}
+	if meta.TrackNumber != 3 || meta.TrackTotal != 10 {
+		t.Errorf("unexpected track numbers: %d/%d", meta.TrackNumber, meta.TrackTotal)
+	}
+	if meta.Year != 2024 {
+		t.Errorf("expected year 2024, got %d", meta.Year)
+	}
+	if !meta.HasCover {
+		t.Errorf("expected HasCover to be true")
+	}
+	if meta.LyricsStatus != "lrc" {
+		t.Errorf("expected lyrics_status 'lrc', got %q", meta.LyricsStatus)
+	}
+	if meta.Genre != "Rock\\\\Metal" {
+		t.Errorf("expected genre 'Rock\\\\Metal', got %q", meta.Genre)
+	}
+}
+
 

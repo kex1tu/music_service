@@ -96,7 +96,7 @@ function puddletagWorkstationComponent() {
 
         // Геттер отфильтрованных и отсортированных треков
         get displayTracks() {
-            let list = this.tracks.map((t, idx) => ({ ...t, _trackIndex: idx }));
+            let list = this.tracks;
 
             // 1. Поисковый фильтр
             if (this.searchFilter && this.searchFilter.trim()) {
@@ -114,7 +114,7 @@ function puddletagWorkstationComponent() {
             if (this.sortColumn) {
                 const col = this.sortColumn;
                 const asc = this.sortAsc ? 1 : -1;
-                list.sort((a, b) => {
+                list = list.slice().sort((a, b) => {
                     let valA = a[col];
                     let valB = b[col];
 
@@ -186,7 +186,8 @@ function puddletagWorkstationComponent() {
         },
 
         get isAllSelected() {
-            return this.tracks.length > 0 && this.selectedIndices.length === this.tracks.length;
+            const list = this.displayTracks;
+            return list.length > 0 && this.selectedIndices.length >= list.length && list.every(t => this.isTrackSelected(t._trackIndex));
         },
 
         get selectedTracksCount() {
@@ -298,6 +299,7 @@ function puddletagWorkstationComponent() {
                         subDirs.push(item);
                     } else if (item.type === 'file' && (item.extension === '.mp3' || !item.extension)) {
                         audioTracks.push({
+                            _trackIndex: audioTracks.length,
                             path: item.path,
                             name: item.name,
                             title: item.title || item.name.replace(/\.[^/.]+$/, ''),
@@ -355,11 +357,12 @@ function puddletagWorkstationComponent() {
             const coverUrl = payload.coverPreviewUrl || payload.cover_preview_url || payload.coverUrl || payload.cover_url || null;
             const hasCover = !!(payload.hasCover || payload.has_cover || payload.coverPath || payload.cover_path || coverUrl);
 
-            const validTracks = (payload.tracks || []).map(t => {
+            const validTracks = (payload.tracks || []).map((t, idx) => {
                 const trackPath = t.path || t.converted_path || '';
                 const trackName = (trackPath ? trackPath.split('/').pop() : '') || t.name || t.title || 'Track';
                 const trackCover = t.cover_preview_url || t.cover_url || coverUrl;
                 return {
+                    _trackIndex: idx,
                     path: trackPath,
                     name: trackName,
                     title: t.title || '',
@@ -391,8 +394,10 @@ function puddletagWorkstationComponent() {
         toggleSelectAll() {
             if (this.isAllSelected) {
                 this.selectedIndices = [];
+                this._selectedSet = new Set();
             } else {
-                this.selectedIndices = this.tracks.map((_, idx) => idx);
+                this.selectedIndices = this.displayTracks.map(t => t._trackIndex);
+                this._selectedSet = new Set(this.selectedIndices);
             }
             this.syncTagPanel();
         },
@@ -409,6 +414,7 @@ function puddletagWorkstationComponent() {
                 // Объединяем с текущим выбором без дубликатов
                 const set = new Set([...this.selectedIndices, ...range]);
                 this.selectedIndices = Array.from(set);
+                this._selectedSet = set;
             } else if (event.ctrlKey || event.metaKey) {
                 // Одиночное переключение (Ctrl+Click)
                 const pos = this.selectedIndices.indexOf(index);
@@ -417,10 +423,12 @@ function puddletagWorkstationComponent() {
                 } else {
                     this.selectedIndices.push(index);
                 }
+                this._selectedSet = new Set(this.selectedIndices);
                 this.lastClickedIndex = index;
             } else {
                 // Обычный клик — выбор одной строки
                 this.selectedIndices = [index];
+                this._selectedSet = new Set([index]);
                 this.lastClickedIndex = index;
             }
 
@@ -428,7 +436,10 @@ function puddletagWorkstationComponent() {
         },
 
         isTrackSelected(index) {
-            return this.selectedIndices.includes(index);
+            if (!this._selectedSet || this._selectedSet.size !== this.selectedIndices.length) {
+                this._selectedSet = new Set(this.selectedIndices);
+            }
+            return this._selectedSet.has(index);
         },
 
         isTrackDirty(index) {
