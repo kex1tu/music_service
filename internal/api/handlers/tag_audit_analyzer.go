@@ -97,9 +97,10 @@ func analyzeTrackIssues(id int64, filePath, title, artist, album string, year, t
 		issues = append(issues, "missing_year")
 	}
 
-	// 8. Неизвестный или пропущенный альбом (ВНИМАНИЕ: "single" / "singles" - это нормальный альбом для синглов, НЕ ошибка!)
+	// 8. Неизвестный или пропущенный альбом (для синглов альбом должен совпадать с названием трека, а не оставаться "single" / "singles")
 	normAlbum := strings.ToLower(strings.TrimSpace(album))
-	if normAlbum == "" || normAlbum == "unknown album" || normAlbum == "." {
+	isSingleAlbum := normAlbum == "" || normAlbum == "unknown album" || normAlbum == "." || normAlbum == "single" || normAlbum == "singles" || strings.HasPrefix(normAlbum, "single - ") || strings.HasPrefix(normAlbum, "singles - ")
+	if isSingleAlbum {
 		issues = append(issues, "missing_album")
 	}
 
@@ -157,8 +158,13 @@ func analyzeTrackIssues(id int64, filePath, title, artist, album string, year, t
 	}
 
 	proposedAlbum := album
-	if normAlbum == "" || normAlbum == "unknown album" || normAlbum == "." {
+	if isSingleAlbum {
 		proposedAlbum = proposedTitle
+	}
+
+	proposedAlbumArtist := resolver.ExtractPrimaryArtist(proposedArtist)
+	if isSingleAlbum || strings.EqualFold(strings.TrimSpace(proposedAlbum), strings.TrimSpace(proposedTitle)) {
+		proposedAlbumArtist = proposedArtist
 	}
 
 	// Классификация серьезности (Severity)
@@ -199,7 +205,7 @@ func analyzeTrackIssues(id int64, filePath, title, artist, album string, year, t
 			Artist:      proposedArtist,
 			Artists:     proposedArtists,
 			Album:       proposedAlbum,
-			AlbumArtist: resolver.ExtractPrimaryArtist(proposedArtist),
+			AlbumArtist: proposedAlbumArtist,
 			Year:        year,
 		},
 	}

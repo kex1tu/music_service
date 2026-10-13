@@ -22,13 +22,22 @@ func (s *Service) runBackfillPipeline(jobID, deezerAlbumID string, trackURLs []s
 		return
 	}
 
-	// Acquire concurrency slot
-	s.sem <- struct{}{}
-	defer func() { <-s.sem }()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	job.SetCancelFunc(cancel)
 	defer cancel()
+
+	// Wait if queue is paused
+	if err := s.waitIfPaused(ctx); err != nil {
+		return
+	}
+
+	// Acquire concurrency slot
+	select {
+	case <-ctx.Done():
+		return
+	case s.sem <- struct{}{}:
+	}
+	defer func() { <-s.sem }()
 
 	// Step 1: Resolving
 	job.SetStatus(StatusResolving)
@@ -212,13 +221,22 @@ func (s *Service) runPipeline(jobID string) {
 		return
 	}
 
-	// Acquire concurrency slot
-	s.sem <- struct{}{}
-	defer func() { <-s.sem }()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	job.SetCancelFunc(cancel)
 	defer cancel()
+
+	// Wait if queue is paused
+	if err := s.waitIfPaused(ctx); err != nil {
+		return
+	}
+
+	// Acquire concurrency slot
+	select {
+	case <-ctx.Done():
+		return
+	case s.sem <- struct{}{}:
+	}
+	defer func() { <-s.sem }()
 
 	// Step 1: Resolving
 	job.SetStatus(StatusResolving)
@@ -254,6 +272,51 @@ func (s *Service) processTracksPipeline(
 	tracks []resolver.ResolvedTrack,
 	rawDir, convertedDir string,
 ) {
+	if meta == nil {
+		meta = &resolver.ReleaseMetadata{}
+	}
+
+	if len(tracks) == 1 {
+		t := &tracks[0]
+		// 1. Artists / Performers: release album artist must receive all track artists
+		if strings.TrimSpace(meta.AlbumArtist) == "" || meta.AlbumArtist != t.Artist {
+			if strings.TrimSpace(t.Artist) != "" {
+				meta.AlbumArtist = t.Artist
+			}
+		}
+		if strings.TrimSpace(t.AlbumArtist) == "" || t.AlbumArtist != t.Artist {
+			if strings.TrimSpace(t.Artist) != "" {
+				t.AlbumArtist = t.Artist
+			}
+		}
+
+		// 2. Genre: transfer between track and release
+		if strings.TrimSpace(meta.Genre) == "" && t.Genre != nil && strings.TrimSpace(*t.Genre) != "" {
+			meta.Genre = strings.TrimSpace(*t.Genre)
+		} else if strings.TrimSpace(meta.Genre) != "" && (t.Genre == nil || strings.TrimSpace(*t.Genre) == "") {
+			g := strings.TrimSpace(meta.Genre)
+			t.Genre = &g
+		}
+
+		// 3. Year: transfer between track and release
+		if meta.Year == 0 && t.Year != nil && *t.Year > 0 {
+			meta.Year = *t.Year
+		} else if meta.Year > 0 && (t.Year == nil || *t.Year == 0) {
+			y := meta.Year
+			t.Year = &y
+		}
+
+		// 4. Album title: if empty or "single"/"singles", release and track album become track title
+		if strings.TrimSpace(meta.AlbumTitle) == "" || strings.EqualFold(meta.AlbumTitle, "single") || strings.EqualFold(meta.AlbumTitle, "singles") {
+			if strings.TrimSpace(t.Title) != "" {
+				meta.AlbumTitle = strings.TrimSpace(t.Title)
+				t.Album = strings.TrimSpace(t.Title)
+			}
+		} else if strings.TrimSpace(t.Album) == "" || strings.EqualFold(t.Album, "single") || strings.EqualFold(t.Album, "singles") {
+			t.Album = meta.AlbumTitle
+		}
+	}
+
 	job.SetMetadata(*meta, tracks)
 
 	// Download album cover if available
@@ -426,6 +489,13 @@ trackLoop:
 			}
 			defer os.Remove(rawAudioFile)
 
+			// Analyze audio quality telemetry (codec, bitrate, cutoff frequency)
+			qualityTelemetry := s.analyzeAudioQuality(ctx, rawAudioFile)
+			job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+				tr.AudioQuality = qualityTelemetry
+			})
+			track.AudioQuality = qualityTelemetry
+
 			// Transcode to MP3 320 kbps CBR
 			job.SetStepAndStatus(fmt.Sprintf("Конвертация трека %d/%d: %s в MP3 320k", trackIdx, total, track.Title), StatusConverting)
 
@@ -451,6 +521,9 @@ trackLoop:
 			alb := strings.TrimSpace(track.Album)
 			if (alb == "" || strings.EqualFold(alb, "single") || strings.EqualFold(alb, "singles")) && strings.TrimSpace(track.Title) != "" {
 				alb = strings.TrimSpace(track.Title)
+			}
+			if total == 1 && albArt == "" && art != "" {
+				albArt = art
 			}
 
 			if job.IsBackfill && job.ArtistName != nil && *job.ArtistName != "" {

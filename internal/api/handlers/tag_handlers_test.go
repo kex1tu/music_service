@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -402,5 +403,88 @@ func TestTagHandler_SearchDeezerTracks_And_GetDetails(t *testing.T) {
 	}
 	if trackDetails.Album != "Bandana I" {
 		t.Errorf("expected album 'Bandana I', got %q", trackDetails.Album)
+	}
+}
+
+func TestTagHandler_BatchSaveTags_SingleTrackPropagation(t *testing.T) {
+	h, _, musicDir := setupTestTagHandler(t)
+
+	singleDir := filepath.Join(musicDir, "MySingle")
+	_ = os.MkdirAll(singleDir, 0755)
+
+	t1 := filepath.Join(singleDir, "01. Song.mp3")
+	_ = os.WriteFile(t1, []byte("audio-single"), 0644)
+
+	_ = id3.WriteTags(t1, id3.TrackTags{
+		Title:       "Single Song",
+		Artist:      "Super Artist",
+		TrackNumber: 1,
+		Year:        2025,
+		Genre:       "Electronic",
+	}, nil)
+
+	body := `{
+		"album": {
+			"album_artist": "",
+			"album": "",
+			"year": null,
+			"genre": ""
+		},
+		"tracks": [
+			{
+				"path": "MySingle/01. Song.mp3",
+				"title": "Single Song",
+				"artist": "Super Artist",
+				"album": "",
+				"album_artist": "",
+				"track_number": 1,
+				"year": 2025,
+				"genre": "Electronic"
+			}
+		],
+		"source_dir": "MySingle"
+	}`
+
+	req := httptest.NewRequest(http.MethodPost, "/tags/batch", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.BatchSaveTags(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Success        bool            `json:"success"`
+		DestinationDir string          `json:"destination_dir"`
+		Tracks         []id3.TrackTags `json:"tracks"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Fatalf("expected success true")
+	}
+
+	expectedDir := "Single Song - Super Artist"
+	if resp.DestinationDir != expectedDir {
+		t.Errorf("expected destination_dir %q, got %q", expectedDir, resp.DestinationDir)
+	}
+
+	if len(resp.Tracks) != 1 {
+		t.Fatalf("expected 1 track, got %d", len(resp.Tracks))
+	}
+	tr := resp.Tracks[0]
+	if tr.Album != "Single Song" {
+		t.Errorf("expected album 'Single Song', got %q", tr.Album)
+	}
+	if tr.AlbumArtist != "Super Artist" {
+		t.Errorf("expected album_artist 'Super Artist', got %q", tr.AlbumArtist)
+	}
+	if tr.Year != 2025 {
+		t.Errorf("expected year 2025, got %d", tr.Year)
+	}
+	if tr.Genre != "Electronic" {
+		t.Errorf("expected genre 'Electronic', got %q", tr.Genre)
 	}
 }

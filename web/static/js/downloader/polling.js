@@ -85,6 +85,16 @@ window.DownloaderPolling = {
                 return;
             }
 
+            if (validTracks.length === 1) {
+                const single = validTracks[0];
+                if (!album.album_artist && single.artist) album.album_artist = single.artist;
+                if ((!album.album || album.album.toLowerCase() === 'single' || album.album.toLowerCase() === 'singles') && single.title) {
+                    album.album = single.title;
+                }
+                if (!album.year && single.year) album.year = single.year;
+                if (!album.genre && single.genre) album.genre = single.genre;
+            }
+
             const coverPath = data.cover_path || `tmp_downloads/${jobId}/cover.jpg`;
             const coverPreview = data.cover_url || `/tags/cover?path=${encodeURIComponent(coverPath)}&t=${Date.now()}`;
             const hasCover = !!data.cover_url || !!data.cover_path;

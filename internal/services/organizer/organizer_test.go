@@ -247,3 +247,74 @@ func TestSaveBatch(t *testing.T) {
 		t.Errorf("expected inherited Genre 'Synthwave', got %q", tr.Genre)
 	}
 }
+
+func TestSaveBatch_SingleTrackMetadataPropagationToRelease(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "organizer_single_prop_*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	musicDir := filepath.Join(tempDir, "music")
+	tmpDir := filepath.Join(tempDir, "tmp")
+	_ = os.MkdirAll(musicDir, 0755)
+	_ = os.MkdirAll(tmpDir, 0755)
+
+	musicSb, _ := sandbox.NewPathSandbox(musicDir)
+	tmpSb, _ := sandbox.NewPathSandbox(tmpDir)
+	svc := NewService(musicSb, tmpSb)
+
+	jobDir := filepath.Join(tmpDir, "job-single", "converted")
+	_ = os.MkdirAll(jobDir, 0755)
+	jobTrack := filepath.Join(jobDir, "1.mp3")
+	_ = os.WriteFile(jobTrack, []byte("audio-single-track"), 0644)
+
+	// Single track download where release-level album and artist are empty/omitted
+	req := BatchSaveRequest{
+		SourceDir: "tmp_downloads/job-single",
+		Album: AlbumMeta{
+			Album:       "", // Empty or single
+			AlbumArtist: "",
+			Year:        nil,
+			Genre:       "",
+		},
+		Tracks: []TrackTags{
+			{
+				Path:        "tmp_downloads/job-single/converted/1.mp3",
+				Title:       "Hit Song",
+				Artist:      "Main Artist",
+				TrackNumber: 1,
+				Year:        2023,
+				Genre:       "Hip-Hop",
+			},
+		},
+	}
+
+	res, err := svc.SaveBatch(req)
+	if err != nil {
+		t.Fatalf("SaveBatch failed: %v", err)
+	}
+
+	if len(res.Tracks) != 1 {
+		t.Fatalf("expected 1 track in result, got %d", len(res.Tracks))
+	}
+
+	tr := res.Tracks[0]
+	if tr.Album != "Hit Song" {
+		t.Errorf("expected Album 'Hit Song', got %q", tr.Album)
+	}
+	if tr.AlbumArtist != "Main Artist" {
+		t.Errorf("expected AlbumArtist 'Main Artist', got %q", tr.AlbumArtist)
+	}
+	if tr.Year != 2023 {
+		t.Errorf("expected Year 2023, got %d", tr.Year)
+	}
+	if tr.Genre != "Hip-Hop" {
+		t.Errorf("expected Genre 'Hip-Hop', got %q", tr.Genre)
+	}
+
+	expectedDir := "Hit Song - Main Artist"
+	if res.DestinationDir != expectedDir {
+		t.Errorf("expected DestinationDir %q, got %q", expectedDir, res.DestinationDir)
+	}
+}

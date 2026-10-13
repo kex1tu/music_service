@@ -1,0 +1,194 @@
+{{ define "puddletag_tag_panel" }}
+<!-- ==================== БОКОВАЯ ПАНЕЛЬ ТЕГОВ (TAG PANEL) ==================== -->
+<aside class="w-full lg:w-72 xl:w-80 bg-surface-panel/95 border border-surface-border rounded-xl p-4 flex flex-col space-y-4 shadow-xl shrink-0">
+    <!-- Заголовок панели тегов и счетчик выбора -->
+    <div class="flex items-center justify-between border-b border-surface-borderSubtle pb-2.5">
+        <div class="flex items-center space-x-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-brand" :class="hasDirtyChanges ? 'animate-pulse' : ''"></span>
+            <h3 class="text-xs font-bold uppercase tracking-wider text-content-primary">Панель тегов</h3>
+        </div>
+        <div class="text-[11px] font-mono text-content-muted">
+            <span x-text="selectedTracksCount > 0 ? `Выбрано: ${selectedTracksCount}` : 'Нет выбора'"></span>
+        </div>
+    </div>
+
+    <!-- БЛОК ОБЛОЖКИ (ARTWORK BOX) -->
+    <div
+        class="bg-surface-elevated/80 border-2 border-dashed border-surface-border hover:border-brand/50 rounded-xl p-3 flex flex-col items-center justify-center relative group transition cursor-pointer"
+        @dragover.prevent
+        @drop="handleCoverDrop($event)"
+        @click="$refs.coverFileInput.click()"
+        title="Нажмите или перетащите изображение для замены обложки">
+        
+        <input
+            type="file"
+            x-ref="coverFileInput"
+            @change="handleCoverFileInput($event)"
+            accept="image/jpeg,image/png,image/webp"
+            class="hidden">
+
+        <div class="w-32 h-32 rounded-lg bg-surface-input border border-surface-border overflow-hidden relative shadow-md flex items-center justify-center">
+            <template x-if="tagPanel.cover_url">
+                <img :src="tagPanel.cover_url" class="w-full h-full object-cover">
+            </template>
+            <template x-if="!tagPanel.cover_url">
+                <div class="flex flex-col items-center justify-center text-content-muted/60 space-y-1">
+                    <svg class="w-10 h-10" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3z"/>
+                    </svg>
+                    <span class="text-[10px] uppercase font-mono">Нет обложки</span>
+                </div>
+            </template>
+
+            <!-- Оверлей при наведении -->
+            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition p-2 text-center text-[10px] text-white">
+                <svg class="w-5 h-5 text-brand mb-1" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/>
+                </svg>
+                <span>Загрузить / Перетащить</span>
+            </div>
+        </div>
+
+        <!-- Кнопки управления обложкой -->
+        <div class="flex items-center space-x-2 mt-2" @click.stop>
+            <button
+                type="button"
+                @click="$refs.coverFileInput.click()"
+                class="px-2 py-0.5 bg-surface-input hover:bg-surface-hover text-content-secondary hover:text-content-primary rounded text-[10px] font-mono border border-surface-border transition">
+                Загрузить
+            </button>
+            <template x-if="tagPanel.cover_url">
+                <button
+                    type="button"
+                    @click="removeCover()"
+                    class="px-2 py-0.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded text-[10px] font-mono border border-red-500/20 transition">
+                    Удалить
+                </button>
+            </template>
+        </div>
+    </div>
+
+    <!-- ПОЛЯ ВВОДА ТЕГОВ -->
+    <div class="space-y-2.5 overflow-y-auto flex-1 pr-1 text-xs">
+        <!-- Название (Title) -->
+        <div>
+            <label class="block text-[11px] font-medium text-content-muted mb-0.5">Название (Title)</label>
+            <input
+                type="text"
+                :value="tagPanel.title"
+                @input="onTagPanelInput('title', $event.target.value)"
+                :placeholder="tagPanelDiff.title ? '<Разные значения>' : 'Название композиции'"
+                class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary focus:border-brand focus:ring-1 focus:ring-brand outline-none transition text-xs"
+                :class="tagPanelDiff.title ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
+        </div>
+
+        <!-- Исполнитель (Artist) -->
+        <div>
+            <label class="block text-[11px] font-medium text-content-muted mb-0.5">Исполнитель (Artist)</label>
+            <input
+                type="text"
+                :value="tagPanel.artist"
+                @input="onTagPanelInput('artist', $event.target.value)"
+                :placeholder="tagPanelDiff.artist ? '<Разные значения>' : 'Исполнитель'"
+                class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary focus:border-brand focus:ring-1 focus:ring-brand outline-none transition text-xs"
+                :class="tagPanelDiff.artist ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
+        </div>
+
+        <!-- Альбомный артист (Album Artist) -->
+        <div>
+            <label class="block text-[11px] font-medium text-content-muted mb-0.5">Альбомный артист</label>
+            <input
+                type="text"
+                :value="tagPanel.album_artist"
+                @input="onTagPanelInput('album_artist', $event.target.value)"
+                :placeholder="tagPanelDiff.album_artist ? '<Разные значения>' : 'Основной автор релиза'"
+                class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary focus:border-brand focus:ring-1 focus:ring-brand outline-none transition text-xs"
+                :class="tagPanelDiff.album_artist ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
+        </div>
+
+        <!-- Альбом (Album) -->
+        <div>
+            <label class="block text-[11px] font-medium text-content-muted mb-0.5">Альбом (Album)</label>
+            <input
+                type="text"
+                :value="tagPanel.album"
+                @input="onTagPanelInput('album', $event.target.value)"
+                :placeholder="tagPanelDiff.album ? '<Разные значения>' : 'Название альбома'"
+                class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary focus:border-brand focus:ring-1 focus:ring-brand outline-none transition text-xs"
+                :class="tagPanelDiff.album ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
+        </div>
+
+        <!-- Год и Жанр в 2 колонки -->
+        <div class="grid grid-cols-2 gap-2">
+            <div>
+                <label class="block text-[11px] font-medium text-content-muted mb-0.5">Год</label>
+                <input
+                    type="number"
+                    :value="tagPanel.year"
+                    @input="onTagPanelInput('year', $event.target.value)"
+                    :placeholder="tagPanelDiff.year ? '<Разные>' : 'ГГГГ'"
+                    class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary focus:border-brand focus:ring-1 focus:ring-brand outline-none transition text-xs font-mono"
+                    :class="tagPanelDiff.year ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
+            </div>
+            <div>
+                <label class="block text-[11px] font-medium text-content-muted mb-0.5">Жанр</label>
+                <input
+                    type="text"
+                    :value="tagPanel.genre"
+                    @input="onTagPanelInput('genre', $event.target.value)"
+                    :placeholder="tagPanelDiff.genre ? '<Разные>' : 'Жанр'"
+                    class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary focus:border-brand focus:ring-1 focus:ring-brand outline-none transition text-xs"
+                    :class="tagPanelDiff.genre ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
+            </div>
+        </div>
+
+        <!-- Номер дорожки и Всего треков -->
+        <div class="grid grid-cols-2 gap-2">
+            <div>
+                <label class="block text-[11px] font-medium text-content-muted mb-0.5">Дорожка #</label>
+                <input
+                    type="number"
+                    :value="tagPanel.track_number"
+                    @input="onTagPanelInput('track_number', $event.target.value)"
+                    :placeholder="tagPanelDiff.track_number ? '<Разные>' : '1'"
+                    class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary focus:border-brand focus:ring-1 focus:ring-brand outline-none transition text-xs font-mono"
+                    :class="tagPanelDiff.track_number ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
+            </div>
+            <div>
+                <label class="block text-[11px] font-medium text-content-muted mb-0.5">Всего треков</label>
+                <input
+                    type="number"
+                    :value="tagPanel.track_total"
+                    @input="onTagPanelInput('track_total', $event.target.value)"
+                    :placeholder="tagPanelDiff.track_total ? '<Разные>' : 'Всего'"
+                    class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary focus:border-brand focus:ring-1 focus:ring-brand outline-none transition text-xs font-mono"
+                    :class="tagPanelDiff.track_total ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
+            </div>
+        </div>
+
+        <!-- Диск # и Всего дисков -->
+        <div class="grid grid-cols-2 gap-2">
+            <div>
+                <label class="block text-[11px] font-medium text-content-muted mb-0.5">Диск #</label>
+                <input
+                    type="number"
+                    :value="tagPanel.disc_number"
+                    @input="onTagPanelInput('disc_number', $event.target.value)"
+                    :placeholder="tagPanelDiff.disc_number ? '<Разные>' : '1'"
+                    class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary focus:border-brand focus:ring-1 focus:ring-brand outline-none transition text-xs font-mono"
+                    :class="tagPanelDiff.disc_number ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
+            </div>
+            <div>
+                <label class="block text-[11px] font-medium text-content-muted mb-0.5">Всего дисков</label>
+                <input
+                    type="number"
+                    :value="tagPanel.disc_total"
+                    @input="onTagPanelInput('disc_total', $event.target.value)"
+                    :placeholder="tagPanelDiff.disc_total ? '<Разные>' : '1'"
+                    class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary focus:border-brand focus:ring-1 focus:ring-brand outline-none transition text-xs font-mono"
+                    :class="tagPanelDiff.disc_total ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
+            </div>
+        </div>
+    </div>
+</aside>
+{{ end }}

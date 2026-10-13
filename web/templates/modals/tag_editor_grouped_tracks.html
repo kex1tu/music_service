@@ -4,6 +4,13 @@
     <table class="w-full text-left text-xs min-w-[820px]">
         <thead class="bg-surface-base text-content-secondary uppercase tracking-wider border-b border-surface-border font-mono text-[11px]">
             <tr>
+                <th class="py-2.5 px-2 w-8 text-center" title="Выбрать все треки">
+                    <input
+                        type="checkbox"
+                        :checked="isAllTracksSelected()"
+                        @click="toggleSelectAllTracks()"
+                        class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 cursor-pointer">
+                </th>
                 <th class="py-2.5 px-2 w-8 text-center" title="Перетаскивание треков"></th>
                 <th class="py-2.5 px-2 w-12 text-center" title="Обложка трека">Арт</th>
                 <th class="py-2.5 px-2 w-14 text-center">Диск</th>
@@ -20,6 +27,7 @@
                 <tr
                     class="hover:bg-surface-elevated/60 transition-colors"
                     :class="{
+                        'bg-brand/10': isTrackSelected(item.originalIndex),
                         'bg-brand-muted border-t-2 border-brand': dragOverIndex === item.originalIndex,
                         'opacity-40': draggedIndex === item.originalIndex
                     }"
@@ -28,6 +36,13 @@
                     @dragover="onDragOver($event, item.originalIndex)"
                     @drop="onDrop($event, item.originalIndex)"
                     @dragend="onDragEnd()">
+                    <td class="py-2 px-1 text-center select-none" @click.stop>
+                        <input
+                            type="checkbox"
+                            :checked="isTrackSelected(item.originalIndex)"
+                            @click="toggleTrackSelection(item.originalIndex, $event)"
+                            class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 cursor-pointer">
+                    </td>
                     <!-- Drag Handle -->
                     <td class="py-2 px-1 text-center cursor-grab active:cursor-grabbing text-content-muted hover:text-content-primary select-none">
                         <svg class="w-4 h-4 mx-auto" viewBox="0 0 24 24" fill="currentColor">

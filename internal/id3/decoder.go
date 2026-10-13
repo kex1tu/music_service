@@ -8,8 +8,12 @@ import (
 
 // decodeSynchsafe декодирует 28-битное synchsafe целое число ID3v2.
 func decodeSynchsafe(b []byte) int {
+	if len(b) < 4 {
+		return 0
+	}
 	return int(b[0]&0x7F)<<21 | int(b[1]&0x7F)<<14 | int(b[2]&0x7F)<<7 | int(b[3]&0x7F)
 }
+
 
 // isValidFrameID проверяет, состоит ли 4-байтный идентификатор фрейма из допустимых символов [A-Z0-9].
 func isValidFrameID(id string) bool {

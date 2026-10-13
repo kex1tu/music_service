@@ -2,8 +2,10 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,13 +27,29 @@ type SwitchVersionResult struct {
 	FilePath  string `json:"file_path"`
 }
 
+var ErrInvalidURL = errors.New("untrusted or invalid target_url")
+
 // SwitchTrackVersion выполняет горячее переключение версии трека:
 // скачивание выбранного SoundCloud URL, перекодирование в MP3 320k CBR, перенос ID3v2.4 тегов,
 // атомарную замену аудиофайла и сохранение ручного пина в SQLite кэше.
 func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL string) (*SwitchVersionResult, error) {
 	targetURL = strings.TrimSpace(targetURL)
 	if targetURL == "" {
-		return nil, fmt.Errorf("target_url cannot be empty")
+		return nil, fmt.Errorf("%w: target_url cannot be empty", ErrInvalidURL)
+	}
+
+	if strings.HasPrefix(targetURL, "-") {
+		return nil, fmt.Errorf("%w: target_url cannot start with '-'", ErrInvalidURL)
+	}
+
+	parsedURL, pErr := url.Parse(targetURL)
+	if pErr != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		return nil, fmt.Errorf("%w: invalid url scheme", ErrInvalidURL)
+	}
+
+	host := strings.ToLower(parsedURL.Hostname())
+	if host != "soundcloud.com" && !strings.HasSuffix(host, ".soundcloud.com") {
+		return nil, fmt.Errorf("%w: domain %q is not allowed for switch-version (must be soundcloud.com)", ErrInvalidURL, host)
 	}
 
 	var artist, title, isrc, relFilePath, absFilePath string

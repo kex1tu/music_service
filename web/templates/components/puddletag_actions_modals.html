@@ -1,0 +1,175 @@
+{{ define "puddletag_actions_modals" }}
+<!-- ==================== МОДАЛЬНЫЕ ОКНА БЫСТРЫХ ДЕЙСТВИЙ (PUDDLETAG ACTIONS) ==================== -->
+
+<!-- 1. МОДАЛ СМЕНЫ РЕГИСТРА (CASE CONVERT) -->
+<div
+    x-show="showCaseModal"
+    x-cloak
+    @click.self="showCaseModal = false"
+    @keydown.escape.window="showCaseModal = false"
+    class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
+    <div @click.stop class="bg-surface-panel border border-surface-border rounded-2xl max-w-md w-full p-6 space-y-4 shadow-panel animate-scale-in">
+        <div class="flex items-center justify-between border-b border-surface-border pb-3">
+            <h3 class="text-sm font-bold text-content-primary flex items-center space-x-2">
+                <span class="text-sky-400 font-serif font-bold text-base">Aa</span>
+                <span>Преобразование регистра</span>
+            </h3>
+            <button @click="showCaseModal = false" class="text-content-muted hover:text-content-primary">✕</button>
+        </div>
+
+        <div class="space-y-3 text-xs">
+            <label class="block font-semibold text-content-secondary">Стиль регистра:</label>
+            <div class="space-y-2 font-mono">
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="radio" value="title" x-model="caseStyle" class="text-brand focus:ring-0">
+                    <span class="text-content-primary">Title Case (Каждое Слово С Заглавной)</span>
+                </label>
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="radio" value="sentence" x-model="caseStyle" class="text-brand focus:ring-0">
+                    <span class="text-content-primary">Sentence case (Как в предложении)</span>
+                </label>
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="radio" value="upper" x-model="caseStyle" class="text-brand focus:ring-0">
+                    <span class="text-content-primary">UPPERCASE (ВСЕ ПРОПИСНЫЕ)</span>
+                </label>
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="radio" value="lower" x-model="caseStyle" class="text-brand focus:ring-0">
+                    <span class="text-content-primary">lowercase (все строчные)</span>
+                </label>
+            </div>
+
+            <div class="pt-2 border-t border-surface-borderSubtle space-y-1.5">
+                <label class="block font-semibold text-content-secondary">Применить к полям:</label>
+                <div class="flex items-center space-x-4">
+                    <label class="flex items-center space-x-1.5 cursor-pointer">
+                        <input type="checkbox" x-model="caseFields.title" class="rounded text-brand focus:ring-0">
+                        <span>Название</span>
+                    </label>
+                    <label class="flex items-center space-x-1.5 cursor-pointer">
+                        <input type="checkbox" x-model="caseFields.artist" class="rounded text-brand focus:ring-0">
+                        <span>Исполнитель</span>
+                    </label>
+                    <label class="flex items-center space-x-1.5 cursor-pointer">
+                        <input type="checkbox" x-model="caseFields.album" class="rounded text-brand focus:ring-0">
+                        <span>Альбом</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex justify-end space-x-2 pt-2">
+            <button type="button" @click="showCaseModal = false" class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary rounded-lg text-xs font-semibold">Отмена</button>
+            <button type="button" @click="applyCaseConversion()" class="px-4 py-1.5 bg-brand hover:bg-brand-hover text-white rounded-lg text-xs font-bold shadow-md shadow-brand/20">Применить</button>
+        </div>
+    </div>
+</div>
+
+<!-- 2. МОДАЛ АВТОНУМЕРАТОРА (AUTONUMBER WIZARD) -->
+<div
+    x-show="showAutoNumberModal"
+    x-cloak
+    @click.self="showAutoNumberModal = false"
+    @keydown.escape.window="showAutoNumberModal = false"
+    class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
+    <div @click.stop class="bg-surface-panel border border-surface-border rounded-2xl max-w-md w-full p-6 space-y-4 shadow-panel animate-scale-in">
+        <div class="flex items-center justify-between border-b border-surface-border pb-3">
+            <h3 class="text-sm font-bold text-content-primary flex items-center space-x-2">
+                <span class="text-emerald-400 font-mono font-bold text-base">#</span>
+                <span>Мастер автонумерации треков</span>
+            </h3>
+            <button @click="showAutoNumberModal = false" class="text-content-muted hover:text-content-primary">✕</button>
+        </div>
+
+        <div class="space-y-3 text-xs">
+            <div class="flex items-center justify-between">
+                <label class="font-semibold text-content-secondary">Начальный номер:</label>
+                <input type="number" x-model="autoNumberStart" min="1" class="w-20 bg-surface-input border border-surface-border rounded-lg px-2 py-1 text-center font-mono text-content-primary">
+            </div>
+
+            <div class="space-y-2 pt-1 border-t border-surface-borderSubtle">
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="checkbox" x-model="autoNumberLeadingZeros" class="rounded text-brand focus:ring-0">
+                    <span class="text-content-primary">Ведущие нули для номеров до 10 (01, 02, 03...)</span>
+                </label>
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="checkbox" x-model="autoNumberResetPerDisc" class="rounded text-brand focus:ring-0">
+                    <span class="text-content-primary">Сбрасывать нумерацию на 1 при смене номера диска</span>
+                </label>
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="checkbox" x-model="autoNumberSetTotal" class="rounded text-brand focus:ring-0">
+                    <span class="text-content-primary">Проставить общее количество треков (track_total)</span>
+                </label>
+            </div>
+        </div>
+
+        <div class="flex justify-end space-x-2 pt-2">
+            <button type="button" @click="showAutoNumberModal = false" class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary rounded-lg text-xs font-semibold">Отмена</button>
+            <button type="button" @click="applyAutoNumbering()" class="px-4 py-1.5 bg-brand hover:bg-brand-hover text-white rounded-lg text-xs font-bold shadow-md shadow-brand/20">Пронумеровать</button>
+        </div>
+    </div>
+</div>
+
+<!-- 3. МОДАЛ ПОИСКА И ЗАМЕНЫ (SEARCH & REPLACE) -->
+<div
+    x-show="showSearchReplaceModal"
+    x-cloak
+    @click.self="showSearchReplaceModal = false"
+    @keydown.escape.window="showSearchReplaceModal = false"
+    class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
+    <div @click.stop class="bg-surface-panel border border-surface-border rounded-2xl max-w-md w-full p-6 space-y-4 shadow-panel animate-scale-in">
+        <div class="flex items-center justify-between border-b border-surface-border pb-3">
+            <h3 class="text-sm font-bold text-content-primary flex items-center space-x-2">
+                <span class="text-amber-400">🔎</span>
+                <span>Поиск и замена в тегах</span>
+            </h3>
+            <button @click="showSearchReplaceModal = false" class="text-content-muted hover:text-content-primary">✕</button>
+        </div>
+
+        <div class="space-y-3 text-xs">
+            <div>
+                <label class="block font-semibold text-content-secondary mb-1">Найти:</label>
+                <input type="text" x-model="searchQueryText" class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary font-mono outline-none focus:border-brand">
+            </div>
+
+            <div>
+                <label class="block font-semibold text-content-secondary mb-1">Заменить на:</label>
+                <input type="text" x-model="replaceWithText" class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary font-mono outline-none focus:border-brand">
+            </div>
+
+            <div class="flex items-center space-x-4 pt-1">
+                <label class="flex items-center space-x-1.5 cursor-pointer">
+                    <input type="checkbox" x-model="searchIsRegex" class="rounded text-brand focus:ring-0">
+                    <span>Регулярное выражение (Regex)</span>
+                </label>
+                <label class="flex items-center space-x-1.5 cursor-pointer">
+                    <input type="checkbox" x-model="searchCaseSensitive" class="rounded text-brand focus:ring-0">
+                    <span>Учитывать регистр</span>
+                </label>
+            </div>
+
+            <div class="pt-2 border-t border-surface-borderSubtle">
+                <label class="block font-semibold text-content-secondary mb-1">Искать в полях:</label>
+                <div class="flex items-center space-x-4">
+                    <label class="flex items-center space-x-1.5 cursor-pointer">
+                        <input type="checkbox" x-model="searchFields.title" class="rounded text-brand focus:ring-0">
+                        <span>Название</span>
+                    </label>
+                    <label class="flex items-center space-x-1.5 cursor-pointer">
+                        <input type="checkbox" x-model="searchFields.artist" class="rounded text-brand focus:ring-0">
+                        <span>Исполнитель</span>
+                    </label>
+                    <label class="flex items-center space-x-1.5 cursor-pointer">
+                        <input type="checkbox" x-model="searchFields.album" class="rounded text-brand focus:ring-0">
+                        <span>Альбом</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex justify-end space-x-2 pt-2">
+            <button type="button" @click="showSearchReplaceModal = false" class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary rounded-lg text-xs font-semibold">Отмена</button>
+            <button type="button" @click="applySearchAndReplace()" class="px-4 py-1.5 bg-brand hover:bg-brand-hover text-white rounded-lg text-xs font-bold shadow-md shadow-brand/20">Заменить</button>
+        </div>
+    </div>
+</div>
+{{ end }}

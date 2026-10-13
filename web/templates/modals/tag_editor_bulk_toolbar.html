@@ -1,0 +1,192 @@
+{{ define "tag_editor_bulk_toolbar" }}
+<!-- ПЛАВАЮЩИЙ ТУЛБАР МАССОВЫХ ДЕЙСТВИЙ (FLOATING BULK ACTION BAR) -->
+<template x-if="selectedIndices && selectedIndices.length > 0">
+    <div class="sticky bottom-4 z-30 mx-auto max-w-4xl bg-surface-elevated/95 backdrop-blur-md border border-brand/40 rounded-2xl p-3 shadow-2xl shadow-black/60 space-y-2.5 animate-slide-up">
+        <div class="flex flex-wrap items-center justify-between gap-2.5">
+            <div class="flex items-center space-x-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-brand animate-pulse"></span>
+                <span class="text-xs font-bold text-white tracking-wide">
+                    Выбрано: <span class="text-brand font-mono" x-text="selectedIndices.length"></span> из <span class="text-content-secondary font-mono" x-text="tracks.length"></span>
+                </span>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-1.5">
+                <!-- Кнопка Жанр -->
+                <button
+                    type="button"
+                    @click="toggleBulkField('genre')"
+                    class="px-2.5 py-1 rounded-lg text-xs font-semibold border transition flex items-center space-x-1"
+                    :class="bulkActiveField === 'genre' ? 'bg-brand text-white border-brand' : 'bg-surface-panel hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
+                    title="Задать жанр для всех выбранных">
+                    <span>Жанр</span>
+                </button>
+
+                <!-- Кнопка Год -->
+                <button
+                    type="button"
+                    @click="toggleBulkField('year')"
+                    class="px-2.5 py-1 rounded-lg text-xs font-semibold border transition flex items-center space-x-1"
+                    :class="bulkActiveField === 'year' ? 'bg-brand text-white border-brand' : 'bg-surface-panel hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
+                    title="Задать год для всех выбранных">
+                    <span>Год</span>
+                </button>
+
+                <!-- Кнопка Диск -->
+                <button
+                    type="button"
+                    @click="toggleBulkField('disc')"
+                    class="px-2.5 py-1 rounded-lg text-xs font-semibold border transition flex items-center space-x-1"
+                    :class="bulkActiveField === 'disc' ? 'bg-brand text-white border-brand' : 'bg-surface-panel hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
+                    title="Задать номер диска">
+                    <span>Диск</span>
+                </button>
+
+                <!-- Кнопка Альбомный артист -->
+                <button
+                    type="button"
+                    @click="toggleBulkField('album_artist')"
+                    class="px-2.5 py-1 rounded-lg text-xs font-semibold border transition flex items-center space-x-1"
+                    :class="bulkActiveField === 'album_artist' ? 'bg-brand text-white border-brand' : 'bg-surface-panel hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
+                    title="Задать альбомного исполнителя">
+                    <span>Альбомный артист</span>
+                </button>
+
+                <!-- Кнопка + Соавтор -->
+                <button
+                    type="button"
+                    @click="toggleBulkField('feat')"
+                    class="px-2.5 py-1 rounded-lg text-xs font-semibold border transition flex items-center space-x-1"
+                    :class="bulkActiveField === 'feat' ? 'bg-brand text-white border-brand' : 'bg-surface-panel hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
+                    title="Добавить гостевого исполнителя (feat) ко всем выбранным">
+                    <span>+ Соавтор</span>
+                </button>
+
+                <!-- Кнопка Очистить названия -->
+                <button
+                    type="button"
+                    @click="applyBulkCleanTitles()"
+                    class="px-2.5 py-1 bg-surface-panel hover:bg-surface-hover text-content-secondary hover:text-white border border-surface-border rounded-lg text-xs font-semibold transition"
+                    title="Очистить названия выбранных треков и извлечь фиты">
+                    <span>Очистить названия</span>
+                </button>
+
+                <!-- Кнопка Исключить -->
+                <button
+                    type="button"
+                    @click="applyBulkExcludeTracks()"
+                    class="px-2.5 py-1 bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30 rounded-lg text-xs font-semibold transition"
+                    title="Исключить выбранные треки из релиза">
+                    <span>Исключить (<span x-text="selectedIndices.length"></span>)</span>
+                </button>
+
+                <!-- Кнопка Снять выбор -->
+                <button
+                    type="button"
+                    @click="clearTrackSelection()"
+                    class="px-2 py-1 text-content-muted hover:text-content-primary rounded-lg text-xs font-semibold transition"
+                    title="Снять выделение">
+                    ✕
+                </button>
+            </div>
+        </div>
+
+        <!-- Выпадающие панели быстрого ввода для выбранных полей -->
+        <template x-if="bulkActiveField">
+            <div class="pt-2 border-t border-surface-borderSubtle flex flex-wrap items-center gap-2">
+                <!-- Ввод Жанра -->
+                <template x-if="bulkActiveField === 'genre'">
+                    <div class="flex items-center space-x-2 w-full sm:w-auto flex-1">
+                        <input
+                            type="text"
+                            x-model="bulkGenreInput"
+                            @keydown.enter.prevent="applyBulkGenre()"
+                            placeholder="Например: Electronic\\Synthwave"
+                            class="bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-content-muted focus:outline-none focus:border-brand flex-1 font-mono">
+                        <button
+                            type="button"
+                            @click="applyBulkGenre()"
+                            class="px-3 py-1.5 bg-brand hover:bg-brand-hover text-white rounded-lg text-xs font-bold transition shrink-0">
+                            Применить
+                        </button>
+                    </div>
+                </template>
+
+                <!-- Ввод Года -->
+                <template x-if="bulkActiveField === 'year'">
+                    <div class="flex items-center space-x-2 w-full sm:w-auto flex-1">
+                        <input
+                            type="number"
+                            min="1000"
+                            max="2999"
+                            x-model="bulkYearInput"
+                            @keydown.enter.prevent="applyBulkYear()"
+                            placeholder="Год: 2024"
+                            class="bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-content-muted focus:outline-none focus:border-brand w-32 font-mono">
+                        <button
+                            type="button"
+                            @click="applyBulkYear()"
+                            class="px-3 py-1.5 bg-brand hover:bg-brand-hover text-white rounded-lg text-xs font-bold transition shrink-0">
+                            Применить
+                        </button>
+                    </div>
+                </template>
+
+                <!-- Ввод Диска -->
+                <template x-if="bulkActiveField === 'disc'">
+                    <div class="flex items-center space-x-2 w-full sm:w-auto flex-1">
+                        <input
+                            type="number"
+                            min="1"
+                            x-model="bulkDiscInput"
+                            @keydown.enter.prevent="applyBulkDisc()"
+                            placeholder="Диск: 1"
+                            class="bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-content-muted focus:outline-none focus:border-brand w-24 font-mono">
+                        <button
+                            type="button"
+                            @click="applyBulkDisc()"
+                            class="px-3 py-1.5 bg-brand hover:bg-brand-hover text-white rounded-lg text-xs font-bold transition shrink-0">
+                            Применить
+                        </button>
+                    </div>
+                </template>
+
+                <!-- Ввод Альбомного исполнителя -->
+                <template x-if="bulkActiveField === 'album_artist'">
+                    <div class="flex items-center space-x-2 w-full sm:w-auto flex-1">
+                        <input
+                            type="text"
+                            x-model="bulkAlbumArtistInput"
+                            @keydown.enter.prevent="applyBulkAlbumArtist()"
+                            placeholder="Исполнитель альбома"
+                            class="bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-content-muted focus:outline-none focus:border-brand flex-1 font-mono">
+                        <button
+                            type="button"
+                            @click="applyBulkAlbumArtist()"
+                            class="px-3 py-1.5 bg-brand hover:bg-brand-hover text-white rounded-lg text-xs font-bold transition shrink-0">
+                            Применить
+                        </button>
+                    </div>
+                </template>
+
+                <!-- Ввод Соавтора -->
+                <template x-if="bulkActiveField === 'feat'">
+                    <div class="flex items-center space-x-2 w-full sm:w-auto flex-1">
+                        <input
+                            type="text"
+                            x-model="bulkFeatInput"
+                            @keydown.enter.prevent="applyBulkFeat()"
+                            placeholder="Имя гостя для добавления к трекам"
+                            class="bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-content-muted focus:outline-none focus:border-brand flex-1 font-mono">
+                        <button
+                            type="button"
+                            @click="applyBulkFeat()"
+                            class="px-3 py-1.5 bg-brand hover:bg-brand-hover text-white rounded-lg text-xs font-bold transition shrink-0">
+                            Добавить
+                        </button>
+                    </div>
+                </template>
+            </div>
+        </template>
+    </div>
+</template>
+{{ end }}

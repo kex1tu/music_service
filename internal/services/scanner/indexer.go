@@ -46,10 +46,14 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		albumArtist = artistName
 	}
 	albumTitle := tags.Album
-	if albumTitle == "" {
-		albumTitle = filepath.Base(filepath.Dir(fullPath))
-		if albumTitle == "." || albumTitle == "/" {
-			albumTitle = "Unknown Album"
+	if albumTitle == "" || strings.EqualFold(albumTitle, "single") || strings.EqualFold(albumTitle, "singles") {
+		if strings.TrimSpace(tags.Title) != "" {
+			albumTitle = strings.TrimSpace(tags.Title)
+		} else {
+			albumTitle = filepath.Base(filepath.Dir(fullPath))
+			if albumTitle == "." || albumTitle == "/" {
+				albumTitle = "Unknown Album"
+			}
 		}
 	}
 

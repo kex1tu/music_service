@@ -17,6 +17,7 @@ type ITunesTrackMatch struct {
 	Artist      string
 	Artists     []string
 	Album       string
+	Genre       string
 	Year        int
 	TrackNumber int
 	Duration    int
@@ -77,13 +78,14 @@ func (c *ITunesClient) SearchTracksWithCountry(ctx context.Context, query, count
 
 	var res struct {
 		Results []struct {
-			TrackName       string `json:"trackName"`
-			ArtistName      string `json:"artistName"`
-			CollectionName  string `json:"collectionName"`
-			ReleaseDate     string `json:"releaseDate"`
-			TrackNumber     int    `json:"trackNumber"`
-			TrackTimeMillis int    `json:"trackTimeMillis"`
-			ArtworkURL100   string `json:"artworkUrl100"`
+			TrackName        string `json:"trackName"`
+			ArtistName       string `json:"artistName"`
+			CollectionName   string `json:"collectionName"`
+			PrimaryGenreName string `json:"primaryGenreName"`
+			ReleaseDate      string `json:"releaseDate"`
+			TrackNumber      int    `json:"trackNumber"`
+			TrackTimeMillis  int    `json:"trackTimeMillis"`
+			ArtworkURL100    string `json:"artworkUrl100"`
 		} `json:"results"`
 	}
 
@@ -117,6 +119,7 @@ func (c *ITunesClient) SearchTracksWithCountry(ctx context.Context, query, count
 			Artist:      strings.Join(artists, "\x00"),
 			Artists:     artists,
 			Album:       r.CollectionName,
+			Genre:       strings.TrimSpace(r.PrimaryGenreName),
 			Year:        year,
 			TrackNumber: num,
 			Duration:    dur,

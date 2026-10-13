@@ -145,7 +145,7 @@ func (h *FileHandler) FixSafeTagIssues(w http.ResponseWriter, r *http.Request) {
 		if item.Proposed.Artist != "" {
 			tags.Artist = item.Proposed.Artist
 		}
-		if item.Proposed.AlbumArtist != "" && strings.TrimSpace(tags.AlbumArtist) == "" {
+		if item.Proposed.AlbumArtist != "" && (strings.TrimSpace(tags.AlbumArtist) == "" || strings.EqualFold(tags.AlbumArtist, "unknown artist") || strings.EqualFold(tags.Album, tags.Title) || strings.EqualFold(item.Proposed.Album, item.Proposed.Title)) {
 			tags.AlbumArtist = item.Proposed.AlbumArtist
 		}
 
@@ -199,8 +199,12 @@ func (h *FileHandler) FixSelectedTagIssues(w http.ResponseWriter, r *http.Reques
 		}
 		if strings.TrimSpace(item.Artist) != "" {
 			tags.Artist = strings.TrimSpace(item.Artist)
-			if strings.TrimSpace(tags.AlbumArtist) == "" {
-				tags.AlbumArtist = resolver.ExtractPrimaryArtist(tags.Artist)
+			if strings.TrimSpace(tags.AlbumArtist) == "" || strings.EqualFold(tags.AlbumArtist, "unknown artist") {
+				if strings.EqualFold(tags.Album, tags.Title) {
+					tags.AlbumArtist = tags.Artist
+				} else {
+					tags.AlbumArtist = resolver.ExtractPrimaryArtist(tags.Artist)
+				}
 			}
 		}
 		if strings.TrimSpace(item.Album) != "" {
@@ -294,10 +298,10 @@ func (h *FileHandler) FixAllTagIssues(w http.ResponseWriter, r *http.Request) {
 		if item.Proposed.Artist != "" {
 			tags.Artist = item.Proposed.Artist
 		}
-		if item.Proposed.AlbumArtist != "" && strings.TrimSpace(tags.AlbumArtist) == "" {
+		if item.Proposed.AlbumArtist != "" && (strings.TrimSpace(tags.AlbumArtist) == "" || strings.EqualFold(tags.AlbumArtist, "unknown artist") || strings.EqualFold(tags.Album, tags.Title) || strings.EqualFold(item.Proposed.Album, item.Proposed.Title)) {
 			tags.AlbumArtist = item.Proposed.AlbumArtist
 		}
-		if item.Proposed.Album != "" && (tags.Album == "" || strings.EqualFold(tags.Album, "unknown album")) {
+		if item.Proposed.Album != "" && (tags.Album == "" || strings.EqualFold(tags.Album, "unknown album") || strings.EqualFold(tags.Album, "single") || strings.EqualFold(tags.Album, "singles") || strings.HasPrefix(strings.ToLower(tags.Album), "single - ") || strings.HasPrefix(strings.ToLower(tags.Album), "singles - ")) {
 			tags.Album = item.Proposed.Album
 		}
 		if item.Proposed.Year > 0 && tags.Year == 0 {

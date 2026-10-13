@@ -58,6 +58,18 @@ func TestPathSandbox_Resolve(t *testing.T) {
 		t.Errorf("expected error on double url encoded traversal")
 	}
 
+	// 6b. Защита от deep multi-level URL-encoding %2525252e%2525252e
+	_, err = sb.Resolve("%2525252e%2525252e/etc/passwd", false)
+	if err == nil {
+		t.Errorf("expected error on deep multi-level url encoded traversal")
+	}
+
+	// 6c. Защита от множественных начальных слешей ////etc/passwd
+	_, err = sb.Resolve("////../../etc/passwd", false)
+	if err == nil {
+		t.Errorf("expected error on multiple leading slashes traversal")
+	}
+
 	// 7. Защита от нулевого байта
 	_, err = sb.Resolve("test\x00.mp3", false)
 	if err == nil {
@@ -74,6 +86,7 @@ func TestPathSandbox_Resolve(t *testing.T) {
 		t.Errorf("expected '%s', got '%s'", expectedWin, winRes)
 	}
 }
+
 
 func TestSanitizeFilename(t *testing.T) {
 	tests := []struct {

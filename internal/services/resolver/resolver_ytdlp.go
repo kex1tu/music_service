@@ -234,8 +234,18 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 	if len(firstArtists) == 0 && artistName != "" {
 		firstArtists = []string{artistName}
 	}
+	genre := entries[0].Genre
+	year := entries[0].ReleaseYear
+
 	if r.featEnricher != nil {
-		firstArtists = r.featEnricher.EnrichTrackArtists(ctx, firstParsed.Title, firstArtists)
+		enriched := r.featEnricher.EnrichTrackDetails(ctx, firstParsed.Title, firstArtists)
+		firstArtists = enriched.Artists
+		if genre == "" && enriched.Genre != "" {
+			genre = enriched.Genre
+		}
+		if year == 0 && enriched.Year > 0 {
+			year = enriched.Year
+		}
 	}
 	if len(firstArtists) > 0 {
 		artistName = id3.FormatMultiValue(firstArtists)
@@ -243,7 +253,7 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 
 	isArtistPage := strings.Contains(rawURL, "/channel/") || strings.Contains(rawURL, "/releases")
 	albumTitle := entries[0].Album
-	if albumTitle == "" || isArtistPage {
+	if albumTitle == "" || isArtistPage || (len(entries) == 1 && (strings.EqualFold(albumTitle, "single") || strings.EqualFold(albumTitle, "singles"))) {
 		if isArtistPage && artistName != "" {
 			albumTitle = artistName
 		} else if firstParsed.Title != "" {
@@ -254,14 +264,13 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 	}
 
 	coverURL := entries[0].Thumbnail
-	year := entries[0].ReleaseYear
 
 	meta := &ReleaseMetadata{
 		AlbumTitle:  albumTitle,
 		AlbumArtist: artistName,
 		CoverURL:    coverURL,
 		Year:        year,
-		Genre:       entries[0].Genre,
+		Genre:       genre,
 		TotalTracks: len(entries),
 	}
 
@@ -321,6 +330,9 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 		if len(artists) > 0 {
 			albArt = artists[0]
 		}
+		if total == 1 {
+			albArt = cleanArt
+		}
 
 		tr := ResolvedTrack{
 			TrackID:        fmt.Sprintf("yt_%s", trID),
@@ -344,6 +356,10 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 			tr.Year = &y
 		} else if year > 0 {
 			tr.Year = &year
+		}
+		if genre != "" {
+			g := genre
+			tr.Genre = &g
 		}
 		tracks = append(tracks, tr)
 	}

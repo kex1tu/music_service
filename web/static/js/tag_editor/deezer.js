@@ -194,6 +194,13 @@ window.TagDeezer = {
                 }
             }
 
+            if (this.tracks?.length === 1 && this.album) {
+                if (data.album) this.album.album = data.album;
+                if (data.album_artist || data.artist) this.album.album_artist = data.album_artist || data.artist;
+                if (data.year) this.album.year = data.year;
+                if (data.genre) this.album.genre = this.formatGenres ? this.formatGenres(data.genre) : data.genre;
+            }
+
             this.closeDeezerSearch();
             Alpine.store('app').toast(`Трек "${data.artist} — ${data.title}" успешно применен!`, 'success');
         } catch (err) {

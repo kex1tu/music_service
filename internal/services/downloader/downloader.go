@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"music-manager/internal/core/sandbox"
@@ -26,6 +27,10 @@ type Service struct {
 	client       *http.Client
 	ctx          context.Context
 	cancel       context.CancelFunc
+
+	pauseMu   sync.RWMutex
+	isPaused  bool
+	pauseCond *sync.Cond
 }
 
 // NewService creates a new DownloadService.
@@ -56,6 +61,7 @@ func NewService(
 		ctx:          serviceCtx,
 		cancel:       cancel,
 	}
+	svc.pauseCond = sync.NewCond(&svc.pauseMu)
 	go svc.startCleaner(serviceCtx, 24*time.Hour)
 	return svc
 }
@@ -64,6 +70,12 @@ func NewService(
 func (s *Service) Close() {
 	if s.cancel != nil {
 		s.cancel()
+	}
+	s.pauseMu.Lock()
+	s.isPaused = false
+	s.pauseMu.Unlock()
+	if s.pauseCond != nil {
+		s.pauseCond.Broadcast()
 	}
 }
 
@@ -240,3 +252,80 @@ func (s *Service) DeleteJob(id string) error {
 	}
 	return nil
 }
+
+// PauseQueue приостанавливает запуск новых задач в очереди. Активные задачи завершают текущий шаг.
+func (s *Service) PauseQueue() {
+	s.pauseMu.Lock()
+	s.isPaused = true
+	s.pauseMu.Unlock()
+}
+
+// ResumeQueue возобновляет работу очереди и пробуждает ожидающие задачи.
+func (s *Service) ResumeQueue() {
+	s.pauseMu.Lock()
+	s.isPaused = false
+	s.pauseMu.Unlock()
+	if s.pauseCond != nil {
+		s.pauseCond.Broadcast()
+	}
+}
+
+// IsQueuePaused возвращает текущий статус паузы очереди.
+func (s *Service) IsQueuePaused() bool {
+	s.pauseMu.RLock()
+	defer s.pauseMu.RUnlock()
+	return s.isPaused
+}
+
+// waitIfPaused блокирует выполнение, если очередь на паузе, до возобновления или отмены контекста.
+func (s *Service) waitIfPaused(ctx context.Context) error {
+	s.pauseMu.Lock()
+	defer s.pauseMu.Unlock()
+	for s.isPaused {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if s.ctx.Err() != nil {
+			return s.ctx.Err()
+		}
+		s.pauseCond.Wait()
+	}
+	return nil
+}
+
+// ClearCompletedJobs очищает завершенные, ошибочные и отмененные задачи из памяти, БД и удаляет временные директории.
+func (s *Service) ClearCompletedJobs() int {
+	allJobs := s.jobs.GetAll()
+	clearedIDs := make([]string, 0)
+	for _, j := range allJobs {
+		snap := j.Snapshot()
+		if snap.Status == StatusReady || snap.Status == StatusError || snap.Status == StatusCancelled {
+			clearedIDs = append(clearedIDs, snap.ID)
+		}
+	}
+
+	count := s.jobs.ClearCompleted()
+	for _, id := range clearedIDs {
+		jobDir, err := s.tmpSandbox.Resolve(id, false)
+		if err == nil {
+			_ = os.RemoveAll(jobDir)
+		}
+	}
+	return count
+}
+
+// RetryAllFailedJobs находит все задачи со статусом ERROR или CANCELLED и перезапускает их.
+func (s *Service) RetryAllFailedJobs() ([]string, error) {
+	allJobs := s.jobs.GetAll()
+	var retriedIDs []string
+	for _, j := range allJobs {
+		snap := j.Snapshot()
+		if snap.Status == StatusError || snap.Status == StatusCancelled {
+			if _, err := s.RetryJob(snap.ID); err == nil {
+				retriedIDs = append(retriedIDs, snap.ID)
+			}
+		}
+	}
+	return retriedIDs, nil
+}
+

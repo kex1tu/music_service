@@ -90,6 +90,10 @@ func NewRouter(p RouterParams) http.Handler {
 		r.Get("/queue/summary", p.DownloadHandler.GetQueueSummary)
 		r.Post("/queue/clear", p.DownloadHandler.ClearQueue)
 		r.Delete("/completed", p.DownloadHandler.ClearCompleted)
+		r.Post("/clear-completed", p.DownloadHandler.ClearCompleted)
+		r.Post("/retry-failed", p.DownloadHandler.RetryAllFailed)
+		r.Post("/pause", p.DownloadHandler.PauseQueue)
+		r.Post("/resume", p.DownloadHandler.ResumeQueue)
 		r.Get("/{id}", p.DownloadHandler.GetDownload)
 		r.Delete("/{id}", p.DownloadHandler.DeleteDownload)
 		r.Post("/{id}/retry", p.DownloadHandler.RetryDownload)
@@ -154,6 +158,7 @@ func NewRouter(p RouterParams) http.Handler {
 		r.Delete("/", p.FileHandler.DeleteFile)
 		r.Get("/stream", p.FileHandler.StreamAudio)
 		r.Get("/search", p.FileHandler.SearchLibrary)
+		r.Post("/rename-pattern", p.FileHandler.RenamePattern)
 
 		r.Route("/audit", func(r chi.Router) {
 			r.Get("/search", p.FileHandler.SearchLibrary)

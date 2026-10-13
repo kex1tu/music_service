@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -162,18 +163,21 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 		albumTitle := ""
 		coverURL := ""
 		year := 0
+		genre := ""
 		if track.Album != nil {
 			albumTitle = track.Album.Title
 			coverURL = track.Album.BestCoverURL()
 			year = track.Album.ReleaseYear()
-		}
-
-		meta := &ReleaseMetadata{
-			AlbumTitle:  albumTitle,
-			AlbumArtist: track.Artist.Name,
-			CoverURL:    coverURL,
-			Year:        year,
-			TotalTracks: 1,
+			if track.Album.ID > 0 {
+				albCtx, albCancel := context.WithTimeout(ctx, 3*time.Second)
+				if alb, albErr := r.deezerClient.GetAlbum(albCtx, strconv.FormatInt(track.Album.ID, 10)); albErr == nil && alb != nil {
+					genre = alb.PrimaryGenre()
+					if year == 0 {
+						year = alb.ReleaseYear()
+					}
+				}
+				albCancel()
+			}
 		}
 
 		var artists []string
@@ -188,9 +192,30 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 			artists = []string{track.Artist.Name}
 		}
 		if r.featEnricher != nil {
-			artists = r.featEnricher.EnrichTrackArtists(ctx, track.Title, artists)
+			enriched := r.featEnricher.EnrichTrackDetails(ctx, track.Title, artists)
+			artists = enriched.Artists
+			if genre == "" && enriched.Genre != "" {
+				genre = enriched.Genre
+			}
+			if year == 0 && enriched.Year > 0 {
+				year = enriched.Year
+			}
 		}
 		formattedArtist := id3.FormatMultiValue(artists)
+
+		cleanTitle := id3.CleanTitle(track.Title, "")
+		if albumTitle == "" || strings.EqualFold(albumTitle, "single") || strings.EqualFold(albumTitle, "singles") {
+			albumTitle = cleanTitle
+		}
+
+		meta := &ReleaseMetadata{
+			AlbumTitle:  albumTitle,
+			AlbumArtist: formattedArtist,
+			CoverURL:    coverURL,
+			Year:        year,
+			Genre:       genre,
+			TotalTracks: 1,
+		}
 
 		tot := 1
 		tr := ResolvedTrack{
@@ -198,16 +223,19 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 			TrackNumber: 1,
 			TrackTotal:  &tot,
 			DiscNumber:  1,
-			Title:       id3.CleanTitle(track.Title, ""),
+			Title:       cleanTitle,
 			Artist:      formattedArtist,
 			Album:       albumTitle,
-			AlbumArtist: track.Artist.Name,
+			AlbumArtist: formattedArtist,
 			Duration:    track.Duration,
 			CoverURL:    &coverURL,
 			Status:      "pending",
 		}
 		if year > 0 {
 			tr.Year = &year
+		}
+		if genre != "" {
+			tr.Genre = &genre
 		}
 		if track.ISRC != "" {
 			isrcCopy := track.ISRC

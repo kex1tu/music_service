@@ -19,28 +19,38 @@ var allowedDomains = []string{
 	"music.apple.com",
 }
 
+// AudioQualityTelemetry содержит спектральные и кодековые метрики исходного аудиопотока.
+type AudioQualityTelemetry struct {
+	SourceCodec   string `json:"source_codec"`   // "opus", "aac", "mp3", "flac"
+	SourceBitrate int    `json:"source_bitrate"` // в bps: e.g. 128000, 160000, 320000
+	CutoffHz      int    `json:"cutoff_hz"`      // e.g. 15400, 18500, 20500
+	QualityTier   string `json:"quality_tier"`   // "true_320k", "hq_opus", "upscaled_128k", "lossless"
+	Description   string `json:"description"`    // e.g. "YouTube AAC 128k (Срез ~15.4 kHz)"
+}
+
 // ResolvedTrack defines the standardized track model across all sources.
 type ResolvedTrack struct {
-	TrackID        string                     `json:"track_id"`
-	TrackNumber    int                        `json:"track_number"`
-	TrackTotal     *int                       `json:"track_total,omitempty"`
-	DiscNumber     int                        `json:"disc_number"`
-	DiscTotal      *int                       `json:"disc_total,omitempty"`
-	Title          string                     `json:"title"`
-	Artist         string                     `json:"artist"`
-	Album          string                     `json:"album"`
-	AlbumArtist    string                     `json:"album_artist"`
-	Year           *int                       `json:"year,omitempty"`
-	Genre          *string                    `json:"genre,omitempty"`
-	Duration       int                        `json:"duration"`
-	ISRC           *string                    `json:"isrc,omitempty"`
-	CoverURL       *string                    `json:"cover_url,omitempty"`
-	AudioSourceURL string                     `json:"audio_source_url"`
-	ConvertedPath  *string                    `json:"converted_path,omitempty"`
-	Status         string                     `json:"status"` // pending, downloading, converting, ready, error
-	Error          *string                    `json:"error,omitempty"`
-	VersionStatus  string                     `json:"version_status,omitempty"`
+	TrackID        string                       `json:"track_id"`
+	TrackNumber    int                          `json:"track_number"`
+	TrackTotal     *int                         `json:"track_total,omitempty"`
+	DiscNumber     int                          `json:"disc_number"`
+	DiscTotal      *int                         `json:"disc_total,omitempty"`
+	Title          string                       `json:"title"`
+	Artist         string                       `json:"artist"`
+	Album          string                       `json:"album"`
+	AlbumArtist    string                       `json:"album_artist"`
+	Year           *int                         `json:"year,omitempty"`
+	Genre          *string                      `json:"genre,omitempty"`
+	Duration       int                          `json:"duration"`
+	ISRC           *string                      `json:"isrc,omitempty"`
+	CoverURL       *string                      `json:"cover_url,omitempty"`
+	AudioSourceURL string                       `json:"audio_source_url"`
+	ConvertedPath  *string                      `json:"converted_path,omitempty"`
+	Status         string                       `json:"status"` // pending, downloading, converting, ready, error
+	Error          *string                      `json:"error,omitempty"`
+	VersionStatus  string                       `json:"version_status,omitempty"`
 	Candidates     []db.SoundCloudCandidateItem `json:"candidates,omitempty"`
+	AudioQuality   *AudioQualityTelemetry       `json:"audio_quality,omitempty"`
 }
 
 // ReleaseMetadata holds album-level metadata.

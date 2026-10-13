@@ -21,7 +21,50 @@
                 </p>
             </div>
         </div>
-        <div class="flex items-center space-x-2">
+        <div class="flex flex-wrap items-center gap-2">
+            <!-- Индикатор паузы -->
+            <template x-if="$store.app.queue.isPaused">
+                <span class="px-2 py-1 bg-amber-500/15 text-amber-400 border border-amber-500/30 rounded-lg text-xs font-semibold flex items-center space-x-1 animate-pulse">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                    <span>Пауза</span>
+                </span>
+            </template>
+
+            <!-- Кнопка Пауза / Возобновить -->
+            <button
+                type="button"
+                @click="$store.app.queue.isPaused ? $store.app.queue.resumeQueue() : $store.app.queue.pauseQueue()"
+                class="px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 border"
+                :class="$store.app.queue.isPaused ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/25' : 'bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
+                :title="$store.app.queue.isPaused ? 'Возобновить обработку очереди' : 'Приостановить запуск новых задач'">
+                <template x-if="!$store.app.queue.isPaused">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M14 19V5h4v14zm-8 0V5h4v14z"/>
+                    </svg>
+                </template>
+                <template x-if="$store.app.queue.isPaused">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 19V5l11 7z"/>
+                    </svg>
+                </template>
+                <span x-text="$store.app.queue.isPaused ? 'Возобновить' : 'Пауза'"></span>
+            </button>
+
+            <!-- Кнопка Повторить ошибки -->
+            <template x-if="$store.app.queue.errorCount > 0">
+                <button
+                    type="button"
+                    @click="$store.app.queue.retryAllFailed()"
+                    class="px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/30 rounded-lg text-xs font-semibold transition flex items-center space-x-1.5"
+                    title="Перезапустить все задачи с ошибкой">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.037T5 12t2.038 4.963T12 19q2.425 0 4.313-1.463T18.65 14h2.075q-.475 3.275-2.875 5.138T12 20"/>
+                    </svg>
+                    <span>Повторить ошибки (<span x-text="$store.app.queue.errorCount"></span>)</span>
+                </button>
+            </template>
+
+            <!-- Кнопка Редактировать всё -->
             <template x-if="$store.app.queue.readyCount > 0">
                 <button
                     type="button"
@@ -34,6 +77,8 @@
                     <span>Редактировать всё (<span x-text="$store.app.queue.readyCount"></span>)</span>
                 </button>
             </template>
+
+            <!-- Кнопка Очистить завершенные -->
             <button
                 type="button"
                 @click="$store.app.queue.clearCompleted()"
@@ -127,6 +172,22 @@
                                     </div>
                                     <div class="flex items-center space-x-1.5 shrink-0">
                                         <span class="text-[10px] font-mono text-content-muted" x-text="window.AppFormatters ? window.AppFormatters.formatDuration(track.duration) : track.duration + 'с'"></span>
+
+                                        <!-- Телеметрия качества звука (Cutoff & Spek) -->
+                                        <template x-if="track.audio_quality">
+                                            <span
+                                                class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium border shrink-0 transition"
+                                                :class="{
+                                                    'bg-emerald-500/15 text-emerald-400 border-emerald-500/30': track.audio_quality.quality_tier === 'true_320k' || track.audio_quality.quality_tier === 'lossless',
+                                                    'bg-sky-500/15 text-sky-400 border-sky-500/30': track.audio_quality.quality_tier === 'hq_opus',
+                                                    'bg-amber-500/15 text-amber-400 border-amber-500/30': track.audio_quality.quality_tier === 'upscaled_128k'
+                                                }"
+                                                :title="track.audio_quality.description">
+                                                <span x-text="track.audio_quality.source_codec.toUpperCase() + (track.audio_quality.source_bitrate > 0 ? ' ' + Math.round(track.audio_quality.source_bitrate/1000) + 'k' : '')"></span>
+                                                <span class="text-content-muted">•</span>
+                                                <span x-text="'~' + (track.audio_quality.cutoff_hz/1000).toFixed(1) + ' kHz'"></span>
+                                            </span>
+                                        </template>
 
                                         <!-- Бейдж оригинальности -->
                                         <template x-if="track.version_status">

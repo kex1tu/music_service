@@ -51,6 +51,26 @@ func (h *TagHandler) BatchSaveTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Single-track synchronization: if len(req.Tracks) == 1, populate album-level metadata from track if missing
+	if len(req.Tracks) == 1 {
+		t := &req.Tracks[0]
+		if strings.TrimSpace(req.Album.AlbumArtist) == "" && strings.TrimSpace(t.Artist) != "" {
+			req.Album.AlbumArtist = strings.TrimSpace(t.Artist)
+		}
+		if strings.TrimSpace(req.Album.Album) == "" || strings.EqualFold(req.Album.Album, "single") || strings.EqualFold(req.Album.Album, "singles") {
+			if strings.TrimSpace(t.Title) != "" {
+				req.Album.Album = strings.TrimSpace(t.Title)
+			}
+		}
+		if (req.Album.Year == nil || *req.Album.Year == 0) && t.Year > 0 {
+			yr := t.Year
+			req.Album.Year = &yr
+		}
+		if strings.TrimSpace(req.Album.Genre) == "" && strings.TrimSpace(t.Genre) != "" {
+			req.Album.Genre = strings.TrimSpace(t.Genre)
+		}
+	}
+
 	// Apply album fields to tracks ONLY if track's corresponding field is empty
 	for i := range req.Tracks {
 		if strings.TrimSpace(req.Tracks[i].Album) == "" {

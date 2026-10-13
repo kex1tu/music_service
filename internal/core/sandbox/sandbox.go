@@ -62,9 +62,9 @@ func (s *PathSandbox) Resolve(relativePath string, allowRoot bool) (string, erro
 		return "", fmt.Errorf("%w: обнаружен нулевой байт", ErrPathTraversal)
 	}
 
-	// 1. Итеративное URL-декодирование (защита от двойного кодирования %252e%252e)
+	// 1. Итеративное URL-декодирование (защита от многократного кодирования %252e%252e)
 	cleaned := relativePath
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 10; i++ {
 		if strings.Contains(cleaned, "%") {
 			if decoded, err := url.QueryUnescape(cleaned); err == nil && decoded != cleaned {
 				cleaned = decoded
@@ -78,12 +78,21 @@ func (s *PathSandbox) Resolve(relativePath string, allowRoot bool) (string, erro
 		return "", fmt.Errorf("%w: обнаружен нулевой байт после URL-декодирования", ErrPathTraversal)
 	}
 
-	// 2. Нормализация слэшей
+	// 2. Нормализация Unicode fullwidth слэшей и точек
+	cleaned = strings.ReplaceAll(cleaned, "\uff0f", "/") // ／
+	cleaned = strings.ReplaceAll(cleaned, "\uff3c", "/") // ＼
+	cleaned = strings.ReplaceAll(cleaned, "\uff0e", ".") // ．
+
+	// 3. Нормализация слэшей
 	cleaned = strings.ReplaceAll(cleaned, "\\", "/")
-	cleaned = strings.TrimPrefix(cleaned, "/")
+	cleaned = strings.TrimLeft(cleaned, "/")
 	cleaned = filepath.Clean(cleaned)
 
-	// 3. Формирование абсолютного пути
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("%w: путь '%s' выходит за пределы корня", ErrPathTraversal, relativePath)
+	}
+
+	// 4. Формирование абсолютного пути
 	targetAbs := filepath.Join(s.root, cleaned)
 
 	// 4. Проверка раскрытия симлинков, если путь или его родитель существует

@@ -152,7 +152,7 @@ func parseFrames(file *os.File, version byte, flags byte, tagSize int, tags *Tra
 			frameSize = int(binary.BigEndian.Uint32(hdr[4:8]))
 		}
 
-		if frameSize <= 0 || bytesRead+frameSize > tagSize {
+		if frameSize <= 0 || frameSize > 25*1024*1024 || bytesRead+frameSize > tagSize {
 			break
 		}
 
@@ -259,7 +259,7 @@ func ReadRawFrames(filePath string) ([]RawFrame, error) {
 			frameSize = int(binary.BigEndian.Uint32(hdr[4:8]))
 		}
 
-		if frameSize <= 0 || bytesRead+frameSize > tagSize {
+		if frameSize <= 0 || frameSize > 25*1024*1024 || bytesRead+frameSize > tagSize {
 			break
 		}
 

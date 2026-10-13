@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -128,6 +130,9 @@ func (h *DownloadHandler) GetDownloadTracks(w http.ResponseWriter, r *http.Reque
 	discTot := 1
 	trackTot := len(snap.Tracks)
 
+	albumArtist := snap.AlbumMetadata.AlbumArtist
+	albumTitle := snap.AlbumMetadata.AlbumTitle
+
 	var year *int
 	if snap.AlbumMetadata.Year > 0 {
 		year = &snap.AlbumMetadata.Year
@@ -135,6 +140,22 @@ func (h *DownloadHandler) GetDownloadTracks(w http.ResponseWriter, r *http.Reque
 	var genre *string
 	if snap.AlbumMetadata.Genre != "" {
 		genre = &snap.AlbumMetadata.Genre
+	}
+
+	if trackTot == 1 {
+		t := snap.Tracks[0]
+		if albumArtist == "" && t.Artist != "" {
+			albumArtist = t.Artist
+		}
+		if (albumTitle == "" || strings.EqualFold(albumTitle, "single") || strings.EqualFold(albumTitle, "singles")) && t.Title != "" {
+			albumTitle = t.Title
+		}
+		if year == nil && t.Year != nil && *t.Year > 0 {
+			year = t.Year
+		}
+		if (genre == nil || *genre == "") && t.Genre != nil && *t.Genre != "" {
+			genre = t.Genre
+		}
 	}
 
 	var coverPath *string
@@ -150,8 +171,8 @@ func (h *DownloadHandler) GetDownloadTracks(w http.ResponseWriter, r *http.Reque
 
 	resp := map[string]any{
 		"job_id":       snap.ID,
-		"album_artist": snap.AlbumMetadata.AlbumArtist,
-		"album":        snap.AlbumMetadata.AlbumTitle,
+		"album_artist": albumArtist,
+		"album":        albumTitle,
 		"year":         year,
 		"genre":        genre,
 		"disc_total":   discTot,
@@ -212,7 +233,11 @@ func (h *DownloadHandler) SwitchTrackVersion(w http.ResponseWriter, r *http.Requ
 	result, err := h.service.SwitchTrackVersion(r.Context(), trackID, req.TargetURL)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
+		if errors.Is(err, downloader.ErrInvalidURL) {
+			w.WriteHeader(http.StatusBadRequest)
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}

@@ -17,6 +17,7 @@ type QueueSummaryResponse struct {
 	TotalTracks     int     `json:"total_tracks"`
 	CompletedTracks int     `json:"completed_tracks"`
 	OverallProgress float64 `json:"overall_progress"`
+	IsPaused        bool    `json:"is_paused"`
 }
 
 // JobManager manages concurrent download jobs with SQLite persistence.

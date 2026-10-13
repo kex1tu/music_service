@@ -3,6 +3,7 @@ package resolver
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"music-manager/internal/id3"
 )
@@ -95,7 +96,6 @@ func (r *SourceResolver) resolveYandex(ctx context.Context, rawURL string) (*Rel
 
 	case "track":
 		// При ссылке на одиночный трек: ищем трек и формируем одиночный релиз
-		// Для Яндекс Музыки /track/{id} часто проще найти через SearchTrack или получить альбом трека
 		tracksFound, err := r.yandexClient.SearchTrack(ctx, fmt.Sprintf("%d", id))
 		if err != nil || len(tracksFound) == 0 {
 			return nil, nil, fmt.Errorf("track %d not found in yandex music", id)
@@ -103,27 +103,41 @@ func (r *SourceResolver) resolveYandex(ctx context.Context, rawURL string) (*Rel
 
 		tr := tracksFound[0]
 		allArt := tr.AllArtistNames()
-		if r.featEnricher != nil {
-			allArt = r.featEnricher.EnrichTrackArtists(ctx, tr.Title, allArt)
-		}
-		formattedArtist := id3.FormatMultiValue(allArt)
-		albumTitle := tr.Title
+		cleanTit := id3.CleanTitle(tr.Title, "")
+		albumTitle := cleanTit
 		year := 0
 		coverURL := ""
+		genre := ""
+
 		if len(tr.Albums) > 0 {
-			albumTitle = tr.Albums[0].Title
-			year = tr.Albums[0].Year
-			coverURL = tr.Albums[0].BestCoverURL()
+			alb := tr.Albums[0]
+			if alb.Title != "" && !strings.EqualFold(alb.Title, "single") && !strings.EqualFold(alb.Title, "singles") {
+				albumTitle = alb.Title
+			}
+			year = alb.Year
+			coverURL = alb.BestCoverURL()
+			genre = alb.Genre
 		}
 
-		cleanTit := id3.CleanTitle(tr.Title, "")
-		tot := 1
+		if r.featEnricher != nil {
+			enriched := r.featEnricher.EnrichTrackDetails(ctx, tr.Title, allArt)
+			allArt = enriched.Artists
+			if genre == "" && enriched.Genre != "" {
+				genre = enriched.Genre
+			}
+			if year == 0 && enriched.Year > 0 {
+				year = enriched.Year
+			}
+		}
+		formattedArtist := id3.FormatMultiValue(allArt)
 
+		tot := 1
 		meta := &ReleaseMetadata{
 			AlbumTitle:  albumTitle,
 			AlbumArtist: formattedArtist,
 			CoverURL:    coverURL,
 			Year:        year,
+			Genre:       genre,
 			TotalTracks: 1,
 		}
 
@@ -141,6 +155,9 @@ func (r *SourceResolver) resolveYandex(ctx context.Context, rawURL string) (*Rel
 		}
 		if year > 0 {
 			resolvedTr.Year = &year
+		}
+		if genre != "" {
+			resolvedTr.Genre = &genre
 		}
 		if coverURL != "" {
 			resolvedTr.CoverURL = &coverURL

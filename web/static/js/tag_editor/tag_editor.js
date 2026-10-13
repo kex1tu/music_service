@@ -70,6 +70,16 @@ function tagEditorComponent() {
         isLoadingDeezerDetails: false,
         jobIds: [],
 
+        // Multi-Selection & Bulk Editing
+        selectedIndices: [],
+        lastClickedIndex: null,
+        bulkActiveField: null,
+        bulkGenreInput: '',
+        bulkYearInput: '',
+        bulkDiscInput: '',
+        bulkAlbumArtistInput: '',
+        bulkFeatInput: '',
+
         get groupedReleases() {
             return this.releases;
         },
@@ -82,6 +92,7 @@ function tagEditorComponent() {
         ...(window.TagRecognition || {}),
         ...(window.TagDragDrop || {}),
         ...(window.TagLyrics || {}),
+        ...(window.TagSelection || {}),
 
         init() {
             this.$watch('$store.app.tagEditorData', (newData) => {
@@ -124,6 +135,11 @@ function tagEditorComponent() {
 
         removeTrack(index) {
             this.tracks.splice(index, 1);
+            if (this.selectedIndices) {
+                this.selectedIndices = this.selectedIndices
+                    .filter((i) => i !== index)
+                    .map((i) => (i > index ? i - 1 : i));
+            }
             if (this.tracks.length === 0) {
                 Alpine.store('app').closeTagEditor();
                 return;

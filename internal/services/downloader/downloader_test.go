@@ -172,3 +172,109 @@ func TestService_CleanerStopsOnContextCancel(t *testing.T) {
 	svc2.Close()
 }
 
+func TestService_PauseResumeQueue(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpSb, _ := sandbox.NewPathSandbox(tmpDir)
+	musicSb, _ := sandbox.NewPathSandbox(tmpDir)
+
+	svc := NewService(context.Background(), nil, nil, tmpSb, musicSb, "", 1)
+	defer svc.Close()
+
+	if svc.IsQueuePaused() {
+		t.Errorf("expected queue not paused initially")
+	}
+
+	svc.PauseQueue()
+	if !svc.IsQueuePaused() {
+		t.Errorf("expected queue to be paused after PauseQueue()")
+	}
+
+	svc.ResumeQueue()
+	if svc.IsQueuePaused() {
+		t.Errorf("expected queue not to be paused after ResumeQueue()")
+	}
+}
+
+func TestService_ClearCompletedJobs(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpSb, _ := sandbox.NewPathSandbox(tmpDir)
+	musicSb, _ := sandbox.NewPathSandbox(tmpDir)
+
+	jobMgr := NewJobManager(nil)
+	svc := NewService(context.Background(), jobMgr, nil, tmpSb, musicSb, "", 1)
+	defer svc.Close()
+
+	job1 := &DownloadJob{ID: "job-ready-1", Status: StatusReady}
+	job2 := &DownloadJob{ID: "job-err-1", Status: StatusError}
+	job3 := &DownloadJob{ID: "job-active-1", Status: StatusDownloading}
+	job4 := &DownloadJob{ID: "job-queued-1", Status: StatusQueued}
+
+	jobMgr.Add(job1)
+	jobMgr.Add(job2)
+	jobMgr.Add(job3)
+	jobMgr.Add(job4)
+
+	cleared := svc.ClearCompletedJobs()
+	if cleared != 2 {
+		t.Errorf("expected 2 cleared jobs (ready + error), got %d", cleared)
+	}
+
+	if _, ok := jobMgr.Get("job-ready-1"); ok {
+		t.Errorf("expected job-ready-1 to be deleted")
+	}
+	if _, ok := jobMgr.Get("job-err-1"); ok {
+		t.Errorf("expected job-err-1 to be deleted")
+	}
+	if _, ok := jobMgr.Get("job-active-1"); !ok {
+		t.Errorf("expected job-active-1 to be retained")
+	}
+	if _, ok := jobMgr.Get("job-queued-1"); !ok {
+		t.Errorf("expected job-queued-1 to be retained")
+	}
+}
+
+func TestService_RetryAllFailedJobs(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpSb, _ := sandbox.NewPathSandbox(tmpDir)
+	musicSb, _ := sandbox.NewPathSandbox(tmpDir)
+
+	jobMgr := NewJobManager(nil)
+	svc := NewService(context.Background(), jobMgr, nil, tmpSb, musicSb, "", 1)
+	defer svc.Close()
+
+	// Pause queue so retried jobs stay queued during test assertions
+	svc.PauseQueue()
+
+	errMsg := "some network error"
+	job1 := &DownloadJob{ID: "err-job-1", Status: StatusError, URL: "https://www.deezer.com/track/1", Error: &errMsg}
+	job2 := &DownloadJob{ID: "err-job-2", Status: StatusError, URL: "https://www.deezer.com/track/2", Error: &errMsg}
+	job3 := &DownloadJob{ID: "active-job", Status: StatusDownloading, URL: "https://www.deezer.com/track/3"}
+
+	jobMgr.Add(job1)
+	jobMgr.Add(job2)
+	jobMgr.Add(job3)
+
+	retriedIDs, err := svc.RetryAllFailedJobs()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(retriedIDs) != 2 {
+		t.Errorf("expected 2 retried jobs, got %d (%v)", len(retriedIDs), retriedIDs)
+	}
+
+	j1, _ := jobMgr.Get("err-job-1")
+	j1.mu.Lock()
+	status1 := j1.Status
+	err1 := j1.Error
+	j1.mu.Unlock()
+
+	if status1 != StatusQueued {
+		t.Errorf("expected err-job-1 to be StatusQueued, got %s", status1)
+	}
+	if err1 != nil {
+		t.Errorf("expected err-job-1 error to be nil, got %v", *err1)
+	}
+}
+
+

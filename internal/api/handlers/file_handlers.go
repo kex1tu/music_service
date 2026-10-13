@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -125,8 +126,45 @@ type directoryListingResponse struct {
 	TotalFiles       int              `json:"total_files"`
 }
 
+func (h *FileHandler) buildFileItem(itemFull, itemRel string, sz int64) fileItem {
+	ext := filepath.Ext(itemRel)
+	name := filepath.Base(itemRel)
+	cleanRel := filepath.ToSlash(itemRel)
+
+	fItem := fileItem{
+		Name:         name,
+		Path:         cleanRel,
+		Type:         "file",
+		Size:         &sz,
+		Extension:    &ext,
+		LyricsStatus: "none",
+	}
+
+	if strings.EqualFold(ext, ".mp3") {
+		tHash := db.TrackHash(cleanRel)
+		fItem.ID = &tHash
+		streamURL := "/api/tracks/" + tHash + "/stream"
+		fItem.StreamURL = &streamURL
+		h.trackCache.Store(tHash, cleanRel)
+
+		if tags, err := id3.ReadTags(itemFull, cleanRel); err == nil && tags != nil {
+			fItem.TrackNumber = &tags.TrackNumber
+			fItem.Title = &tags.Title
+			fItem.Artist = &tags.Artist
+			fItem.Album = &tags.Album
+			dur := int(tags.Duration)
+			fItem.Duration = &dur
+			fItem.HasCover = tags.HasCover
+			fItem.LyricsStatus = tags.LyricsStatus
+		}
+	}
+
+	return fItem
+}
+
 func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	relPath := r.URL.Query().Get("path")
+	recursive := r.URL.Query().Get("recursive") == "true"
 	fullPath, err := h.musicSandbox.Resolve(relPath, true)
 	if err != nil {
 		if errors.Is(err, sandbox.ErrPathTraversal) {
@@ -137,13 +175,112 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build breadcrumbs
+	var breadcrumbs []breadcrumbItem
+	breadcrumbs = append(breadcrumbs, breadcrumbItem{Name: "Корень", Path: ""})
+	if relPath != "" {
+		parts := strings.Split(filepath.Clean(relPath), string(filepath.Separator))
+		accum := ""
+		for _, p := range parts {
+			if p == "" || p == "." {
+				continue
+			}
+			accum = filepath.Join(accum, p)
+			breadcrumbs = append(breadcrumbs, breadcrumbItem{Name: p, Path: accum})
+		}
+	}
+
+	var parentPath *string
+	if relPath != "" {
+		parent := filepath.Dir(relPath)
+		if parent == "." {
+			parent = ""
+		}
+		parentPath = &parent
+	}
+
+	if recursive {
+		st, err := os.Stat(fullPath)
+		if err != nil || !st.IsDir() {
+			http.Error(w, `{"error":"failed to read directory"}`, http.StatusInternalServerError)
+			return
+		}
+
+		items := make([]fileItem, 0)
+		const maxTracks = 2000
+		const maxDepth = 20
+
+		_ = filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return nil
+			}
+
+			// Safety check: avoid traversing outside sandbox
+			relToSandbox, err := h.musicSandbox.ToRelative(path)
+			if err != nil {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			name := d.Name()
+			if d.IsDir() {
+				if path != fullPath {
+					if strings.HasPrefix(name, ".") || name == "tmp" || name == "tmp_downloads" {
+						return filepath.SkipDir
+					}
+					// Depth limit relative to fullPath
+					relFromStart, err := filepath.Rel(fullPath, path)
+					if err == nil {
+						parts := strings.Split(filepath.ToSlash(relFromStart), "/")
+						if len(parts) > maxDepth {
+							return filepath.SkipDir
+						}
+					}
+				}
+				return nil
+			}
+
+			// For files: skip hidden and non-mp3 files
+			if strings.HasPrefix(name, ".") || !strings.EqualFold(filepath.Ext(name), ".mp3") {
+				return nil
+			}
+
+			// Track count limit
+			if len(items) >= maxTracks {
+				return filepath.SkipAll
+			}
+
+			info, _ := d.Info()
+			var sz int64
+			if info != nil {
+				sz = info.Size()
+			}
+
+			items = append(items, h.buildFileItem(path, relToSandbox, sz))
+			return nil
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(directoryListingResponse{
+			CurrentPath:      relPath,
+			ParentPath:       parentPath,
+			Breadcrumbs:      breadcrumbs,
+			Items:            items,
+			TotalDirectories: 0,
+			TotalFiles:       len(items),
+		})
+		return
+	}
+
 	entries, err := os.ReadDir(fullPath)
 	if err != nil {
 		http.Error(w, `{"error":"failed to read directory"}`, http.StatusInternalServerError)
 		return
 	}
 
-	var items []fileItem
+	items := make([]fileItem, 0)
 	var totalDirs, totalFiles int
 
 	for _, e := range entries {
@@ -180,62 +317,8 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 			if info != nil {
 				sz = info.Size()
 			}
-			ext := filepath.Ext(name)
-
-			fItem := fileItem{
-				Name:         name,
-				Path:         itemRel,
-				Type:         "file",
-				Size:         &sz,
-				Extension:    &ext,
-				LyricsStatus: "none",
-			}
-
-			if strings.EqualFold(ext, ".mp3") {
-				tHash := db.TrackHash(itemRel)
-				fItem.ID = &tHash
-				streamURL := "/api/tracks/" + tHash + "/stream"
-				fItem.StreamURL = &streamURL
-				h.trackCache.Store(tHash, itemRel)
-
-				if tags, err := id3.ReadTags(itemFull, itemRel); err == nil {
-					fItem.TrackNumber = &tags.TrackNumber
-					fItem.Title = &tags.Title
-					fItem.Artist = &tags.Artist
-					fItem.Album = &tags.Album
-					dur := int(tags.Duration)
-					fItem.Duration = &dur
-					fItem.HasCover = tags.HasCover
-					fItem.LyricsStatus = tags.LyricsStatus
-				}
-			}
-
-			items = append(items, fItem)
+			items = append(items, h.buildFileItem(itemFull, itemRel, sz))
 		}
-	}
-
-	// Build breadcrumbs
-	var breadcrumbs []breadcrumbItem
-	breadcrumbs = append(breadcrumbs, breadcrumbItem{Name: "Корень", Path: ""})
-	if relPath != "" {
-		parts := strings.Split(filepath.Clean(relPath), string(filepath.Separator))
-		accum := ""
-		for _, p := range parts {
-			if p == "" || p == "." {
-				continue
-			}
-			accum = filepath.Join(accum, p)
-			breadcrumbs = append(breadcrumbs, breadcrumbItem{Name: p, Path: accum})
-		}
-	}
-
-	var parentPath *string
-	if relPath != "" {
-		parent := filepath.Dir(relPath)
-		if parent == "." {
-			parent = ""
-		}
-		parentPath = &parent
 	}
 
 	w.Header().Set("Content-Type", "application/json")

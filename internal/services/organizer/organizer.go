@@ -62,6 +62,28 @@ func (s *Service) SaveBatch(req BatchSaveRequest) (*OrganizerResult, error) {
 	fallbackAlbum := req.Album.Album
 	fallbackAlbumArtist := req.Album.AlbumArtist
 
+	// Single-track synchronization: if len(req.Tracks) == 1, populate album-level metadata from track if missing
+	if len(req.Tracks) == 1 {
+		t := &req.Tracks[0]
+		if strings.TrimSpace(fallbackAlbumArtist) == "" && strings.TrimSpace(t.Artist) != "" {
+			fallbackAlbumArtist = strings.TrimSpace(t.Artist)
+			req.Album.AlbumArtist = fallbackAlbumArtist
+		}
+		if strings.TrimSpace(fallbackAlbum) == "" || strings.EqualFold(fallbackAlbum, "single") || strings.EqualFold(fallbackAlbum, "singles") {
+			if strings.TrimSpace(t.Title) != "" {
+				fallbackAlbum = strings.TrimSpace(t.Title)
+				req.Album.Album = fallbackAlbum
+			}
+		}
+		if (req.Album.Year == nil || *req.Album.Year == 0) && t.Year > 0 {
+			yr := t.Year
+			req.Album.Year = &yr
+		}
+		if strings.TrimSpace(req.Album.Genre) == "" && strings.TrimSpace(t.Genre) != "" {
+			req.Album.Genre = strings.TrimSpace(t.Genre)
+		}
+	}
+
 	// Apply high-level album fields to tracks when individual track field is omitted
 	for i := range req.Tracks {
 		if strings.TrimSpace(req.Tracks[i].Album) == "" {
@@ -94,6 +116,17 @@ func (s *Service) SaveBatch(req BatchSaveRequest) (*OrganizerResult, error) {
 // Canonical structure: music_library / {Album} - {Album Artist} / {TrackNumber:02d}. {Title}.mp3.
 // For singles without an explicit album, album name is set to the track's title.
 func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist string, tracks []TrackTags, coverBase64 string) (*OrganizerResult, error) {
+	if len(tracks) == 1 {
+		if strings.TrimSpace(fallbackAlbumArtist) == "" && strings.TrimSpace(tracks[0].Artist) != "" {
+			fallbackAlbumArtist = strings.TrimSpace(tracks[0].Artist)
+		}
+		if strings.TrimSpace(fallbackAlbum) == "" || strings.EqualFold(fallbackAlbum, "single") || strings.EqualFold(fallbackAlbum, "singles") {
+			if strings.TrimSpace(tracks[0].Title) != "" {
+				fallbackAlbum = strings.TrimSpace(tracks[0].Title)
+			}
+		}
+	}
+
 	if len(tracks) == 0 {
 		defaultDir := s.ComputeAlbumDir(fallbackAlbumArtist, fallbackAlbum)
 		return &OrganizerResult{

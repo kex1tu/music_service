@@ -30,6 +30,15 @@ window.createQueueManager = function() {
         get readyCount() {
             return (this.jobs || []).filter((j) => j.status === 'READY').length;
         },
+        get errorCount() {
+            return (this.jobs || []).filter((j) => j.status === 'ERROR').length;
+        },
+        get completedCount() {
+            return (this.jobs || []).filter((j) => j.status === 'READY' || j.status === 'ERROR' || j.status === 'CANCELLED').length;
+        },
+        get isPaused() {
+            return !!this.summary?.is_paused;
+        },
 
         async init() {
             await this.fetchQueue();
@@ -141,14 +150,54 @@ window.createQueueManager = function() {
 
         async clearCompleted() {
             try {
-                const res = await fetch('/downloads/queue/clear', { method: 'POST' });
+                const res = await fetch('/downloads/clear-completed', { method: 'POST' });
                 if (res.ok) {
                     const data = await res.json();
-                    Alpine.store('app').toast(`Очищено завершенных задач: ${data.count || 0}`, 'info');
+                    Alpine.store('app').toast(`Очищено завершенных задач: ${data.cleared || data.count || 0}`, 'info');
                     await this.fetchQueue();
                 }
             } catch (e) {
                 Alpine.store('app').toast('Ошибка очистки очереди', 'error');
+            }
+        },
+
+        async pauseQueue() {
+            try {
+                const res = await fetch('/downloads/pause', { method: 'POST' });
+                if (res.ok) {
+                    Alpine.store('app').toast('Очередь загрузок приостановлена', 'info');
+                    await this.fetchQueue();
+                }
+            } catch (e) {
+                Alpine.store('app').toast('Ошибка приостановки очереди', 'error');
+            }
+        },
+
+        async resumeQueue() {
+            try {
+                const res = await fetch('/downloads/resume', { method: 'POST' });
+                if (res.ok) {
+                    Alpine.store('app').toast('Очередь загрузок возобновлена', 'success');
+                    this.wakeUpPolling();
+                }
+            } catch (e) {
+                Alpine.store('app').toast('Ошибка возобновления очереди', 'error');
+            }
+        },
+
+        async retryAllFailed() {
+            try {
+                const res = await fetch('/downloads/retry-failed', { method: 'POST' });
+                if (res.ok) {
+                    const data = await res.json();
+                    Alpine.store('app').toast(`Перезапущено задач с ошибкой: ${data.retried_count || data.count || 0}`, 'info');
+                    this.wakeUpPolling();
+                } else {
+                    const data = await res.json();
+                    Alpine.store('app').toast(data.error || 'Ошибка перезапуска задач', 'error');
+                }
+            } catch (e) {
+                Alpine.store('app').toast('Ошибка перезапуска задач', 'error');
             }
         },
 

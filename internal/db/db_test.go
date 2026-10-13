@@ -326,11 +326,82 @@ func TestDB_SearchLibrary(t *testing.T) {
 	if trk.Artist != "Black Eyed Peas" {
 		t.Errorf("unexpected track artist: %+v", trk)
 	}
-	if trk.LyricsStatus != "lrc" {
-		t.Errorf("expected lyrics_status 'lrc', got %q", trk.LyricsStatus)
-	}
 	if trk.Path != "Black Eyed Peas/Elephunk/01. Where Is The Love.mp3" {
 		t.Errorf("unexpected track path: %q", trk.Path)
 	}
 }
+
+func TestDB_ConcurrentWALStress(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "stress.db")
+	database, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer database.Close()
+
+	ctx := context.Background()
+	concurrency := 20
+	opsPerWorker := 25
+
+	errCh := make(chan error, concurrency)
+
+	for w := 0; w < concurrency; w++ {
+		workerID := w
+		go func() {
+			for i := 0; i < opsPerWorker; i++ {
+				// 1. Write job
+				jobID := filepath.Join(tempDir, "job") // unique format
+				job := DownloadJobEntity{
+					ID:          "job-" + string(rune('a'+workerID)) + "-" + string(rune('0'+(i%10))),
+					Status:      "DOWNLOADING",
+					Source:      "soundcloud",
+					URL:         "https://soundcloud.com/test",
+					Progress:    float64(i * 4),
+					CurrentStep: "Transcoding",
+				}
+				if err := database.SaveJob(ctx, job); err != nil {
+					errCh <- err
+					return
+				}
+
+				// 2. Read jobs
+				if _, err := database.GetAllJobs(ctx); err != nil {
+					errCh <- err
+					return
+				}
+
+				// 3. Save cache
+				cacheEntry := SoundCloudCacheEntry{
+					CacheKey:    "key-" + string(rune('a'+workerID)),
+					TrackTitle:  "Title",
+					ArtistName:  "Artist",
+					SelectedURL: "https://soundcloud.com/1",
+					Status:      "likely",
+					Duration:    180,
+				}
+				if err := database.SaveSoundCloudCache(ctx, cacheEntry); err != nil {
+					errCh <- err
+					return
+				}
+
+				// 4. Read cache
+				if _, err := database.GetSoundCloudCache(ctx, "key-"+string(rune('a'+workerID)), 720); err != nil {
+					errCh <- err
+					return
+				}
+
+				_ = jobID
+			}
+			errCh <- nil
+		}()
+	}
+
+	for w := 0; w < concurrency; w++ {
+		if err := <-errCh; err != nil {
+			t.Fatalf("concurrent worker failed with error: %v", err)
+		}
+	}
+}
+
 

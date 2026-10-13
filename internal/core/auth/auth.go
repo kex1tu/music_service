@@ -29,8 +29,9 @@ func CheckPasswordHash(password, hash string) bool {
 
 // CreateSessionToken creates an HMAC-signed session string: login:timestamp:signature
 func CreateSessionToken(login, secretKey string) string {
+	cleanLogin := strings.ReplaceAll(login, ":", "_")
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
-	payload := login + ":" + ts
+	payload := cleanLogin + ":" + ts
 	mac := hmac.New(sha256.New, []byte(secretKey))
 	mac.Write([]byte(payload))
 	sig := hex.EncodeToString(mac.Sum(nil))
@@ -52,8 +53,9 @@ func ValidateSessionToken(token, secretKey string) (string, bool) {
 		return "", false
 	}
 
-	// 7 days expiration
-	if time.Now().Unix()-ts > 7*24*3600 {
+	now := time.Now().Unix()
+	// Disallow timestamps more than 5 minutes in the future, and expired after 7 days
+	if ts > now+300 || now-ts > 7*24*3600 {
 		return "", false
 	}
 

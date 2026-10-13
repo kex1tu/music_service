@@ -227,14 +227,18 @@ window.AuditFixes = {
     async normalizeNavidrome() {
         if (this.isNormalizingNavidrome) return;
         this.isNormalizingNavidrome = true;
-        Alpine.store('app').toast('Запущена синхронизация медиатеки для Navidrome (права 0644/0755 и очистка \\\\ тегов)...', 'info');
+        Alpine.store('app').toast('Запущена синхронизация медиатеки для Navidrome (права, теги и нормализация синглов)...', 'info');
         try {
             const res = await fetch('/files/audit/normalize-navidrome', { method: 'POST' });
             if (res.ok) {
                 const data = await res.json();
                 const rep = data.report || {};
+                const scanned = rep.total_scanned || 0;
+                const perms = (rep.files_perms_fixed || 0) + (rep.directories_fixed || 0);
+                const tags = rep.tags_normalized || 0;
+                const singles = rep.singles_fixed || 0;
                 Alpine.store('app').toast(
-                    `Синхронизация Navidrome завершена: проверено ${rep.total_files || 0} файлов, обновлены права у ${rep.fixed_permissions || 0}, нормализованы теги у ${rep.fixed_tags || 0}`,
+                    `Синхронизация Navidrome завершена: проверено ${scanned} файлов, исправлено прав: ${perms}, нормализовано тегов: ${tags}, исправлено синглов: ${singles}`,
                     'success'
                 );
                 if (this.loadAll) await this.loadAll(true);

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -63,10 +64,23 @@ func containsEquivalentArtist(target string, list []string) bool {
 	return false
 }
 
+// EnrichedTrackDetails содержит расширенные метаданные трека: соавторы, жанр и год выпуска.
+type EnrichedTrackDetails struct {
+	Artists []string
+	Genre   string
+	Year    int
+}
+
 // EnrichTrackArtists принимает название песни и текущего исполнителя (или список),
 // сверяет их с локальным текстом, Яндекс Музыкой и YouTube Music по правилу максимального количества
 // подтвержденных соавторов ("где больше указано артистов, то и выбирается").
 func (e *FeatEnricher) EnrichTrackArtists(ctx context.Context, title string, currentArtists []string) []string {
+	return e.EnrichTrackDetails(ctx, title, currentArtists).Artists
+}
+
+// EnrichTrackDetails принимает название песни и текущего исполнителя,
+// извлекает подтвержденных соавторов, жанр и год выпуска из Yandex Music, YouTube Music и iTunes.
+func (e *FeatEnricher) EnrichTrackDetails(ctx context.Context, title string, currentArtists []string) EnrichedTrackDetails {
 	var localArtists []string
 
 	// 1. Извлекаем соавторов из текущих тегов (разбирая multi-value если была строка "A\\B" или фиты)
@@ -101,6 +115,8 @@ func (e *FeatEnricher) EnrichTrackArtists(ctx context.Context, title string, cur
 
 	var yaArtists []string
 	var ytmArtists []string
+	var yaGenre string
+	var yaYear int
 
 	// Параллельный опрос Яндекс Музыки и YouTube Music с таймаутом
 	if query != "" && (e.yandexClient != nil || e.ytmusicClient != nil) {
@@ -124,6 +140,14 @@ func (e *FeatEnricher) EnrichTrackArtists(ctx context.Context, title string, cur
 							if primaryArt == "" || len(cand.Artists) == 0 || AreArtistsEquivalent(cand.Artists[0].Name, primaryArt) || containsEquivalentArtist(primaryArt, candArts) {
 								mu.Lock()
 								yaArtists = candArts
+								if len(cand.Albums) > 0 {
+									if cand.Albums[0].Genre != "" && yaGenre == "" {
+										yaGenre = cand.Albums[0].Genre
+									}
+									if cand.Albums[0].Year > 0 && yaYear == 0 {
+										yaYear = cand.Albums[0].Year
+									}
+								}
 								mu.Unlock()
 								break
 							}
@@ -181,62 +205,99 @@ func (e *FeatEnricher) EnrichTrackArtists(ctx context.Context, title string, cur
 		best = cleanArtistList(merged)
 	}
 
-	// Если ни один сервис не нашел фитов (остался 1 артист), проверяем iTunes Search API
-	if len(best) <= 1 && e.httpClient != nil && primaryArt != "" {
+	var itunesDetails itunesMatchDetails
+	// Если ни один сервис не нашел фитов (остался 1 артист) или отсутствуют жанр/год, опрашиваем iTunes
+	if (len(best) <= 1 || yaGenre == "" || yaYear == 0) && e.httpClient != nil && primaryArt != "" {
 		itCtx, itCancel := context.WithTimeout(ctx, 2*time.Second)
 		defer itCancel()
-		itunesFeats := e.searchItunesFeats(itCtx, primaryArt, cleanTit)
-		for _, f := range itunesFeats {
-			if !containsEquivalentArtist(f, best) {
-				best = append(best, f)
+		itunesDetails = e.searchItunesDetails(itCtx, primaryArt, cleanTit)
+		if len(best) <= 1 && len(itunesDetails.Feats) > 0 {
+			for _, f := range itunesDetails.Feats {
+				if !containsEquivalentArtist(f, best) {
+					best = append(best, f)
+				}
 			}
+			best = cleanArtistList(best)
 		}
-		best = cleanArtistList(best)
 	}
 
 	if len(best) == 0 && len(currentArtists) > 0 {
-		return currentArtists
+		best = currentArtists
 	}
-	return best
+
+	finalGenre := yaGenre
+	if finalGenre == "" && itunesDetails.Genre != "" {
+		finalGenre = itunesDetails.Genre
+	}
+
+	finalYear := yaYear
+	if finalYear == 0 && itunesDetails.Year > 0 {
+		finalYear = itunesDetails.Year
+	}
+
+	return EnrichedTrackDetails{
+		Artists: best,
+		Genre:   finalGenre,
+		Year:    finalYear,
+	}
 }
 
-// searchItunesFeats ищет трек в iTunes Search API и извлекает соавторов из trackName
-func (e *FeatEnricher) searchItunesFeats(ctx context.Context, artist, title string) []string {
+type itunesMatchDetails struct {
+	Feats []string
+	Genre string
+	Year  int
+}
+
+// searchItunesDetails ищет трек в iTunes Search API и извлекает соавторов, жанр и год выпуска
+func (e *FeatEnricher) searchItunesDetails(ctx context.Context, artist, title string) itunesMatchDetails {
 	itunesURL := fmt.Sprintf("https://itunes.apple.com/search?term=%s&entity=song&limit=3", url.QueryEscape(artist+" "+title))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, itunesURL, nil)
 	if err != nil {
-		return nil
+		return itunesMatchDetails{}
 	}
 
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
-		return nil
+		return itunesMatchDetails{}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil
+		return itunesMatchDetails{}
 	}
 
 	var res struct {
 		Results []struct {
-			TrackName  string `json:"trackName"`
-			ArtistName string `json:"artistName"`
+			TrackName        string `json:"trackName"`
+			ArtistName       string `json:"artistName"`
+			PrimaryGenreName string `json:"primaryGenreName"`
+			ReleaseDate      string `json:"releaseDate"`
 		} `json:"results"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return nil
+		return itunesMatchDetails{}
 	}
 
 	for _, item := range res.Results {
 		if AreArtistsEquivalent(item.ArtistName, artist) {
 			_, feats := ExtractFeatFromText(item.TrackName)
-			if len(feats) > 0 {
-				return feats
+			year := 0
+			if len(item.ReleaseDate) >= 4 {
+				year, _ = strconv.Atoi(item.ReleaseDate[:4])
+			}
+			return itunesMatchDetails{
+				Feats: feats,
+				Genre: strings.TrimSpace(item.PrimaryGenreName),
+				Year:  year,
 			}
 		}
 	}
 
-	return nil
+	return itunesMatchDetails{}
+}
+
+// searchItunesFeats ищет трек в iTunes Search API и извлекает соавторов из trackName
+func (e *FeatEnricher) searchItunesFeats(ctx context.Context, artist, title string) []string {
+	return e.searchItunesDetails(ctx, artist, title).Feats
 }

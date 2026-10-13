@@ -1,10 +1,11 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 54 блока задач полностью реализованы и протестированы).
+- **Статус готовности:** **100% DONE** (Все 60 блоков задач полностью реализованы и протестированы).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 15 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
-- **Результаты тестов:** 100% Go unit & integration tests (155/155 тестов пройдено, `go test -race ./...` — **0 data races**, все 13 пакетов зеленые).
-- **Продакшен-деплой:** Развернут под управлением `systemd` (`music-manager.service`) на боевых серверах `nl_vpn` (144.31.51.105) и `nl_music` (194.76.168.20).
+- **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 13 пакетов зеленые).
+- **Безопасность:** Проведен глубокий аудит безопасности и фаззинг, сформирован [`SECURITY_AUDIT_REPORT.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/SECURITY_AUDIT_REPORT.md).
+- **Продакшен-деплой:** Развернут под управлением `systemd` (`music-manager.service`) на боевом сервере `nl_music` (194.76.168.20 / `mymusicdownload.verymad.net`).
 
 
 ---
@@ -53,7 +54,7 @@
 - **Блоки 26–30:** CLI сканер `music-scanner` (NDJSON), нормализация жанров, одноуровневая структура `Альбом/Треки.mp3`, демон аудита на Go + `fsnotify` + SQLite WAL, полный вывод Python из кодовой базы, декомпозиция фронтенда на Go-шаблоны и модульные JS-файлы.
 
 #### Эпоха 3: Стабилизация и декомпозиция Go-монолитов
-- **Блок 31 (Git Checkpoint):** Фиксация перехода на Go и деплой на боевые серверы `nl_vpn`, `nl_music`.
+- **Блок 31 (Git Checkpoint):** Фиксация перехода на Go и деплой на боевой сервер `nl_music`.
 - **Блок 32 (Downloader Engine Stabilization):** Персистентность очереди в SQLite, SoundCloud-First Matcher, Deezer anti-403 WAF fallback на iTunes, кнопка Retry.
 - **Блок 33 (YouTube PO Token & Remixes):** Обход ограничений YouTube PO Token (`--flat-playlist`), сохранение ремиксов и версий треков.
 - **Блок 34 (Deterministic Queue & Progress):** Детерминированная сортировка очереди по приоритету статусов, взвешенный расчет `OverallProgress`.
@@ -306,6 +307,130 @@
     - Добавлен unit-тест `TestTagHandler_SearchDeezerTracks_And_GetDetails` в `internal/api/handlers/tag_handlers_test.go` (проверяет поиск треков и применение соавторов).
     - `go test -race ./...` — **100% PASS** (0 race conditions во всех 13 пакетах).
 
+- **Блок 57 (Single Tracks Metadata Propagation to Release & Tag Manager):**
+  - **iTunes Client & Feat Enricher (`internal/services/resolver/`):**
+    - В [`client_itunes_track.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/client_itunes_track.go) добавлено поле `Genre` (`PrimaryGenreName`) в структуру `ITunesTrackMatch`.
+    - В [`feat_enricher.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/feat_enricher.go) реализована функция `EnrichTrackDetails`, возвращающая `EnrichedTrackDetails` (соавторы, жанр и год релиза) с перекрестным поиском по Yandex Music и iTunes Search API.
+  - **Резолверы источников (`internal/services/resolver/`):**
+    - В [`resolver_deezer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/resolver_deezer.go) для одиночных треков (`case "track"`) запрашивается родительский альбом для получения `PrimaryGenre()`, проставляются `AlbumArtist = formattedArtist`, `AlbumTitle = cleanTitle`, `Genre`, `Year`.
+    - В [`resolver_yandex.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/resolver_yandex.go) для одиночных треков извлекаются `Genre` и `Year` из `tr.Albums[0]`, передаются в `ReleaseMetadata` и `ResolvedTrack`, синглу назначается альбом `cleanTit`.
+    - В [`resolver_ytdlp.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/resolver_ytdlp.go) для одиночных треков вызывается `EnrichTrackDetails`, заполняются жанр, год и соавторы, проставляются `meta.AlbumArtist = cleanArt`, `tr.AlbumArtist = cleanArt`, `tr.Genre = genre`.
+  - **Пайплайн загрузки и тегирования (`internal/services/downloader/pipeline.go`):**
+    - В `processTracksPipeline` добавлена строгая двунаправленная синхронизация при `len(tracks) == 1`: трек и релиз делят `Artist <-> AlbumArtist`, `Genre <-> Genre`, `Year <-> Year`, `Title <-> AlbumTitle`.
+    - При записи ID3v2.4 тегов для синглов `albArt` устанавливается равным `art` (со всеми соавторами).
+  - **API обработчики (`internal/api/handlers/`):**
+    - В [`download_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/download_handlers.go) метод `GetDownloadTracks` дополнен фоллбэком при `len(snap.Tracks) == 1`: если релизные поля пусты, они наследуются из единственного трека.
+    - В [`tag_save_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_save_handlers.go) метод `BatchSaveTags` синхронизирует поля релиза и трека при `len(req.Tracks) == 1`.
+  - **Органайзер и сканер библиотеки (`internal/services/organizer/`, `internal/services/scanner/`):**
+    - В [`organizer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/organizer/organizer.go) методы `SaveBatch` и `MoveAlbum` при `len(tracks) == 1` подставляют название трека и артиста трека вместо пустых или фиктивных ("Single"/"Singles") значений альбома.
+    - В [`indexer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/scanner/indexer.go) при индексации файлов, если `tags.Album` пустой или равен "Single"/"Singles", в качестве альбома используется `tags.Title`.
+  - **Фронтенд модули (No-Build Alpine.js):**
+    - [`polling.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/downloader/polling.js) и [`queue_editor_bridge.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/store/queue_editor_bridge.js): при открытии сингла в Tag Editor объект `album` наследует `album_artist`, `album`, `year`, `genre` из трека.
+    - [`loader.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/tag_editor/loader.js): `TagLoader.loadData` синхронизирует поля `component.album` и трека при 1 треке.
+    - [`releases.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/tag_editor/releases.js): `buildReleasesFromTracks` формирует полноценную карточку релиза с названием трека для сингла вместо общей папки "Синглы".
+    - [`deezer.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/tag_editor/deezer.js): `applyDeezerTrack` обновляет `this.album` при применении метаданных к синглу.
+  - **Тесты и верификация:**
+    - Добавлен `TestSaveBatch_SingleTrackMetadataPropagationToRelease` в `organizer_test.go`.
+    - Добавлен `TestDownloadHandler_GetDownloadTracks_SingleTrackFallback` в `download_handlers_test.go`.
+    - Добавлен `TestTagHandler_BatchSaveTags_SingleTrackPropagation` в `tag_handlers_test.go`.
+    - `go test -race ./...` — **100% PASS** (0 race conditions во всех пакетах).
+- **Блок 58 (Batch Normalization of Existing Single Tracks in «Для Navidrome»):**
+  - **Organizer Service (`internal/services/organizer/navidrome_fixer.go`):**
+    - Добавлено поле `SinglesFixed int` в структуру `NavidromeFixReport`.
+    - В методе `NormalizeNavidromeLibrary` реализована детекция треков-синглов (`Album` пустой, `"Single"`, `"Singles"`, `"Unknown Album"`, `"Single - ..."` или совпадает с названием трека).
+    - Для синглов выполняется синхронизация метаданных релиза: `tags.Album = tags.Title`, `tags.AlbumArtist = tags.Artist` (включая всех соавторов).
+    - Реализовано автоматическое извлечение соавторов `(feat. ...)` из названия трека через `resolver.ExtractFeatFromText` с очисткой заголовка и добавлением артистов в `tags.Artist` и `tags.AlbumArtist`.
+    - Многотрековые альбомы гарантированно не затрагиваются (`Album != Title` и не `"Single"`).
+    - При нормализации сингла вызывается `onTrackNormalized(relPath)` для мгновенного обновления индекса SQLite через `scanner.IndexFile`.
+  - **Аудит тегов и API обработчики (`internal/api/handlers/`):**
+    - В [`tag_audit_analyzer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_audit_analyzer.go) дополнена детекция `missing_album`: значения `"single"` / `"singles"` классифицируются как требующие исправления альбома на название трека, а для синглов предлагается `AlbumArtist = Artist` со всеми соавторами.
+    - В [`tag_audit_fix_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_audit_fix_handlers.go) методы `FixSafeTagIssues`, `FixSelectedTagIssues` и `FixAllTagIssues` обновлены для корректной перезаписи альбома и альбомного артиста для синглов.
+  - **Интерфейс Alpine.js и No-Build шаблоны:**
+    - В [`fixes.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/audit/fixes.js) метод `normalizeNavidrome()` сопоставляет поля ответа бэкенда (`total_scanned`, `files_perms_fixed + directories_fixed`, `tags_normalized`, `singles_fixed`) и выводит детальный тост: `...проверено X файлов, исправлено прав: Y, нормализовано тегов: Z, исправлено синглов: W`.
+    - В [`audit.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit.html) обновлен тултип кнопки «Для Navidrome», отражающий нормализацию метаданных синглов.
+  - **Тесты и верификация:**
+    - Добавлен `TestNormalizeNavidromeLibrary_SingleTrackPromotion` в `navidrome_fixer_test.go` (проверяет исправление альбома "Single" на название песни, перенос соавторов из feat в Artist и AlbumArtist).
+    - Добавлен `TestNormalizeNavidromeLibrary_MultiTrackUntouched` в `navidrome_fixer_test.go` (гарантирует неизменность полноценных альбомов).
+    - Дополнена проверка синглов в `TestFileHandler_NormalizeNavidrome` в `batch_covers_handlers_test.go`.
+    - `go test -race ./...` — **100% PASS** (0 race conditions во всех пакетах).
+    - `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешная сборка.
+
+- **Блок 59 (Cutoff Audio Quality Telemetry, Download Queue Bulk Actions & Tag Editor Multi-Selection Bulk Edit):**
+  - **1.5. Детекция реального качества звука (Cutoff & Spek Telemetry):**
+    - В [`internal/services/resolver/resolver.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/resolver.go) добавлена структура `AudioQualityTelemetry` (`SourceCodec`, `SourceBitrate`, `CutoffHz`, `QualityTier`, `Description`) и поле `AudioQuality *AudioQualityTelemetry` в `ResolvedTrack`.
+    - В [`internal/services/downloader/media_processor.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/downloader/media_processor.go) реализованы:
+      - `probeAudioStream`: парсинг входного потока через `ffprobe -v quiet -print_format json -show_streams` (кодек, битрейт, частота дискретизации).
+      - `measureSpectralCutoff`: мгновенный анализ частотного среза (~190ms на 5-секундном слайсе через `ffmpeg -ss 15 -t 5 -af aspectralstats=measure=rolloff,ametadata=print:key=lavfi.aspectralstats.1.rolloff:file=- -f null -`).
+      - `classifyAudioQuality`: градация качества на уровни `lossless` (FLAC/ALAC/>21kHz), `true_320k` (>=19.5kHz), `hq_opus` (Opus/AAC >=17kHz, например SoundCloud HQ) и `upscaled_128k` (YouTube 128k апскейл со срезом на ~15.5kHz).
+      - `analyzeAudioQuality`: интеграция в конвейер `pipeline.go` перед перекодированием в MP3 320k.
+    - В [`web/templates/components/downloader_queue.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/downloader_queue.html) на карточках треков очереди выведен телеметрический бейдж реального качества (цветовая индикация: фиолетовый для Lossless, изумрудный для True 320k, голубой для HQ Opus/AAC, янтарный для апскейла 128k со всплывающим тултипом с точным срезом в kHz).
+  - **1.6. Массовые действия над очередью загрузок (Bulk Queue Actions):**
+    - В [`internal/services/downloader/downloader.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/downloader/downloader.go) реализованы:
+      - Потокобезопасная пауза/возобновление очереди (`PauseQueue()`, `ResumeQueue()`, `IsQueuePaused()`) на базе `sync.Cond` и `pauseMu` без накладных расходов процессорного времени.
+      - Метод ожидания `waitIfPaused(ctx)` внедрен в воркеры конвейера `pipeline.go` с немедленным пробуждением при завершении сервиса (`Close()`).
+      - `ClearCompletedJobs()`: пакетное удаление завершенных и ошибочных задач.
+      - `RetryAllFailedJobs()`: пакетный перезапуск всех упавших задач с повторной постановкой в очередь.
+    - Добавлены HTTP эндпоинты в [`internal/api/handlers/queue_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/queue_handlers.go) и зарегистрированы в [`router.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/router.go):
+      - `POST /downloads/pause` и `POST /downloads/resume`.
+      - `POST /downloads/clear-completed` и `POST /downloads/retry-failed`.
+      - В ответе `GET /downloads/summary` добавлено поле `is_paused: bool`.
+    - В [`web/static/js/store/queue_manager.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/store/queue_manager.js) и [`web/templates/components/downloader_queue.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/downloader_queue.html) добавлены кнопки быстрого управления:
+      - Переключатель Пауза/Возобновление с баннером состояния очереди.
+      - Кнопка «Повторить ошибки (N)» (активна при наличии упавших задач).
+      - Кнопка «Очистить завершённые (N)» с мгновенной синхронизацией счетчиков.
+  - **2.3. Массовое редактирование выбранных треков в Tag Editor (Multi-Selection & Bulk Edit):**
+    - Разработан модуль [`web/static/js/tag_editor/selection.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/tag_editor/selection.js) (`window.TagSelection`):
+      - Хранение выбранных индексов `selectedIndices`, поддержка выбора отдельных чекбоксов и непрерывных диапазонов через `Shift+Click`.
+      - Быстрый выбор всех / сброс выбора (`toggleSelectAllTracks`).
+      - Пакетное применение метаданных: жанр (`applyBulkGenre`), год (`applyBulkYear`), номер диска (`applyBulkDisc`), альбомный артист (`applyBulkAlbumArtist`), добавление фитов (`applyBulkFeat`), очистка названий (`cleanTitlesForSelected`), исключение треков из сохранения (`removeSelectedTracks` с коррекцией индексов).
+    - Разработан плавающий тулбар [`web/templates/modals/tag_editor_bulk_toolbar.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/modals/tag_editor_bulk_toolbar.html):
+      - Индикатор «Выбрано X из Y треков».
+      - Быстрые кнопки пакетных действий со встроенными попапами быстрого ввода.
+    - В шаблонах [`tag_editor_grouped_tracks.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/modals/tag_editor_grouped_tracks.html) и [`tag_editor_flat.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/modals/tag_editor_flat.html) добавлена колонка с чекбоксами строк, выбор всех в шапке таблицы и визуальное выделение выбранных строк.
+    - Интеграция модулей в [`tag_editor.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/tag_editor/tag_editor.js), [`loader.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/tag_editor/loader.js), [`tag_editor.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/modals/tag_editor.html) и [`index.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/index.html).
+  - **Тесты и верификация:**
+    - Добавлен unit-тест `TestClassifyAudioQuality` в `internal/services/downloader/media_processor_test.go` (проверка всех градаций: lossless, true 320k, hq opus, upscaled 128k).
+    - Добавлены unit-тесты `TestService_PauseResumeQueue`, `TestService_ClearCompletedJobs`, `TestService_RetryAllFailedJobs` в `internal/services/downloader/downloader_test.go`.
+    - Добавлены интеграционные тесты HTTP API `TestQueueHandlers_PauseResumeSummary`, `TestQueueHandlers_ClearAndRetry` в `internal/api/handlers/queue_handlers_test.go`.
+    - `go test -race ./...` — **100% PASS (0 data races)** во всех пакетах.
+    - `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешная компиляция бинарника.
+
+- **Блок 55 (Puddletag-Style Workstation & Unified Tag Editor Engine):**
+  - **55.1. Бэкенд и Sandbox изоляция:**
+    - Поддержка рекурсивного обхода каталогов `GET /files?path=...&recursive=true` с ограничением глубины (20), порогом треков (2000), проверкой `PathSandbox.ToRelative()` и сбором всех метаданных `.mp3` в `internal/api/handlers/file_handlers.go`.
+    - Эндпоинт пакетного безопасного переименования `POST /files/rename-pattern` в `internal/api/handlers/file_rename_handlers.go`: проверка коллизий имен, dry-run предпросмотр, атомарный `os.Rename`, синхронное переименование `.lrc`/`.txt` текстов песен и актуализация SQLite БД.
+    - Монтирование маршрута в `internal/api/router.go`.
+    - Unit-тесты `file_handlers_recursive_test.go` и `file_rename_handlers_test.go` с проверкой на race conditions и path traversal.
+  - **55.2. Клиентский движок шаблонов и действий:**
+    - Разработан `web/static/js/puddletag/patterns.js` (`window.PuddletagPatterns`): компиляция шаблонов `%artist% - %title%` в регулярные выражения, парсинг имен файлов в теги, форматирование с санитизацией запрещенных символов файловой системы и расчет Diff «Было → Станет».
+    - Разработан `web/static/js/puddletag/actions.js` (`window.PuddletagActions`): преобразование регистра (Title Case, UPPERCASE, lowercase, Sentence case), мастер автонумерации треков (01..N, сброс по дискам), очистка от мусора и извлечение `feat` в поле `Artist` с разделителем `\\`, поиск и замена текста с поддержкой Regex.
+  - **55.3. Интерактивная рабочая станция Puddletag UI:**
+    - Контроллер `web/static/js/puddletag/puddletag_workstation.js`: инлайн-редактирование ячеек (Enter/Tab/Esc), мультиселект диапазонов (Shift+Click, Ctrl+Click), подсветка staged dirty state (янтарный цвет), синхронизация Tag Panel (<Разные значения>), сохранение по `Ctrl+S`.
+    - Шаблоны: `puddletag_toolbar.html` (тулбар с конвертерами и рекурсией), `puddletag_tag_panel.html` (левая панель с драг-н-дропом обложек), `puddletag_grid.html` (таблица-сетка), `puddletag_diff_modal.html` (предпросмотр Diff) и `puddletag_actions_modals.html` (модалы регистра, нумерации и замены).
+    - Унификация: библиотека `file_manager.html` и модальное окно скачанных релизов `tag_editor.html` переведены на единый Puddletag Engine с кнопкой «Принять в медиатеку» для очереди загрузок.
+- **Блок 60 (Comprehensive Security Audit, Native Go Fuzzing, Race & Concurrency Verification):**
+  - **Устранение Path Traversal в `PathSandbox.Resolve` (SEC-01):**
+    - Увеличение предела итераций URL-декодирования до 10 для нейтрализации deep multi-level URL encoding (`%2525252e%2525252e`).
+    - Замена `strings.TrimPrefix` на `strings.TrimLeft(cleaned, "/")` для блокировки обходов через множественные слэши (`////../../etc/passwd`).
+    - Нормализация Unicode fullwidth слэшей и точек (`\uff0f`, `\uff3c`, `\uff0e`) и немедленный возврат `ErrPathTraversal` при ведущих `../`.
+  - **Защита от бессрочных сессионных токенов (SEC-02):**
+    - В [`ValidateSessionToken`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/core/auth/auth.go) добавлена проверка метки времени из будущего (`ts > now + 300`), исключающая уязвимость бессрочной жизни сессий. Санитизация двоеточий в логинах.
+  - **Нейтрализация SSRF и Argument Injection в загрузчике (SEC-03):**
+    - В [`SwitchTrackVersion`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/downloader/switch_version.go) добавлена валидация схемы `http/https`, белого списка доменов `soundcloud.com` и запрет флагов, начинающихся с дефиса `-`.
+    - В [`media_processor.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/downloader/media_processor.go) перед позиционным `sourceURL` в `yt-dlp` добавлен разделитель `--`.
+    - В [`download_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/download_handlers.go) ошибка невалидного URL сопоставлена со статусом HTTP 400 Bad Request.
+  - **Нативный фаззинг и защита ID3v2.4 от DoS/OOM (SEC-04, SEC-05):**
+    - Создан сьют [`fuzz_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/id3/fuzz_test.go) с нативными Go fuzz-тестами `FuzzParseAPIC`, `FuzzDecodeText`, `FuzzReadTags`.
+    - Ограничение максимального размера фрейма обложки до 25 МБ в `parseFrames` и `ReadRawFrames` для защиты от APIC-бомб декомпрессии.
+    - Добавлена проверка `len(b) < 4` в `decodeSynchsafe` против паник `slice bounds out of range`.
+    - Более 500 000 итераций фаззинга завершились с 0 паник и падений.
+  - **Стресс-тестирование SQLite WAL под высокой конкуренцией (PERF-01):**
+    - В [`db_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/db/db_test.go) реализован `TestDB_ConcurrentWALStress` (20 горутин, 500 транзакций записи/чтения задач и кэша). 0 ошибок блокировки базы данных, 0 гонок данных.
+  - **Клиентская безопасность Puddletag (SEC-06):**
+    - В [`patterns.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/puddletag/patterns.js) ограничен размер строки шаблона (500 символов) для предотвращения ReDoS; подтверждено полное отсутствие опасных директив `x-html` и `innerHTML` во всем интерфейсе.
+  - **Документация и отчетность:**
+    - Сформирован сводный документ [`SECURITY_AUDIT_REPORT.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/SECURITY_AUDIT_REPORT.md).
+
 ---
 
 ## 4. Верификация
@@ -319,5 +444,7 @@
    go test -race ./...
    ```
    **Результат:** 100% PASS, 0 race conditions во всех пакетах.
+
+
 
 

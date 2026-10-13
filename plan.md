@@ -1,131 +1,190 @@
-# Детекция цензурированных треков в медиатеке
+# План: Комплексный поиск уязвимостей, багов и глубокое тестирование сервиса
 
-Архитектурный план добавления автоматического обнаружения уже загруженных цензурированных версий треков в систему аудита тегов (`audit_tags`) с возможностью их удаления и последующей перезагрузки.
+**Дата:** 2026-10-13  
+**Статус:** `DONE`  
+**Компоненты:** `internal/core/`, `internal/api/`, `internal/services/`, `internal/id3/`, `internal/db/`, `web/`  
+**Архитектурный инвариант:** 100% Hermetic Sandbox, Zero-Network tests, Pure Go, No-Build Frontend.
 
 ---
 
 ## 1. Цель и границы задачи (Objective & Scope)
 
-### 1.1. Проблема
-Проект уже имеет мощную защиту от скачивания цензурированных версий при загрузке (через штрафы за `badKeywords` в `resolver/score.go` и SoundCloud-First резолвер в `uncensored_matcher.go`), но не умеет обнаруживать цензурированные треки, которые уже загружены в медиатеку. Пользователь не знает, какие треки в его библиотеке являются цензурированными версиями ("Clean", "Radio Edit", "Censored").
+### 1.1. Проблема и целевое состояние
+- **Текущее состояние:** Проект насчитывает 59 реализованных функциональных блоков (включая загрузчик аудио, транскодирование в MP3 320k CBR, ID3v2.4 engine, полнотекстовый поиск, SQLite WAL, аудиты тегов и рабочую станцию Puddletag). Базовый набор из 155 тестов зеленый, однако глубокий аудит безопасности (SAST, фаззинг бинарных парсеров, проверка на инъекции аргументов CLI и SSRF, стресс-тестирование базы данных под нагрузкой и XSS-аудит клиентской части) ранее в едином комплексе не проводился.
+- **Целевое состояние:** Полномасштабный аудит безопасности и стабильности, выявление всех критических дефектов и уязвимостей, покрытие критических компонентов нативным фаззингом (`go test -fuzz`), создание регрессионных PoC-тестов, атомарное исправление находок и выпуск итогового отчета `SECURITY_AUDIT_REPORT.md`.
 
-### 1.2. Решение
-Добавить детекцию цензурированных треков в существующую систему аудита тегов (`audit_tags`):
-- **Бэкенд:** новый тип дефекта `censored_version` в анализаторе тегов [`tag_audit_analyzer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_audit_analyzer.go) на базе локального regex `badRegexAudit`.
-- **Фронтенд:** отображение бейджа "Цензурированная версия" в таблице аудита [`audit_tags.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit_tags.html) и кнопка фильтрации "Цензурированные".
-- **UI:** кнопка «Удалить» для удаления цензурированного файла с подтверждением, вызовом `DELETE /files` и обновлением интерфейса.
-- **Поддержка контрактов API:** поддержка парсинга пути как из query-параметра `?path=...`, так и из тела JSON-запроса `{"path": "..."}` в [`file_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/file_handlers.go).
-- **Документация:** секция 4c конфигурации резолвера нецензурированных версий в [`.env.example`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/.env.example).
-
-### 1.3. Out-of-Scope
-- Автоматическая перезагрузка трека (требует отдельной фоновой интеграции с очередью).
-- Изменение существующей логики скачивания (она уже работает корректно).
-- Модификация схемы базы данных SQLite (дефекты тегов определяются динамически в рантайме аудита).
-
----
-
-## 2. Анализ текущего состояния (Current State Analysis)
-
-| Компонент / Файл | Текущее состояние | Выявленный недостаток | Требуемое изменение |
-|---|---|---|---|
-| [`internal/api/handlers/tag_audit_analyzer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_audit_analyzer.go) | Анализ 8 типов дефектов (клипы, фиты, каналы, номер в названии, дубли артиста, год, альбом, `\\`) | Цензурированные треки не помечались и не попадали в аудит | Внедрен `badRegexAudit`, дефект `censored_version` и серьезность `review_needed` |
-| [`web/templates/components/audit_tags.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit_tags.html) | Кнопки фильтрации дефектов, бейджи и действия «Исправить», «Сверка» | Отсутствовал фильтр цензуры и действие удаления цензурированного трека | Добавлены фильтр «Цензурированные», бейдж `bg-red-600/10 text-red-400` и кнопка «Удалить» |
-| [`web/static/js/audit/tag_audit.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/audit/tag_audit.js) | Методы `fixTagIssue`, `fixSafeTagIssues`, `fixSelectedTagIssues` | Нет метода удаления трека прямо из таблицы аудита | Добавлен `deleteCensoredTrack(item)` с диалогом подтверждения и вызовом `DELETE /files` |
-| [`internal/api/handlers/file_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/file_handlers.go) | `DeleteFile` ожидал путь строго в `r.URL.Query().Get("path")` | Запросы с телом `{ "path": "..." }` приводили к 400 Bad Request | Добавлен парсинг JSON-тела с сохранением обратной совместимости |
+### 1.2. Границы задачи (Scope)
+- **In-Scope:**
+  - Изоляция `PathSandbox` (защита от Path Traversal, symlink escapes, unicode-гомоглифов, null-byte инъекций).
+  - Аутентификация и сессии (HMAC-SHA256, future timestamps, query-token leakage, timing attacks, CSRF).
+  - Безопасность CLI и внешних вызовов (защита от Argument Injection в `yt-dlp`/`ffmpeg`/`ffprobe`, SSRF в эндпоинтах загрузки и смены версий).
+  - ID3v2.4 Engine & Native Go Fuzzing (`ReadTags`, `parseFrames`, `parseAPIC`, `decodeSynchsafe`, защита от APIC-бомб декомпрессии).
+  - Валидация аудио-инвариантов Navidrome (null-разделители `\x00`, фильтрация `TXXX`, права 0644/0755, запрет текстов в MP3).
+  - Конкурентность и база данных (гонки данных `go test -race`, SQLite WAL contention, `busy_timeout`, утечки горутин).
+  - Фронтенд безопасность (XSS в Alpine.js шаблонах, ReDoS в движке регулярных выражений Puddletag, UI freeze).
+- **Out-of-Scope:**
+  - Реальные сетевые вызовы наружу во время тестов (строгий инвариант: только герметичные моки `httptest.Server`).
+  - Добавление Node.js/npm зависимостей или Docker-контейнеров (категорический запрет согласно `AGENTS.md`).
 
 ---
 
-## 3. Архитектурное решение и обоснование (Architecture & Rationale)
+## 2. Анализ архитектурных альтернатив
 
-### 3.1. Метод детекции цензуры (Локальный Regex)
-Используется локальный регулярный выразитель `badRegexAudit` в [`tag_audit_analyzer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_audit_analyzer.go):
-```go
-badRegexAudit = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(clean|radio\s+edit|censored|censored version|radio version|tv edit|с\s+цензурой|цензурная)(?:$|[^\p{L}\p{N}])`)
-```
-- **Почему именно так:**
-  - **Словные границы (`[^\p{L}\p{N}]`):** предотвращают ложные срабатывания на нормальные слова вроде "cleaner", "cleaning" и т.п.
-  - **Без внешних HTTP-запросов:** проверка выполняется мгновенно в оперативной памяти во время сканирования и пагинации SQLite.
-  - **Специфика аудита:** в аудите медиатеки отсутствует внешний эталон, поэтому Anti-Collision проверка сравнивает слова внутри названия трека. Имена артистов вроде "Clean Bandit" при нормальном названии ("Rather Be") не триггерят дефект, так как проверяется именно название трека (`title`).
-
-### 3.2. Классификация серьезности (Severity: `review_needed`)
-- Автоисправление тегов для цензурированной версии невозможно, поскольку аудиодорожка физически содержит запиканные/вырезанные фрагменты.
-- Поэтому дефект классифицируется как `review_needed` (amber бейдж «Требует внимания»), требующий ручного решения пользователя.
-
-### 3.3. Безопасность и каскадная очистка при удалении
-- Запрос на удаление передается в `DELETE /files`, который верифицирует путь через `PathSandbox.Resolve()`.
-- При удалении `.mp3` файла автоматически удаляются сопутствующие `.lrc`, `.txt`, поквартирные `.jpg` и каскадно обновляются таблицы `tracks`, `track_genres`, `audit_issues`, `albums` и `artists` в SQLite WAL.
+| Параметр | Вариант 1: Монолитный линейный аудит | Вариант 2: Модульный поэтапный конвейер (Выбран) |
+|---|---|---|
+| **Модель запуска** | Один длительный сеанс аудита без четких границ между доменами | 6 изолированных этапов с готовыми промптами для субагентов или ручного запуска |
+| **Параллелизм** | Невозможен (только строго последовательно) | Полный: независимые этапы можно запустить параллельными субагентами (Swarm) |
+| **Локализация ошибок** | Высокий риск конфликтов при одновременной правке кода | Четкое разграничение ответственности по пакетам (`core`, `downloader`, `id3`, `db`, `web`) |
+| **Контроль качества** | Сложно верифицировать промежуточный прогресс | Каждый этап имеет свои критерии приемки (DoD) и регрессионные PoC-тесты |
 
 ---
 
-## 4. Пошаговая декомпозиция реализации (Step-by-Step Implementation)
+## 3. Модель изоляции и стратегия устранения находок
 
-### Этап 1: Бэкенд — детекция цензуры в анализаторе тегов
-**Файл:** [`internal/api/handlers/tag_audit_analyzer.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/tag_audit_analyzer.go) `[MODIFY]`
-- Объявлен `badRegexAudit`.
-- Добавлена проверка шага 9:
-  ```go
-  badMatches := badRegexAudit.FindAllStringSubmatchIndex(title, -1)
-  if len(badMatches) > 0 {
-      issues = append(issues, "censored_version")
-  }
-  ```
-- В классификацию серьезности добавлен `case "censored_version": hasReviewNeeded = true`.
-
-### Этап 2: Бэкенд — поддержка JSON-тела в `DeleteFile`
-**Файл:** [`internal/api/handlers/file_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/file_handlers.go) `[MODIFY]`
-- В метод `DeleteFile` добавлен парсинг JSON-структуры `{ "path": "..." }` при отсутствии query-параметра.
-
-### Этап 3: Фронтенд — визуализация и фильтрация
-**Файл:** [`web/templates/components/audit_tags.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit_tags.html) `[MODIFY]`
-- Кнопка фильтра `filterTagIssues('censored_version')`.
-- Бейдж с текстом «Цензурированная версия» и стилями `bg-red-600/10 text-red-400 border border-red-600/20`.
-- Кнопка «Удалить» в колонке действий с директивой `<template x-if="item.issues.includes('censored_version')">`.
-
-### Этап 4: JavaScript — удаление трека
-**Файл:** [`web/static/js/audit/tag_audit.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/audit/tag_audit.js) `[MODIFY]`
-- Метод `deleteCensoredTrack(item)` с подтверждением `confirm()`, отправкой запроса `DELETE /files`, тостом уведомления и оптимистичным удалением из `this.tagIssues`.
-
-### Этап 5: Документация и конфигурация
-**Файл:** [`.env.example`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/.env.example) `[MODIFY]`
-- Актуализирована секция 4c параметров резолвера нецензурированных версий.
+1. **Герметичность окружения (100% Hermetic):**
+   - Все сетевые клиенты (`Deezer`, `ITunes`, `YTMusic`, `YandexMusic`, `LRCLIB`) в тестах подключаются к локальным `httptest.Server` или моковым `http.RoundTripper`.
+   - Файловые операции выполняются исключительно во временных песочницах `t.TempDir()`.
+2. **Двухфазный цикл устранения (Triage + PoC -> Fix):**
+   - **Фаза A (Воспроизведение):** Написание падающего unit/fuzz-теста, демонстрирующего уязвимость или панику.
+   - **Фаза B (Патч и верификация):** Минимальное атомарное исправление в кодовой базе и подтверждение, что тест теперь проходит успешно без деградации `go test -race ./...`.
 
 ---
 
-## 5. Анализ рисков и краевых случаев (Risks, Edge Cases & Guardrails)
+## 4. Пошаговая декомпозиция этапов (Спецификация для агентов)
 
-1. **Ложные срабатывания (False Positives):**
-   - *Риск:* Название трека содержит подстроку "clean" в составе другого слова (например, "Cleaner").
-   - *Митигация:* Использование словных границ `(?:^|[^\p{L}\p{N}])` в регулярном выражении.
-2. **Артисты со словом Clean (кейс Clean Bandit):**
-   - *Риск:* Треки группы Clean Bandit без маркеров цензуры могут быть ошибочно помечены.
-   - *Митигация:* Регулярное выражение применяется исключительно к строке названия трека (`title`), а не к исполнителю (`artist`).
-3. **Удаление файла с диска:**
-   - *Риск:* Случайный клик пользователя приведет к немедленной потере файла.
-   - *Митигация:* Нативный диалог `confirm(...)` с предупреждением и указанием, как восстановить трек через Downloader.
-
----
-
-## 6. План тестирования и верификации (Verification Matrix)
-
-| Тест / Сценарий | Уровень | Проверяемый аспект | Результат |
-|---|---|---|---|
-| `TestAnalyzeTrackIssues_CensoredDetection` | Unit (Go) | Проверка распознавания Clean, Radio Edit, Censored, маркеров на кириллице и кейса Clean Bandit | PASS (10/10 сценариев) |
-| `TestFileHandler_DeleteFile_JSONBody` | Integration (Go HTTP) | Удаление файла через `DELETE /files` с телом JSON, проверка удаления MP3/LRC и очистки записей SQLite | PASS |
-| `go test -race ./...` | Concurrency | Проверка отсутствия состояний гонки во всех пакетах репозитория | PASS (0 data races) |
-| `go build` | Build | Компиляция единого статического бинарника `bin/music-manager` | PASS |
+### Этап 1: Core Security, PathSandbox & Auth Auditor
+- **Целевые пакеты:** `internal/core/sandbox/`, `internal/core/auth/`, `internal/api/`
+- **Задачи:**
+  1. Стресс-тест `PathSandbox.Resolve` на устойчивость к Path Traversal:
+     - Двойное и тройное URL-декодирование (`%252e%252e%252f`).
+     - Unicode-эквиваленты точек и слэшей (Fullwidth characters).
+     - TOCTOU symlink races (подмена каталога на симлинк в момент разрешения пути).
+     - Проверка обязательного возврата HTTP 403 Forbidden при любых нарушениях песочницы во всех эндпоинтах.
+  2. Аудит `internal/core/auth`:
+     - Валидация временной метки: отклонение токенов со временем из будущего (`ts > now + 300`).
+     - Безопасный парсинг `login:ts:signature` при наличии двоеточий в логине.
+     - Проверка использования `hmac.Equal` во всех местах сравнения хешей.
+     - Аудит передачи токена через query-параметр `?token=` (минимизация риска утечки в логи).
+     - Проверка CSRF-защиты для мутирующих запросов через сессионные куки.
+- **Критерии приемки:**
+  - Новые unit-тесты в `sandbox_test.go` и `auth_test.go`.
+  - `go test -race ./internal/core/...` — 100% PASS.
 
 ---
 
-## 7. Критерии приемки (Definition of Done)
+### Этап 2: Downloader, CLI Execution, SSRF & Process Boundary Auditor
+- **Целевые пакеты:** `internal/services/downloader/`, `internal/services/resolver/`, `internal/api/handlers/`
+- **Задачи:**
+  1. SSRF и валидация URL:
+     - В `POST /downloads/tracks/{trackId}/switch-version` (`switch_version.go`): устранить передачу невалидированного `req.TargetURL` напрямую в `downloadRawStream`. Внедрить строгую проверку белого списка доменов (`DetectSource`).
+     - Защита от обхода белого списка доменов (поддомены вроде `evil-soundcloud.com`, `soundcloud.com.attacker.com`).
+     - Блокировка доступа к Cloud Metadata (`http://169.254.169.254/`) и локальным адресам `127.0.0.1`.
+  2. Защита от Argument Injection в `exec.CommandContext`:
+     - Проверка параметров `yt-dlp`, `ffmpeg`, `ffprobe` на передачу аргументов, начинающихся с `--` (`--exec`, `--output`).
+     - Разделение флагов и позиционных аргументов через `--`.
+  3. Управление дочерними процессами:
+     - Проверка завершения ffmpeg/yt-dlp процессов при отмене родительского `context.Context` (исключение процессов-зомби).
+     - Гарантированная очистка временных файлов в `tmp_downloads` при сбоях и отменах.
+- **Критерии приемки:**
+  - Новые тесты в `download_handlers_test.go`, `downloader_test.go`, `resolver_test.go`.
+  - `go test -race ./internal/services/downloader/... ./internal/services/resolver/...` — 100% PASS.
 
-- [x] Цензурированные треки автоматически детектируются в аудите тегов.
-- [x] Бейдж "Цензурированная версия" отображается в таблице аудита (красный цвет).
-- [x] Фильтр "Цензурированные" работает корректно.
-- [x] Серьезность дефекта = "Требует внимания" (`review_needed` / amber).
-- [x] Кнопка "Удалить" видна только для цензурированных треков.
-- [x] Удаление файла работает корректно через существующий `DELETE /files` endpoint (поддерживает и query, и JSON body).
-- [x] Unit-тесты проходят (`go test -v ./internal/api/handlers -run TestAnalyzeTrackIssues_CensoredDetection`).
-- [x] Тесты удаления проходят (`go test -v ./internal/api/handlers -run TestFileHandler_DeleteFile_JSONBody`).
-- [x] Все тесты с детектором гонок проходят (`go test -race ./...`).
-- [x] Бинарник собирается без ошибок (`go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go`).
-- [x] `.env.example` обновлен с параметрами резолвера.
+---
+
+### Этап 3: ID3 Engine, Native Fuzzing & Navidrome Audio Invariants Specialist
+- **Целевые пакеты:** `internal/id3/`, `internal/services/organizer/`, `internal/services/lyrics/`
+- **Задачи:**
+  1. Native Go Fuzzing (`testing.F`):
+     - Написание `fuzz_test.go`: функции `FuzzReadTags(f *testing.F)` и `FuzzParseAPIC(f *testing.F)`.
+     - Запуск `go test -fuzz=Fuzz -fuzztime=30s` для поиска непредвиденных паник, падений по выходу за границы срезов и бесконечных циклов.
+     - Корректный парсинг UTF-16 строк в описании APIC (учет двойного нуль-терминатора `\x00\x00`).
+     - Проверка synchsafe-декодирования на целочисленные переполнения.
+  2. Защита от APIC-бомб памяти:
+     - Лимит на максимальный размер обложки в `parseFrames` (предотвращение аллокаций сотен мегабайт).
+  3. Валидация аудио-инвариантов Navidrome:
+     - Строгое кодирование множественных артистов и жанров через null-байт `\x00` в `TPE1`, `TPE2`, `TCON`.
+     - Фильтрация конфликтных фреймов `TXXX:ARTISTS`, `TXXX:ALBUMARTISTS`.
+     - Сохранение прав доступа `0644` для MP3 и `0755` для каталогов.
+     - Запрет вшивания текстов в MP3 (только внешние `.lrc`/`.txt`).
+- **Критерии приемки:**
+  - Наличие и успешный прогон `fuzz_test.go` (`go test -fuzz=... -fuzztime=30s`).
+  - 100% PASS для `go test -race ./internal/id3/...`.
+
+---
+
+### Этап 4: Concurrency, Deadlocks, SQLite WAL & Resource Leak Auditor
+- **Целевые пакеты:** `internal/db/`, `internal/services/downloader/`, `internal/services/scanner/`
+- **Задачи:**
+  1. Стресс-тестирование SQLite WAL под высокой конкуренцией:
+     - Написание стресс-теста в `db_test.go` с 20 параллельными горутинами: одновременная запись прогресса задач, индексация медиатеки, чтение кэша и поиск.
+     - Валидация отсутствия дедлоков и ошибок `database is locked` благодаря `busy_timeout(5000)`.
+  2. Гонки данных и синхронизация:
+     - Проверка потокобезопасности `downloader.Service` (`pauseMu`, `sync.Cond`, `trackSem`).
+     - Проверка потокобезопасности in-memory кэша `trackCache sync.Map`.
+  3. Утечки горутин (Goroutine Leaks):
+     - Проверка остановки фонового таймера `startCleaner` и воркеров конвейера при вызове `downloader.Service.Close()`.
+     - Проверка отсутствия зависших горутин после завершения тестов.
+- **Критерии приемки:**
+  - Стресс-тест в `db_test.go` проходит без ошибок.
+  - `go test -race -v ./internal/db/... ./internal/services/downloader/...` — 0 data races.
+
+---
+
+### Этап 5: Frontend Security, Puddletag Engine & DOM Auditor
+- **Целевые пакеты:** `web/templates/`, `web/static/js/`
+- **Задачи:**
+  1. XSS-аудит клиентского кода:
+     - Проверка всех шаблонов Alpine.js на опасные директивы `x-html` и прямой `innerHTML`.
+     - Проверка экранирования пользовательских тегов треков, имен файлов и сообщений об ошибках при наличии полезных нагрузок `<script>`, `onload=`, `javascript:`.
+  2. ReDoS аудит в движке Puddletag:
+     - Проверка функции `compilePattern` в `patterns.js` на уязвимость к регулярным выражениям с катастрофическим возвратом (Catastrophic Backtracking).
+     - Безопасная санитизация регулярных выражений в инструменте поиска и замены (`actions.js`).
+  3. Производительность UI и утечки памяти:
+     - Проверка плавности работы Puddletag Grid на больших каталогах (2 000+ треков).
+     - Проверка корректной отписки глобальных обработчиков клавиатуры (`keydown`) при закрытии модальных окон.
+     - Соблюдение No-Build инварианта (Zero-Node.js, чистый Alpine.js + Tailwind CDN).
+- **Критерии приемки:**
+  - Устранены любые потенциальные точки внедрения XSS.
+  - Регулярные выражения шаблонов защищены от ReDoS.
+
+---
+
+### Этап 6: Итоговая интеграция, матрица уязвимостей и Release Verification Gate
+- **Целевые файлы:** `SECURITY_AUDIT_REPORT.md`, `PROGRESS.md`, `bin/music-manager`
+- **Задачи:**
+  1. Выпуск отчета `SECURITY_AUDIT_REPORT.md`:
+     - Сводная матрица всех найденных и устраненных уязвимостей и дефектов (ID, CWE, Severity, PoC-тест, Patch).
+  2. Финальный регрессионный прогон:
+     - `go test -race -v ./...` (все пакеты зеленые, 0 data races).
+  3. Сборка продакшен-бинарника:
+     - `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go`.
+  4. Обновление дашборда `PROGRESS.md`.
+- **Критерии приемки:**
+  - Отчет `SECURITY_AUDIT_REPORT.md` сформирован.
+  - Бинарник скомпилирован без ошибок.
+  - Все тесты проекта проходят на 100%.
+
+---
+
+## 5. Анализ рисков и краевых случаев (Risks & Guardrails)
+
+1. **Риск дестабилизации боевой медиатеки во время тестов:**
+   - *Митигация:* Строгое использование `t.TempDir()` в тестах; запрет на передачу путей `/var/lib/music` или боевых файлов в тестовые сценарии.
+2. **Риск падения внешних сервисов из-за тестов:**
+   - *Митигация:* Полная изоляция сети через локальные моки `httptest.Server`, реальный интернет заблокирован на уровне тестовых конфигов.
+3. **Риск деградации производительности SQLite WAL из-за избыточных блокировок:**
+   - *Митигация:* Применение `_pragma=busy_timeout(5000)` и дебаунса фоновой синхронизации `syncJob`.
+
+---
+
+## 6. Критерии приемки (Definition of Done)
+
+1. [ ] Реализованы фаззинг-тесты `FuzzReadTags` и `FuzzParseAPIC`, фаззер отработал без паник.
+2. [ ] Устранена уязвимость передачи невалидированного URL в `switch_version.go`.
+3. [ ] Проверена и подтверждена защита `PathSandbox` от всех форм Path Traversal и Symlink bypass.
+4. [ ] Исправлена логика проверки времени сессионного токена (защита от токенов из будущего).
+5. [ ] Проведен стресс-тест SQLite WAL под нагрузкой из 20 параллельных горутин.
+6. [ ] Проведен аудит XSS и ReDoS во фронтенде и движке Puddletag.
+7. [ ] Все тесты `go test -race ./...` проходят успешно (100% PASS, 0 data races).
+8. [ ] Скомпилирован статический бинарник `bin/music-manager`.
+9. [ ] Сформирован сводный документ `SECURITY_AUDIT_REPORT.md`.

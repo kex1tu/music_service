@@ -25,6 +25,16 @@ window.QueueEditorBridge = {
                 Alpine.store('app').toast('Нет готовых треков для редактирования', 'warning');
                 return;
             }
+
+            if (validTracks.length === 1) {
+                const single = validTracks[0];
+                if (!album.album_artist && single.artist) album.album_artist = single.artist;
+                if ((!album.album || album.album.toLowerCase() === 'single' || album.album.toLowerCase() === 'singles') && single.title) {
+                    album.album = single.title;
+                }
+                if (!album.year && single.year) album.year = single.year;
+                if (!album.genre && single.genre) album.genre = single.genre;
+            }
             const coverPath = data.cover_path || `tmp_downloads/${jobId}/cover.jpg`;
             const coverPreview = data.cover_url || `/tags/cover?path=${encodeURIComponent(coverPath)}&t=${Date.now()}`;
             const hasCover = !!data.cover_url || !!data.cover_path;
@@ -146,14 +156,24 @@ window.QueueEditorBridge = {
                     cover_path: data.cover_path || `tmp_downloads/${jobId}/cover.jpg`,
                 };
 
+                const validTracks = (data.tracks || []).filter(
+                    (t) => t.status !== 'error' && (t.converted_path || t.status === 'ok' || t.status === 'ready')
+                );
+
+                if (validTracks.length === 1) {
+                    const single = validTracks[0];
+                    if (!album.album_artist && single.artist) album.album_artist = single.artist;
+                    if ((!album.album || album.album.toLowerCase() === 'single' || album.album.toLowerCase() === 'singles') && single.title) {
+                        album.album = single.title;
+                    }
+                    if (!album.year && single.year) album.year = single.year;
+                    if (!album.genre && single.genre) album.genre = single.genre;
+                }
+
                 if (!firstAlbum && (album.album || album.album_artist)) {
                     firstAlbum = album;
                     firstCoverPath = album.cover_path;
                 }
-
-                const validTracks = (data.tracks || []).filter(
-                    (t) => t.status !== 'error' && (t.converted_path || t.status === 'ok' || t.status === 'ready')
-                );
 
                 const defaultCoverPath = data.cover_path || `tmp_downloads/${jobId}/cover.jpg`;
                 const defaultCoverPreview = data.cover_url || `/tags/cover?path=${encodeURIComponent(defaultCoverPath)}&t=${Date.now()}`;

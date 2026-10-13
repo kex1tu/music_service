@@ -30,7 +30,7 @@
                 @click="normalizeNavidrome()"
                 :disabled="isNormalizingNavidrome || isReorganizing"
                 class="px-4 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 hover:text-sky-300 border border-sky-500/30 disabled:opacity-50 text-xs font-semibold rounded-lg transition flex items-center justify-center space-x-2 shadow-sm active:scale-95"
-                title="Исправление прав доступа (0644/0755), очистка TXXX и конвертация \\ в ID3v2.4 null-байты для Navidrome">
+                title="Синхронизация медиатеки для Navidrome: права 0644/0755, фильтрация TXXX, null-байты \x00 и нормализация синглов (альбом = трек, соавторы)">
                 <template x-if="isNormalizingNavidrome">
                     <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>

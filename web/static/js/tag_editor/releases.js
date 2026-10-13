@@ -13,17 +13,20 @@ window.TagReleases = {
 
         (this.tracks || []).forEach((track, originalIndex) => {
             const albumName = (track.album || '').trim();
-            const isSingle = !albumName || this.singlesMode;
+            const isSingle = !albumName || albumName.toLowerCase() === 'single' || albumName.toLowerCase() === 'singles' || this.singlesMode;
+            const singleAlbumTitle = (track.album && track.album.toLowerCase() !== 'singles' && track.album.toLowerCase() !== 'single') ? track.album : (track.title || 'Singles');
             const artistName = (track.album_artist || track.artist || this.album.album_artist || 'Unknown Artist').trim();
             const albumArtistKey = artistName.toLowerCase();
-            const key = isSingle ? `__singles__:::${albumArtistKey}` : `${albumArtistKey}:::${albumName.toLowerCase()}`;
+            const isSingleRelease = this.tracks.length === 1 && !this.singlesMode;
+            const key = isSingle ? (isSingleRelease ? `${albumArtistKey}:::${singleAlbumTitle.toLowerCase()}` : `__singles__:::${albumArtistKey}`) : `${albumArtistKey}:::${albumName.toLowerCase()}`;
 
             if (!groupsMap[key]) {
+                const isGroupSingles = isSingle && !isSingleRelease;
                 groupsMap[key] = {
                     id: key,
-                    isSingles: isSingle,
-                    title: isSingle ? (artistName ? `Синглы — ${artistName}` : 'Синглы и отдельные треки') : (track.album || 'Неизвестный альбом'),
-                    albumTitle: isSingle ? (track.album || 'Singles') : (track.album || ''),
+                    isSingles: isGroupSingles,
+                    title: isGroupSingles ? (artistName ? `Синглы — ${artistName}` : 'Синглы и отдельные треки') : (singleAlbumTitle || track.album || 'Неизвестный альбом'),
+                    albumTitle: isSingle ? singleAlbumTitle : (track.album || ''),
                     albumArtist: artistName,
                     year: track.year || this.album.year || null,
                     discTotal: track.disc_total || this.album.disc_total || 1,

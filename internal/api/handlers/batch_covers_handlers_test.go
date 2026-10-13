@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"music-manager/internal/id3"
@@ -31,6 +32,20 @@ func TestFileHandler_NormalizeNavidrome(t *testing.T) {
 	}
 	_ = id3.WriteTags(trackPath, tags, nil)
 
+	// Single track downloaded previously with Album="Single"
+	singleDir := filepath.Join(musicDir, "Single Artist")
+	_ = os.MkdirAll(singleDir, 0700)
+	singleTrack := filepath.Join(singleDir, "01. Hit Song.mp3")
+	_ = os.WriteFile(singleTrack, dummyAudio, 0600)
+	singleTags := id3.TrackTags{
+		Title:       "Hit Song (feat. Star)",
+		Artist:      "Lead Artist",
+		Album:       "Single",
+		AlbumArtist: "",
+		TrackNumber: 1,
+	}
+	_ = id3.WriteTags(singleTrack, singleTags, nil)
+
 	req := httptest.NewRequest(http.MethodPost, "/files/audit/normalize-navidrome", nil)
 	w := httptest.NewRecorder()
 	h.NormalizeNavidrome(w, req)
@@ -39,13 +54,25 @@ func TestFileHandler_NormalizeNavidrome(t *testing.T) {
 		t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var resp map[string]any
+	var resp struct {
+		Success bool `json:"success"`
+		Report  struct {
+			TotalScanned     int `json:"total_scanned"`
+			FilesPermsFixed  int `json:"files_perms_fixed"`
+			DirectoriesFixed int `json:"directories_fixed"`
+			TagsNormalized   int `json:"tags_normalized"`
+			SinglesFixed     int `json:"singles_fixed"`
+		} `json:"report"`
+	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if resp["success"] != true {
+	if !resp.Success {
 		t.Errorf("expected success: true, got %v", resp)
+	}
+	if resp.Report.SinglesFixed != 1 {
+		t.Errorf("expected SinglesFixed=1, got %d", resp.Report.SinglesFixed)
 	}
 
 	// Verify permissions
@@ -57,6 +84,21 @@ func TestFileHandler_NormalizeNavidrome(t *testing.T) {
 	dirSt, _ := os.Stat(albumDir)
 	if dirSt.Mode().Perm() != 0755 {
 		t.Errorf("expected dir perm 0755, got %v", dirSt.Mode().Perm())
+	}
+
+	// Verify single track tags on disk
+	stTags, err := id3.ReadTags(singleTrack, "Single Artist/01. Hit Song.mp3")
+	if err != nil {
+		t.Fatalf("failed to read single track tags: %v", err)
+	}
+	if stTags.Title != "Hit Song" {
+		t.Errorf("expected Title 'Hit Song', got %q", stTags.Title)
+	}
+	if stTags.Album != "Hit Song" {
+		t.Errorf("expected Album 'Hit Song', got %q", stTags.Album)
+	}
+	if stTags.AlbumArtist == "" || !strings.Contains(stTags.AlbumArtist, "Star") {
+		t.Errorf("expected AlbumArtist with Star, got %q", stTags.AlbumArtist)
 	}
 }
 

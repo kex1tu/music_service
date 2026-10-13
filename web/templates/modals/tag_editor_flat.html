@@ -5,6 +5,13 @@
                             <table class="w-full text-left text-xs min-w-[820px]">
                                 <thead class="bg-surface-base text-content-secondary uppercase tracking-wider border-b border-surface-border font-mono text-[11px]">
                                     <tr>
+                                        <th class="py-2.5 px-2 w-8 text-center" title="Выбрать все треки">
+                                            <input
+                                                type="checkbox"
+                                                :checked="isAllTracksSelected()"
+                                                @click="toggleSelectAllTracks()"
+                                                class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 cursor-pointer">
+                                        </th>
                                         <th class="py-2.5 px-2 w-8 text-center" title="Перетаскивание треков"></th>
                                         <th class="py-2.5 px-2 w-12 text-center" title="Обложка трека">Арт</th>
                                         <th class="py-2.5 px-2 w-14 text-center">Диск</th>
@@ -23,6 +30,7 @@
                                         <tr
                                             class="hover:bg-surface-elevated/60 transition-colors"
                                             :class="{
+                                                'bg-brand/10': isTrackSelected(index),
                                                 'bg-brand-muted border-t-2 border-brand': dragOverIndex === index,
                                                 'opacity-40': draggedIndex === index
                                             }"
@@ -31,6 +39,13 @@
                                             @dragover="onDragOver($event, index)"
                                             @drop="onDrop($event, index)"
                                             @dragend="onDragEnd()">
+                                            <td class="py-2 px-1 text-center select-none" @click.stop>
+                                                <input
+                                                    type="checkbox"
+                                                    :checked="isTrackSelected(index)"
+                                                    @click="toggleTrackSelection(index, $event)"
+                                                    class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 cursor-pointer">
+                                            </td>
                                             <td class="py-2 px-1 text-center cursor-grab active:cursor-grabbing text-content-muted hover:text-content-primary select-none">
                                                 <svg class="w-4 h-4 mx-auto" viewBox="0 0 24 24" fill="currentColor">
                                                     <path d="M9 19q-.825 0-1.412-.587T7 17t.588-1.412T9 15t1.413.588T11 17t-.587 1.413T9 19m6 0q-.825 0-1.412-.587T13 17t.588-1.412T15 15t1.413.588T17 17t-.587 1.413T15 19M9 13q-.825 0-1.412-.587T7 11t.588-1.412T9 9t1.413.588T11 11t-.587 1.413T9 13m6 0q-.825 0-1.412-.587T13 11t.588-1.412T15 9t1.413.588T17 11t-.587 1.413T15 13M9 7q-.825 0-1.412-.587T7 5t.588-1.412T9 3t1.413.588T11 5t-.587 1.413T9 7m6 0q-.825 0-1.412-.587T13 5t.588-1.412T15 3t1.413.588T17 5t-.587 1.413T15 7"/>

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"music-manager/internal/id3"
+	"music-manager/internal/services/resolver"
 )
 
 // NavidromeFixReport содержит статистику выполнения нормализации библиотеки.
@@ -15,6 +16,7 @@ type NavidromeFixReport struct {
 	DirectoriesFixed int `json:"directories_fixed"`
 	FilesPermsFixed  int `json:"files_perms_fixed"`
 	TagsNormalized   int `json:"tags_normalized"`
+	SinglesFixed     int `json:"singles_fixed"`
 	TotalScanned     int `json:"total_scanned"`
 }
 
@@ -115,13 +117,86 @@ func (s *Service) NormalizeNavidromeLibrary(ctx context.Context, onTrackNormaliz
 			return nil
 		}
 
-		hasLiteralBackslash := strings.Contains(tags.Artist, "\\") || strings.Contains(tags.AlbumArtist, "\\")
+		rawTitle := strings.TrimSpace(tags.Title)
+		if rawTitle == "" {
+			rawTitle = id3.CleanTitle("", filepath.Base(fullPath))
+			if rawTitle != "" {
+				tags.Title = rawTitle
+			}
+		}
 
-		// Если есть слеши или конфликтные TXXX — переписываем теги через WriteTags
-		if hasLiteralBackslash || hasConflictingTXXX {
+		rawArtist := strings.TrimSpace(tags.Artist)
+		rawAlbum := strings.TrimSpace(tags.Album)
+		rawAlbumArtist := strings.TrimSpace(tags.AlbumArtist)
+		lowerAlbum := strings.ToLower(rawAlbum)
+
+		isSingle := rawAlbum == "" ||
+			lowerAlbum == "single" ||
+			lowerAlbum == "singles" ||
+			lowerAlbum == "unknown album" ||
+			lowerAlbum == "." ||
+			strings.HasPrefix(lowerAlbum, "single - ") ||
+			strings.HasPrefix(lowerAlbum, "singles - ") ||
+			(rawTitle != "" && strings.EqualFold(rawAlbum, rawTitle))
+
+		hasLiteralBackslash := strings.Contains(tags.Artist, "\\") || strings.Contains(tags.AlbumArtist, "\\")
+		needsRewrite := hasLiteralBackslash || hasConflictingTXXX
+		isSingleFixed := false
+
+		// 3. Извлечение нераспарсенных соавторов из названия трека (feat. / ft. / with / при уч.)
+		if rawTitle != "" {
+			cleanTitle, feats := resolver.ExtractFeatFromText(rawTitle)
+			if len(feats) > 0 && cleanTitle != "" {
+				tags.Title = cleanTitle
+				rawTitle = cleanTitle
+
+				currentArts := id3.ParseMultiValue(tags.Artist)
+				for _, f := range feats {
+					fTrimmed := strings.TrimSpace(f)
+					if fTrimmed != "" {
+						found := false
+						for _, a := range currentArts {
+							if strings.EqualFold(a, fTrimmed) {
+								found = true
+								break
+							}
+						}
+						if !found {
+							currentArts = append(currentArts, fTrimmed)
+						}
+					}
+				}
+				tags.Artist = id3.FormatMultiValue(currentArts)
+				rawArtist = tags.Artist
+				needsRewrite = true
+				if isSingle {
+					isSingleFixed = true
+				}
+			}
+		}
+
+		// 4. Нормализация метаданных сингла: Album = Title, AlbumArtist = Artist
+		if isSingle && rawTitle != "" {
+			if tags.Album != rawTitle {
+				tags.Album = rawTitle
+				needsRewrite = true
+				isSingleFixed = true
+			}
+			if rawArtist != "" && (rawAlbumArtist == "" || rawAlbumArtist != rawArtist || strings.EqualFold(rawAlbumArtist, "unknown artist")) {
+				tags.AlbumArtist = rawArtist
+				needsRewrite = true
+				isSingleFixed = true
+			}
+		}
+
+		// Если есть слеши, конфликтные TXXX или исправлены метаданные сингла — переписываем теги
+		if needsRewrite {
 			// WriteTags автоматически кодирует TPE1/TPE2 в ID3v2.4 \x00 и отфильтровывает TXXX:ARTISTS
 			if wErr := id3.WriteTags(fullPath, *tags, nil); wErr == nil {
 				report.TagsNormalized++
+				if isSingleFixed {
+					report.SinglesFixed++
+				}
 				if onTrackNormalized != nil {
 					onTrackNormalized(relPath)
 				}

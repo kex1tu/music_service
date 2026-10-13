@@ -33,6 +33,16 @@ window.TagLoader = {
         component.isLoadingDeezerDetails = false;
         component.jobIds = data.jobIds || (data.jobId ? [data.jobId] : []);
 
+        // Сброс состояния множественного выбора
+        component.selectedIndices = [];
+        component.lastClickedIndex = null;
+        component.bulkActiveField = null;
+        component.bulkGenreInput = '';
+        component.bulkYearInput = '';
+        component.bulkDiscInput = '';
+        component.bulkAlbumArtistInput = '';
+        component.bulkFeatInput = '';
+
         const formatGenres = component.formatGenres || (window.AppFormatters ? window.AppFormatters.formatGenres : (g) => g);
 
         component.album = {
@@ -43,6 +53,22 @@ window.TagLoader = {
             disc_total: data.album?.disc_total || null,
             track_total: data.album?.track_total || null,
         };
+
+        if ((data.tracks || []).length === 1) {
+            const single = data.tracks[0];
+            if (!component.album.album_artist && single.artist) {
+                component.album.album_artist = single.artist;
+            }
+            if ((!component.album.album || component.album.album.toLowerCase() === 'single' || component.album.album.toLowerCase() === 'singles') && single.title) {
+                component.album.album = single.title;
+            }
+            if (!component.album.year && single.year) {
+                component.album.year = single.year;
+            }
+            if (!component.album.genre && single.genre) {
+                component.album.genre = formatGenres(single.genre);
+            }
+        }
 
         component.tracks = (data.tracks || []).map((t) => {
             let covPrev = t.cover_preview_url || t.cover_url || null;
@@ -58,8 +84,8 @@ window.TagLoader = {
                 track_total: t.track_total || (data.album?.track_total || null),
                 disc_number: t.disc_number !== undefined && t.disc_number !== null ? t.disc_number : 1,
                 disc_total: t.disc_total || (data.album?.disc_total || null),
-                album: (t.album !== undefined && t.album !== null && t.album !== '') ? t.album : '',
-                album_artist: (t.album_artist !== undefined && t.album_artist !== null && t.album_artist !== '') ? t.album_artist : (t.artist || ''),
+                album: (t.album !== undefined && t.album !== null && t.album !== '' && t.album.toLowerCase() !== 'singles' && t.album.toLowerCase() !== 'single') ? t.album : (component.album.album || t.title || ''),
+                album_artist: (t.album_artist !== undefined && t.album_artist !== null && t.album_artist !== '') ? t.album_artist : (component.album.album_artist || t.artist || ''),
                 year: (t.year !== undefined && t.year !== null && t.year !== '') ? t.year : (component.album.year || null),
                 genre: formatGenres((t.genre !== undefined && t.genre !== null && t.genre !== '') ? t.genre : (component.album.genre || '')),
                 cover_url: t.cover_url || null,

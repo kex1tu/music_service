@@ -1,0 +1,142 @@
+{{ define "puddletag_diff_modal" }}
+<!-- ==================== МОДАЛЬНОЕ ОКНО КОНВЕРТЕРА ШАБЛОНОВ И DIFF-ПРЕДПРОСМОТРА ==================== -->
+<div
+    x-show="showPatternModal"
+    x-cloak
+    @click.self="showPatternModal = false"
+    @keydown.escape.window="showPatternModal = false"
+    class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4 overflow-y-auto">
+    <div
+        @click.stop
+        class="bg-surface-panel border border-surface-border rounded-2xl max-w-4xl w-full max-h-[85vh] flex flex-col shadow-panel overflow-hidden animate-scale-in">
+        
+        <!-- Заголовок модального окна -->
+        <div class="px-6 py-4 border-b border-surface-border flex items-center justify-between bg-surface-base/90">
+            <div class="flex items-center space-x-3">
+                <div class="w-8 h-8 rounded-lg bg-brand-muted text-brand flex items-center justify-center">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2m-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h2 class="text-base font-bold text-content-primary" x-text="patternMode === 'filename_to_tag' ? 'Конвертер: Имя файла в теги' : 'Конвертер: Теги в имя файла'"></h2>
+                    <p class="text-xs text-content-muted">Синтаксис шаблонов Puddletag / Mp3tag</p>
+                </div>
+            </div>
+            <button
+                @click="showPatternModal = false"
+                class="text-content-muted hover:text-content-primary p-1.5 rounded-lg hover:bg-surface-hover transition">
+                ✕
+            </button>
+        </div>
+
+        <!-- Тело модального окна -->
+        <div class="p-6 space-y-4 overflow-y-auto flex-1">
+            <!-- Строка ввода шаблона и готовые пресеты -->
+            <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                    <label class="text-xs font-semibold text-content-secondary">Шаблон формата:</label>
+                    <!-- Выпадающий список пресетов -->
+                    <div class="flex items-center space-x-1.5 text-xs">
+                        <span class="text-content-muted text-[11px]">Пресеты:</span>
+                        <template x-for="p in patternPresets" :key="p.pattern">
+                            <button
+                                type="button"
+                                @click="patternInput = p.pattern; updatePatternDiff()"
+                                class="px-2 py-0.5 rounded bg-surface-elevated hover:bg-brand hover:text-white text-content-secondary border border-surface-border transition font-mono text-[10px]"
+                                x-text="p.label">
+                            </button>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="relative">
+                    <input
+                        type="text"
+                        x-model="patternInput"
+                        @input="updatePatternDiff()"
+                        class="w-full bg-surface-input border border-surface-border focus:border-brand rounded-xl px-3.5 py-2 text-content-primary font-mono text-sm outline-none transition"
+                        placeholder="%artist% - %title%">
+                </div>
+
+                <!-- Кликабельные чипы доступных токенов -->
+                <div class="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span class="text-[11px] text-content-muted mr-1">Доступные токены:</span>
+                    <button type="button" @click="patternInput += '%artist%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%artist%</button>
+                    <button type="button" @click="patternInput += '%title%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%title%</button>
+                    <button type="button" @click="patternInput += '%album%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%album%</button>
+                    <button type="button" @click="patternInput += '%track%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%track%</button>
+                    <button type="button" @click="patternInput += '%year%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%year%</button>
+                    <button type="button" @click="patternInput += '%genre%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%genre%</button>
+                    <button type="button" @click="patternInput += '%disc%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%disc%</button>
+                </div>
+            </div>
+
+            <!-- ТАБЛИЦА ПРЕДПРОСМОТРА DIFF (SIDE-BY-SIDE PREVIEW) -->
+            <div class="border border-surface-border rounded-xl overflow-hidden shadow-inner">
+                <div class="bg-surface-base px-4 py-2 border-b border-surface-border text-xs font-semibold text-content-muted uppercase tracking-wider flex justify-between items-center">
+                    <span>Предпросмотр сопоставления</span>
+                    <span class="font-mono text-[11px]" x-text="`Элементов: ${patternDiffResults.length}`"></span>
+                </div>
+                <div class="max-h-72 overflow-y-auto">
+                    <table class="w-full text-left text-xs font-mono">
+                        <thead class="bg-surface-panel/90 text-content-muted border-b border-surface-borderSubtle text-[11px]">
+                            <tr>
+                                <th class="py-2 px-3 w-10 text-center">#</th>
+                                <th class="py-2 px-3 w-1/2">
+                                    <span x-text="patternMode === 'filename_to_tag' ? 'Текущее имя файла' : 'Текущее имя файла'"></span>
+                                </th>
+                                <th class="py-2 px-3 w-1/2">
+                                    <span x-text="patternMode === 'filename_to_tag' ? 'Результат тегов' : 'Новое имя файла на диске'"></span>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-surface-borderSubtle bg-surface-panel/30">
+                            <template x-for="(diff, idx) in patternDiffResults" :key="diff.track_path || idx">
+                                <tr class="hover:bg-surface-elevated/40 transition">
+                                    <td class="py-2 px-3 text-center text-content-muted" x-text="idx + 1"></td>
+                                    
+                                    <!-- Исходное значение -->
+                                    <td class="py-2 px-3 truncate max-w-xs text-content-secondary" x-text="patternMode === 'filename_to_tag' ? diff.current_display : diff.current_filename"></td>
+
+                                    <!-- Результирующее значение -->
+                                    <td class="py-2 px-3 truncate max-w-xs font-medium" :class="diff.has_conflict ? 'text-red-400 font-bold' : (diff.has_change ? 'text-amber-400' : 'text-content-muted')">
+                                        <template x-if="patternMode === 'filename_to_tag'">
+                                            <span x-text="diff.preview_display"></span>
+                                        </template>
+                                        <template x-if="patternMode !== 'filename_to_tag'">
+                                            <div>
+                                                <span x-text="diff.new_filename"></span>
+                                                <template x-if="diff.has_conflict">
+                                                    <span class="ml-1 text-[10px] text-red-400 uppercase font-bold">[Конфликт имен!]</span>
+                                                </template>
+                                            </div>
+                                        </template>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Подвал с кнопками -->
+        <div class="px-6 py-3.5 bg-surface-base/90 border-t border-surface-border flex items-center justify-end space-x-3">
+            <button
+                type="button"
+                @click="showPatternModal = false"
+                class="px-4 py-2 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-content-primary rounded-xl text-xs font-semibold transition border border-surface-border">
+                Отмена
+            </button>
+            <button
+                type="button"
+                @click="applyPatternDiff()"
+                :disabled="patternDiffResults.length === 0 || isSaving"
+                class="px-5 py-2 bg-brand hover:bg-brand-hover text-white rounded-xl text-xs font-bold transition shadow-md shadow-brand/20 active:scale-95 disabled:opacity-50">
+                <span x-text="patternMode === 'filename_to_tag' ? 'Применить теги ко всем' : 'Переименовать файлы на диске'"></span>
+            </button>
+        </div>
+    </div>
+</div>
+{{ end }}
