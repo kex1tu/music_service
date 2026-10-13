@@ -408,6 +408,9 @@
     - Контроллер `web/static/js/puddletag/puddletag_workstation.js`: инлайн-редактирование ячеек (Enter/Tab/Esc), мультиселект диапазонов (Shift+Click, Ctrl+Click), подсветка staged dirty state (янтарный цвет), синхронизация Tag Panel (<Разные значения>), сохранение по `Ctrl+S`.
     - Шаблоны: `puddletag_toolbar.html` (тулбар с конвертерами и рекурсией), `puddletag_tag_panel.html` (левая панель с драг-н-дропом обложек), `puddletag_grid.html` (таблица-сетка), `puddletag_diff_modal.html` (предпросмотр Diff) и `puddletag_actions_modals.html` (модалы регистра, нумерации и замены).
     - Унификация: библиотека `file_manager.html` и модальное окно скачанных релизов `tag_editor.html` переведены на единый Puddletag Engine с кнопкой «Принять в медиатеку» для очереди загрузок.
+    - Навигация по подкаталогам в пустом состоянии: добавлены карточки папок исполнителей с количеством треков при пустом корневом каталоге и кнопка «⚡ Загрузить все треки в таблицу (Включая подпапки)».
+    - Мгновенная синхронизация модального редактора тегов при передаче данных загрузки через `CustomEvent('puddletag-load-job')`.
+    - Раскатка на оба боевых сервера: `nl_music` (194.76.168.20) и Сервер 2 (`13.143.193.207` / `mymusicdownload.verymad.net`).
 - **Блок 60 (Comprehensive Security Audit, Native Go Fuzzing, Race & Concurrency Verification):**
   - **Устранение Path Traversal в `PathSandbox.Resolve` (SEC-01):**
     - Увеличение предела итераций URL-декодирования до 10 для нейтрализации deep multi-level URL encoding (`%2525252e%2525252e`).

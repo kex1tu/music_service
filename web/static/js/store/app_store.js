@@ -61,6 +61,7 @@ document.addEventListener('alpine:init', () => {
         openTagEditor(data) {
             this.tagEditorData = data;
             this.activeModal = 'tag_editor';
+            window.dispatchEvent(new CustomEvent('puddletag-load-job', { detail: data }));
         },
 
         closeTagEditor() {

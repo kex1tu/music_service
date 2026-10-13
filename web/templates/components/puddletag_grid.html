@@ -47,16 +47,68 @@
 
             <!-- Тело таблицы со строками файлов -->
             <tbody class="divide-y divide-surface-borderSubtle bg-surface-panel/30 font-sans">
-                <!-- Пустое состояние -->
+                <!-- Пустое состояние или Просмотр подкаталогов -->
                 <template x-if="displayTracks.length === 0 && !isLoading">
                     <tr>
-                        <td colspan="14" class="py-16 text-center text-content-muted">
-                            <div class="flex flex-col items-center justify-center space-y-2">
-                                <svg class="w-10 h-10 text-content-muted/40" viewBox="0 0 24 24" fill="currentColor">
-                                    <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3z"/>
-                                </svg>
-                                <span class="text-xs font-mono">В текущем каталоге нет аудиофайлов</span>
-                            </div>
+                        <td colspan="14" class="py-10 px-4 text-center text-content-muted">
+                            <!-- Если в текущей папке есть подкаталоги (например, в корне медиатеки) -->
+                            <template x-if="directories && directories.length > 0">
+                                <div class="space-y-4 max-w-3xl mx-auto py-2">
+                                    <div class="flex flex-col items-center justify-center space-y-1">
+                                        <div class="text-sm font-bold text-content-primary">В этой папке находятся подкаталоги исполнителей и альбомов:</div>
+                                        <div class="text-xs text-content-muted">Выберите нужную папку для перехода или нажмите кнопку ниже, чтобы загрузить сразу все треки</div>
+                                    </div>
+
+                                    <!-- Сетка папок -->
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 text-left pt-1">
+                                        <template x-for="dir in directories" :key="dir.path">
+                                            <button
+                                                type="button"
+                                                @click="navigateTo(dir.path)"
+                                                class="p-3 bg-surface-elevated hover:bg-surface-hover hover:border-brand/70 border border-surface-border rounded-xl flex items-center space-x-3 transition group active:scale-95 shadow-sm text-left">
+                                                <div class="w-9 h-9 rounded-lg bg-surface-input flex items-center justify-center text-amber-400 group-hover:scale-110 transition shrink-0">
+                                                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                                                        <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                                                    </svg>
+                                                </div>
+                                                <div class="min-w-0 flex-1">
+                                                    <div class="font-bold text-content-primary group-hover:text-brand truncate text-xs" x-text="dir.name"></div>
+                                                    <div class="text-[11px] text-content-muted font-mono" x-text="dir.track_count !== undefined ? `${dir.track_count} треков` : 'Папка'"></div>
+                                                </div>
+                                                <svg class="w-4 h-4 text-content-muted group-hover:text-brand group-hover:translate-x-0.5 transition shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/>
+                                                </svg>
+                                            </button>
+                                        </template>
+                                    </div>
+
+                                    <!-- Кнопка рекурсивного открытия всей медиатеки в сетку -->
+                                    <div class="pt-2">
+                                        <button
+                                            type="button"
+                                            @click="recursiveMode = true; loadDirectory(currentPath)"
+                                            class="px-5 py-2.5 bg-brand hover:bg-brand-hover text-white text-xs font-bold rounded-xl transition shadow-md shadow-brand/20 active:scale-95 inline-flex items-center space-x-2">
+                                            <span>⚡ Загрузить все треки в таблицу (Включить «Включая подпапки»)</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+
+                            <!-- Если действительно пустая папка -->
+                            <template x-if="!(directories && directories.length > 0)">
+                                <div class="flex flex-col items-center justify-center space-y-2 py-8">
+                                    <svg class="w-10 h-10 text-content-muted/40" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3z"/>
+                                    </svg>
+                                    <span class="text-xs font-mono">В текущем каталоге нет аудиофайлов</span>
+                                    <button
+                                        type="button"
+                                        @click="$store.app.activeTab = 'downloader'"
+                                        class="text-xs text-brand hover:underline mt-1 font-medium">
+                                        Перейти в Загрузчик для добавления треков →
+                                    </button>
+                                </div>
+                            </template>
                         </td>
                     </tr>
                 </template>

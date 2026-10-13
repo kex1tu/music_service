@@ -169,10 +169,23 @@ function puddletagWorkstationComponent() {
             });
 
             window.addEventListener('puddletag-load-job', (e) => {
-                if (e.detail && e.detail.tracks) {
+                if (e.detail) {
                     this.loadJobData(e.detail);
                 }
             });
+
+            // Реактивная связь с хранилищем при открытии модального окна тегов
+            if (this.$watch) {
+                this.$watch('$store.app.tagEditorData', (newData) => {
+                    if (newData) {
+                        this.loadJobData(newData);
+                    }
+                });
+            }
+
+            if (window.Alpine && Alpine.store('app')?.tagEditorData) {
+                this.loadJobData(Alpine.store('app').tagEditorData);
+            }
         },
 
         /**
@@ -253,33 +266,42 @@ function puddletagWorkstationComponent() {
          * Загружает треки свежескачанного релиза из очереди загрузчика.
          */
         loadJobData(payload) {
+            if (!payload) return;
             this.isDownloaderMode = true;
-            this.jobId = payload.jobId || null;
+            this.jobId = payload.jobId || (payload.jobIds && payload.jobIds[0]) || null;
             this.currentPath = payload.sourceDir || '';
             this.dirtyIndices.clear();
             this.selectedIndices = [];
             this.editingCell = null;
 
-            const validTracks = (payload.tracks || []).map(t => ({
-                path: t.path,
-                name: t.path.split('/').pop() || t.title,
-                title: t.title || '',
-                artist: t.artist || '',
-                album: t.album || payload.album?.album || '',
-                album_artist: t.album_artist || payload.album?.album_artist || '',
-                year: t.year || payload.album?.year || null,
-                genre: t.genre || payload.album?.genre || '',
-                track_number: t.track_number || null,
-                track_total: t.track_total || payload.tracks.length,
-                disc_number: t.disc_number || 1,
-                disc_total: t.disc_total || 1,
-                duration: t.duration || 0,
-                bitrate: 320,
-                lyrics_status: t.lyrics_status || 'none',
-                has_cover: !!(t.has_cover || payload.hasCover || payload.coverUrl),
-                cover_preview_url: t.cover_preview_url || payload.coverPreviewUrl || null,
-                cover_base64: payload.coverBase64 || null
-            }));
+            const coverUrl = payload.coverPreviewUrl || payload.cover_preview_url || payload.coverUrl || payload.cover_url || null;
+            const hasCover = !!(payload.hasCover || payload.has_cover || payload.coverPath || payload.cover_path || coverUrl);
+
+            const validTracks = (payload.tracks || []).map(t => {
+                const trackPath = t.path || t.converted_path || '';
+                const trackName = (trackPath ? trackPath.split('/').pop() : '') || t.name || t.title || 'Track';
+                const trackCover = t.cover_preview_url || t.cover_url || coverUrl;
+                return {
+                    path: trackPath,
+                    name: trackName,
+                    title: t.title || '',
+                    artist: t.artist || payload.album?.album_artist || payload.album?.artist || '',
+                    album: t.album || payload.album?.album || '',
+                    album_artist: t.album_artist || payload.album?.album_artist || '',
+                    year: t.year || payload.album?.year || null,
+                    genre: t.genre || payload.album?.genre || '',
+                    track_number: t.track_number !== undefined && t.track_number !== null ? t.track_number : null,
+                    track_total: t.track_total || payload.tracks.length,
+                    disc_number: t.disc_number || 1,
+                    disc_total: t.disc_total || 1,
+                    duration: t.duration || 0,
+                    bitrate: t.bitrate || 320,
+                    lyrics_status: t.lyrics_status || 'none',
+                    has_cover: !!(t.has_cover || trackCover || hasCover),
+                    cover_preview_url: trackCover,
+                    cover_base64: t.cover_base64 || payload.coverBase64 || payload.cover_base64 || null
+                };
+            });
 
             this.tracks = validTracks;
             this.originalTracks = JSON.parse(JSON.stringify(validTracks));
