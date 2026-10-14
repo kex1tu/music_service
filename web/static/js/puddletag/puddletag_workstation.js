@@ -885,32 +885,50 @@ function puddletagWorkstationComponent() {
 
         // ==================== СОХРАНЕНИЕ И ОТКАТ (PERSISTENCE) ====================
 
+        saveChanges() {
+            return this.saveAllChanges();
+        },
+
         async saveAllChanges() {
-            if (this.dirtyIndices.size === 0) {
+            if (!this.isDownloaderMode && this.dirtyIndices.size === 0) {
                 Alpine.store('app').toast('Нет несохраненных изменений', 'info');
+                return;
+            }
+            if (!this.tracks || this.tracks.length === 0) {
+                Alpine.store('app').toast('Нет треков для сохранения', 'warning');
                 return;
             }
 
             this.isSaving = true;
             try {
-                const dirtyTracksList = Array.from(this.dirtyIndices).map(idx => this.tracks[idx]);
-
                 // В зависимости от режима отправляем сохранение
                 if (this.isDownloaderMode) {
-                    // Режим загрузчика: переносим в библиотеку через BatchSaveTags с флагом reorganize
+                    // Режим загрузчика: переносим в библиотеку ВСЕ треки релиза через BatchSaveTags с флагом reorganize
+                    const tracksToSave = this.tracks.map((t, idx) => ({
+                        ...t,
+                        title: t.title || '',
+                        artist: t.artist || this.tagPanel.artist || this.tagPanel.album_artist || '',
+                        album: t.album || this.tagPanel.album || '',
+                        album_artist: t.album_artist || this.tagPanel.album_artist || '',
+                        year: t.year || Number(this.tagPanel.year) || null,
+                        genre: t.genre || this.tagPanel.genre || '',
+                        track_number: t.track_number !== undefined && t.track_number !== null ? t.track_number : (idx + 1),
+                        track_total: t.track_total || this.tracks.length,
+                    }));
+
                     const res = await fetch('/tags/batch', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             album: {
-                                album_artist: this.tagPanel.album_artist || dirtyTracksList[0]?.album_artist || '',
-                                album: this.tagPanel.album || dirtyTracksList[0]?.album || '',
-                                year: Number(this.tagPanel.year) || dirtyTracksList[0]?.year || null,
-                                genre: this.tagPanel.genre || dirtyTracksList[0]?.genre || ''
+                                album_artist: this.tagPanel.album_artist || tracksToSave[0]?.album_artist || '',
+                                album: this.tagPanel.album || tracksToSave[0]?.album || '',
+                                year: Number(this.tagPanel.year) || tracksToSave[0]?.year || null,
+                                genre: this.tagPanel.genre || tracksToSave[0]?.genre || ''
                             },
-                            tracks: dirtyTracksList,
+                            tracks: tracksToSave,
                             source_dir: this.currentPath,
-                            cover_base64: this.tagPanel.cover_base64 || dirtyTracksList[0]?.cover_base64 || '',
+                            cover_base64: this.tagPanel.cover_base64 || tracksToSave[0]?.cover_base64 || '',
                             reorganize: true
                         })
                     });
@@ -921,9 +939,23 @@ function puddletagWorkstationComponent() {
                     }
 
                     Alpine.store('app').toast('Релиз успешно принят в медиатеку!', 'success');
-                    Alpine.store('app').activeModal = null;
+                    Alpine.store('app').closeTagEditor();
+
+                    // Очищаем завершенные задачи из очереди загрузок
+                    const jobIdsToClean = (this.jobIds && this.jobIds.length > 0) ? this.jobIds : (this.jobId ? [this.jobId] : []);
+                    if (jobIdsToClean.length > 0) {
+                        try {
+                            await Promise.allSettled(jobIdsToClean.map(jid => fetch(`/downloads/${jid}`, { method: 'DELETE' })));
+                            if (Alpine.store('app').queue) {
+                                await Alpine.store('app').queue.fetchQueue();
+                            }
+                        } catch (cleanupErr) {
+                            console.debug('[Puddletag] Сбой удаления задач из очереди:', cleanupErr);
+                        }
+                    }
                     window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
                 } else {
+                    const dirtyTracksList = Array.from(this.dirtyIndices).map(idx => this.tracks[idx]);
                     // Режим медиатеки: атомарно перезаписываем ID3v2.4 теги
                     const res = await fetch('/tags/batch', {
                         method: 'PUT',
@@ -950,6 +982,7 @@ function puddletagWorkstationComponent() {
                     Alpine.store('app').toast(`Успешно сохранено ${dirtyTracksList.length} файлов! (ID3v2.4)`, 'success');
                     this.dirtyIndices.clear();
                     this.originalTracks = JSON.parse(JSON.stringify(this.tracks));
+                    window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
                 }
             } catch (err) {
                 Alpine.store('app').toast(`Ошибка: ${err.message}`, 'error');

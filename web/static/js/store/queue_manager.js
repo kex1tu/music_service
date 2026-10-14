@@ -246,5 +246,11 @@ window.createQueueManager = function() {
                 return window.QueueEditorBridge.openAllReadyJobsInTagEditor(this);
             }
         },
+
+        acceptJobDirectly(jobId) {
+            if (window.DownloaderPolling) {
+                return window.DownloaderPolling.acceptJobDirectly(jobId);
+            }
+        },
     };
 };

@@ -179,29 +179,40 @@ document.addEventListener('alpine:init', () => {
                         this.fetchArtists();
                     } else {
                         Alpine.store('app').showToast('Запущено фоновое сканирование всех артистов', 'info');
+                        this.progress.is_running = true;
+                        this.progress.current_artist = 'запуск...';
                         this.pollProgress();
                     }
                 } else {
-                    const data = await res.json();
+                    const data = await res.json().catch(() => ({}));
                     Alpine.store('app').showToast(data.error || 'Ошибка сканирования', 'error');
                 }
             } catch (err) {
                 console.error('[Radar] Error triggering scan:', err);
+                Alpine.store('app').showToast('Ошибка запуска сканирования', 'error');
             }
         },
 
         async pollProgress() {
             if (this.pollTimer) clearInterval(this.pollTimer);
+            let wasRunning = this.progress.is_running;
             const check = async () => {
                 try {
                     const res = await fetch('/api/radar/progress');
                     if (res.ok) {
                         const data = await res.json();
+                        const previouslyRunning = wasRunning || this.progress.is_running;
                         this.progress = data;
+                        wasRunning = data.is_running;
                         if (!data.is_running) {
                             clearInterval(this.pollTimer);
                             this.pollTimer = null;
+                            if (previouslyRunning) {
+                                Alpine.store('app').showToast(`Сканирование завершено: найдено ${data.new_releases_found || 0} новинок`, 'success');
+                            }
                             this.fetchUnreadCount();
+                            this.fetchFeed(1);
+                            this.fetchArtists();
                         }
                     }
                 } catch (e) {

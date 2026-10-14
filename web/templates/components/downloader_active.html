@@ -175,6 +175,16 @@
         <div class="flex items-center justify-end space-x-3 pt-2">
             <template x-if="job.status === 'READY'">
                 <div class="flex flex-wrap items-center gap-2">
+                    <button
+                        type="button"
+                        @click="acceptJobDirectly(job.id)"
+                        class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition shadow-md shadow-emerald-600/20 flex items-center space-x-1.5"
+                        title="Переместить релиз в медиатеку в один клик">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                        </svg>
+                        <span>Принять в медиатеку</span>
+                    </button>
                     <template x-if="$store.app.queue.readyCount > 1">
                         <button
                             type="button"
@@ -190,11 +200,11 @@
                     <button
                         type="button"
                         @click="openTagEditorForJob(job.id)"
-                        class="px-4 py-2 bg-brand hover:bg-brand-hover text-white text-xs font-semibold rounded-lg transition shadow-md shadow-brand/20 flex items-center space-x-1.5">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        class="px-4 py-2 bg-surface-elevated hover:bg-surface-hover border border-surface-border text-content-primary hover:text-white text-xs font-semibold rounded-lg transition shadow-md flex items-center space-x-1.5">
+                        <svg class="w-3.5 h-3.5 text-brand" viewBox="0 0 24 24" fill="currentColor">
                             <path d="m21.4 14.25l-7.15 7.15q-.3.3-.675.45t-.75.15t-.75-.15t-.675-.45l-8.825-8.825q-.275-.275-.425-.637T2 11.175V4q0-.825.588-1.412T4 2h7.175q.4 0 .775.163t.65.437l8.8 8.825q.3.3.438.675t.137.75t-.137.738t-.438.662M6.5 8q.625 0 1.063-.437T8 6.5t-.437-1.062T6.5 5t-1.062.438T5 6.5t.438 1.063T6.5 8"/>
                         </svg>
-                        <span x-text="$store.app.queue.readyCount > 1 ? 'Открыть этот релиз' : 'Открыть в редакторе тегов'"></span>
+                        <span x-text="$store.app.queue.readyCount > 1 ? 'Открыть этот релиз' : 'Редактировать теги'"></span>
                     </button>
                 </div>
             </template>

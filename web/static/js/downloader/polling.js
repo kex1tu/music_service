@@ -135,5 +135,75 @@ window.DownloaderPolling = {
         } catch (err) {
             Alpine.store('app').toast(`Ошибка открытия редактора: ${err.message}`, 'error');
         }
+    },
+
+    async acceptJobDirectly(jobId) {
+        try {
+            Alpine.store('app').toast('Перемещение релиза в медиатеку...', 'info');
+            const res = await fetch(`/downloads/${jobId}/tracks`);
+            if (!res.ok) {
+                throw new Error('Не удалось получить подготовленные треки задачи');
+            }
+
+            const data = await res.json();
+            const validTracks = (data.tracks || []).filter(
+                (t) => t.status !== 'error' && (t.converted_path || t.status === 'ok' || t.status === 'ready')
+            );
+
+            if (validTracks.length === 0) {
+                Alpine.store('app').toast('Нет готовых треков для перемещения', 'warning');
+                return;
+            }
+
+            const album = {
+                album_artist: data.album_artist || validTracks[0]?.artist || '',
+                album: data.album || validTracks[0]?.album || validTracks[0]?.title || '',
+                year: data.year || validTracks[0]?.year || null,
+                genre: data.genre || validTracks[0]?.genre || '',
+            };
+
+            const sourceDir = `tmp_downloads/${jobId}/converted`;
+            const tracks = validTracks.map((t, idx) => ({
+                path: t.converted_path || `tmp_downloads/${jobId}/converted/${t.track_number !== undefined && t.track_number !== null ? t.track_number : (idx + 1)}.mp3`,
+                track_number: t.track_number !== undefined && t.track_number !== null ? t.track_number : (idx + 1),
+                track_total: t.track_total || data.track_total || validTracks.length,
+                disc_number: t.disc_number || 1,
+                disc_total: t.disc_total || data.disc_total || 1,
+                title: t.title || '',
+                artist: t.artist || album.album_artist || '',
+                album: t.album || album.album || '',
+                album_artist: t.album_artist || album.album_artist || '',
+                year: t.year || album.year || null,
+                genre: t.genre || album.genre || '',
+                duration: t.duration || 0,
+                lyrics_status: 'none',
+            }));
+
+            const saveRes = await fetch('/tags/batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    album: album,
+                    tracks: tracks,
+                    source_dir: sourceDir,
+                    cover_base64: '',
+                    reorganize: true,
+                })
+            });
+
+            if (!saveRes.ok) {
+                const err = await saveRes.json().catch(() => ({}));
+                throw new Error(err.error || 'Ошибка перемещения в медиатеку');
+            }
+
+            Alpine.store('app').toast('Релиз успешно принят в медиатеку!', 'success');
+            await fetch(`/downloads/${jobId}`, { method: 'DELETE' });
+            if (Alpine.store('app').queue) {
+                await Alpine.store('app').queue.fetchQueue();
+            }
+            window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
+        } catch (err) {
+            Alpine.store('app').toast(`Ошибка: ${err.message}`, 'error');
+        }
     }
 };

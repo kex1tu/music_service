@@ -150,6 +150,12 @@ function downloaderComponent() {
             }
         },
 
+        async acceptJobDirectly(jobId) {
+            if (window.DownloaderPolling) {
+                return window.DownloaderPolling.acceptJobDirectly(jobId);
+            }
+        },
+
         async retryJob(jobId) {
             const targetId = jobId || (this.job ? this.job.id : null);
             if (!targetId) return;

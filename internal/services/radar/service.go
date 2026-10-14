@@ -112,7 +112,7 @@ func (s *Service) ScanAll(parentCtx context.Context, trigger string) error {
 		return errors.New("сканирование уже выполняется")
 	}
 
-	scanCtx, cancel := context.WithCancel(parentCtx)
+	scanCtx, cancel := context.WithCancel(context.Background())
 	s.cancelScan = cancel
 	s.progress = ScanProgress{
 		IsRunning:        true,
@@ -140,6 +140,17 @@ func (s *Service) ScanAll(parentCtx context.Context, trigger string) error {
 			s.mu.Unlock()
 			log.Printf("[Radar] Ошибка получения списка артистов: %v", err)
 			return
+		}
+
+		if len(artists) == 0 {
+			// Если нет явно подписанных, сканируем всех отслеживаемых артистов библиотеки
+			artists, err = s.db.GetTrackedArtists(scanCtx, false)
+			if err != nil {
+				s.mu.Lock()
+				s.progress.LastError = err.Error()
+				s.mu.Unlock()
+				return
+			}
 		}
 
 		s.mu.Lock()

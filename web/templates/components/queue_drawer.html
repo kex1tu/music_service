@@ -119,6 +119,14 @@
                         <div class="flex items-center justify-between text-[10px] text-content-secondary">
                             <span class="truncate mr-2 text-content-muted" x-text="j.current_step"></span>
                             <div class="flex items-center space-x-1 shrink-0">
+                                <template x-if="j.status === 'READY'">
+                                    <button
+                                        @click="$store.app.queue.acceptJobDirectly(j.id)"
+                                        class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-semibold transition shadow-sm"
+                                        title="Принять в медиатеку">
+                                        Принять
+                                    </button>
+                                </template>
                                 <template x-if="j.status === 'READY' && j.is_backfill">
                                     <button
                                         @click="$store.app.queue.openBackfillJobInTagEditor(j)"
@@ -130,7 +138,8 @@
                                 <template x-if="j.status === 'READY' && !j.is_backfill">
                                     <button
                                         @click="$store.app.queue.openJobInTagEditor(j.id)"
-                                        class="px-2 py-0.5 bg-brand hover:bg-brand-hover text-white rounded text-[10px] font-semibold transition">
+                                        class="px-2 py-0.5 bg-brand hover:bg-brand-hover text-white rounded text-[10px] font-semibold transition"
+                                        title="Редактировать теги перед переносом">
                                         В теги
                                     </button>
                                 </template>
