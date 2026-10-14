@@ -132,7 +132,7 @@ func (s *Service) CreateJob(rawURL, source string) (*DownloadJob, error) {
 	if err != nil {
 		return nil, err
 	}
-	if source == "" || source == "auto" {
+	if source == "" || source == "auto" || source == "radar" {
 		source = detectedSource
 	}
 

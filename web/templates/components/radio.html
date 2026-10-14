@@ -140,24 +140,78 @@
         </div>
     </div>
 
-    <!-- Текущая очередь кандидатов «Моя Волна» -->
+    <!-- Блок «Сейчас в эфире» (Now Playing) -->
+    <template x-if="$store.radio.nowPlaying">
+        <div class="bg-gradient-to-r from-brand/20 via-surface-elevated to-surface-panel border border-brand/40 rounded-2xl p-5 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="flex items-center space-x-4 min-w-0">
+                <div class="relative w-14 h-14 rounded-2xl bg-surface-input border border-surface-border flex items-center justify-center shrink-0 overflow-hidden shadow-md">
+                    <template x-if="$store.radio.nowPlaying.id">
+                        <img :src="`/api/tracks/${$store.radio.nowPlaying.id}/cover`" class="w-full h-full object-cover" onerror="this.style.display='none'">
+                    </template>
+                    <svg class="w-7 h-7 text-brand" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                    </svg>
+                </div>
+                <div class="min-w-0">
+                    <div class="flex items-center space-x-2 mb-1">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+                            <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse mr-1.5"></span>
+                            СЕЙЧАС В ЭФИРЕ
+                        </span>
+                        <template x-if="$store.radio.nowPlaying.genre">
+                            <span class="px-2 py-0.5 text-[10px] font-mono bg-surface-input text-content-secondary rounded border border-surface-border" x-text="$store.radio.nowPlaying.genre"></span>
+                        </template>
+                    </div>
+                    <div class="text-base font-extrabold text-white truncate" x-text="$store.radio.nowPlaying.title"></div>
+                    <div class="text-xs text-content-muted truncate" x-text="`${$store.radio.nowPlaying.artist} — ${$store.radio.nowPlaying.album}`"></div>
+                </div>
+            </div>
+            <div class="flex items-center space-x-3 shrink-0">
+                <button
+                    @click="$store.radio.playWave()"
+                    class="px-5 py-2.5 bg-brand hover:bg-brand-hover text-white text-xs font-bold rounded-xl transition flex items-center space-x-2 shadow-md shadow-brand/20">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    <span>Включить поток</span>
+                </button>
+            </div>
+        </div>
+    </template>
+
+    <!-- Очередь кандидатов и история эфира -->
     <div class="bg-surface-panel border border-surface-border rounded-2xl p-5 space-y-4 shadow-sm">
-        <div class="flex items-center justify-between">
-            <div>
-                <h3 class="font-bold text-white text-base">Текущая очередь Волны</h3>
-                <p class="text-xs text-content-muted">Ближайшие запланированные композиции для веб-плеера</p>
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="flex items-center space-x-2">
+                <button
+                    @click="$store.radio.queueTab = 'queue'"
+                    :class="$store.radio.queueTab === 'queue' ? 'bg-brand text-white' : 'bg-surface-elevated text-content-secondary hover:text-white border border-surface-border'"
+                    class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition">
+                    Очередь кандидатов
+                </button>
+                <button
+                    @click="$store.radio.queueTab = 'history'"
+                    :class="$store.radio.queueTab === 'history' ? 'bg-brand text-white' : 'bg-surface-elevated text-content-secondary hover:text-white border border-surface-border'"
+                    class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5">
+                    <span>История эфира</span>
+                    <template x-if="$store.radio.recentHistory.length">
+                        <span class="px-1.5 py-0.2 text-[10px] bg-white/20 rounded-full font-mono" x-text="$store.radio.recentHistory.length"></span>
+                    </template>
+                </button>
             </div>
             <button
-                @click="$store.radio.fetchQueue()"
-                class="px-3 py-1.5 rounded-lg bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs transition flex items-center space-x-1.5 border border-surface-border">
+                @click="$store.radio.fetchQueue(); $store.radio.fetchNowPlaying()"
+                class="px-3 py-1.5 rounded-lg bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs transition flex items-center space-x-1.5 border border-surface-border self-start sm:self-auto">
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
                 </svg>
-                <span>Обновить очередь</span>
+                <span>Обновить</span>
             </button>
         </div>
 
-        <div class="divide-y divide-surface-borderSubtle">
+        <!-- Таблица очереди кандидатов -->
+        <div x-show="$store.radio.queueTab === 'queue'" class="divide-y divide-surface-borderSubtle">
+            <template x-if="!$store.radio.waveQueue.length">
+                <div class="py-8 text-center text-xs text-content-muted">Очередь формируется...</div>
+            </template>
             <template x-for="(trk, idx) in $store.radio.waveQueue" :key="trk.id || trk.path || idx">
                 <div class="py-2.5 flex items-center justify-between hover:bg-surface-hover/40 px-3 rounded-xl transition text-xs">
                     <div class="flex items-center space-x-3 truncate mr-3">
@@ -174,6 +228,38 @@
                         <span class="font-mono text-content-muted text-[11px]" x-text="formatDuration ? formatDuration(trk.duration) : `${Math.floor(trk.duration/60)}:${('0'+Math.floor(trk.duration%60)).slice(-2)}`"></span>
                         <button
                             @click="$store.player.playTrack(trk, $store.radio.waveQueue)"
+                            title="Слушать этот трек"
+                            class="p-1.5 rounded-lg bg-surface-elevated hover:bg-brand hover:text-white text-content-secondary transition">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M8 5v14l11-7z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Таблица истории эфира -->
+        <div x-show="$store.radio.queueTab === 'history'" class="divide-y divide-surface-borderSubtle">
+            <template x-if="!$store.radio.recentHistory.length">
+                <div class="py-8 text-center text-xs text-content-muted">История пуста. Включите поток, чтобы начать воспроизведение.</div>
+            </template>
+            <template x-for="(trk, idx) in $store.radio.recentHistory" :key="trk.id || idx">
+                <div class="py-2.5 flex items-center justify-between hover:bg-surface-hover/40 px-3 rounded-xl transition text-xs">
+                    <div class="flex items-center space-x-3 truncate mr-3">
+                        <span class="font-mono text-content-muted w-6 text-center shrink-0" x-text="idx === 0 ? '▶' : idx + 1"></span>
+                        <div class="truncate">
+                            <div class="font-bold text-white truncate" :class="idx === 0 ? 'text-brand' : 'text-white'" x-text="trk.title"></div>
+                            <div class="text-[11px] text-content-muted truncate" x-text="`${trk.artist} — ${trk.album}`"></div>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-3 shrink-0">
+                        <template x-if="trk.genre">
+                            <span class="px-2 py-0.5 text-[10px] font-mono bg-surface-input text-content-secondary rounded border border-surface-border" x-text="trk.genre"></span>
+                        </template>
+                        <span class="font-mono text-content-muted text-[11px]" x-text="formatDuration ? formatDuration(trk.duration) : `${Math.floor(trk.duration/60)}:${('0'+Math.floor(trk.duration%60)).slice(-2)}`"></span>
+                        <button
+                            @click="$store.player.playTrack(trk, $store.radio.recentHistory)"
                             title="Слушать этот трек"
                             class="p-1.5 rounded-lg bg-surface-elevated hover:bg-brand hover:text-white text-content-secondary transition">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">

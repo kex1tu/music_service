@@ -242,7 +242,7 @@ func (s *Service) ScanArtist(ctx context.Context, artistName string) (*ScanArtis
 
 			if autoDownload && s.downloader != nil && rel.SourceURL != "" {
 				log.Printf("[Radar] Автозагрузка нового релиза: %s — %s (%s)", rel.ArtistName, rel.Title, rel.SourceURL)
-				if _, dlErr := s.downloader.CreateJob(rel.SourceURL, "radar"); dlErr != nil {
+				if _, dlErr := s.downloader.CreateJob(rel.SourceURL, "auto"); dlErr != nil {
 					log.Printf("[Radar] Не удалось создать задание автозагрузки: %v", dlErr)
 				}
 			}

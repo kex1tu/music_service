@@ -241,6 +241,7 @@ func NewRouter(p RouterParams) http.Handler {
 	if p.RadioHandler != nil {
 		r.Route("/api/radio/stream", func(r chi.Router) {
 			r.Options("/*", p.RadioHandler.HandleStreamOptions)
+			r.Get("/now-playing", p.RadioHandler.GetNowPlaying)
 			r.Get("/wave", p.RadioHandler.StreamWave)
 			r.Head("/wave", p.RadioHandler.StreamWave)
 			r.Get("/wave.mp3", p.RadioHandler.StreamWave)
@@ -275,6 +276,7 @@ func NewRouter(p RouterParams) http.Handler {
 	if p.RadioHandler != nil {
 		r.Route("/api/radio", func(r chi.Router) {
 			r.Use(authMiddleware)
+			r.Get("/now-playing", p.RadioHandler.GetNowPlaying)
 			r.Get("/wave/queue", p.RadioHandler.GetWaveQueue)
 			r.Get("/wave/stats", p.RadioHandler.GetWaveStats)
 			r.Get("/genres", p.RadioHandler.GetGenres)

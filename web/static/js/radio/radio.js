@@ -14,15 +14,36 @@ document.addEventListener('alpine:init', () => {
         waveQueue: [],
         genres: [],
         artistSearch: '',
+        nowPlaying: null,
+        recentHistory: [],
+        queueTab: 'queue', // 'queue' | 'history'
         isLoading: false,
         isGeneratingM3U: false,
         isSyncingNavidrome: false,
         streamToken: '',
+        pollTimer: null,
 
         init() {
             this.fetchStats();
             this.fetchQueue();
             this.fetchGenres();
+            this.fetchNowPlaying();
+            if (!this.pollTimer) {
+                this.pollTimer = setInterval(() => this.fetchNowPlaying(), 4000);
+            }
+        },
+
+        async fetchNowPlaying() {
+            try {
+                const res = await fetch('/api/radio/stream/now-playing');
+                if (res.ok) {
+                    const data = await res.json();
+                    this.nowPlaying = data.current_track || null;
+                    this.recentHistory = data.history || [];
+                }
+            } catch (err) {
+                console.debug('[Radio] Error polling now playing:', err);
+            }
         },
 
         getStreamUrl(type = 'wave', param = '', absolute = false) {

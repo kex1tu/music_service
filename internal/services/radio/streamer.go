@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"music-manager/internal/core/sandbox"
@@ -23,21 +24,38 @@ const (
 	TickChunk    = 4000   // 4 000 байт за каждые 100 мс (40 000 байт/сек)
 )
 
+// RadioTrackInfo содержит информацию о треке в эфире.
+type RadioTrackInfo struct {
+	ID       int64  `json:"id"`
+	Title    string `json:"title"`
+	Artist   string `json:"artist"`
+	Album    string `json:"album"`
+	Genre    string `json:"genre"`
+	Duration int    `json:"duration"`
+	FilePath string `json:"file_path"`
+}
+
 // IcyStreamer осуществляет непрерывное вещание по протоколу HTTP ICY с динамической сменой метаданных.
 type IcyStreamer struct {
 	selector *WaveSelector
 	sandbox  *sandbox.PathSandbox
 	database *db.DB
 	token    string
+
+	mu           sync.RWMutex
+	currentTrack map[string]*RadioTrackInfo
+	history      []*RadioTrackInfo
 }
 
 // NewIcyStreamer создает новый экземпляр IcyStreamer.
 func NewIcyStreamer(selector *WaveSelector, sb *sandbox.PathSandbox, database *db.DB, token string) *IcyStreamer {
 	return &IcyStreamer{
-		selector: selector,
-		sandbox:  sb,
-		database: database,
-		token:    token,
+		selector:     selector,
+		sandbox:      sb,
+		database:     database,
+		token:        token,
+		currentTrack: make(map[string]*RadioTrackInfo),
+		history:      make([]*RadioTrackInfo, 0, 15),
 	}
 }
 
@@ -156,6 +174,7 @@ func (s *IcyStreamer) ServeHTTP(w http.ResponseWriter, r *http.Request, stationT
 		displayTitle := fmt.Sprintf("%s - %s", track.Artist, track.Title)
 		currentTitle = displayTitle
 		log.Printf("[Radio] Now streaming: %s", displayTitle)
+		s.setCurrentTrack(stationType, stationParam, track)
 
 		// Фиксация воспроизведения в БД для умной ротации
 		if s.database != nil {
@@ -358,4 +377,59 @@ func buildICYMetadataBlock(streamTitle string) []byte {
 	copy(block[1:], payloadBytes)
 	// Оставшиеся байты блока заполнены нулями (\0)
 	return block
+}
+
+func (s *IcyStreamer) setCurrentTrack(stationType, stationParam string, track *db.TrackEntity) {
+	if track == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	info := &RadioTrackInfo{
+		ID:       track.ID,
+		Title:    track.Title,
+		Artist:   track.Artist,
+		Album:    track.Album,
+		Duration: int(track.Duration),
+		FilePath: track.FilePath,
+	}
+
+	stationKey := stationType
+	if stationParam != "" {
+		stationKey = stationType + ":" + stationParam
+	}
+	if s.currentTrack == nil {
+		s.currentTrack = make(map[string]*RadioTrackInfo)
+	}
+	s.currentTrack[stationKey] = info
+	s.currentTrack["wave"] = info
+
+	// Добавляем в историю (до 15 записей, исключая последовательные дубликаты)
+	if len(s.history) == 0 || s.history[0].ID != info.ID {
+		s.history = append([]*RadioTrackInfo{info}, s.history...)
+		if len(s.history) > 15 {
+			s.history = s.history[:15]
+		}
+	}
+}
+
+// GetNowPlaying возвращает текущий трек в эфире и историю недавних композиций.
+func (s *IcyStreamer) GetNowPlaying(stationType, stationParam string) (*RadioTrackInfo, []*RadioTrackInfo) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	stationKey := stationType
+	if stationParam != "" {
+		stationKey = stationType + ":" + stationParam
+	}
+	current := s.currentTrack[stationKey]
+	if current == nil {
+		current = s.currentTrack["wave"]
+	}
+
+	histCopy := make([]*RadioTrackInfo, len(s.history))
+	copy(histCopy, s.history)
+
+	return current, histCopy
 }

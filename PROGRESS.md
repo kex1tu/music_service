@@ -667,6 +667,21 @@
       - В `internal/api/router.go` эндпоинты стриминга изолированы в отдельный подмаршрут `r.Route("/api/radio/stream", ...)` с поддержкой `OPTIONS /*`, `GET` и `HEAD`, а также добавлены удобные алиасы с расширением `.mp3` (`/wave.mp3`) для капризных внешних клиентов.
       - Исключен фоллбек `HEAD`-запросов на защищенную группу `/api/radio` с возвратом ложного 401.
 
+  - **Блок 71 (Live Now-Playing Sync, Navidrome Subsonic Credentials & Radar Download Fix):**
+    - **71.1. Исправление прямой загрузки релизов Radar (`source: "radar"`):**
+      - В `internal/services/downloader/downloader.go` метод `CreateJob` теперь валидирует и принимает `source == "radar"`, переопределяя его на определенный платформенный источник.
+      - В `internal/services/resolver/resolver.go` метод `Resolve` распознает `"radar"` как авто-определение (`"auto"`).
+      - В `internal/services/radar/service.go` и `web/static/js/radar/radar.js` вызов скачивания передает `"auto"`.
+    - **71.2. Реал-тайм синхронизация метаданных вещания и устранение рассинхрона очередей:**
+      - В `internal/services/radio/streamer.go` добавлено отслеживание текущего трека `currentTrack` и истории эфира `history []*RadioTrackInfo`, обновляемое при каждом переключении трека радиостанции.
+      - Реализован потокобезопасный метод `GetNowPlaying(stationType, stationParam string)`.
+      - В `internal/api/handlers/radio_handlers.go` и `internal/api/router.go` зарегистрирован эндпоинт `GET /api/radio/stream/now-playing` (и `GET /api/radio/now-playing`), возвращающий текущий трек в эфире и последние 15 воспроизведенных треков.
+      - В `web/static/js/player.js` добавлена фоновая синхронизация метаданных плеера каждые 4 секунды (`startRadioMetadataPolling`/`stopRadioMetadataPolling`), обновляющая название, артиста, альбом, обложку и прогресс в нижней панели при проигрывании радио.
+      - В `web/static/js/radio/radio.js` и `web/templates/components/radio.html` добавлен интерактивный блок «🔴 СЕЙЧАС В ЭФИРЕ» с анимированным индикатором и переключатель табов «Очередь кандидатов» / «История эфира».
+    - **71.3. Настройка Navidrome Subsonic API:**
+      - Проверена и подтверждена аутентификация Navidrome Subsonic API (`admin` / `admin`) на Сервере 1 (`http://127.0.0.1:4533/rest/ping`).
+      - Сконфигурированы реквизиты в `/opt/music-manager/.env` для экспорта радиостанций и синхронизации плейлиста `Playlists/Моя Волна.m3u`.
+
 ---
 
 ## 4. Верификация и Продакшен-Деплой

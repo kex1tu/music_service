@@ -219,7 +219,7 @@ func (r *SourceResolver) DetectSource(rawURL string) (string, error) {
 // Resolve extracts track metadata and audio streams from a source URL.
 func (r *SourceResolver) Resolve(ctx context.Context, rawURL, explicitSource string) (*ReleaseMetadata, []ResolvedTrack, error) {
 	source := explicitSource
-	if source == "" || source == "auto" {
+	if source == "" || source == "auto" || source == "radar" {
 		detected, err := r.DetectSource(rawURL)
 		if err != nil {
 			return nil, nil, err

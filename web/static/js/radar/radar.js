@@ -253,7 +253,7 @@ document.addEventListener('alpine:init', () => {
                 const res = await fetch('/downloads', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: release.source_url, source: 'radar' })
+                    body: JSON.stringify({ url: release.source_url, source: 'auto' })
                 });
                 if (res.ok) {
                     await this.setReleaseStatus(release, 'downloaded');

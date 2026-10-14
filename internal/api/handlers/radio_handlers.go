@@ -119,6 +119,23 @@ func (h *RadioHandler) GetWaveStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetNowPlaying возвращает информацию о текущем треке в эфире и недавней истории.
+func (h *RadioHandler) GetNowPlaying(w http.ResponseWriter, r *http.Request) {
+	stationType := r.URL.Query().Get("type")
+	if stationType == "" {
+		stationType = "wave"
+	}
+	stationParam := r.URL.Query().Get("param")
+
+	current, history := h.streamer.GetNowPlaying(stationType, stationParam)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"current_track": current,
+		"history":       history,
+	})
+}
+
 // StreamWave организует бесконечный ICY-поток «Моя Волна» без перекодирования.
 func (h *RadioHandler) StreamWave(w http.ResponseWriter, r *http.Request) {
 	if !h.checkStreamAuth(r) {
