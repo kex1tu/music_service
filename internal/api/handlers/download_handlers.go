@@ -5,10 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 
+	"music-manager/internal/db"
 	"music-manager/internal/services/downloader"
 	"music-manager/internal/services/resolver"
 )
@@ -244,5 +246,105 @@ func (h *DownloadHandler) SwitchTrackVersion(w http.ResponseWriter, r *http.Requ
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
+}
+
+// GetCandidates ищет кандидатов на YouTube Music, SoundCloud и YouTube для ручного выбора.
+func (h *DownloadHandler) GetCandidates(w http.ResponseWriter, r *http.Request) {
+	artist := strings.TrimSpace(r.URL.Query().Get("artist"))
+	title := strings.TrimSpace(r.URL.Query().Get("title"))
+	customQ := strings.TrimSpace(r.URL.Query().Get("q"))
+	durStr := strings.TrimSpace(r.URL.Query().Get("duration"))
+	dur, _ := strconv.Atoi(durStr)
+
+	if customQ == "" && (artist == "" && title == "") {
+		http.Error(w, `{"error":"query, or artist and title are required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if h.service == nil || h.service.Resolver() == nil || h.service.Resolver().Matcher() == nil {
+		http.Error(w, `{"error":"audio matcher is not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	candidates, err := h.service.Resolver().Matcher().SearchMultiCandidates(r.Context(), artist, title, dur, customQ)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"artist":     artist,
+		"title":      title,
+		"query":      customQ,
+		"candidates": candidates,
+		"total":      len(candidates),
+	})
+}
+
+type bindBackfillSourceRequest struct {
+	Path        string `json:"path"`
+	AlbumTitle  string `json:"album_title"`
+	ArtistName  string `json:"artist_name"`
+	TrackTitle  string `json:"track_title"`
+	TrackNumber int    `json:"track_number"`
+	TargetURL   string `json:"target_url"`
+}
+
+// BindBackfillSource привязывает выбранный URL к отсутствующему треку релиза и запускает докачку.
+func (h *DownloadHandler) BindBackfillSource(w http.ResponseWriter, r *http.Request) {
+	var req bindBackfillSourceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid json body"}`, http.StatusBadRequest)
+		return
+	}
+
+	req.TargetURL = strings.TrimSpace(req.TargetURL)
+	if req.TargetURL == "" {
+		http.Error(w, `{"error":"target_url is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if !resolver.IsAllowedURL(req.TargetURL) {
+		http.Error(w, `{"error":"target_url domain is not allowed"}`, http.StatusBadRequest)
+		return
+	}
+
+	// 1. Сохранение ручного пина в SQLite
+	if h.service.Database() != nil {
+		tTitle := req.TrackTitle
+		if tTitle == "" {
+			tTitle = req.AlbumTitle
+		}
+		cacheKey := resolver.BuildCacheKey("", req.ArtistName, tTitle)
+		_ = h.service.Database().SavePinnedSource(r.Context(), db.PinnedTrackSource{
+			CacheKey:   cacheKey,
+			ArtistName: req.ArtistName,
+			TrackTitle: tTitle,
+			PinnedURL:  req.TargetURL,
+			SourceType: "manual",
+		})
+	}
+
+	// 2. Создание задачи дозагрузки (Backfill Job)
+	job, err := h.service.CreateBackfillJob(
+		req.Path,
+		req.AlbumTitle,
+		req.ArtistName,
+		"",
+		[]string{req.TargetURL},
+		[]int{req.TrackNumber},
+	)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(job)
 }
 

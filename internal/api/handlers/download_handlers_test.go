@@ -290,4 +290,57 @@ func TestDownloadHandler_GetDownloadTracks_SingleTrackFallback(t *testing.T) {
 	}
 }
 
+func TestDownloadHandler_PreviewAudio_Validation(t *testing.T) {
+	handler := NewDownloadHandler(nil, nil)
+
+	// 1. Missing URL parameter -> 400
+	req := httptest.NewRequest(http.MethodGet, "/downloads/preview", nil)
+	rec := httptest.NewRecorder()
+	handler.PreviewAudio(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for missing url, got %d", rec.Code)
+	}
+
+	// 2. Disallowed domain -> 400
+	reqDisallowed := httptest.NewRequest(http.MethodGet, "/downloads/preview?url=https://untrusted-site.com/audio.mp3", nil)
+	recDisallowed := httptest.NewRecorder()
+	handler.PreviewAudio(recDisallowed, reqDisallowed)
+	if recDisallowed.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for disallowed domain, got %d", recDisallowed.Code)
+	}
+}
+
+func TestDownloadHandler_GetCandidates_Validation(t *testing.T) {
+	handler := NewDownloadHandler(nil, nil)
+
+	// Empty parameters -> 400
+	req := httptest.NewRequest(http.MethodGet, "/downloads/candidates", nil)
+	rec := httptest.NewRecorder()
+	handler.GetCandidates(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for empty query, got %d", rec.Code)
+	}
+}
+
+func TestDownloadHandler_BindBackfillSource_Validation(t *testing.T) {
+	handler := NewDownloadHandler(nil, nil)
+
+	// 1. Missing body -> 400
+	reqEmpty := httptest.NewRequest(http.MethodPost, "/downloads/backfill/bind-source", strings.NewReader(""))
+	recEmpty := httptest.NewRecorder()
+	handler.BindBackfillSource(recEmpty, reqEmpty)
+	if recEmpty.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for empty body, got %d", recEmpty.Code)
+	}
+
+	// 2. Disallowed domain -> 400
+	payload := `{"path":"/music/Album","album_title":"Album","artist_name":"Artist","target_url":"https://evil.com/song"}`
+	reqEvil := httptest.NewRequest(http.MethodPost, "/downloads/backfill/bind-source", strings.NewReader(payload))
+	recEvil := httptest.NewRecorder()
+	handler.BindBackfillSource(recEvil, reqEvil)
+	if recEvil.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for evil url, got %d", recEvil.Code)
+	}
+}
+
 

@@ -28,13 +28,13 @@ window.createQueueManager = function() {
             return Math.round(this.summary?.overall_progress || 0);
         },
         get readyCount() {
-            return (this.jobs || []).filter((j) => j.status === 'READY').length;
+            return (this.jobs || []).filter((j) => j.status === 'READY' || j.status === 'PARTIAL_READY').length;
         },
         get errorCount() {
             return (this.jobs || []).filter((j) => j.status === 'ERROR').length;
         },
         get completedCount() {
-            return (this.jobs || []).filter((j) => j.status === 'READY' || j.status === 'ERROR' || j.status === 'CANCELLED').length;
+            return (this.jobs || []).filter((j) => j.status === 'READY' || j.status === 'PARTIAL_READY' || j.status === 'ERROR' || j.status === 'CANCELLED').length;
         },
         get isPaused() {
             return !!this.summary?.is_paused;
@@ -72,7 +72,8 @@ window.createQueueManager = function() {
                             case 'TAGGING':
                                 return 2; // Скачиваются / обрабатываются
                             case 'READY':
-                                return 3; // Скачаны
+                            case 'PARTIAL_READY':
+                                return 3; // Скачаны / Готовы частично
                             case 'ERROR':
                                 return 4; // Ошибки
                             case 'CANCELLED':

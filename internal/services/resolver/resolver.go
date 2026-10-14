@@ -13,10 +13,30 @@ var allowedDomains = []string{
 	"youtube.com", "youtu.be",
 	"music.youtube.com",
 	"soundcloud.com",
+	"bandcamp.com",
 	"deezer.com", "deezer.page.link", "link.deezer.com",
 	"spotify.com", "spotify.link",
 	"music.yandex.ru", "music.yandex.com",
 	"music.apple.com",
+}
+
+// IsAllowedURL проверяет, принадлежит ли URL белому списку разрешенных доменов.
+func IsAllowedURL(rawURL string) bool {
+	cleanURL := strings.TrimSpace(rawURL)
+	if !strings.HasPrefix(cleanURL, "http://") && !strings.HasPrefix(cleanURL, "https://") {
+		cleanURL = "https://" + cleanURL
+	}
+	u, err := url.Parse(cleanURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, d := range allowedDomains {
+		if host == d || strings.HasSuffix(host, "."+d) {
+			return true
+		}
+	}
+	return false
 }
 
 // AudioQualityTelemetry содержит спектральные и кодековые метрики исходного аудиопотока.
@@ -92,6 +112,9 @@ func NewSourceResolver(deezer *DeezerClient, matcher *AudioMatcher, cookiesPath 
 	}
 	yandex := NewYandexMusicClient(yaToken, yaProxy)
 	ytmusic := NewYouTubeMusicClient("")
+	if matcher != nil {
+		matcher.SetYtMusicClient(ytmusic)
+	}
 	return &SourceResolver{
 		deezerClient:  deezer,
 		yandexClient:  yandex,
@@ -174,6 +197,9 @@ func (r *SourceResolver) DetectSource(rawURL string) (string, error) {
 	if strings.Contains(host, "soundcloud.com") {
 		return "soundcloud", nil
 	}
+	if strings.Contains(host, "bandcamp.com") {
+		return "bandcamp", nil
+	}
 	if strings.Contains(host, "youtube.com") || strings.Contains(host, "youtu.be") {
 		return "youtube", nil
 	}
@@ -206,7 +232,7 @@ func (r *SourceResolver) Resolve(ctx context.Context, rawURL, explicitSource str
 		return r.resolveDeezer(ctx, rawURL)
 	case "yandex":
 		return r.resolveYandex(ctx, rawURL)
-	case "youtube", "soundcloud":
+	case "youtube", "soundcloud", "bandcamp":
 		return r.resolveYtDlp(ctx, rawURL)
 	case "torrent":
 		return r.resolveTorrentOrDeezer(ctx, rawURL)

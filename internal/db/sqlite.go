@@ -53,11 +53,18 @@ func (db *DB) Conn() *sql.DB {
 	return db.conn
 }
 
-// initSchema применяет DDL схему таблиц при запуске.
+// initSchema применяет DDL схему таблиц при запуске и накатывает инкрементальные миграции.
 func (db *DB) initSchema() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	_, err := db.conn.ExecContext(ctx, ddlSchema)
-	return err
+	if _, err := db.conn.ExecContext(ctx, ddlSchema); err != nil {
+		return err
+	}
+
+	// Инкрементальные миграции для существующих баз данных
+	_, _ = db.conn.ExecContext(ctx, "ALTER TABLE tracks ADD COLUMN pinned_source_url TEXT;")
+	_, _ = db.conn.ExecContext(ctx, "ALTER TABLE missing_tracks ADD COLUMN pinned_source_url TEXT;")
+
+	return nil
 }

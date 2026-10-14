@@ -250,7 +250,7 @@ func (m *JobManager) GetSummary() QueueSummaryResponse {
 			summary.ActiveJobs++
 		case StatusQueued:
 			summary.QueuedJobs++
-		case StatusReady:
+		case StatusReady, StatusPartialReady:
 			summary.CompletedJobs++
 		case StatusError:
 			summary.ErrorJobs++

@@ -111,6 +111,7 @@
                                 'bg-purple-500/20 text-purple-400 border border-purple-500/30': j.status === 'CONVERTING',
                                 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30': j.status === 'TAGGING',
                                 'bg-brand-muted text-brand border border-brand/30': j.status === 'READY',
+                                'bg-amber-500/20 text-amber-300 border border-amber-500/40': j.status === 'PARTIAL_READY',
                                 'bg-red-500/20 text-red-400 border border-red-500/30': j.status === 'ERROR',
                                 'bg-surface-elevated text-content-muted border border-surface-border': j.status === 'CANCELLED',
                             }"
@@ -199,6 +200,19 @@
                                                 <span x-text="getVersionBadge(track.version_status).label"></span>
                                             </span>
                                         </template>
+
+                                        <!-- Кнопка Выбрать источник вручную (Source Picker) -->
+                                        <button
+                                            type="button"
+                                            @click.stop="$store.sourcePicker.openForQueueTrack(j, track)"
+                                            class="px-1.5 py-0.5 rounded text-[10px] font-semibold transition flex items-center space-x-1 border shadow-xs"
+                                            :class="track.status === 'waiting_source' || track.status === 'error' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30 animate-pulse' : 'bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
+                                            title="Выбрать источник вручную через модальное окно">
+                                            <svg class="w-3 h-3 text-brand" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                                            </svg>
+                                            <span x-text="track.status === 'waiting_source' || track.status === 'error' ? 'Выбрать источник' : 'Источник'"></span>
+                                        </button>
 
                                         <!-- Кнопка выпадающего списка версий -->
                                         <template x-if="track.candidates && track.candidates.length > 1">
@@ -303,7 +317,7 @@
                         </template>
                     </div>
                     <div class="flex items-center space-x-2 shrink-0">
-                        <template x-if="j.status === 'READY' && j.is_backfill">
+                        <template x-if="(j.status === 'READY' || j.status === 'PARTIAL_READY') && j.is_backfill">
                             <button
                                 type="button"
                                 @click="$store.app.queue.openBackfillJobInTagEditor(j)"
@@ -312,7 +326,7 @@
                                 Весь релиз
                             </button>
                         </template>
-                        <template x-if="j.status === 'READY' && !j.is_backfill">
+                        <template x-if="(j.status === 'READY' || j.status === 'PARTIAL_READY') && !j.is_backfill">
                             <button
                                 type="button"
                                 @click="$store.app.queue.openJobInTagEditor(j.id)"
@@ -323,7 +337,16 @@
                                 <span>В теги</span>
                             </button>
                         </template>
-                        <template x-if="j.status !== 'READY' && j.status !== 'ERROR' && j.status !== 'CANCELLED'">
+                        <template x-if="j.status === 'PARTIAL_READY'">
+                            <button
+                                type="button"
+                                @click="$store.app.queue.cancelJob(j.id)"
+                                class="px-2 py-1 bg-surface-elevated hover:bg-red-900/40 text-content-muted hover:text-red-200 rounded-md text-xs border border-surface-border hover:border-red-700/50 transition"
+                                title="Отменить оставшиеся / удалить">
+                                Отмена
+                            </button>
+                        </template>
+                        <template x-if="j.status !== 'READY' && j.status !== 'PARTIAL_READY' && j.status !== 'ERROR' && j.status !== 'CANCELLED'">
                             <button
                                 type="button"
                                 @click="$store.app.queue.cancelJob(j.id)"

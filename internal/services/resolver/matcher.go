@@ -31,8 +31,9 @@ type AudioMatcher struct {
 	cookiesPath  string
 	db           *db.DB
 	cfg          *config.Config
-	deezerClient *DeezerClient
-	itunesClient *ITunesClient
+	deezerClient  *DeezerClient
+	itunesClient  *ITunesClient
+	ytmusicClient *YouTubeMusicClient
 }
 
 // MatchResult содержит детальные сведения о подобранном аудио-источнике.
@@ -66,6 +67,11 @@ func (m *AudioMatcher) SetCatalogClients(deezer *DeezerClient, itunes *ITunesCli
 	m.itunesClient = itunes
 }
 
+// SetYtMusicClient привязывает клиент YouTube Music для быстрого поиска кандидатов.
+func (m *AudioMatcher) SetYtMusicClient(ytmusic *YouTubeMusicClient) {
+	m.ytmusicClient = ytmusic
+}
+
 // FindBestMatch searches SoundCloud first (for uncut/explicit audio), falling back to YouTube.
 func (m *AudioMatcher) FindBestMatch(ctx context.Context, title, artist string, duration int) (string, error) {
 	res, err := m.FindBestMatchWithDetails(ctx, title, artist, "", duration)
@@ -79,6 +85,17 @@ func (m *AudioMatcher) FindBestMatch(ctx context.Context, title, artist string, 
 // falling back transparently to YouTube if no suitable candidates are found on SoundCloud.
 func (m *AudioMatcher) FindBestMatchWithDetails(ctx context.Context, title, artist, isrc string, duration int) (*MatchResult, error) {
 	cacheKey := BuildCacheKey(isrc, artist, title)
+
+	// 0. Проверка постоянных ручных привязок пользователя (наивысший приоритет)
+	if m.db != nil {
+		if pin, err := m.db.GetPinnedSource(ctx, cacheKey); err == nil && pin != nil && pin.PinnedURL != "" {
+			return &MatchResult{
+				URL:      pin.PinnedURL,
+				Status:   "manual",
+				Duration: pin.Duration,
+			}, nil
+		}
+	}
 
 	// 1. Проверка SQLite кэша
 	if m.db != nil {

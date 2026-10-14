@@ -794,3 +794,85 @@ func (db *DB) DeleteSetting(ctx context.Context, key string) error {
 	return err
 }
 
+// PinnedTrackSource представляет запись постоянной ручной привязки аудио-источника.
+type PinnedTrackSource struct {
+	CacheKey   string    `json:"cache_key"`
+	ArtistName string    `json:"artist_name"`
+	TrackTitle string    `json:"track_title"`
+	ISRC       *string   `json:"isrc,omitempty"`
+	PinnedURL  string    `json:"pinned_url"`
+	SourceType string    `json:"source_type"`
+	Duration   int       `json:"duration"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// GetPinnedSource возвращает зафиксированный источник трека по ключу.
+func (db *DB) GetPinnedSource(ctx context.Context, cacheKey string) (*PinnedTrackSource, error) {
+	cacheKey = strings.TrimSpace(cacheKey)
+	if cacheKey == "" {
+		return nil, nil
+	}
+
+	query := `
+	SELECT cache_key, artist_name, track_title, isrc, pinned_url, source_type, duration, created_at, updated_at
+	FROM pinned_track_sources
+	WHERE cache_key = ?;
+	`
+	row := db.conn.QueryRowContext(ctx, query, cacheKey)
+	var p PinnedTrackSource
+	var isrc sql.NullString
+	err := row.Scan(
+		&p.CacheKey, &p.ArtistName, &p.TrackTitle, &isrc,
+		&p.PinnedURL, &p.SourceType, &p.Duration,
+		&p.CreatedAt, &p.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if isrc.Valid && isrc.String != "" {
+		p.ISRC = &isrc.String
+	}
+	return &p, nil
+}
+
+// SavePinnedSource сохраняет постоянную ручную привязку аудио-источника.
+func (db *DB) SavePinnedSource(ctx context.Context, pin PinnedTrackSource) error {
+	query := `
+	INSERT INTO pinned_track_sources (
+		cache_key, artist_name, track_title, isrc, pinned_url, source_type, duration, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+	ON CONFLICT(cache_key) DO UPDATE SET
+		pinned_url = excluded.pinned_url,
+		source_type = excluded.source_type,
+		duration = excluded.duration,
+		updated_at = CURRENT_TIMESTAMP;
+	`
+	var isrcVal any
+	if pin.ISRC != nil && *pin.ISRC != "" {
+		isrcVal = *pin.ISRC
+	}
+	_, err := db.conn.ExecContext(ctx, query,
+		pin.CacheKey, pin.ArtistName, pin.TrackTitle, isrcVal,
+		pin.PinnedURL, pin.SourceType, pin.Duration,
+	)
+	return err
+}
+
+// UpdateTrackPinnedURL сохраняет URL ручной привязки для трека в таблице tracks.
+func (db *DB) UpdateTrackPinnedURL(ctx context.Context, trackID int64, pinnedURL string) error {
+	query := `UPDATE tracks SET pinned_source_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;`
+	_, err := db.conn.ExecContext(ctx, query, pinnedURL, trackID)
+	return err
+}
+
+// UpdateMissingTrackPinnedURL сохраняет URL ручной привязки для недостающего трека.
+func (db *DB) UpdateMissingTrackPinnedURL(ctx context.Context, missingTrackID int64, pinnedURL string) error {
+	query := `UPDATE missing_tracks SET pinned_source_url = ? WHERE id = ?;`
+	_, err := db.conn.ExecContext(ctx, query, pinnedURL, missingTrackID)
+	return err
+}
+

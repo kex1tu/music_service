@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"music-manager/internal/core/sandbox"
+	"music-manager/internal/db"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
@@ -29,9 +30,9 @@ type SwitchVersionResult struct {
 
 var ErrInvalidURL = errors.New("untrusted or invalid target_url")
 
-// SwitchTrackVersion выполняет горячее переключение версии трека:
-// скачивание выбранного SoundCloud URL, перекодирование в MP3 320k CBR, перенос ID3v2.4 тегов,
-// атомарную замену аудиофайла и сохранение ручного пина в SQLite кэше.
+// SwitchTrackVersion выполняет привязку выбранного источника (YouTube, YT Music, SoundCloud, Bandcamp):
+// скачивание потока во временный каталог, конвертацию в MP3 320k CBR, накат канонических ID3v2.4 тегов
+// и обложки альбома, замену файла и фиксацию ручного пина в SQLite базе данных.
 func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL string) (*SwitchVersionResult, error) {
 	targetURL = strings.TrimSpace(targetURL)
 	if targetURL == "" {
@@ -48,13 +49,25 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 	}
 
 	host := strings.ToLower(parsedURL.Hostname())
-	if host != "soundcloud.com" && !strings.HasSuffix(host, ".soundcloud.com") {
-		return nil, fmt.Errorf("%w: domain %q is not allowed for switch-version (must be soundcloud.com)", ErrInvalidURL, host)
+	if !resolver.IsAllowedURL(targetURL) {
+		return nil, fmt.Errorf("%w: domain %q is not in allowed sources whitelist", ErrInvalidURL, host)
+	}
+
+	sourceType := "direct"
+	if strings.Contains(host, "youtube.com") || strings.Contains(host, "youtu.be") {
+		sourceType = "youtube"
+		if strings.Contains(host, "music.youtube.com") {
+			sourceType = "ytmusic"
+		}
+	} else if strings.Contains(host, "soundcloud.com") {
+		sourceType = "soundcloud"
+	} else if strings.Contains(host, "bandcamp.com") {
+		sourceType = "bandcamp"
 	}
 
 	var artist, title, isrc, relFilePath, absFilePath string
 	var foundJob *DownloadJob
-	var foundIdx int
+	var foundIdx int = -1
 
 	// 1. Поиск трека в активных и недавних задачах загрузчика
 	for _, job := range s.jobs.GetAll() {
@@ -80,12 +93,14 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 	}
 
 	// 2. Если трек не найден в задачах — ищем в базе данных медиатеки по ID/Hash/FilePath
+	var dbTrackID int64
 	if foundJob == nil && s.Database() != nil {
 		entity, err := s.Database().GetTrackByIDOrHash(ctx, trackID)
 		if err == nil && entity != nil {
 			artist = entity.Artist
 			title = entity.Title
 			relFilePath = entity.FilePath
+			dbTrackID = entity.ID
 		}
 	}
 
@@ -147,26 +162,80 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 		}
 	}
 
-	// 8. Перенос существующих ID3v2.4 тегов и обложки
+	// 8. Перенос канонических ID3v2.4 тегов и обложки альбома
+	var tagData id3.TrackTags
+	var cover *id3.CoverInfo
+
 	if absFilePath != "" {
 		oldTags, _ := id3.ReadTags(absFilePath, "")
-		cover, _ := id3.ReadCover(absFilePath)
+		cover, _ = id3.ReadCover(absFilePath)
 		if oldTags != nil {
-			oldTags.Duration = float64(candDuration)
-			_ = id3.WriteTags(tmpMP3File, *oldTags, cover)
+			tagData = *oldTags
+			tagData.Duration = float64(candDuration)
 		} else {
-			_ = id3.WriteTags(tmpMP3File, id3.TrackTags{Title: title, Artist: artist, Duration: float64(candDuration)}, cover)
+			tagData = id3.TrackTags{Title: title, Artist: artist, Duration: float64(candDuration)}
+		}
+	} else if foundJob != nil && foundIdx >= 0 && foundIdx < len(foundJob.Tracks) {
+		tr := foundJob.Tracks[foundIdx]
+		alb := tr.Album
+		if alb == "" && foundJob.AlbumTitle != nil {
+			alb = *foundJob.AlbumTitle
+		}
+		albArt := tr.AlbumArtist
+		if albArt == "" && foundJob.ArtistName != nil {
+			albArt = *foundJob.ArtistName
+		}
+		tagData = id3.TrackTags{
+			Title:       tr.Title,
+			Artist:      tr.Artist,
+			Album:       alb,
+			AlbumArtist: albArt,
+			TrackNumber: tr.TrackNumber,
+			DiscNumber:  tr.DiscNumber,
+			Duration:    float64(candDuration),
+		}
+		if tr.TrackTotal != nil {
+			tagData.TrackTotal = *tr.TrackTotal
+		}
+		if tr.DiscTotal != nil {
+			tagData.DiscTotal = *tr.DiscTotal
+		}
+		if tr.Year != nil {
+			tagData.Year = *tr.Year
+		}
+		if tr.Genre != nil {
+			tagData.Genre = *tr.Genre
+		}
+
+		if foundJob.CoverRelativePath != "" {
+			if covAbs, cErr := s.tmpSandbox.Resolve(foundJob.CoverRelativePath, false); cErr == nil {
+				cover, _ = id3.ReadCover(covAbs)
+			}
 		}
 	} else {
-		_ = id3.WriteTags(tmpMP3File, id3.TrackTags{Title: title, Artist: artist, Duration: float64(candDuration)}, nil)
+		tagData = id3.TrackTags{Title: title, Artist: artist, Duration: float64(candDuration)}
 	}
 
-	// 9. Атомарная замена файла (os.Rename с fallback на копирование при EXDEV)
+	_ = id3.WriteTags(tmpMP3File, tagData, cover)
+
+	// 9. Атомарная замена или создание файла в целевой папке
 	destPath := absFilePath
 	if destPath == "" {
-		cleanTitle := id3.CleanTitle(title, "Track")
-		safeName := sandbox.SanitizeFilename(fmt.Sprintf("%s - %s.mp3", artist, cleanTitle), "Track.mp3")
-		destPath, _ = s.musicSandbox.Resolve(safeName, false)
+		if foundJob != nil {
+			convertedDir, _ := s.tmpSandbox.Resolve(filepath.Join(foundJob.ID, "converted"), true)
+			_ = os.MkdirAll(convertedDir, 0755)
+			cleanTitle := id3.CleanTitle(title, "Track")
+			safeTitle := sandbox.SanitizeFilename(cleanTitle, "Track")
+			trackNum := 1
+			if foundIdx >= 0 && foundIdx < len(foundJob.Tracks) && foundJob.Tracks[foundIdx].TrackNumber > 0 {
+				trackNum = foundJob.Tracks[foundIdx].TrackNumber
+			}
+			destPath = filepath.Join(convertedDir, fmt.Sprintf("%02d. %s.mp3", trackNum, safeTitle))
+		} else {
+			cleanTitle := id3.CleanTitle(title, "Track")
+			safeName := sandbox.SanitizeFilename(fmt.Sprintf("%s - %s.mp3", artist, cleanTitle), "Track.mp3")
+			destPath, _ = s.musicSandbox.Resolve(safeName, false)
+		}
 	}
 
 	_ = os.Chmod(tmpMP3File, 0644)
@@ -178,18 +247,57 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 	}
 	_ = os.Chmod(destPath, 0644)
 
-	// 10. Фиксация ручного выбора в базе данных SQLite (защита от перезаписи)
+	// 10. Фиксация ручного выбора в SQLite базе данных
 	if s.Database() != nil {
+		_ = s.Database().SavePinnedSource(ctx, db.PinnedTrackSource{
+			CacheKey:   cacheKey,
+			ArtistName: artist,
+			TrackTitle: title,
+			ISRC:       &isrc,
+			PinnedURL:  targetURL,
+			SourceType: sourceType,
+			Duration:   candDuration,
+		})
 		_ = s.Database().PinSoundCloudVersion(ctx, cacheKey, artist, title, targetURL, candDuration)
+		if dbTrackID > 0 {
+			_ = s.Database().UpdateTrackPinnedURL(ctx, dbTrackID, targetURL)
+		}
 	}
 
 	// 11. Обновление состояния задачи в памяти
 	if foundJob != nil {
+		relConverted, _ := s.tmpSandbox.ToRelative(destPath)
 		foundJob.UpdateTrack(foundIdx, func(tr *resolver.ResolvedTrack) {
 			tr.AudioSourceURL = targetURL
 			tr.VersionStatus = "manual"
 			tr.Duration = candDuration
+			tr.ConvertedPath = &relConverted
+			tr.Status = "ready"
+			tr.Error = nil
 		})
+
+		// Пересчет количества готовых треков и обновление статуса задачи
+		snap := foundJob.Snapshot()
+		readyCount := 0
+		for _, tr := range snap.Tracks {
+			if tr.Status == "ready" && tr.ConvertedPath != nil && *tr.ConvertedPath != "" {
+				readyCount++
+			}
+		}
+
+		foundJob.mu.Lock()
+		foundJob.CompletedTracks = readyCount
+		if readyCount >= snap.TotalTracks && snap.TotalTracks > 0 {
+			foundJob.Status = StatusReady
+			foundJob.Progress = 100.0
+			foundJob.CurrentStep = fmt.Sprintf("Готово к проверке тегов (%d/%d скачано)", readyCount, snap.TotalTracks)
+		} else if readyCount > 0 {
+			foundJob.Status = StatusPartialReady
+			foundJob.CurrentStep = fmt.Sprintf("Готов частично (%d/%d готово)", readyCount, snap.TotalTracks)
+		}
+		foundJob.UpdatedAt = time.Now().UTC()
+		foundJob.mu.Unlock()
+		foundJob.notifyUpdate()
 	}
 
 	return &SwitchVersionResult{

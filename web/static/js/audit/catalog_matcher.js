@@ -177,7 +177,7 @@ window.AuditCatalogMatcher = {
         return (Alpine.store('app').queue?.jobs || []).find((j) => {
             if (!j.is_backfill || !j.target_album_path) return false;
             const jNorm = j.target_album_path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-            return jNorm === norm && j.status === 'READY';
+            return jNorm === norm && (j.status === 'READY' || j.status === 'PARTIAL_READY');
         });
     },
 

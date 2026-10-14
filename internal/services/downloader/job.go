@@ -18,9 +18,10 @@ const (
 	StatusDownloading JobStatus = "DOWNLOADING"
 	StatusConverting  JobStatus = "CONVERTING"
 	StatusTagging     JobStatus = "TAGGING"
-	StatusReady       JobStatus = "READY"
-	StatusError       JobStatus = "ERROR"
-	StatusCancelled   JobStatus = "CANCELLED"
+	StatusReady        JobStatus = "READY"
+	StatusPartialReady JobStatus = "PARTIAL_READY"
+	StatusError        JobStatus = "ERROR"
+	StatusCancelled    JobStatus = "CANCELLED"
 )
 
 // DownloadJob represents an active or completed download task.
@@ -204,6 +205,18 @@ func (j *DownloadJob) SetReady(completedTracks, total int) {
 	j.Status = StatusReady
 	j.Progress = 100.0
 	j.CurrentStep = fmt.Sprintf("Готово к проверке тегов (%d/%d скачано)", completedTracks, total)
+	j.UpdatedAt = time.Now().UTC()
+	j.mu.Unlock()
+	j.notifyUpdate()
+}
+
+func (j *DownloadJob) SetPartialReady(completedTracks, total int) {
+	j.mu.Lock()
+	j.Status = StatusPartialReady
+	j.CompletedTracks = completedTracks
+	j.TotalTracks = total
+	j.Progress = 100.0
+	j.CurrentStep = fmt.Sprintf("Готов частично (%d/%d готово, требуется выбор источника)", completedTracks, total)
 	j.UpdatedAt = time.Now().UTC()
 	j.mu.Unlock()
 	j.notifyUpdate()

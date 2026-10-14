@@ -149,7 +149,7 @@
                                         <th class="p-2.5 w-12 text-center">#</th>
                                         <th class="p-2.5">Название трека</th>
                                         <th class="p-2.5 w-24 text-center">Статус</th>
-                                        <th class="p-2.5 w-28 text-right">Действие</th>
+                                        <th class="p-2.5 w-48 text-right">Действие</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-800/40">
@@ -181,15 +181,26 @@
                                             </td>
                                             <td class="p-2.5 text-right">
                                                 <template x-if="!t.is_present">
-                                                    <button
-                                                        @click="downloadMissing(alb, t)"
-                                                        :disabled="isDownloading(alb, t)"
-                                                        class="px-2.5 py-1 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 rounded text-[11px] font-medium transition inline-flex items-center space-x-1">
-                                                        <svg class="w-3.5 h-3.5" :class="{'animate-spin': isDownloading(alb, t)}" viewBox="0 0 24 24" fill="currentColor">
-                                                            <path d="M12 16l-5-5h3V4h4v7h3l-5 5zm9-4v7H3v-7H1v7a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2v-7h-2z"/>
-                                                        </svg>
-                                                        <span>Скачать</span>
-                                                    </button>
+                                                    <div class="inline-flex items-center space-x-1.5 justify-end">
+                                                        <button
+                                                            @click.stop="$store.sourcePicker.openForMissingTrack(alb, t)"
+                                                            class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border border-surface-border rounded text-[11px] font-medium transition inline-flex items-center space-x-1"
+                                                            title="Выбрать источник вручную">
+                                                            <svg class="w-3.5 h-3.5 text-brand" viewBox="0 0 24 24" fill="currentColor">
+                                                                <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                                                            </svg>
+                                                            <span>Источник</span>
+                                                        </button>
+                                                        <button
+                                                            @click="downloadMissing(alb, t)"
+                                                            :disabled="isDownloading(alb, t)"
+                                                            class="px-2.5 py-1 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 rounded text-[11px] font-medium transition inline-flex items-center space-x-1">
+                                                            <svg class="w-3.5 h-3.5" :class="{'animate-spin': isDownloading(alb, t)}" viewBox="0 0 24 24" fill="currentColor">
+                                                                <path d="M12 16l-5-5h3V4h4v7h3l-5 5zm9-4v7H3v-7H1v7a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2v-7h-2z"/>
+                                                            </svg>
+                                                            <span>Скачать</span>
+                                                        </button>
+                                                    </div>
                                                 </template>
                                             </td>
                                         </tr>

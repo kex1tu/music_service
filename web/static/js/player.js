@@ -205,6 +205,40 @@ document.addEventListener('alpine:init', () => {
             this.fetchTrackSpecs(track);
         },
 
+        playPreviewStream(streamUrl, title, artist) {
+            if (!streamUrl) return;
+            if (this.currentTrack && this.currentTrack.preview_url === streamUrl && this.isPlaying) {
+                this.togglePlay();
+                return;
+            }
+            this.currentTrack = {
+                title: title || 'Предпрослушивание',
+                artist: artist || 'Фрагмент (15 сек)',
+                duration: 15,
+                preview_url: streamUrl,
+            };
+            this.isVisible = true;
+            this.currentTime = 0;
+            this.duration = 15;
+            this.ensureAudioContext();
+            if (this.audioElement) {
+                this.isLoading = true;
+                this.audioElement.src = streamUrl;
+                this.audioElement.load();
+                this.audioElement.play()
+                    .then(() => {
+                        this.isPlaying = true;
+                        this.isLoading = false;
+                        this.startVisualizer();
+                    })
+                    .catch((err) => {
+                        console.warn('Ошибка превью воспроизведения:', err);
+                        this.isPlaying = false;
+                        this.isLoading = false;
+                    });
+            }
+        },
+
         togglePlay() {
             if (!this.audioElement || !this.currentTrack) return;
 

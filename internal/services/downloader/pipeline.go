@@ -22,7 +22,11 @@ func (s *Service) runBackfillPipeline(jobID, deezerAlbumID string, trackURLs []s
 		return
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	parentCtx := s.ctx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parentCtx)
 	job.SetCancelFunc(cancel)
 	defer cancel()
 
@@ -221,7 +225,11 @@ func (s *Service) runPipeline(jobID string) {
 		return
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	parentCtx := s.ctx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parentCtx)
 	job.SetCancelFunc(cancel)
 	defer cancel()
 
@@ -389,9 +397,9 @@ trackLoop:
 				}
 				matchRes, mErr := s.resolver.Matcher().FindBestMatchWithDetails(ctx, track.Title, track.Artist, trackISRC, track.Duration)
 				if mErr != nil {
-					errStr := mErr.Error()
+					errStr := "Источник не найден: требуется ручной выбор"
 					job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
-						tr.Status = "error"
+						tr.Status = "waiting_source"
 						tr.Error = &errStr
 					})
 					return
@@ -482,7 +490,7 @@ trackLoop:
 			if dErr != nil {
 				errStr := dErr.Error()
 				job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
-					tr.Status = "error"
+					tr.Status = "waiting_source"
 					tr.Error = &errStr
 				})
 				return
@@ -604,7 +612,11 @@ trackLoop:
 		return
 	}
 
-	job.SetReady(snap.CompletedTracks, total)
+	if snap.CompletedTracks < total {
+		job.SetPartialReady(snap.CompletedTracks, total)
+	} else {
+		job.SetReady(snap.CompletedTracks, total)
+	}
 }
 
 func (s *Service) failJob(job *DownloadJob, errMsg string) {

@@ -13,8 +13,8 @@ func jobStatusPriority(s downloader.JobStatus) int {
 		return 1 // Ожидают
 	case downloader.StatusResolving, downloader.StatusDownloading, downloader.StatusConverting, downloader.StatusTagging:
 		return 2 // Скачиваются / в процессе
-	case downloader.StatusReady:
-		return 3 // Скачаны
+	case downloader.StatusReady, downloader.StatusPartialReady:
+		return 3 // Скачаны / Готовы частично
 	case downloader.StatusError:
 		return 4 // Ошибки
 	case downloader.StatusCancelled:

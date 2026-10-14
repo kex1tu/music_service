@@ -521,4 +521,109 @@ func TestDB_GetTracksMetadataCache(t *testing.T) {
 	}
 }
 
+func TestDB_PinnedSources(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "db_pinned_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	database, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer database.Close()
+
+	ctx := context.Background()
+
+	// 1. Проверяем сохранение и получение pinned source
+	pin := PinnedTrackSource{
+		CacheKey:   "artist_track_key",
+		ArtistName: "The Beatles",
+		TrackTitle: "Yesterday",
+		PinnedURL:  "https://www.youtube.com/watch?v=pinned123",
+		SourceType: "manual",
+	}
+
+	if err := database.SavePinnedSource(ctx, pin); err != nil {
+		t.Fatalf("failed to save pinned source: %v", err)
+	}
+
+	retrieved, err := database.GetPinnedSource(ctx, "artist_track_key")
+	if err != nil {
+		t.Fatalf("failed to get pinned source: %v", err)
+	}
+	if retrieved == nil {
+		t.Fatal("expected retrieved pinned source, got nil")
+	}
+	if retrieved.PinnedURL != pin.PinnedURL {
+		t.Errorf("expected url %s, got %s", pin.PinnedURL, retrieved.PinnedURL)
+	}
+	if retrieved.SourceType != "manual" {
+		t.Errorf("expected source_type manual, got %s", retrieved.SourceType)
+	}
+
+	// Обновление существующего пина (UPSERT)
+	pin.PinnedURL = "https://soundcloud.com/thebeatles/yesterday"
+	if err := database.SavePinnedSource(ctx, pin); err != nil {
+		t.Fatalf("failed to update pinned source: %v", err)
+	}
+
+	retrievedUpdated, err := database.GetPinnedSource(ctx, "artist_track_key")
+	if err != nil {
+		t.Fatalf("failed to get updated pinned source: %v", err)
+	}
+	if retrievedUpdated.PinnedURL != pin.PinnedURL {
+		t.Errorf("expected updated url %s, got %s", pin.PinnedURL, retrievedUpdated.PinnedURL)
+	}
+
+	// 2. Тест обновления pinned_source_url у tracks
+	_, err = database.conn.ExecContext(ctx, `
+		INSERT INTO artists (id, name, clean_name) VALUES (10, 'The Beatles', 'the beatles');
+		INSERT INTO albums (id, artist_id, title, clean_title, album_artist, year, folder_path, has_cover) 
+		VALUES (10, 10, 'Help!', 'help', 'The Beatles', 1965, 'The Beatles - Help!', 0);
+		INSERT INTO tracks (id, album_id, artist_id, title, clean_title, track_number, duration, bitrate, file_path, file_size, mtime)
+		VALUES (100, 10, 10, 'Yesterday', 'yesterday', 1, 125, 320, 'The Beatles/Help!/01. Yesterday.mp3', 1000, 1234567.0);
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert test track: %v", err)
+	}
+
+	if err := database.UpdateTrackPinnedURL(ctx, 100, "https://soundcloud.com/thebeatles/yesterday"); err != nil {
+		t.Fatalf("UpdateTrackPinnedURL failed: %v", err)
+	}
+
+	var trackPinned string
+	err = database.conn.QueryRowContext(ctx, "SELECT COALESCE(pinned_source_url, '') FROM tracks WHERE id = 100").Scan(&trackPinned)
+	if err != nil {
+		t.Fatalf("query track failed: %v", err)
+	}
+	if trackPinned != "https://soundcloud.com/thebeatles/yesterday" {
+		t.Errorf("expected pinned url 'https://soundcloud.com/thebeatles/yesterday', got %q", trackPinned)
+	}
+
+	// 3. Тест UpdateMissingTrackPinnedURL
+	_, err = database.conn.ExecContext(ctx, `
+		INSERT INTO missing_tracks (id, album_id, track_number, title, artist) 
+		VALUES (200, 10, 2, 'Act Naturally', 'The Beatles');
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert test missing track: %v", err)
+	}
+
+	if err := database.UpdateMissingTrackPinnedURL(ctx, 200, "https://youtube.com/watch?v=123"); err != nil {
+		t.Fatalf("UpdateMissingTrackPinnedURL failed: %v", err)
+	}
+
+	var missingPinned string
+	err = database.conn.QueryRowContext(ctx, "SELECT COALESCE(pinned_source_url, '') FROM missing_tracks WHERE id = 200").Scan(&missingPinned)
+	if err != nil {
+		t.Fatalf("query missing track failed: %v", err)
+	}
+	if missingPinned != "https://youtube.com/watch?v=123" {
+		t.Errorf("expected missing track pinned url 'https://youtube.com/watch?v=123', got %q", missingPinned)
+	}
+}
+
 

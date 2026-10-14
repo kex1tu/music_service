@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     deezer_id TEXT,
     spotify_id TEXT,
     isrc TEXT,
+    pinned_source_url TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -115,6 +116,7 @@ CREATE TABLE IF NOT EXISTS missing_tracks (
     spotify_id TEXT,
     genius_url TEXT,
     isrc TEXT,
+    pinned_source_url TEXT,
     status TEXT DEFAULT 'missing',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(album_id, track_number, disc_number)
@@ -175,3 +177,17 @@ CREATE TABLE IF NOT EXISTS app_settings (
     value TEXT NOT NULL DEFAULT '',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- 10. Постоянные ручные привязки источников треков (Track Source Pins)
+CREATE TABLE IF NOT EXISTS pinned_track_sources (
+    cache_key TEXT PRIMARY KEY,
+    artist_name TEXT NOT NULL,
+    track_title TEXT NOT NULL,
+    isrc TEXT,
+    pinned_url TEXT NOT NULL,
+    source_type TEXT NOT NULL, -- youtube, ytmusic, soundcloud, bandcamp, direct
+    duration INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_pinned_sources_artist_title ON pinned_track_sources(artist_name, track_title);

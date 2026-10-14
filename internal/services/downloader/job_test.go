@@ -178,3 +178,41 @@ func TestJobManager_WeightedOverallProgress(t *testing.T) {
 	}
 }
 
+func TestDownloadJob_SetPartialReady(t *testing.T) {
+	mgr := NewJobManager(nil)
+
+	job := &DownloadJob{
+		ID:              "j-partial",
+		Status:          StatusDownloading,
+		TotalTracks:     10,
+		CompletedTracks: 8,
+		Tracks: []resolver.ResolvedTrack{
+			{TrackNumber: 1, Status: "ready"},
+			{TrackNumber: 2, Status: "waiting_source"},
+		},
+	}
+	mgr.Add(job)
+
+	job.SetPartialReady(9, 10)
+
+	snap := job.Snapshot()
+	if snap.Status != StatusPartialReady {
+		t.Errorf("expected status %s, got %s", StatusPartialReady, snap.Status)
+	}
+	if snap.Progress != 100.0 {
+		t.Errorf("expected progress 100.0, got %f", snap.Progress)
+	}
+	if snap.CompletedTracks != 9 {
+		t.Errorf("expected completed tracks 9, got %d", snap.CompletedTracks)
+	}
+	expectedStep := "Готов частично (9/10 готово, требуется выбор источника)"
+	if snap.CurrentStep != expectedStep {
+		t.Errorf("expected step %q, got %q", expectedStep, snap.CurrentStep)
+	}
+
+	summary := mgr.GetSummary()
+	if summary.CompletedJobs != 1 {
+		t.Errorf("expected summary.CompletedJobs to count PARTIAL_READY, got %d", summary.CompletedJobs)
+	}
+}
+

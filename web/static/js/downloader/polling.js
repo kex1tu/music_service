@@ -17,17 +17,15 @@ window.DownloaderPolling = {
             }
 
             const currentJob = await res.json();
-            downloader.job = currentJob;
-
-            if (currentJob.status === 'READY') {
+            if (currentJob.status === 'READY' || currentJob.status === 'PARTIAL_READY') {
                 if (downloader.pollInterval) {
                     clearInterval(downloader.pollInterval);
                     downloader.pollInterval = null;
                 }
-                if (currentJob.total_tracks > 1 && currentJob.completed_tracks < currentJob.total_tracks) {
+                if (currentJob.status === 'PARTIAL_READY') {
                     const skipped = currentJob.total_tracks - currentJob.completed_tracks;
                     Alpine.store('app').toast(
-                        `Загрузка завершена: ${currentJob.completed_tracks} из ${currentJob.total_tracks} треков (пропущено: ${skipped})`,
+                        `Загрузка готова частично: ${currentJob.completed_tracks} из ${currentJob.total_tracks} треков (требуется выбор источника для ${skipped})`,
                         'warning'
                     );
                 } else {

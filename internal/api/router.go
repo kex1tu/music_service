@@ -118,11 +118,19 @@ func NewRouter(p RouterParams) http.Handler {
 		r.Post("/{id}/retry", p.DownloadHandler.RetryDownload)
 		r.Get("/{id}/tracks", p.DownloadHandler.GetDownloadTracks)
 		r.Post("/tracks/{trackId}/switch-version", p.DownloadHandler.SwitchTrackVersion)
+		r.Post("/tracks/{trackId}/bind-source", p.DownloadHandler.SwitchTrackVersion)
+		r.Get("/candidates", p.DownloadHandler.GetCandidates)
+		r.Get("/preview", p.DownloadHandler.PreviewAudio)
+		r.Post("/backfill/bind-source", p.DownloadHandler.BindBackfillSource)
 	})
 
 	r.Route("/api/downloads", func(r chi.Router) {
 		r.Use(authMiddleware)
 		r.Post("/tracks/{trackId}/switch-version", p.DownloadHandler.SwitchTrackVersion)
+		r.Post("/tracks/{trackId}/bind-source", p.DownloadHandler.SwitchTrackVersion)
+		r.Get("/candidates", p.DownloadHandler.GetCandidates)
+		r.Get("/preview", p.DownloadHandler.PreviewAudio)
+		r.Post("/backfill/bind-source", p.DownloadHandler.BindBackfillSource)
 	})
 
 	// Tags API
