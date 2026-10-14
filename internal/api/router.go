@@ -79,20 +79,23 @@ func NewRouter(p RouterParams) http.Handler {
 		r.Post("/login", p.AuthHandler.Login)
 		r.Post("/logout", p.AuthHandler.Logout)
 		r.Get("/me", p.AuthHandler.Me)
-
-		// MusicBrainz OAuth (публичный callback для перенаправления с musicbrainz.org)
-		r.Get("/musicbrainz/callback", p.TagHandler.MusicBrainzCallback)
 	})
 
 	// Protected Endpoints
 	authMiddleware := auth.Middleware(p.Config.SecretKey)
 
-	// MusicBrainz OAuth Protected Endpoints
+	// MusicBrainz OAuth Endpoints
 	r.Route("/api/auth/musicbrainz", func(r chi.Router) {
-		r.Use(authMiddleware)
-		r.Get("/login", p.TagHandler.MusicBrainzLogin)
-		r.Get("/status", p.TagHandler.MusicBrainzStatus)
-		r.Post("/disconnect", p.TagHandler.MusicBrainzDisconnect)
+		// Публичный callback для редиректа от musicbrainz.org
+		r.Get("/callback", p.TagHandler.MusicBrainzCallback)
+
+		// Защищенные эндпоинты (требуют сессии администратора)
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware)
+			r.Get("/login", p.TagHandler.MusicBrainzLogin)
+			r.Get("/status", p.TagHandler.MusicBrainzStatus)
+			r.Post("/disconnect", p.TagHandler.MusicBrainzDisconnect)
+		})
 	})
 
 	// Downloads API
