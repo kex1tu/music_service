@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 64 блока задач полностью реализованы, протестированы и задеплоены).
+- **Статус готовности:** **100% DONE** (Все 65 блоков задач полностью реализованы, протестированы и задеплоены).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 13 пакетов зеленые).
@@ -525,7 +525,21 @@
       - При отсутствии подключения: кнопка `🔗 Подключить MusicBrainz (OAuth)` с красивой подсветкой.
   - **Тестирование и верификация:**
     - `go test -race ./...` — **100% PASS (0 data races)** во всех пакетах репозитория.
-    - `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешная сборка бинарника (16 МБ).
+- **Блок 65 (Intelligent Matching & Manual Track Selection in Puddletag Source Search):**
+  - **65.1. Алгоритм нечеткого сопоставления (`web/static/js/puddletag/sources.js`):**
+    - Реализована функция `normalizeTitleForMatching`: отрезание расширений аудиофайлов (`.mp3`, `.flac` и т.д.), ведущих номеров дорожек (`^\d+[\.\-\s]+`), префиксов исполнителей (`Artist - `), клипового мусора в скобках, приведение к нижнему регистру и нормализация `ё` -> `е`.
+    - Реализована функция `calculateTitleSimilarity`: оценка совпадений по подстрокам (containment) + биграммный коэффициент Дайса (Dice's coefficient).
+    - Модернизирован `matchTracks`: жадное сопоставление (Best Match First) по матрице сходства названий и имен файлов с безопасным порогом уверенности `>= 0.50`. Если совпадений нет, строка остаётся со статусом `⚠️ Без файла (пропустить)` без риска повреждения чужих тегов.
+  - **65.2. Управление состоянием и уникальностью (`web/static/js/puddletag/puddletag_workstation.js`):**
+    - Создан массив `targetTrackOptions` со списком доступных локальных файлов.
+    - Реализован метод `onMatchedFileChange(pairIndex, newOrigIndexStr)` со строго уникальным сопоставлением 1-к-1: при выборе файла в другой строке он автоматически освобождается в предыдущей.
+    - Реализованы методы `toggleAllMatched(checked)`, `isAllMatchedChecked()`, `reMatchTracks()` (кнопка «Авто-сопоставить заново»).
+    - В `applySourceTags()` теги применяются только к парам, где `isMatched && isChecked`.
+  - **65.3. Интерфейс окна поиска (`web/templates/components/puddletag_source_modal.html`):**
+    - В каждой строке треклиста добавлен чекбокс `[✓]` для выборочного включения/отключения применения тегов.
+    - В столбце «Файл таблицы» размещен выпадающий список `<select>` с опцией `⚠️ Без файла (пропустить)` и списком локальных файлов.
+    - В шапку таблицы добавлены: мастер-чекбокс в `<th>`, информационный бейдж `Сопоставлено: X из Y файлов` и кнопка `⚡ Авто-сопоставить`.
+    - В нижней панели динамический счётчик отображает точное количество выбранных сопоставленных дорожек (`matchedPairs.filter(p => p.isMatched && p.isChecked).length`).
 
 ---
 
@@ -541,24 +555,24 @@
    ```
    **Результат:** 100% PASS, 0 race conditions во всех 13 пакетах.
 
-3. **Развертывание на боевых серверах:**
+3. **Развертывание на боевых серверах (коммиты `00d8afa`, `5ec223c`):**
    - **Сервер 1 (`nl_music`):** `https://musicdownloader.verymad.net/`
-     - Git: актуализирован до последней ревизии `main` (`00d8afa`).
+     - Git: актуализирован до `main` (`5ec223c`).
      - Бинарный файл: синхронизирован в `/opt/music-manager/bin/music-manager`.
      - Переменные окружения: `MUSICBRAINZ_CLIENT_ID`, `MUSICBRAINZ_CLIENT_SECRET`, `MUSICBRAINZ_REDIRECT_URI` сконфигурированы в `.env`.
-     - Сервис: `systemctl restart music-manager.service` (active/running, сканирование 8747 треков успешно завершено).
+     - Сервис: `systemctl restart music-manager.service` (active/running).
      - Проверка эндпоинтов:
        - `https://musicdownloader.verymad.net/api/health` — `200 OK`.
-       - `https://musicdownloader.verymad.net/api/auth/musicbrainz/callback` — `400 Bad Request` с валидацией обязательного параметра `code` (маршрут публичен и доступен для внешних редиректов).
+       - `https://musicdownloader.verymad.net/api/auth/musicbrainz/callback` — `400 Bad Request`.
    - **Сервер 2:** `https://mymusicdownload.verymad.net/`
-     - Git: актуализирован до последней ревизии `main` (`00d8afa`).
+     - Git: актуализирован до `main` (`5ec223c`).
      - Бинарный файл: синхронизирован в `/root/music_service/bin/music-manager`.
      - Переменные окружения: `MUSICBRAINZ_CLIENT_ID`, `MUSICBRAINZ_CLIENT_SECRET`, `MUSICBRAINZ_REDIRECT_URI` сконфигурированы в `.env`.
-     - Nginx: настроен сквозной проброс статус-кодов приложения (`proxy_intercept_errors off`), исключающий подмену страниц ошибок приложения общим шаблоном 404.
+     - Nginx: настроен сквозной проброс статус-кодов приложения (`proxy_intercept_errors off`).
      - Сервис: `systemctl restart music-manager.service` (active/running).
      - Проверка эндпоинтов:
        - `https://mymusicdownload.verymad.net/api/health` — `200 OK`.
-       - `https://mymusicdownload.verymad.net/api/auth/musicbrainz/callback` — `400 Bad Request` с валидацией обязательного параметра `code`.
+       - `https://mymusicdownload.verymad.net/api/auth/musicbrainz/callback` — `400 Bad Request`.
 
 
 
