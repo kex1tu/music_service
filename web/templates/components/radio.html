@@ -13,8 +13,10 @@
             <div class="space-y-3 max-w-xl">
                 <div class="flex items-center space-x-2">
                     <span class="px-2.5 py-1 text-[10px] font-mono font-bold uppercase tracking-wider bg-brand text-white rounded-full shadow-md shadow-brand/20">ICY 320 kbps Zero-Transcoding</span>
-                    <template x-if="$store.radio.stats.navidrome_available">
-                        <span class="px-2.5 py-1 text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full">Navidrome Connected</span>
+                    <template x-if="$store.radio.stats.navidrome_available || $store.radio.stats.subsonic_configured">
+                        <span class="px-2.5 py-1 text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full"
+                              x-text="$store.radio.stats.navidrome_available && $store.radio.stats.subsonic_configured ? 'Navidrome Connected' : ($store.radio.stats.navidrome_available ? 'Navidrome DB' : 'Subsonic Connected')">
+                        </span>
                     </template>
                 </div>
 

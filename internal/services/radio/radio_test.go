@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
@@ -214,5 +215,78 @@ func TestIcyMetadataBlock(t *testing.T) {
 	str := string(block[1:])
 	if !strings.HasPrefix(str, "StreamTitle='Daft Punk - One More Time';") {
 		t.Errorf("unexpected metadata string: %s", str)
+	}
+}
+
+func TestNavidromeStatsMatching(t *testing.T) {
+	stats := &NavidromeStats{
+		StarredPaths: map[string]bool{
+			"/var/music/Daft Punk/Discovery/01. One More Time.mp3": true,
+			"D:\\Music\\The Weeknd\\Starboy\\01. Starboy.mp3":     true,
+		},
+		PlayCounts: map[string]int{
+			"/var/music/Daft Punk/Discovery/01. One More Time.mp3": 42,
+			"The Weeknd/Starboy/01. Starboy.mp3":                   15,
+		},
+		LastPlayed: map[string]time.Time{
+			"/var/music/Daft Punk/Discovery/01. One More Time.mp3": time.Now().Add(-1 * time.Hour),
+		},
+	}
+
+	// 1. Проверка IsStarred с относительными путями против абсолютных путей Navidrome
+	if !stats.IsStarred("Daft Punk/Discovery/01. One More Time.mp3") {
+		t.Error("expected IsStarred to match relative path with absolute Navidrome path")
+	}
+	if !stats.IsStarred("The Weeknd/Starboy/01. Starboy.mp3") {
+		t.Error("expected IsStarred to match Windows-style Navidrome path")
+	}
+	if stats.IsStarred("Unknown/Album/Nonexistent.mp3") {
+		t.Error("expected IsStarred to return false for nonexistent track")
+	}
+
+	// 2. Проверка GetPlayCount
+	if count := stats.GetPlayCount("Daft Punk/Discovery/01. One More Time.mp3"); count != 42 {
+		t.Errorf("expected play count 42, got %d", count)
+	}
+	if count := stats.GetPlayCount("The Weeknd/Starboy/01. Starboy.mp3"); count != 15 {
+		t.Errorf("expected play count 15, got %d", count)
+	}
+	if count := stats.GetPlayCount("Other/Track.mp3"); count != 0 {
+		t.Errorf("expected play count 0 for unknown track, got %d", count)
+	}
+
+	// 3. Проверка GetLastPlayed
+	lp := stats.GetLastPlayed("Daft Punk/Discovery/01. One More Time.mp3")
+	if lp.IsZero() {
+		t.Error("expected non-zero last played time")
+	}
+}
+
+func TestIcyStreamerOptionsAndHeaders(t *testing.T) {
+	database, tempDir, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	sb, err := sandbox.NewPathSandbox(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	simEngine := resolver.NewSimilarityEngine(nil, nil, database)
+	selector := NewWaveSelector(database, nil, simEngine)
+	streamer := NewIcyStreamer(selector, sb, database, "test-token")
+
+	// Тест OPTIONS preflight
+	reqOptions := httptest.NewRequest("OPTIONS", "/api/radio/stream/wave", nil)
+	recOptions := httptest.NewRecorder()
+	streamer.ServeHTTP(recOptions, reqOptions, "wave", "")
+
+	if recOptions.Code != http.StatusNoContent {
+		t.Errorf("expected 204 No Content for OPTIONS, got %d", recOptions.Code)
+	}
+	if recOptions.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Errorf("expected CORS origin *")
+	}
+	if recOptions.Header().Get("Access-Control-Allow-Methods") == "" {
+		t.Errorf("expected CORS allow methods")
 	}
 }

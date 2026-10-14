@@ -7,8 +7,9 @@ document.addEventListener('alpine:init', () => {
             top_genres: [],
             navidrome_available: false,
             subsonic_configured: false,
-            wave_size: 100,
-            stream_token_set: false
+            wave_size: 60,
+            stream_token_set: false,
+            stream_token: ''
         },
         waveQueue: [],
         genres: [],
@@ -24,15 +25,21 @@ document.addEventListener('alpine:init', () => {
             this.fetchGenres();
         },
 
-        getStreamUrl(type = 'wave', param = '') {
-            const loc = window.location;
+        getStreamUrl(type = 'wave', param = '', absolute = false) {
             let path = '/api/radio/stream/wave';
             if (type === 'genre' && param) {
                 path = `/api/radio/stream/genre/${encodeURIComponent(param)}`;
             } else if (type === 'artist' && param) {
                 path = `/api/radio/stream/artist/${encodeURIComponent(param)}`;
             }
-            const tokenParam = this.streamToken ? `?token=${encodeURIComponent(this.streamToken)}` : '';
+            const token = this.streamToken || (this.stats && this.stats.stream_token) || '';
+            const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+
+            if (!absolute) {
+                return `${path}${tokenParam}`;
+            }
+
+            const loc = window.location;
             return `${loc.protocol}//${loc.host}${path}${tokenParam}`;
         },
 
@@ -41,6 +48,9 @@ document.addEventListener('alpine:init', () => {
                 const res = await fetch('/api/radio/wave/stats');
                 if (res.ok) {
                     this.stats = await res.json();
+                    if (this.stats && this.stats.stream_token) {
+                        this.streamToken = this.stats.stream_token;
+                    }
                 }
             } catch (err) {
                 console.error('[Radio] Error fetching stats:', err);
@@ -75,29 +85,35 @@ document.addEventListener('alpine:init', () => {
         },
 
         playWave() {
-            const url = this.getStreamUrl('wave');
+            const url = this.getStreamUrl('wave', '', false);
             if (Alpine.store('player')) {
                 Alpine.store('player').playRadioStream(url, 'Моя Волна');
-                Alpine.store('app').showToast('Воспроизведение «Моя Волна» запущено', 'info');
+                if (Alpine.store('app') && Alpine.store('app').toast) {
+                    Alpine.store('app').toast('Воспроизведение «Моя Волна» запущено', 'info');
+                }
             }
         },
 
         playGenre(genre) {
             if (!genre) return;
-            const url = this.getStreamUrl('genre', genre);
+            const url = this.getStreamUrl('genre', genre, false);
             if (Alpine.store('player')) {
                 Alpine.store('player').playRadioStream(url, `Радио: ${genre}`);
-                Alpine.store('app').showToast(`Запущено радио жанра "${genre}"`, 'info');
+                if (Alpine.store('app') && Alpine.store('app').toast) {
+                    Alpine.store('app').toast(`Запущено радио жанра "${genre}"`, 'info');
+                }
             }
         },
 
         playArtist(artist) {
             artist = artist || this.artistSearch.trim();
             if (!artist) return;
-            const url = this.getStreamUrl('artist', artist);
+            const url = this.getStreamUrl('artist', artist, false);
             if (Alpine.store('player')) {
                 Alpine.store('player').playRadioStream(url, `Радио артиста: ${artist}`);
-                Alpine.store('app').showToast(`Запущено радио исполнителя "${artist}"`, 'info');
+                if (Alpine.store('app') && Alpine.store('app').toast) {
+                    Alpine.store('app').toast(`Запущено радио исполнителя "${artist}"`, 'info');
+                }
                 this.artistSearch = '';
             }
         },
@@ -108,14 +124,14 @@ document.addEventListener('alpine:init', () => {
                 const res = await fetch('/api/radio/m3u/generate', { method: 'POST' });
                 if (res.ok) {
                     const data = await res.json();
-                    Alpine.store('app').showToast(`Плейлист ${data.playlist_path} успешно сгенерирован`, 'success');
+                    Alpine.store('app').toast(`Плейлист ${data.playlist_path} успешно сгенерирован`, 'success');
                 } else {
                     const text = await res.text();
-                    Alpine.store('app').showToast(`Ошибка генерации M3U: ${text}`, 'error');
+                    Alpine.store('app').toast(`Ошибка генерации M3U: ${text}`, 'error');
                 }
             } catch (err) {
                 console.error('[Radio] Error generating M3U:', err);
-                Alpine.store('app').showToast('Ошибка генерации плейлиста', 'error');
+                Alpine.store('app').toast('Ошибка генерации плейлиста', 'error');
             } finally {
                 this.isGeneratingM3U = false;
             }
@@ -124,27 +140,32 @@ document.addEventListener('alpine:init', () => {
         async syncNavidrome() {
             this.isSyncingNavidrome = true;
             try {
-                const res = await fetch('/api/radio/navidrome/sync-radio', { method: 'POST' });
+                const streamUrl = this.getStreamUrl('wave', '', true);
+                const res = await fetch('/api/radio/navidrome/sync-radio', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: 'Моя Волна', stream_url: streamUrl })
+                });
                 if (res.ok) {
                     const data = await res.json();
-                    Alpine.store('app').showToast(`Радиостанция "${data.name}" создана в Navidrome!`, 'success');
+                    Alpine.store('app').toast(`Радиостанция "${data.name}" успешно экспортирована в Navidrome!`, 'success');
                 } else {
                     const text = await res.text();
-                    Alpine.store('app').showToast(`Ошибка экспорта в Navidrome: ${text}`, 'error');
+                    Alpine.store('app').toast(`Ошибка экспорта в Navidrome: ${text}`, 'error');
                 }
             } catch (err) {
                 console.error('[Radio] Error syncing Navidrome:', err);
-                Alpine.store('app').showToast('Сбой синхронизации с Navidrome', 'error');
+                Alpine.store('app').toast('Сбой синхронизации с Navidrome', 'error');
             } finally {
                 this.isSyncingNavidrome = false;
             }
         },
 
         copyStreamUrl(type = 'wave', param = '') {
-            const url = this.getStreamUrl(type, param);
+            const url = this.getStreamUrl(type, param, true);
             if (navigator.clipboard) {
                 navigator.clipboard.writeText(url).then(() => {
-                    Alpine.store('app').showToast('Ссылка на аудиопоток скопирована в буфер', 'success');
+                    Alpine.store('app').toast('Прямая ссылка на ICY-аудиопоток скопирована в буфер', 'success');
                 });
             }
         }

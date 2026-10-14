@@ -58,6 +58,10 @@ document.addEventListener('alpine:init', () => {
             }, 4000);
         },
 
+        showToast(message, type = 'info') {
+            this.toast(message, type);
+        },
+
         openTagEditor(data) {
             this.tagEditorData = data;
             this.activeModal = 'tag_editor';

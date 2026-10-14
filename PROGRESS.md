@@ -630,6 +630,33 @@
     - **Документация:**
       - Обновлен `README.md` (раздел 5.4).
 
+  - **Блок 69 (Radio, «Моя Волна» & Navidrome Streaming Engine Audit & Bug Fixes):**
+    - **69.1. Устранение ошибки стриминга в веб-плеере («Ошибка стриминга аудиофайла»):**
+      - Выявлена и устранена блокирующая ошибка авторизации: в `IcyStreamer.ServeHTTP` происходила повторная проверка `reqToken` без учета сессионных cookie браузера, из-за чего авторизованным пользователям веб-интерфейса возвращался `401 Unauthorized`.
+      - Контроль доступа централизован в `RadioHandler.checkStreamAuth`: поддерживаются `?token=...`, `X-Stream-Token`, `Authorization: Bearer <token>` и сессионные cookie `music_manager_session`.
+      - В эндпоинт `GET /api/radio/wave/stats` добавлена передача поля `stream_token` авторизованному клиенту, что позволяет `radio.js` автоматически заполнять `streamToken` для формирования валидных прямых ссылок.
+    - **69.2. Полная поддержка CORS и preflight OPTIONS для Navidrome и внешних плееров:**
+      - Внедрены маршруты `OPTIONS /api/radio/stream/wave`, `/api/radio/stream/genre/{name}`, `/api/radio/stream/artist/{name}` с возвратом `204 No Content` и полным набором CORS-заголовков (`Access-Control-Allow-Origin: *`, `Access-Control-Allow-Methods: GET, HEAD, OPTIONS`, `Access-Control-Expose-Headers: Content-Type, icy-metaint, icy-name, icy-genre, icy-br`).
+      - Устранены кросс-доменные блокировки Web Audio API и сторонних веб-клиентов Navidrome.
+    - **69.3. Надежность аудиотрансляции, Pacing и Zero-Transcoding:**
+      - Для предотвращения обрыва бесконечной радиопередачи по серверному таймауту `WriteTimeout` в `ServeHTTP` внедрен сброс дедлайна записи через `http.NewResponseController(w).SetWriteDeadline(time.Time{})`.
+      - Первоначальный burst-буфер увеличен до 320 КБ (~8 секунд при 320 kbps), а также добавлен mini-burst 40 КБ (1 секунда) при переходе между треками для защиты аудиоплееров от опустошения буфера (underrun) при задержках диска/селектора.
+      - Реализована функция `prepareTrackFile`: пропуск ID3v2-заголовка с последующим сканированием до первого байта синхронизации MPEG (`0xFF 0xEx..0xFx`) для исключения нулевого паддинга, а также отсечение ID3v1-трейлера (`TAG...`) в конце файла, что предотвращает сбои декодеров Chrome/ffmpeg.
+      - Оптимизирована инжекция ICY-метаданных: по спецификации Icecast/Shoutcast блок с полным названием трека отправляется только при изменении композиции, а при неизменном заголовке передается 1 нулевой байт (`\x00`), исключая спам метаданными каждые 400 мс.
+      - Выбор первого трека перенесен до фиксации HTTP-заголовков: при пустой медиатеке возвращается чистый `404 Not Found` вместо зависания пустого потока с кодом 200.
+    - **69.4. Идемпотентность и безопасность Navidrome Subsonic API:**
+      - В `NavidromeSubsonicClient` добавлена поддержка аутентификации Subsonic v1.16.1 через MD5-хэш с динамической солью (`t=md5(password+salt)&s=salt`) наряду с `p`, что обеспечивает совместимость с серверами Navidrome, где отключена передача открытого пароля.
+      - Реализован предварительный опрос `/rest/getInternetRadioStations`: если станция «Моя Волна» уже зарегистрирована, вызывается `/rest/updateInternetRadioStation` вместо дублирования через `createInternetRadioStation`.
+      - Исправлен формат параметров: передаются оба варианта регистра `homepageUrl` и `homePageUrl`.
+      - В `SyncNavidromeRadio` исключена перезапись хоста на `127.0.0.1` при наличии валидного `r.Host` или `X-Forwarded-Host`, что позволяет Navidrome в Docker/LAN подключаться к реальному сетевому адресу.
+    - **69.5. Кроссплатформенная нормализация путей Navidrome:**
+      - В `NavidromeStats` внедрена функция `normalizePath`, корректно заменяющая обратные слэши `\` на `/` на Linux и сопоставляющая пути по суффиксам и базовым именам файлов (`IsStarred`, `GetPlayCount`, `GetLastPlayed`).
+    - **69.6. Исправления фронтенда (Alpine.js & Player):**
+      - В `app_store.js` добавлен метод `showToast` как алиас к `toast` для предотвращения `TypeError` при вызовах уведомлений в `radio.js` и `radar.js`.
+      - В `radio.js` метод `getStreamUrl` теперь отдает относительный путь для воспроизведения во встроенном плеере (гарантия same-origin) и абсолютный URL с токеном при копировании ссылки.
+      - В `player.js` методы `playTrack` и `loadLyrics` адаптированы под объекты из очереди `waveQueue`, содержащие `file_path`.
+      - В `radio.html` обновлен бейдж статуса подключения Navidrome при наличии Subsonic API.
+
 ---
 
 ## 4. Верификация и Продакшен-Деплой

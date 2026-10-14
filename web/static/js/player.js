@@ -174,12 +174,15 @@ document.addEventListener('alpine:init', () => {
             this.currentTime = 0;
             this.duration = track.duration || 0;
 
+            const trackPath = track.path || track.file_path || '';
+            const trackId = track.id || trackPath;
+
             if (playlist && playlist.length > 0) {
-                this.playlist = playlist.filter(item => item.type === 'file' && (item.extension === '.mp3' || item.stream_url));
-                this.currentIndex = this.playlist.findIndex(item => item.path === track.path);
+                this.playlist = playlist.filter(item => (item.type === 'file' || item.file_path) && (item.extension === '.mp3' || (item.file_path && item.file_path.endsWith('.mp3')) || item.stream_url));
+                this.currentIndex = this.playlist.findIndex(item => (item.path || item.file_path) === trackPath || (item.id && item.id === track.id));
             }
 
-            const streamUrl = track.stream_url || `/api/tracks/${track.id || track.path}/stream`;
+            const streamUrl = track.stream_url || `/api/tracks/${trackId}/stream`;
 
             this.ensureAudioContext();
 
@@ -201,8 +204,8 @@ document.addEventListener('alpine:init', () => {
             }
 
             // Загружаем тексты песен и метаданные трека
-            this.loadLyrics(track);
-            this.fetchTrackSpecs(track);
+            this.loadLyrics({ ...track, path: trackPath });
+            this.fetchTrackSpecs({ ...track, path: trackPath, id: trackId });
         },
 
         playPreviewStream(streamUrl, title, artist) {
@@ -570,7 +573,8 @@ document.addEventListener('alpine:init', () => {
         // ==================== КАРАОКЕ LRC ====================
 
         async loadLyrics(track) {
-            if (!track || !track.path) {
+            const trackPath = track ? (track.path || track.file_path) : null;
+            if (!track || !trackPath) {
                 this.lyricsLines = [];
                 this.lyricsKind = 'none';
                 return;
@@ -581,7 +585,7 @@ document.addEventListener('alpine:init', () => {
             this.currentLyricIndex = -1;
 
             try {
-                const res = await fetch(`/lyrics?path=${encodeURIComponent(track.path)}`);
+                const res = await fetch(`/lyrics?path=${encodeURIComponent(trackPath)}`);
                 if (!res.ok) throw new Error('Lyrics fetch failed');
                 const data = await res.json();
                 this.lyricsKind = data.kind || 'none';

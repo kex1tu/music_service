@@ -7,9 +7,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"music-manager/internal/config"
+	"music-manager/internal/core/auth"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	"music-manager/internal/services/radio"
@@ -134,10 +136,47 @@ func TestRadioHandler_Endpoints(t *testing.T) {
 		t.Error("expected auth to pass with query token")
 	}
 
+	// С правильным X-Stream-Token заголовком
+	reqXToken := httptest.NewRequest("GET", "/api/radio/stream/wave", nil)
+	reqXToken.Header.Set("X-Stream-Token", "secret-token-123")
+	if !handler.checkStreamAuth(reqXToken) {
+		t.Error("expected auth to pass with X-Stream-Token")
+	}
+
 	// С правильным Bearer заголовком
 	reqBearer := httptest.NewRequest("GET", "/api/radio/stream/wave", nil)
 	reqBearer.Header.Set("Authorization", "Bearer secret-token-123")
 	if !handler.checkStreamAuth(reqBearer) {
 		t.Error("expected auth to pass with Bearer token")
+	}
+
+	// С валидной сессионной cookie браузера (как веб-плеер)
+	sessionToken := auth.CreateSessionToken("admin", handler.cfg.SecretKey)
+	reqCookie := httptest.NewRequest("GET", "/api/radio/stream/wave", nil)
+	reqCookie.AddCookie(&http.Cookie{
+		Name:  auth.CookieName,
+		Value: sessionToken,
+	})
+	if !handler.checkStreamAuth(reqCookie) {
+		t.Error("expected auth to pass with valid session cookie")
+	}
+
+	// 6. Проверка CORS OPTIONS preflight
+	reqOptions := httptest.NewRequest("OPTIONS", "/api/radio/stream/wave", nil)
+	wOptions := httptest.NewRecorder()
+	handler.HandleStreamOptions(wOptions, reqOptions)
+	if wOptions.Code != http.StatusNoContent {
+		t.Errorf("expected 204 No Content for OPTIONS, got %d", wOptions.Code)
+	}
+	if wOptions.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Errorf("expected Access-Control-Allow-Origin: *")
+	}
+
+	// 7. Проверка передачи stream_token в GetWaveStats
+	reqStats := httptest.NewRequest("GET", "/api/radio/wave/stats", nil)
+	wStats := httptest.NewRecorder()
+	handler.GetWaveStats(wStats, reqStats)
+	if !strings.Contains(wStats.Body.String(), `"stream_token":"secret-token-123"`) {
+		t.Errorf("expected stream_token in stats body, got: %s", wStats.Body.String())
 	}
 }

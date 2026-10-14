@@ -47,12 +47,16 @@ func NewRadioHandler(
 	}
 }
 
-// checkStreamAuth проверяет авторизацию для ICY потока (токен в query ?token=..., заголовок Bearer, либо сессионная cookie).
+// checkStreamAuth проверяет авторизацию для ICY потока (токен в query ?token=..., заголовок X-Stream-Token, заголовок Bearer, либо сессионная cookie).
 func (h *RadioHandler) checkStreamAuth(r *http.Request) bool {
 	if h.cfg == nil || h.cfg.RadioStreamToken == "" {
 		return true
 	}
-	if r.URL.Query().Get("token") == h.cfg.RadioStreamToken {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		token = r.Header.Get("X-Stream-Token")
+	}
+	if token != "" && token == h.cfg.RadioStreamToken {
 		return true
 	}
 	authHdr := r.Header.Get("Authorization")
@@ -65,6 +69,15 @@ func (h *RadioHandler) checkStreamAuth(r *http.Request) bool {
 		}
 	}
 	return false
+}
+
+// HandleStreamOptions обрабатывает preflight CORS OPTIONS запросы для радиопотока.
+func (h *RadioHandler) HandleStreamOptions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+	w.Header().Set("Access-Control-Max-Age", "86400")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // GetWaveQueue возвращает сформированную очередь треков для веб-плеера «Моя Волна».
@@ -102,6 +115,7 @@ func (h *RadioHandler) GetWaveStats(w http.ResponseWriter, r *http.Request) {
 		"subsonic_configured": subsonicConfigured,
 		"wave_size":           h.cfg.RadioWaveSize,
 		"stream_token_set":    h.cfg.RadioStreamToken != "",
+		"stream_token":        h.cfg.RadioStreamToken,
 	})
 }
 
@@ -164,38 +178,53 @@ func (h *RadioHandler) GenerateM3U(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// SyncNavidromeRadio регистрирует поток «Моя Волна» в Navidrome через Subsonic REST API.
+// SyncNavidromeRadio регистрирует или обновляет поток «Моя Волна» в Navidrome через Subsonic REST API.
 func (h *RadioHandler) SyncNavidromeRadio(w http.ResponseWriter, r *http.Request) {
 	if h.subsonic == nil || !h.subsonic.IsConfigured() {
-		http.Error(w, "Navidrome Subsonic API credentials are not configured in .env", http.StatusBadRequest)
+		http.Error(w, "Реквизиты Navidrome Subsonic API (NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASSWORD) не настроены в .env", http.StatusBadRequest)
 		return
+	}
+
+	var reqBody struct {
+		StreamURL string `json:"stream_url"`
+		Name      string `json:"name"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&reqBody)
+
+	stationName := "Моя Волна"
+	if strings.TrimSpace(reqBody.Name) != "" {
+		stationName = strings.TrimSpace(reqBody.Name)
 	}
 
 	scheme := "http"
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 		scheme = "https"
 	}
+
 	host := r.Host
-	if h.cfg != nil && h.cfg.Host != "0.0.0.0" && h.cfg.Host != "" {
-		host = fmt.Sprintf("%s:%d", h.cfg.Host, h.cfg.Port)
+	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
+		host = fwdHost
 	}
 
-	streamURL := fmt.Sprintf("%s://%s/api/radio/stream/wave", scheme, host)
-	if h.cfg != nil && h.cfg.RadioStreamToken != "" {
-		streamURL = fmt.Sprintf("%s?token=%s", streamURL, h.cfg.RadioStreamToken)
+	streamURL := strings.TrimSpace(reqBody.StreamURL)
+	if streamURL == "" {
+		streamURL = fmt.Sprintf("%s://%s/api/radio/stream/wave", scheme, host)
+		if h.cfg != nil && h.cfg.RadioStreamToken != "" {
+			streamURL = fmt.Sprintf("%s?token=%s", streamURL, h.cfg.RadioStreamToken)
+		}
 	}
 	homePageURL := fmt.Sprintf("%s://%s", scheme, host)
 
-	err := h.subsonic.CreateRadioStation(r.Context(), "Моя Волна", streamURL, homePageURL)
+	err := h.subsonic.CreateRadioStation(r.Context(), stationName, streamURL, homePageURL)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to sync radio station to Navidrome: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Ошибка экспорта радиостанции в Navidrome: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":     "ok",
-		"name":       "Моя Волна",
+		"name":       stationName,
 		"stream_url": streamURL,
 	})
 }

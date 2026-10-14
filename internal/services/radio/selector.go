@@ -99,11 +99,9 @@ func (s *WaveSelector) GeneratePlaylist(ctx context.Context, count int) ([]*db.T
 		var lastPlayed time.Time
 
 		if stats != nil {
-			if stats.StarredPaths[tr.FilePath] {
-				isStarred = true
-			}
-			playCount = stats.PlayCounts[tr.FilePath]
-			lastPlayed = stats.LastPlayed[tr.FilePath]
+			isStarred = stats.IsStarred(tr.FilePath)
+			playCount = stats.GetPlayCount(tr.FilePath)
+			lastPlayed = stats.GetLastPlayed(tr.FilePath)
 		}
 
 		if isStarred || playCount >= 5 {
@@ -211,11 +209,9 @@ func (s *WaveSelector) selectWaveTrack(ctx context.Context) (*db.TrackEntity, er
 		var lastPlayed time.Time
 
 		if stats != nil {
-			if stats.StarredPaths[tr.FilePath] {
-				isStarred = true
-			}
-			playCount = stats.PlayCounts[tr.FilePath]
-			lastPlayed = stats.LastPlayed[tr.FilePath]
+			isStarred = stats.IsStarred(tr.FilePath)
+			playCount = stats.GetPlayCount(tr.FilePath)
+			lastPlayed = stats.GetLastPlayed(tr.FilePath)
 		}
 
 		switch targetSegment {
