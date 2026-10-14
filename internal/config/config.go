@@ -83,9 +83,6 @@ func Load() (*Config, error) {
 	}
 
 	radioToken := getEnv("RADIO_STREAM_TOKEN", "")
-	if radioToken == "" {
-		radioToken = uuid.New().String()
-	}
 	radioWaveSize, _ := strconv.Atoi(getEnv("RADIO_WAVE_SIZE", "60"))
 	if radioWaveSize <= 0 {
 		radioWaveSize = 60

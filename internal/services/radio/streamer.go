@@ -89,6 +89,7 @@ func (s *IcyStreamer) ServeHTTP(w http.ResponseWriter, r *http.Request, stationT
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
+	w.Header().Set("Accept-Ranges", "none")
 	w.Header().Set("icy-name", "Моя Волна | Music Manager")
 	w.Header().Set("icy-genre", "Personal Radio")
 	w.Header().Set("icy-br", "320")

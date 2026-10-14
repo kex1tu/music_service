@@ -239,12 +239,17 @@ func NewRouter(p RouterParams) http.Handler {
 
 	// Public/Token-authorized ICY Radio Stream Endpoints (for VLC, Navidrome Radio, browser audio)
 	if p.RadioHandler != nil {
-		r.Options("/api/radio/stream/wave", p.RadioHandler.HandleStreamOptions)
-		r.Options("/api/radio/stream/genre/{name}", p.RadioHandler.HandleStreamOptions)
-		r.Options("/api/radio/stream/artist/{name}", p.RadioHandler.HandleStreamOptions)
-		r.Get("/api/radio/stream/wave", p.RadioHandler.StreamWave)
-		r.Get("/api/radio/stream/genre/{name}", p.RadioHandler.StreamGenre)
-		r.Get("/api/radio/stream/artist/{name}", p.RadioHandler.StreamArtist)
+		r.Route("/api/radio/stream", func(r chi.Router) {
+			r.Options("/*", p.RadioHandler.HandleStreamOptions)
+			r.Get("/wave", p.RadioHandler.StreamWave)
+			r.Head("/wave", p.RadioHandler.StreamWave)
+			r.Get("/wave.mp3", p.RadioHandler.StreamWave)
+			r.Head("/wave.mp3", p.RadioHandler.StreamWave)
+			r.Get("/genre/{name}", p.RadioHandler.StreamGenre)
+			r.Head("/genre/{name}", p.RadioHandler.StreamGenre)
+			r.Get("/artist/{name}", p.RadioHandler.StreamArtist)
+			r.Head("/artist/{name}", p.RadioHandler.StreamArtist)
+		})
 	}
 
 	// Release Radar API

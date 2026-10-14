@@ -179,4 +179,22 @@ func TestRadioHandler_Endpoints(t *testing.T) {
 	if !strings.Contains(wStats.Body.String(), `"stream_token":"secret-token-123"`) {
 		t.Errorf("expected stream_token in stats body, got: %s", wStats.Body.String())
 	}
+
+	// 8. Проверка открытого стрима (когда RADIO_STREAM_TOKEN не задан в .env)
+	handler.cfg.RadioStreamToken = ""
+	reqOpen := httptest.NewRequest("GET", "/api/radio/stream/wave", nil)
+	if !handler.checkStreamAuth(reqOpen) {
+		t.Error("expected auth to pass when RadioStreamToken is empty")
+	}
+
+	// 9. Проверка HEAD запроса для открытого стрима
+	reqHead := httptest.NewRequest("HEAD", "/api/radio/stream/wave", nil)
+	wHead := httptest.NewRecorder()
+	handler.StreamWave(wHead, reqHead)
+	if wHead.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for HEAD request, got %d", wHead.Code)
+	}
+	if wHead.Header().Get("Accept-Ranges") != "none" {
+		t.Errorf("expected Accept-Ranges: none, got %q", wHead.Header().Get("Accept-Ranges"))
+	}
 }
