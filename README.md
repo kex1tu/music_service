@@ -174,6 +174,26 @@ sudo systemctl enable --now music-manager.service
 sudo systemctl status music-manager.service
 ```
 
+### 5.4 Автоматический деплой через GitHub Actions (CI/CD)
+
+В репозитории настроен автоматический CI/CD пайплайн (`.github/workflows/deploy.yml`):
+
+1. **Автоматический триггер:** При каждом `git push` в ветку `main` запускается:
+   - Автоматический прогон тестов (`go test -v ./...`).
+   - Кросс-компиляция статического бинарника (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64`).
+   - Параллельная раскатка на боевые серверы `nl_music` (`https://musicdownloader.verymad.net/`) и Сервер 2 (`https://mymusicdownload.verymad.net/`).
+   - Атомарная замена исполняемого файла, перезапуск `systemd` и проверка доступности `/api/health` с авто-откатом при ошибках.
+2. **Ручной запуск (Workflow Dispatch):** Вкладка **Actions** в GitHub позволяет запустить деплой вручную с выбором целевого сервера (`all`, `nl_music`, `server2`).
+3. **Локальный скрипт быстрой раскатки:**
+   ```bash
+   # Деплой на все серверы
+   ./scripts/deploy.sh all
+
+   # Деплой только на Сервер 1 или Сервер 2
+   ./scripts/deploy.sh nl_music
+   ./scripts/deploy.sh server2
+   ```
+
 ---
 
 ## 6. Структура проекта

@@ -1,0 +1,182 @@
+name: CI/CD Auto-Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Deployment target'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - nl_music
+          - server2
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Run Tests & Linters
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          check-latest: true
+          cache: true
+
+      - name: Run unit tests
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          go test -v ./...
+
+  build:
+    name: Build Static Binary
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          check-latest: true
+          cache: true
+
+      - name: Compile pure Go binary (CGO_ENABLED=0)
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          mkdir -p bin
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go
+          chmod +x bin/music-manager
+          ls -lh bin/music-manager
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: music-manager-bin
+          path: bin/music-manager
+          retention-days: 1
+
+  deploy:
+    name: Deploy to ${{ matrix.server.name }}
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        server:
+          - id: nl_music
+            name: "nl_music (musicdownloader.verymad.net)"
+            host: "194.76.168.20"
+            port: 56924
+            user: "root"
+            app_dir: "/opt/music-manager"
+            app_user: "music"
+            app_group: "media"
+            service: "music-manager.service"
+            health_url: "https://musicdownloader.verymad.net/api/health"
+          - id: server2
+            name: "Server 2 (mymusicdownload.verymad.net)"
+            host: "13.143.193.207"
+            port: 56924
+            user: "root"
+            app_dir: "/root/music_service"
+            app_user: "root"
+            app_group: "root"
+            service: "music-manager.service"
+            health_url: "https://mymusicdownload.verymad.net/api/health"
+    steps:
+      - name: Check target selection
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.target != 'all' && github.event.inputs.target != matrix.server.id
+        run: |
+          echo "Skipping ${{ matrix.server.name }} because target '${{ github.event.inputs.target }}' was chosen."
+          exit 0
+
+      - name: Download Binary Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: music-manager-bin
+          path: bin
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ matrix.server.port }} -H ${{ matrix.server.host }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Sync Git Repository on Server
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ matrix.server.port }} -o StrictHostKeyChecking=accept-new ${{ matrix.server.user }}@${{ matrix.server.host }} \
+            "cd ${{ matrix.server.app_dir }} && git fetch origin main && git checkout -- . && git pull --ff-only origin main"
+
+      - name: Upload Prebuilt Binary
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ matrix.server.port }} -o StrictHostKeyChecking=accept-new ${{ matrix.server.user }}@${{ matrix.server.host }} \
+            "mkdir -p ${{ matrix.server.app_dir }}/bin"
+          scp -i ~/.ssh/deploy_key -P ${{ matrix.server.port }} -o StrictHostKeyChecking=accept-new bin/music-manager ${{ matrix.server.user }}@${{ matrix.server.host }}:${{ matrix.server.app_dir }}/bin/music-manager.new
+
+      - name: Atomic Swap & Restart Service
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ matrix.server.port }} -o StrictHostKeyChecking=accept-new ${{ matrix.server.user }}@${{ matrix.server.host }} bash -s << 'EOF'
+            set -e
+            APP_DIR="${{ matrix.server.app_dir }}"
+            APP_USER="${{ matrix.server.app_user }}"
+            APP_GROUP="${{ matrix.server.app_group }}"
+            SERVICE="${{ matrix.server.service }}"
+
+            chmod 755 "$APP_DIR/bin/music-manager.new"
+            chown "$APP_USER:$APP_GROUP" "$APP_DIR/bin/music-manager.new"
+
+            if [ -f "$APP_DIR/bin/music-manager" ]; then
+              cp -f "$APP_DIR/bin/music-manager" "$APP_DIR/bin/music-manager.bak"
+            fi
+
+            mv -f "$APP_DIR/bin/music-manager.new" "$APP_DIR/bin/music-manager"
+            systemctl restart "$SERVICE"
+            echo "Service $SERVICE restarted successfully."
+          EOF
+
+      - name: Verify Health Check & Auto-Rollback
+        run: |
+          echo "Verifying service health on ${{ matrix.server.health_url }}..."
+          HEALTHY=0
+          for i in {1..15}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ matrix.server.health_url }}" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check PASSED on attempt $i (HTTP 200)!"
+              HEALTHY=1
+              break
+            fi
+            echo "Attempt $i/15: got HTTP $STATUS, retrying in 2s..."
+            sleep 2
+          done
+
+          if [ "$HEALTHY" -ne 1 ]; then
+            echo "::error::Health check FAILED! Performing automatic rollback to backup binary..."
+            ssh -i ~/.ssh/deploy_key -p ${{ matrix.server.port }} -o StrictHostKeyChecking=accept-new ${{ matrix.server.user }}@${{ matrix.server.host }} bash -s << 'EOF'
+              APP_DIR="${{ matrix.server.app_dir }}"
+              SERVICE="${{ matrix.server.service }}"
+              if [ -f "$APP_DIR/bin/music-manager.bak" ]; then
+                cp -f "$APP_DIR/bin/music-manager.bak" "$APP_DIR/bin/music-manager"
+                systemctl restart "$SERVICE"
+                echo "Rollback restored previous working binary."
+              fi
+            EOF
+            exit 1
+          fi

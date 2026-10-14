@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 66 блоков задач полностью реализованы и протестированы).
+- **Статус готовности:** **100% DONE** (Все 68 блоков задач полностью реализованы и протестированы).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 13 пакетов зеленые).
@@ -577,6 +577,58 @@
     - Добавлены юнит-тесты валидации эндпоинтов `PreviewAudio`, `GetCandidates`, `BindBackfillSource` в `download_handlers_test.go`.
     - Добавлены юнит-тесты `SetPartialReady` и сводки очереди в `job_test.go`.
     - Все 13 пакетов репозитория успешно проходят `go test -race ./...` (0 data races), бинарник компилируется чисто.
+
+  - **Блок 67: Release Radar, Gap Detector, «Моя Волна», ICY Audio Streamer & Navidrome Integration:**
+    - **67.1. Конфигурация и персистентная схема SQLite:**
+      - Добавлены настройки в `internal/config/config.go` и `.env.example`: `RadioStreamToken`, `RadioWaveSize`, `NavidromeDBPath`, `NavidromeURL`, `NavidromeUser`, `NavidromePassword`, `LastfmAPIKey`, `RadarScanIntervalHours`, `RadarAutoDownload`.
+      - В схему `internal/db/schema.sql` добавлены персистентные таблицы: `tracked_artists`, `radar_releases`, `artist_relations`, `radio_history`, с индексами. Настроено их сохранение при вызове `ResetLibraryTables`.
+      - Автоматическое добавление артистов в `tracked_artists` при фоновом сканировании медиатеки (`artist_album.go`).
+      - В `internal/db/radar_radio_queries.go` реализован полный набор методов выборки и мутаций: `UpsertTrackedArtist`, `GetTrackedArtists`, `GetTrackedArtistByName`, `SetArtistFollowed`, `SetArtistAutoDownload`, `UpdateArtistCustomLinks`, `UpdateArtistLastChecked`, `UpsertRadarRelease`, `GetRadarFeed`, `GetArtistDiscography`, `SetRadarReleaseStatus`, `GetRadarUnreadCount`, `GetWaveCandidateTracks`, `GetTracksByGenre`, `GetTracksByArtists`, `GetAvailableGenres`, `RecordRadioHistory`, `UpsertArtistRelation`, `GetRelatedArtistsFromDB`.
+    - **67.2. Каталожные клиенты, агрегатор дискографий и движок схожести:**
+      - Расширен `DeezerClient` (`client_deezer.go`): реализованы методы `SearchArtist` и `GetRelatedArtists`.
+      - Расширен `MusicBrainzClient` (`musicbrainz.go`): добавлен метод `GetArtistReleaseGroups`.
+      - Создан чистый HTTP-клиент `LastfmClient` (`client_lastfm.go`) для метода `artist.getsimilar`.
+      - Создан агрегатор `DiscographyAggregator` (`discography_aggregator.go`): нормализация названий (`CleanReleaseTitle`), отсечение Deluxe/Remaster маркеров, объединение дубликатов по дельте года $|\Delta \text{Year}| \le 1$, сверка с локальной медиатекой и присвоение статусов (`in_library`, `version_exists`, `new`, `missing`).
+      - Создан движок связей `SimilarityEngine` (`similarity.go`): композитный скоринг схожести исполнителей на базе Deezer и Last.fm с кэшированием в SQLite.
+    - **67.3. Радио, Моя Волна, ICY Streamer и Navidrome:**
+      - Создан селектор `WaveSelector` (`selector.go`): алгоритм генерации очереди (45% comfort / любимые, 30% forgotten / забытые, 25% discovery / открытия), защита от повторов (6 часов для трека, 3 трека подряд для одного артиста), станции по жанру и артисту.
+      - Создан `NavidromeReader` (`navidrome.go`): безопасное read-only (`mode=ro`) чтение `navidrome.db` для учета избранного (`starred`) и счетчиков прослушиваний.
+      - Создан `NavidromeSubsonicClient` (`navidrome.go`): автоматическая регистрация потока как интернет-радиостанции в Navidrome Subsonic API (`createInternetRadioStation`).
+      - Создан потоковый сервер `IcyStreamer` (`streamer.go`): Zero-Transcoding MP3 320 kbps CBR прямое чтение с диска, пропуск ID3v2 заголовка, burst-буфер 120 КБ (3 сек), пейсинг-таймер 40 КБ/с (1.0x realtime), инжекция метаданных `StreamTitle` блоками по 16384 байт при наличии заголовка `Icy-MetaData: 1`.
+      - Создан генератор плейлистов `M3UGenerator` (`m3u.go`): атомарная генерация `#EXTM3U` с относительными путями (`Playlists/Моя Волна.m3u`). Фоновый ежедневный запуск в 05:00 и начальная генерация при старте сервера.
+    - **67.4. Сервис Release Radar & Gap Detector:**
+      - Создан `RadarService` (`internal/services/radar/service.go`): периодический опрос каталогов с настраиваемым интервалом, Paced Worker с задержкой 1.5 сек между артистами для защиты от 429 Too Many Requests, отслеживание живого прогресса (`ScanProgress`), автозагрузка новых релизов через `downloader.Service`.
+    - **67.5. HTTP API & Маршрутизация:**
+      - Создан `RadarHandler` (`radar_handlers.go`) и маршруты `/api/radar/*`: `GET /feed`, `GET /unread-count`, `GET /artists`, `POST /artists`, `POST /artists/{name}/follow`, `POST /artists/{name}/auto-download`, `POST /artists/{name}/custom-links`, `GET /artists/{name}/discography`, `POST /scan`, `GET /progress`, `POST /cancel`, `POST /releases/{id}/status`.
+      - Создан `RadioHandler` (`radio_handlers.go`) и маршруты `/api/radio/*`: публичные/токен-авторизованные потоки `GET /stream/wave`, `GET /stream/genre/{name}`, `GET /stream/artist/{name}`; защищенные эндпоинты `GET /wave/queue`, `GET /wave/stats`, `GET /genres`, `POST /m3u/generate`, `POST /navidrome/sync-radio`.
+      - Сборка и запуск сервисов в `cmd/server/main.go` с graceful shutdown.
+    - **67.6. No-Build фронтенд (Alpine.js + Tailwind + Material Symbols):**
+      - Добавлены вкладки `📡 Радар` (с бейджем непросмотренных новинок) и `📻 Радио` в `header.html`.
+      - Создан шаблон `web/templates/components/radar.html`: лента релизов с фильтрами типов (`album`, `single`, `ep`, `compilation`), поиск, таблица отслеживаемых артистов, прогресс-бар сканирования.
+      - Создано модальное окно `web/templates/modals/radar_discography_modal.html`: полная раскладка дискографии со статусами пробелов и настройкой кастомных ID каталогов.
+      - Создан шаблон `web/templates/components/radio.html`: неоморфический баннер Моей Волны, кнопки запуска потока, генерации M3U и экспорта в Navidrome, станции по жанрам и артистам, живая очередь кандидатов.
+      - Созданы клиентские сторы `web/static/js/radar/radar.js` и `web/static/js/radio/radio.js`.
+      - В `web/static/js/player.js` внедрен метод `playRadioStream` с интеграцией в спектроанализатор Web Audio API.
+    - **67.7. Тестирование:**
+      - Написаны и успешно пройдены модульные тесты для всех компонентов: `db_test.go`, `discography_similarity_test.go`, `radio_test.go`, `radar_test.go`, `radar_handlers_test.go`, `radio_handlers_test.go`.
+      - `go test -v -race ./...` — **100% PASS, 0 data races**. Бинарник компилируется чисто.
+
+  - **Блок 68 (CI/CD Automated Deployment via GitHub Actions & systemd):**
+    - **Выделенный SSH Deploy Key:**
+      - Сгенерирована отдельная ключевая пара ED25519 (`github-actions-music-manager-deploy`).
+      - Открытый ключ безопасно прописан в `~/.ssh/authorized_keys` на обоих боевых серверах (`nl_music` и `Server 2`).
+      - Закрытый ключ сохранен в GitHub Actions Secrets (`DEPLOY_SSH_KEY`) через GitHub CLI.
+    - **GitHub Actions Workflow (`.github/workflows/deploy.yml`):**
+      - Автоматический запуск при каждом `git push` в ветку `main` и ручной запуск через `workflow_dispatch` с выбором целевого сервера (`all`, `nl_music`, `server2`).
+      - Очередь `concurrency: deploy-production` с `cancel-in-progress: false` против коллизий параллельных деплоев.
+      - CI Job: полный прогон модульных тестов (`go test -v ./...`).
+      - Build Job: кросс-компиляция статического бинарника `CGO_ENABLED=0 GOOS=linux GOARCH=amd64` со встроенными шаблонами и статикой через `go:embed`.
+      - CD Matrix Job: параллельная раскатка на `nl_music` (порт 56924, `/opt/music-manager`, пользователь `music:media`) и `Server 2` (порт 56924, `/root/music_service`, пользователь `root:root`).
+      - Атомарная замена исполняемого файла с созданием бэкапа `bin/music-manager.bak`, перезапуск `systemd` и опрос эндпоинта `/api/health` с авто-откатом при ошибках.
+    - **Локальный скрипт быстрой раскатки (`scripts/deploy.sh`):**
+      - Скрипт `./scripts/deploy.sh [all|nl_music|server2]` для быстрого деплоя из терминала в один клик.
+    - **Документация:**
+      - Обновлен `README.md` (раздел 5.4).
 
 ---
 
