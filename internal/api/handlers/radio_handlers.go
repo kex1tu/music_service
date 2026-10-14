@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -151,7 +152,8 @@ func (h *RadioHandler) StreamGenre(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized: invalid or missing stream token", http.StatusUnauthorized)
 		return
 	}
-	genre := chi.URLParam(r, "name")
+	genre, _ := url.PathUnescape(chi.URLParam(r, "name"))
+	genre = strings.TrimSpace(strings.TrimSuffix(genre, ".mp3"))
 	h.streamer.ServeHTTP(w, r, "genre", genre)
 }
 
@@ -161,7 +163,8 @@ func (h *RadioHandler) StreamArtist(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized: invalid or missing stream token", http.StatusUnauthorized)
 		return
 	}
-	artist := chi.URLParam(r, "name")
+	artist, _ := url.PathUnescape(chi.URLParam(r, "name"))
+	artist = strings.TrimSpace(strings.TrimSuffix(artist, ".mp3"))
 	h.streamer.ServeHTTP(w, r, "artist", artist)
 }
 

@@ -99,6 +99,8 @@
                 <template x-for="g in $store.radio.genres" :key="g.name || g">
                     <button
                         @click="$store.radio.playGenre(g.name || g)"
+                        @contextmenu.prevent="$store.radio.exportGenreToNavidrome(g.name || g)"
+                        :title="'ЛКМ — слушать на сайте, ПКМ — экспорт в Navidrome'"
                         class="px-3 py-1.5 rounded-xl bg-surface-elevated hover:bg-brand hover:text-white border border-surface-border text-content-secondary transition flex items-center space-x-1.5 text-xs group">
                         <svg class="w-3.5 h-3.5 text-brand group-hover:text-white transition" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M8 5v14l11-7z"/>
@@ -129,12 +131,31 @@
                         class="flex-1 bg-surface-input border border-surface-border rounded-xl px-3 py-2 text-xs text-white placeholder-content-muted focus:outline-none focus:border-brand">
                     <button
                         @click="$store.radio.playArtist()"
-                        class="px-4 py-2 bg-brand hover:bg-brand-hover text-white text-xs font-semibold rounded-xl transition shrink-0">
+                        class="px-3 py-2 bg-brand hover:bg-brand-hover text-white text-xs font-semibold rounded-xl transition shrink-0"
+                        title="Воспроизвести на сайте">
                         Включить
+                    </button>
+                    <button
+                        @click="$store.radio.exportArtistToNavidrome()"
+                        :disabled="$store.radio.isSyncingNavidrome"
+                        class="px-3 py-2 bg-surface-elevated hover:bg-surface-hover border border-surface-border text-content-secondary hover:text-brand text-xs font-semibold rounded-xl transition shrink-0 flex items-center space-x-1"
+                        title="Экспортировать радиостанцию этого артиста в Navidrome">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                        </svg>
+                        <span>В Navidrome</span>
+                    </button>
+                    <button
+                        @click="$store.radio.copyStreamUrl('artist', $store.radio.artistSearch)"
+                        class="p-2 bg-surface-elevated hover:bg-surface-hover border border-surface-border text-content-muted hover:text-white rounded-xl transition shrink-0"
+                        title="Скопировать прямую ссылку на поток">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                        </svg>
                     </button>
                 </div>
                 <p class="text-[11px] text-content-muted">
-                    Совет: Поток автоматически расширяется композициями похожих артистов из графа схожести.
+                    Совет: Поток автоматически расширяется композициями похожих артистов из графа схожести. Нажмите «В Navidrome» для создания станции в вашей медиатеке.
                 </p>
             </div>
         </div>

@@ -158,14 +158,16 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async syncNavidrome() {
+        async syncNavidrome(name = 'Моя Волна', streamUrl = '') {
             this.isSyncingNavidrome = true;
             try {
-                const streamUrl = this.getStreamUrl('wave', '', true);
+                if (!streamUrl) {
+                    streamUrl = this.getStreamUrl('wave', '', true);
+                }
                 const res = await fetch('/api/radio/navidrome/sync-radio', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: 'Моя Волна', stream_url: streamUrl })
+                    body: JSON.stringify({ name: name, stream_url: streamUrl })
                 });
                 if (res.ok) {
                     const data = await res.json();
@@ -180,6 +182,25 @@ document.addEventListener('alpine:init', () => {
             } finally {
                 this.isSyncingNavidrome = false;
             }
+        },
+
+        exportArtistToNavidrome(artist) {
+            artist = (artist || this.artistSearch || '').trim();
+            if (!artist) {
+                if (Alpine.store('app') && Alpine.store('app').toast) {
+                    Alpine.store('app').toast('Введите имя исполнителя для экспорта в Navidrome', 'warning');
+                }
+                return;
+            }
+            const streamUrl = this.getStreamUrl('artist', artist, true);
+            this.syncNavidrome(`Радио: ${artist}`, streamUrl);
+        },
+
+        exportGenreToNavidrome(genre) {
+            genre = (genre || '').trim();
+            if (!genre) return;
+            const streamUrl = this.getStreamUrl('genre', genre, true);
+            this.syncNavidrome(`Радио: ${genre}`, streamUrl);
         },
 
         copyStreamUrl(type = 'wave', param = '') {
