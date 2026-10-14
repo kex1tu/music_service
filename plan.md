@@ -1,47 +1,69 @@
-# План реализации: Мульти-источниковый поиск релизов и тегов (Deezer, MusicBrainz, Shazam) для Puddletag Workstation
+# План реализации: Release Radar (Автозагрузка новинок) и Сверка дискографии артиста (Gap Detector)
 
 **Дата:** 2026-10-14  
-**Статус:** `DONE`  
-**Компоненты:** `internal/services/resolver/`, `internal/api/handlers/`, `web/templates/components/`, `web/static/js/puddletag/`, `internal/config/`  
-**Архитектурный инвариант:** Pure Go (Chi), Zero Node.js/npm, Zero Docker, Sandbox Mandatory (`PathSandbox.Resolve`), ID3v2.4 UTF-8 (`\x00` в фреймах / `\\` на фронтенде), No-Build Frontend (Tailwind CDN + Alpine.js CDN).
+**Статус:** `PROPOSED`  
+**Компоненты:** `internal/db/`, `internal/services/resolver/`, `internal/services/radar/`, `internal/services/downloader/`, `internal/api/handlers/`, `web/templates/`, `web/static/js/`  
+**Архитектурный инвариант:** Pure Go (Chi), Zero Python, Zero Node.js/npm, Zero Docker, Sandbox Mandatory (`PathSandbox.Resolve`), ID3v2.4 UTF-8 (`\x00` в фреймах / `\\` на фронтенде), SQLite (WAL), No-Build Frontend (Tailwind CDN + Alpine.js CDN).
 
 ---
 
 ## 1. Цель и границы задачи (Objective & Scope)
 
 ### 1.1. Проблема и целевой результат
-- **Проблема:** В рабочей станции тегов Puddletag (`web/templates/components/puddletag_grid.html`, `puddletag_workstation.js`) ручной ввод тегов для альбомов и синглов отнимает много времени, если в файлах нет метаданных или они повреждены. Ранее поиск Deezer существовал только в старом модальном окне загрузок, а базы MusicBrainz и Shazam не были интегрированы в единую систему сравнения.
-- **Целевой результат:** Добавить на панель инструментов Puddletag кнопку **«Поиск в базах»** (`🌐 Базы тегов`), открывающую интерактивное модальное окно с параллельным поиском по трем независимым базам данных:
-  1. 🟣 **Deezer API** (с обязательным отдельным параллельным дозапросом `/track/{id}` для каждого трека релиза через 8 воркеров для получения точных соавторов `contributors` и `ISRC`);
-  2. 🟠 **MusicBrainz API v2** (поиск релизов, извлечение треклистов, соавторов, дат и обложек из Cover Art Archive, с поддержкой персонального токена `MUSICBRAINZ_USER_TOKEN` / ввода в настройках);
-  3. 🔵 **Shazam (Гибридный режим)** (акустическое распознавание отпечатка первого выбранного файла через `songrec` / Shazam Audio Fingerprint + текстовый поиск по каталогу Shazam).
-  
-  Пользователь видит результаты из всех 3 баз во вкладках с бейджами количества совпадений, может просмотреть треклист найденного релиза, выбрать нужные поля через чекбоксы (`☑ Названия и авторы`, `☑ Номера треков`, `☑ Альбом и год`, `☑ Жанры`, `☑ Обложка`) и в 1 клик применить теги к выделенным трекам в staged-режиме (янтарная подсветка) с возможностью сохранения по `Ctrl+S`.
+- **Проблема:** 
+  1. В медиатеке отсутствуют средства автоматического отслеживания новых треков и альбомов любимых артистов. Пользователю приходится вручную проверять стриминговые платформы и по одной ссылке копировать релизы в загрузчик.
+  2. У пользователя нет целостной картины полноты дискографии артистов в медиатеке: невозможно увидеть, какие студийные альбомы, EP или синглы были выпущены исполнителем за всю карьеру, но отсутствуют в локальной папке `MUSIC_DIR` (пробелы в дискографии / Gaps).
+- **Целевой результат:**
+  1. **Единая система Release Radar & Gap Detector на верхнем уровне навигации:**
+     - Создание новой главной вкладки **«📡 Радар и Дискографии»** в шапке `header.html` с двумя рабочими областями:
+       - **Под-вкладка 1: «Лента новинок (Radar)»** — единый агрегированный поток свежих незагруженных релизов всех артистов библиотеки за последние 2 года с бесшумными бейджами `NEW`, быстрым скачиванием в 1 клик, кнопкой «Скачать все выбранные» и настройкой автозагрузки.
+       - **Под-вкладка 2: «Артисты и дискографии»** — каталог всех артистов медиатеки с переходом в полную дискографию, отображением статусов каждого релиза (`🟢 В медиатеке`, `🟡 Частично`, `⚪ Отсутствует / Gap`), кнопками докачки пробелов и возможностью ручной привязки псевдонимов/ссылок.
+  2. **Автоматическое отслеживание всех артистов медиатеки:**
+     - Любой исполнитель, найденный в папке `MUSIC_DIR` при сканировании библиотеки, автоматически регистрируется в системе отслеживания (`is_followed = 1`).
+     - Пользователь может в 1 клик отключить отслеживание конкретного артиста (Mute/Unfollow) или включить индивидуальную опцию «Автоматически скачивать новинки».
+  3. **Мультипровайдерная агрегация каталогов (Deezer + MusicBrainz + Shazam):**
+     - Артист не привязывается к единственному поставщику. Система запрашивает каталоги Deezer, открытую базу MusicBrainz и Shazam/Apple Music.
+     - Алгоритм кросс-дедупликации склеивает дубликаты по нормализованному названию (`clean_title`), году выпуска $| \Delta \text{Year} | \le 1$ и типу релиза (`album`, `ep`, `single`, `compilation`), сохраняя прямые ссылки на стриминг для скачивания.
+  4. **Умная классификация пробелов (Gap Detection):**
+     - Полноформатные студийные альбомы и EP считаются ключевыми релизами дискографии. Синглы и сборники вынесены под отдельные переключаемые фильтры.
+     - Если в локальной библиотеке уже присутствует оригинальный альбом, Deluxe/Remaster-издания помечаются бейджем «Версия уже есть», исключая ложные пробелы.
+  5. **Гибридный режим автоматизации:**
+     - По умолчанию новинки попадают в ленту рассмотрения (Radar Inbox) для ручного подтверждения.
+     - Глобальный тумблер или переключатель в карточке конкретного артиста позволяет включить режим «Автозагрузка сразу в очередь» (без необходимости ручного клика).
+  6. **Фоновый планировщик и ручные триггеры:**
+     - Фоновый демон в Go выполняет регулярный обход (по умолчанию раз в 24 часа) с деликатной паузой 1.5 секунды между артистами для защиты от внешних rate-limit (MusicBrainz / Deezer).
+     - Кнопка «🔄 Обновить дискографию» в карточке любого артиста для моментальной точечной проверки.
+     - Кнопка «🔄 Проверить новинки» в шапке ленты Радара с отображением прогресса обхода.
 
 ### 1.2. Границы задачи (Scope)
 - **In-Scope:**
-  - Бэкенд-клиент MusicBrainz (`internal/services/resolver/musicbrainz.go`) с rate-limiting, поддержкой токена и интеграцией с Cover Art Archive.
-  - Расширение клиента Deezer с гарантированным извлечением соавторов треков.
-  - Гибридный обработчик Shazam: извлечение акустического отпечатка из локального MP3 через песочницу + поиск по текстовому каталогу.
-  - Единый агрегирующий HTTP API эндпоинт `GET /api/catalog/search` и детальный просмотр релиза `GET /api/catalog/release`.
-  - Модульный HTML-шаблон модального окна `web/templates/components/puddletag_source_modal.html`.
-  - Клиентский контроллер `web/static/js/puddletag/sources.js` и кнопка на тулбаре `puddletag_toolbar.html`.
-  - Применение найденных тегов к массиву `this.tracks` в рабочей станции Puddletag с сохранением соответствия дорожек и dirty state.
+  - Расширение схемы SQLite (WAL): таблицы `radar_releases`, добавление полей отслеживания в `artists`, системные настройки `app_settings`.
+  - Модуль дедупликации и агрегации каталогов `internal/services/resolver/discography_aggregator.go`.
+  - Фоновый сервис `internal/services/radar/` с планировщиком, защитой от банов, очередью задач и ручным триггером с телеметрией прогресса.
+  - HTTP API эндпоинты в `internal/api/handlers/radar_handlers.go` и регистрация в `router.go`.
+  - HTML-шаблоны `web/templates/components/radar.html`, `radar_feed.html`, `radar_artists.html`, `radar_artist_modal.html`.
+  - Модульный фронтенд JavaScript `web/static/js/radar/radar.js` с интеграцией в `Alpine.store('radar')`.
+  - Пакетные и точечные тесты в Go (`go test -race ./...`).
 - **Out-of-Scope:**
-  - Прямая перезапись файлов на диске без подтверждения (все найденные метаданные попадают в предпросмотр и staged-стейт).
-  - Установка сторонних рантаймов (Node.js, Python).
+  - Вшивание текстов песен в MP3 (инвариант: только внешние `.lrc`/`.txt`).
+  - Сторонние Node.js пакеты или внешние Python-скрипты (Strict Zero-Node, Zero-Python).
+  - Всплывающие системные push-уведомления ОС или назойливые звуковые сигналы (согласовано: тихая лента в UI с бейджами `NEW`).
 
 ---
 
 ## 2. Анализ текущего состояния кодовой базы
 
-| Компонент | Текущее состояние | Что требуется доработать |
+| Файл / Компонент | Текущее состояние | Что требуется доработать |
 |---|---|---|
-| **Deezer Client** (`internal/services/resolver/deezer.go`) | Умеет искать альбомы и получать треки; в `deezer_search_handlers.go` есть 8-поточный обход `GetTrack` | Вынести нормализованное получение релиза в общий интерфейс `CatalogProvider` |
-| **MusicBrainz** | Полностью отсутствует | Создать `MusicBrainzClient` с парсингом JSON v2, Cover Art Archive и поддержкой токена |
-| **Shazam** (`internal/api/handlers/recognize_handlers.go`) | Имеет вызов `songrec` CLI для одиночного файла | Оформить как гибридный провайдер: аудио-фингерпринт + текстовый поиск в каталоге |
-| **Puddletag Toolbar** (`web/templates/components/puddletag_toolbar.html`) | Имеет кнопки «Файл → Теги», «Теги → Файл», «Регистр», «Нумератор», «Очистка», «Замена» | Добавить кнопку «🌐 Базы тегов» с вызовом диалога поиска |
-| **Puddletag Workstation** (`web/static/js/puddletag/puddletag_workstation.js`) | Управляет `tracks`, `selectedIndices`, `dirtyIndices`, пагинацией и инлайн-редактированием | Добавить методы открытия поиска, сопоставления треков и применения тегов из выбранного провайдера |
+| [`internal/db/schema.sql`](file:///home/kex1tu/%D0%A0%D0%B0%D0%B1%D0%BE%D1%87%D0%B8%D0%B9%20%D1%81%D1%82%D0%BE%D0%BB/music%20download/music-manager/internal/db/schema.sql) | Таблица `artists` хранит базовые ID, но не имеет флагов отслеживания; нет таблицы каталожных релизов | Добавить в `artists` поля `is_followed`, `auto_download`, `last_checked_at`, `musicbrainz_id`, `custom_search_alias`. Создать таблицу `radar_releases` |
+| [`internal/db/queries.go`](file:///home/kex1tu/%D0%A0%D0%B0%D0%B1%D0%BE%D1%87%D0%B8%D0%B9%20%D1%81%D1%82%D0%BE%D0%BB/music%20download/music-manager/internal/db/queries.go) | Базовые выборки по трекам и альбомам | Реализовать методы работы с `radar_releases`, выборки новинок, обновления статусов и привязки артистов |
+| [`internal/services/scanner/artist_album.go`](file:///home/kex1tu/%D0%A0%D0%B0%D0%B1%D0%BE%D1%87%D0%B8%D0%B9%20%D1%81%D1%82%D0%BE%D0%BB/music%20download/music-manager/internal/services/scanner/artist_album.go) | При сканировании создает записи в таблице `artists` | Гарантировать установку `is_followed = 1` по умолчанию для каждого обнаруженного исполнителя |
+| [`internal/services/resolver/client_deezer.go`](file:///home/kex1tu/%D0%A0%D0%B0%D0%B1%D0%BE%D1%87%D0%B8%D0%B9%20%D1%81%D1%82%D0%BE%D0%BB/music%20download/music-manager/internal/services/resolver/client_deezer.go) | Умеет отдавать `GetArtistAlbums` по числовому Deezer ID | Добавить метод поиска артиста по имени `SearchArtist(ctx, name)` для получения ID |
+| [`internal/services/resolver/client_musicbrainz.go`](file:///home/kex1tu/%D0%A0%D0%B0%D0%B1%D0%BE%D1%87%D0%B8%D0%B9%20%D1%81%D1%82%D0%BE%D0%BB/music%20download/music-manager/internal/services/resolver/client_musicbrainz.go) | Имеет поиск релиз-групп и релизов | Добавить метод выборки дискографии артиста `GetArtistReleaseGroups(ctx, mbid)` |
+| [`internal/services/resolver/shazam.go`](file:///home/kex1tu/%D0%A0%D0%B0%D0%B1%D0%BE%D1%87%D0%B8%D0%B9%20%D1%81%D1%82%D0%BE%D0%BB/music%20download/music-manager/internal/services/resolver/shazam.go) | Поиск треков через iTunes API | Добавить выборку релизов артиста через iTunes API (`SearchArtistAlbums`) |
+| [`internal/api/handlers/discography_handlers.go`](file:///home/kex1tu/%D0%A0%D0%B0%D0%B1%D0%BE%D1%87%D0%B8%D0%B9%20%D1%81%D1%82%D0%BE%D0%BB/music%20download/music-manager/internal/api/handlers/discography_handlers.go) | Парсит дискографию только по внешней ссылке пользователя и не сопоставляет с файлами на диске | Использовать новый мультипровайдерный агрегатор со сверкой с локальной БД SQLite |
+| [`internal/services/downloader/downloader.go`](file:///home/kex1tu/%D0%A0%D0%B0%D0%B1%D0%BE%D1%87%D0%B8%D0%B9%20%D1%81%D1%82%D0%BE%D0%BB/music%20download/music-manager/internal/services/downloader/downloader.go) | Принимает URL для очереди | Подключить вызов автоматической постановки в очередь при включенном `auto_download` |
+| [`web/templates/header.html`](file:///home/kex1tu/%D0%A0%D0%B0%D0%B1%D0%BE%D1%87%D0%B8%D0%B9%20%D1%81%D1%82%D0%BE%D0%BB/music%20download/music-manager/web/templates/header.html) | Навигация: Загрузчик, Файлы, Аудит, Плеер | Добавить 5-ю главную вкладку `📡 Радар и Дискографии` (`activeTab === 'radar'`) |
 
 ---
 
@@ -49,271 +71,278 @@
 
 ```mermaid
 flowchart TD
-    UI["Puddletag Workstation Toolbar<br>Кнопка '🌐 Базы тегов'"] --> Modal["Модальное окно 'Поиск релиза в базах'<br>(Deezer / MusicBrainz / Shazam)"]
-    Modal --> API["Unified Backend API: /api/catalog/search<br>Параллельный опрос через goroutines"]
-    
-    subgraph Providers ["Провайдеры метаданных (Pure Go)"]
-        API --> P1["🟣 Deezer Provider<br>Параллельные 8 воркеров /track/{id}<br>(соавторы + ISRC)"]
-        API --> P2["🟠 MusicBrainz Provider<br>WS/2 Release Search + CoverArtArchive<br>(Token Auth / Rate Limiter)"]
-        API --> P3["🔵 Shazam Hybrid Provider<br>Акустический отпечаток + Search API<br>(Songrec / Audio Fingerprint)"]
+    subgraph LibraryScanner ["Сканер медиатеки (MUSIC_DIR)"]
+        Scan["Фоновый скан / fsnotify"] --> ArtistsTable["Таблица artists (SQLite WAL)<br>is_followed = 1"]
     end
 
-    P1 --> Norm["Unified CatalogRelease DTO"]
-    P2 --> Norm
-    P3 --> Norm
-    Norm --> Preview["Двухпанельный предпросмотр:<br>Список релизов | Сверка треклиста"]
-    Preview --> Staging["Применение к таблице Puddletag<br>(Staged Dirty State - янтарный цвет)"]
-    Staging --> Save["Сохранение ID3v2.4 в файлы (Ctrl+S)"]
+    subgraph RadarScheduler ["Radar Background Worker (Pure Go)"]
+        Cron["Тикер раз в сутки<br>(или кнопка 'Проверить сейчас')"] --> PacedQueue["Paced Worker<br>(пауза 1.5с между артистами)"]
+        PacedQueue --> Aggregator["Discography Aggregator Engine"]
+    end
+
+    subgraph MultiCatalog ["Мультипровайдерный опрос"]
+        Aggregator --> Deezer["Deezer API<br>(быстрый, аудиопотоки, даты)"]
+        Aggregator --> MusicBrainz["MusicBrainz API<br>(академическая полнота)"]
+        Aggregator --> Shazam["Shazam / iTunes API<br>(популярные синглы и чарты)"]
+    end
+
+    subgraph Deduplication ["Дедупликация и сверка"]
+        Deezer --> Dedupe["Нормализация названия +<br>Год +/- 1 + Тип релиза"]
+        MusicBrainz --> Dedupe
+        Shazam --> Dedupe
+        Dedupe --> GapDetector["Gap Detector:<br>Сверка с локальной таблицей albums"]
+    end
+
+    GapDetector --> StatusRouter{"Определение статуса релиза"}
+    StatusRouter -->|"Есть в albums"| InLib["Статус: in_library<br>(Deluxe -> version_exists)"]
+    StatusRouter -->|"Релиз < 2 лет и нет в albums"| RadarNew["Статус: new<br>is_radar = 1 (Release Radar)"]
+    StatusRouter -->|"Релиз >= 2 лет и нет в albums"| DiscographyGap["Статус: missing<br>(Пробел дискографии)"]
+
+    RadarNew --> AutoCheck{"Включен auto_download?"}
+    AutoCheck -->|"Да (глобально или у артиста)"| DownloaderQueue["Автоматическая отправка<br>в очередь загрузки"]
+    AutoCheck -->|"Нет (по умолчанию)"| RadarFeedUI["Лента новинок (Radar Inbox)<br>Бесшумный бейдж NEW, 1-Click Download"]
 ```
 
-### 3.1. Почему бэкенд-проксирование вместо прямых AJAX-запросов из браузера?
-1. **CORS и безопасность заголовков:** MusicBrainz требует специальный `User-Agent`, а Deezer API при прямых браузерных вызовах блокирует CORS-запросы. Бэкенд на Go обращается к внешним API напрямую без ограничений браузера.
-2. **Параллельная агрегация (Fan-Out / Fan-In):** На бэкенде Go опрашивает все 3 базы параллельно через горутины и `errgroup` за минимальное время, возвращая фронтенду единый нормализованный ответ.
-3. **Безопасность токенов:** Токен `MUSICBRAINZ_USER_TOKEN` и учетные данные не утекают в клиентский код браузера.
+### 3.1. Почему единая таблица `radar_releases` и общий движок агрегации?
+1. **Устранение дублирования кода:** Пропущенный альбом 2018 года и новинка прошлой недели с точки зрения каталога — это одна и та же сущность (релиз артиста, которого нет в локальной медиатеке).
+2. **Динамическая фильтрация:** Release Radar — это срез релизов со статусом `is_radar = 1` (дата релиза за последние 2 года), а полный Gap Detector артиста — это вся хронологическая шкала его дискографии.
+3. **Экономия сетевых запросов:** Один обход артиста одновременно актуализирует и его ленту новинок в Радаре, и карту пробелов всей дискографии, избавляя от повторных обращений к внешним API.
 
-### 3.2. Почему сохранение через Staged Dirty State?
-Вместо мгновенной записи на диск метаданные из выбранного источника заполняют ячейки таблицы Puddletag (`this.tracks[idx]`) и помечаются в `this.dirtyIndices` (янтарный цвет). Пользователь может:
-- Визуально проверить сопоставление треков.
-- Внести любые ручные правки в таблице или на панели тегов.
-- Откатить изменения кнопкой «↺ Сброс» или сохранить на диск комбинацией **Ctrl+S**.
+### 3.2. Почему мультипровайдерность без жесткой привязки к сервису?
+- Артисты могут выпускать эксклюзивы или отсутствовать на отдельных сервисах (например, региональные релизы в Deezer или инди-релизы в MusicBrainz).
+- Мультипровайдерный поиск находит максимум совпадений, но за счет дедупликации пользователь видит чистый, объединенный список без задвоений.
+- В карточке артиста сохраняется возможность ручной корректировки ID или указания альтернативного поискового имени (alias), что гарантирует 100% точность даже для исполнителей со сложными или менявшимися именами.
+
+### 3.3. Почему деликатный Paced Worker с задержкой 1.5 секунды?
+- Мульти-каталожный опрос сотен исполнителей может вызвать блокировку по IP (HTTP 429 Too Many Requests), особенно от MusicBrainz (лимит 1 req/s без OAuth и 4 req/s с OAuth).
+- Фоновый воркер работает в отдельной горутине, с детерминированным интервалом между вызовами, не блокируя HTTP-сервер и UI.
 
 ---
 
 ## 4. Сравнительная таблица альтернатив
 
-| Критерий | Вариант 1: Прямые AJAX-запросы с фронтенда | Вариант 2: Отдельные модальные окна под каждую базу | Вариант 3: Единый бэкенд-агрегатор + 3-вкладочный модал (Выбран) |
+| Критерий | Альтернатива А: Два изолированных сервиса (Radar отдельно, Gap отдельно) | Альтернатива Б: Жесткая привязка артиста только к Deezer | Выбранный подход: Единый движок с кросс-дедупликацией (Deezer + MusicBrainz + Shazam) |
 |---|---|---|---|
-| **CORS и надежность** | ❌ Блокируется CORS браузера у Deezer и MusicBrainz | ⚠️ Частично | ✅ 100% надежно, выполняется бэкендом на Pure Go |
-| **Скорость поиска** | ⚠️ Медленно (последовательно) | ⚠️ Пользователю нужно открывать 3 разных окна | ✅ Параллельно (все 3 базы опрашиваются одновременно) |
-| **Удобство сравнения** | ❌ Невозможно сравнить результаты | ❌ Требует переключения между разными окнами | ✅ Мгновенное переключение между вкладками Deezer/MusicBrainz/Shazam |
-| **Полнота тегов Deezer** | ❌ Базовый альбомный запрос не содержит всех артистов треков | ⚠️ Требует сложной логики в JS | ✅ Бэкенд автоматически дозапрашивает все `/track/{id}` в 8 потоков |
+| **Архитектурная чистота** | ❌ Дублирование структур данных и двойные запросы | ⚠️ Просто, но слепо к артистам вне Deezer | ✅ DRY, единая таблица `radar_releases`, срез по дате $\le 2$ года |
+| **Полнота дискографии** | ⚠️ Зависит от двух разных баз | ❌ Пропуски релизов, отсутствующих в Deezer | ✅ Максимальное покрытие за счет объединения 3 источников |
+| **Защита от дублей** | ❌ Риск рассинхронизации статусов | ✅ Нет дублей, но нет и альтернативных каталогов | ✅ Интеллектуальное слияние карточек по названию, году и типу |
+| **Удобство пользователя** | ❌ Необходимость настраивать два разных раздела | ❌ При ошибке Deezer артист не отслеживается | ✅ Единая вкладка «Радар и Дискографии», ручные псевдонимы |
 
 ---
 
-## 5. Детализация провайдеров и особенностей API
+## 5. Пошаговая декомпозиция реализации
 
-### 5.1. Провайдер Deezer (с 8-поточным обходом треков)
-- **Особенность Deezer API:** Базовый эндпоинт `/album/{id}` возвращает у каждого трека только имя основного артиста альбома. Для извлечения полных соавторов (например, `Miyagi feat. Эндшпиль & Рем Дигга`) необходимо вызвать `/track/{id}`, где поле `contributors` содержит массив всех артистов с ролями (`Main`, `Featured`).
-- **Реализация:**
-  - При выборе релиза бэкенд параллельно (пул из 8 воркеров с буферизованным каналом-семафором) запрашивает `/track/{track_id}`.
-  - Формирует строку исполнителей через project invariant: `\\` для фронтенда и `\x00` для ID3v2.4.
-  - Извлекает высококачественную обложку `cover_xl` (1000x1000) или `cover_big` (500x500).
+### Этап 1: Схема базы данных и персистентность (`internal/db/`)
+- **[MODIFY] `internal/db/schema.sql`**:
+  - Расширение таблицы `artists`:
+    ```sql
+    ALTER TABLE artists ADD COLUMN is_followed BOOLEAN DEFAULT 1;
+    ALTER TABLE artists ADD COLUMN auto_download BOOLEAN DEFAULT 0;
+    ALTER TABLE artists ADD COLUMN last_checked_at DATETIME;
+    ALTER TABLE artists ADD COLUMN musicbrainz_id TEXT;
+    ALTER TABLE artists ADD COLUMN custom_search_alias TEXT;
+    ```
+  - Создание таблицы `radar_releases`:
+    ```sql
+    CREATE TABLE IF NOT EXISTS radar_releases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        artist_id INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
+        artist_name TEXT NOT NULL,
+        title TEXT NOT NULL,
+        clean_title TEXT NOT NULL,
+        release_type TEXT NOT NULL, -- 'album', 'single', 'ep', 'compilation'
+        release_date TEXT,          -- 'YYYY-MM-DD' or 'YYYY'
+        year INTEGER,
+        cover_url TEXT,
+        track_count INTEGER DEFAULT 1,
+        deezer_id TEXT,
+        musicbrainz_id TEXT,
+        shazam_id TEXT,
+        source_url TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'new', -- 'new', 'in_library', 'downloaded', 'ignored'
+        is_radar BOOLEAN DEFAULT 0,         -- 1 если дата релиза за последние 2 года
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(artist_id, clean_title, release_type)
+    );
+    CREATE INDEX IF NOT EXISTS idx_radar_releases_artist ON radar_releases(artist_id);
+    CREATE INDEX IF NOT EXISTS idx_radar_releases_status ON radar_releases(status);
+    CREATE INDEX IF NOT EXISTS idx_radar_releases_is_radar ON radar_releases(is_radar);
+    ```
+- **[MODIFY] `internal/db/queries.go`**:
+  - Методы:
+    - `GetFollowedArtists(ctx context.Context) ([]Artist, error)`
+    - `SetArtistFollowed(ctx context.Context, artistID int64, followed bool) error`
+    - `SetArtistAutoDownload(ctx context.Context, artistID int64, auto bool) error`
+    - `UpdateArtistLinks(ctx context.Context, artistID int64, alias, deezerID, mbID, yandexID string) error`
+    - `UpsertRadarRelease(ctx context.Context, r *RadarRelease) error`
+    - `GetRadarFeed(ctx context.Context, releaseType, search string, limit, offset int) ([]RadarReleaseItem, int, error)`
+    - `GetArtistReleasesTimeline(ctx context.Context, artistID int64) ([]RadarReleaseItem, error)`
+    - `SetRadarReleaseStatus(ctx context.Context, releaseID int64, status string) error`
+- **[MODIFY] `internal/services/scanner/artist_album.go`**:
+  - Убедиться, что при добавлении нового исполнителя `is_followed` выставляется в `1`.
 
-### 5.2. Провайдер MusicBrainz API v2 (с токеном)
-- **Эндпоинт поиска:** `https://musicbrainz.org/ws/2/release?query=...&fmt=json`
-- **Заголовки:** Обязательный `User-Agent: MusicManager/1.0 (contact@verymad.net)` и опциональный заголовок `Authorization: Bearer <MUSICBRAINZ_USER_TOKEN>`.
-- **Эндпоинт деталей релиза:** `https://musicbrainz.org/ws/2/release/{id}?inc=recordings+artist-credits+genres+labels+media&fmt=json`
-- **Обложки:** Интеграция с официальным Cover Art Archive (`https://coverartarchive.org/release/{mbid}/front-500.jpg`).
+### Этап 2: Клиенты каталогов и движок кросс-агрегации (`internal/services/resolver/`)
+- **[MODIFY] `internal/services/resolver/client_deezer.go`**:
+  - Добавить метод поиска артиста:
+    ```go
+    func (c *DeezerClient) SearchArtist(ctx context.Context, name string) (*DeezerArtist, error)
+    ```
+- **[MODIFY] `internal/services/resolver/client_musicbrainz.go`**:
+  - Добавить метод получения всех релиз-групп артиста:
+    ```go
+    func (c *MusicBrainzClient) GetArtistReleaseGroups(ctx context.Context, mbid string) ([]CatalogReleaseSummary, error)
+    ```
+- **[NEW] `internal/services/resolver/discography_aggregator.go`**:
+  - Структура `AggregatedRelease`:
+    ```go
+    type AggregatedRelease struct {
+        Title        string `json:"title"`
+        CleanTitle   string `json:"clean_title"`
+        Artist       string `json:"artist"`
+        ArtistID     int64  `json:"artist_id"`
+        Type         string `json:"type"` // album, ep, single, compilation
+        Year         int    `json:"year"`
+        Date         string `json:"date"`
+        CoverURL     string `json:"cover_url"`
+        TrackCount   int    `json:"track_count"`
+        DeezerID     string `json:"deezer_id,omitempty"`
+        MusicBrainzID string `json:"musicbrainz_id,omitempty"`
+        ShazamID     string `json:"shazam_id,omitempty"`
+        SourceURL    string `json:"source_url"`
+        Status       string `json:"status"` // in_library, version_exists, partial, missing, new
+    }
+    ```
+  - Метод `AggregateArtistDiscography(ctx context.Context, artistName, searchAlias string, knownIDs map[string]string) ([]AggregatedRelease, error)`:
+    - Параллельный опрос Deezer, MusicBrainz, Shazam.
+    - Алгоритм нечеткого слияния дубликатов с сохранением наилучшей обложки и URL аудиоисточника.
+    - Сверка с локальной таблицей `albums`:
+      - Проверка совпадения `clean_title` и артиста.
+      - Проверка подстрок `"deluxe"`, `"remaster"`, `"expanded"`: если базовый альбом найден, пометка `version_exists`.
 
-### 5.3. Провайдер Shazam (Гибридный режим)
-- **Режим A (Акустический):** Если в запросе передан путь к аудиофайлу (`audio_path`), сервер берет сэмпл первых 10 секунд первого выделенного трека через `PathSandbox` и запускает акустическое распознавание через `songrec audio-file-to-recognized-song`.
-- **Режим B (Каталог):** Текстовый поиск по названию трека/исполнителя в базе Shazam Core API.
-- **Результат:** Точное совпадение дорожки, распознанный альбом, официальная обложка в максимальном разрешении (`coverarthq`), жанр и год.
+### Этап 3: Фоновый сервис Release Radar и планировщик (`internal/services/radar/`)
+- **[NEW] `internal/services/radar/service.go`**:
+  - Структура `Service`:
+    ```go
+    type Service struct {
+        db          *db.Database
+        aggregator  *resolver.DiscographyAggregator
+        downloader  *downloader.Service
+        ticker      *time.Ticker
+        stopCh      chan struct{}
+        mu          sync.RWMutex
+        progress    ScanProgress
+    }
+    
+    type ScanProgress struct {
+        IsRunning          bool   `json:"is_running"`
+        TotalArtists       int    `json:"total_artists"`
+        CurrentIndex       int    `json:"current_index"`
+        CurrentArtistName  string `json:"current_artist_name"`
+        NewReleasesFound   int    `json:"new_releases_found"`
+        StartedAt          string `json:"started_at"`
+    }
+    ```
+  - Методы:
+    - `Start(ctx context.Context)`: фоновый цикл опроса по таймеру (раз в 24 часа по умолчанию).
+    - `Stop()`: безопасная остановка горутин.
+    - `ScanAll(ctx context.Context) error`: последовательный обход всех артистов с `time.Sleep(1500 * time.Millisecond)` между запросами.
+    - `ScanArtist(ctx context.Context, artistID int64) error`: моментальное обновление одного исполнителя.
+    - Логика автозагрузки: если `status == 'new'` и включен `auto_download`, автоматический вызов `downloader.CreateJob(source_url)`.
+
+### Этап 4: HTTP API хендлеры и маршрутизация (`internal/api/`)
+- **[NEW] `internal/api/handlers/radar_handlers.go`**:
+  - `GET /api/radar/feed`: пагинированная лента новинок (`?type=...&search=...&page=...&limit=...`).
+  - `POST /api/radar/releases/{id}/download`: отправка релиза в загрузку.
+  - `POST /api/radar/releases/{id}/ignore`: скрыть релиз из ленты новинок.
+  - `POST /api/radar/releases/download-all`: пакетная отправка выбранных новинок.
+  - `GET /api/radar/artists`: список артистов с количеством пропусков, флагами `is_followed` и датой последней проверки.
+  - `GET /api/radar/artists/{id}/discography`: полная шкала дискографии с пробелами.
+  - `POST /api/radar/artists/{id}/toggle-follow`: переключение статуса отслеживания.
+  - `POST /api/radar/artists/{id}/toggle-auto-download`: переключение автозагрузки артиста.
+  - `POST /api/radar/artists/{id}/link`: привязка псевдонима и прямых ID сервисов.
+  - `POST /api/radar/artists/{id}/refresh`: мгновенный точечный опрос.
+  - `POST /api/radar/scan-all`: запуск глобального обхода библиотеки.
+  - `GET /api/radar/scan-status`: опрос состояния глобального сканирования.
+  - `GET /api/radar/settings` / `POST /api/radar/settings`: глобальные настройки Радара (автозагрузка, интервал).
+- **[MODIFY] `internal/api/router.go`**:
+  - Регистрация маршрутов в группе `/api/radar` под защитой `authMiddleware`.
+- **[MODIFY] `cmd/server/main.go`**:
+  - Инициализация `radar.Service`, внедрение зависимостей и корректный `defer radarService.Stop()`.
+
+### Этап 5: No-Build Фронтенд компоненты (`web/templates/`, `web/static/js/`)
+- **[MODIFY] `web/templates/header.html`**:
+  - Добавление вкладки `📡 Радар` в главное меню навигации (`activeTab === 'radar'`).
+- **[NEW] `web/templates/components/radar.html`**:
+  - Контейнер компонента с переключением под-вкладок `radarSubTab`: `'feed'` («Лента новинок») и `'artists'` («Артисты и дискографии»).
+- **[NEW] `web/templates/components/radar_feed.html`**:
+  - Шапка ленты: глобальный тумблер автозагрузки, кнопка «Проверить новинки» со встроенным спиннером и прогресс-баром обхода, фильтры по типу (Все, Альбомы, EP, Синглы), поиск.
+  - Сетка карточек релизов: обложка, артист, альбом, дата выхода, бейдж `NEW`, кнопки «Скачать в 1 клик» и «Скрыть».
+  - Панель массовых действий: чекбоксы выбора, кнопка «Скачать выбранные (N)».
+- **[NEW] `web/templates/components/radar_artists.html`**:
+  - Каталог артистов: строка поиска, фильтры («Все», «С пропусками», «Отслеживаемые»), статистика медиатеки.
+  - Карточки артистов: аватар, имя, счетчик альбомов в медиатеке, бейдж количества пропусков (`⚪ N пропусков`), тумблеры отслеживания и автозагрузки, кнопка «Дискография».
+- **[NEW] `web/templates/components/radar_artist_modal.html`**:
+  - Модальное окно дискографии артиста:
+    - Шапка с кнопкой мгновенного обновления («🔄 Обновить дискографию») и настройкой псевдонимов («⚙️ Связи и ID»).
+    - Хронологическая шкала релизов (Timeline) с группировкой по годам.
+    - Цветовые бейджи статусов: `🟢 В медиатеке`, `🟡 Частично`, `⚪ Отсутствует`, `🔵 Версия уже есть`.
+    - Кнопки скачивания напротив отсутствующих альбомов и мастер-кнопка «Скачать все пропущенные альбомы».
+- **[NEW] `web/static/js/radar/radar.js`**:
+  - Модуль Alpine.js (`radarComponent`): управление состоянием, реактивные выборки, пагинация, модальные окна, запуск сканирования и пакетная отправка в очередь.
+- **[MODIFY] `web/templates/index.html`**:
+  - Подключение шаблонов `radar.html` и скрипта `radar.js`.
 
 ---
 
-## 6. Дизайн интерфейса и визуальный макет
+## 6. Анализ рисков и краевых случаев (Risks & Edge Cases)
 
-### 6.1. Сгенерированный макет модального окна
-Ниже представлен высокоточный дизайн модального окна «Поиск релиза в базах метаданных»:
-
-![Поиск релиза в базах метаданных](/home/kex1tu/.gemini/antigravity/brain/613f885e-b6ff-4be1-a63a-4e369d683e9d/music_tag_workstation_modal_mockup_1791926180438.jpg)
-
-### 6.2. Кнопки и элементы управления
-
-1. **Кнопка на тулбаре Puddletag (`puddletag_toolbar.html`):**
-   - Название: **«🌐 Базы тегов»** (со значком глобуса/каталога).
-   - Подсказка (tooltip): *«Найти метаданные релиза в Deezer, MusicBrainz и Shazam для выделенных треков»*.
-   - Состояние: активна, когда в таблице есть треки; ховер-эффект с акцентом фиолетового/синего цвета.
-
-2. **Шапка модального окна:**
-   - Поле ввода поискового запроса: `x-model="searchQuery"` (по умолчанию заполнено `Artist - Album` из выделенных треков).
-   - Кнопка **«🔍 Искать во всех базах»** (синяя заливка, триггерит параллельный опрос бэкенда).
-   - Кнопка **«🎵 Распознать по аудио (Shazam)»** (с иконкой ноты/микрофона, отправляет первый файл на акустический фингерпринтинг).
-   - Кнопка закрытия `✕`.
-
-3. **Вкладки баз данных (Tabs):**
-   - `[🟣 Deezer (N найдено)]` — активная вкладка с фиолетовым бейджем.
-   - `[🟠 MusicBrainz (N найдено)]` — вкладка с оранжевым бейджем.
-   - `[🔵 Shazam (N совпадений)]` — вкладка с синим бейджем.
-
-4. **Левая колонка — Список найденных релизов:**
-   - Карточки с миниатюрой обложки (64x64 px).
-   - Название релиза жирным шрифтом, исполнитель, год выпуска, лейбл, количество треков (`12 треков`).
-   - Клик по карточке мгновенно загружает треклист в правую колонку.
-
-5. **Правая колонка — Треклист и селектор полей:**
-   - **Панель чекбоксов выбора полей:**
-     - `[☑ Названия и авторы]`
-     - `[☑ Номера треков и дисков]`
-     - `[☑ Альбом и год]`
-     - `[☑ Жанры]`
-     - `[☑ Обложка]`
-   - **Таблица треклиста:**
-     - Номер дорожки (`№`).
-     - Название песни (`Название`).
-     - Все исполнители/соавторы (`Исполнитель`).
-     - Длительность (`Время`).
-     - Индикатор сопоставления с локальным файлом (соответствие по порядковому номеру).
-
-6. **Нижняя панель действий:**
-   - Кнопка **«Отмена»** (закрывает окно без изменений).
-   - Главная кнопка **«Применить теги к выделенным трекам»** (фиолетовый градиент с подсветкой, переносит все выбранные поля в staged-состояние таблицы Puddletag).
+1. **Блокировки и Rate Limits от каталогов (MusicBrainz / Deezer):**
+   - *Риск:* Массовый параллельный опрос сотен исполнителей приведет к блокировке по IP (HTTP 429).
+   - *Митигация:* Использование очереди с задержкой 1.5 секунды между запросами к артистам (`time.Sleep`). Кэширование ответов каталогов в SQLite. Использование токена MusicBrainz при его наличии.
+2. **Различия в написании имен артистов (КИНО vs Kino, AC/DC vs AC-DC):**
+   - *Риск:* Автоматический поиск не находит дискографию или находит однофамильца.
+   - *Митигация:* Возможность вручную указать `custom_search_alias` или прямые идентификаторы (Deezer ID / MusicBrainz MBID) в карточке артиста с сохранением в БД.
+3. **Ложные пробелы из-за Deluxe / Remaster изданий:**
+   - *Риск:* Пользователь скачал обычный альбом, а система навязчиво предлагает скачать Remastered 2024 как отсутствующий.
+   - *Митигация:* Интеллектуальный фильтр версий: нормализация названия, отсечение ключевых слов (`Deluxe`, `Remaster`, `Anniversary`, `Expanded`) и присвоение статуса `version_exists` вместо `missing`.
+4. **Служебные артисты ("Various Artists", "Soundtrack"):**
+   - *Риск:* Попытка найти дискографию для сборных папок.
+   - *Митигация:* Черный список служебных имен исполнителей (`"Various Artists"`, `"VA"`, `"Soundtrack"`, `"Unknown Artist"`), автоматически исключаемых из фонового опроса.
+5. **Безопасность путей (Path Traversal):**
+   - *Риск:* Некорректные имена релизов со спецсимволами (`/`, `\`, `..`).
+   - *Митигация:* Строгое соблюдение инварианта: все операции проводятся только через `PathSandbox.Resolve()` и санитизацию имен.
 
 ---
 
-## 7. Пошаговая декомпозиция реализации (Спецификация для субагентов)
+## 7. План тестирования и верификации (Verification Matrix)
 
-Задачу предлагается реализовать тремя специализированными субагентами в параллельно-последовательном режиме:
-
-### Агент 1: Backend MusicBrainz & Unified Resolver Engine
-- **Роль:** `MusicBrainz & Unified Resolver Specialist`
-- **Файлы:**
-  - `[NEW] internal/services/resolver/musicbrainz.go`
-  - `[NEW] internal/services/resolver/musicbrainz_test.go`
-  - `[MODIFY] internal/services/resolver/models.go`
-  - `[MODIFY] internal/config/config.go` (добавление `MusicBrainzUserToken`)
-- **Задачи:**
-  1. Реализовать структуру `MusicBrainzClient` с методом `SearchReleases(ctx, query)` и `GetRelease(ctx, mbid)`.
-  2. Реализовать парсинг медиа-носителей, номеров треков, `artist-credit` (склейка соавторов через `\\`), даты релиза и жанров.
-  3. Реализовать извлечение обложки через Cover Art Archive JSON API с fallback на `front-500.jpg`.
-  4. Написать unit-тесты с 100% герметичным мокированием через `httptest.Server`.
-
-### Агент 2: Shazam Hybrid Provider & Unified Catalog Handlers
-- **Роль:** `Shazam & Catalog API Specialist`
-- **Файлы:**
-  - `[NEW] internal/services/resolver/shazam.go`
-  - `[NEW] internal/services/resolver/shazam_test.go`
-  - `[NEW] internal/api/handlers/catalog_unified_handlers.go`
-  - `[NEW] internal/api/handlers/catalog_unified_handlers_test.go`
-  - `[MODIFY] internal/api/router.go`
-- **Задачи:**
-  1. Реализовать `ShazamClient` (текстовый поиск по каталогу + безопасный запуск фингерпринтинга через `PathSandbox`).
-  2. Реализовать универсальный агрегирующий контроллер `CatalogHandler`:
-     - `GET /api/catalog/search?query=...&audio_path=...` — запускает горутины для Deezer, MusicBrainz и Shazam с агрегацией результатов в DTO `CatalogSearchResponse`.
-     - `GET /api/catalog/deezer/album/{id}` — возвращает альбом Deezer с 8-поточным разрешением `/track/{id}`.
-     - `GET /api/catalog/musicbrainz/release/{id}` — возвращает детальный релиз MusicBrainz с треклистом.
-     - `GET /api/catalog/shazam/track/{id}` — возвращает детальный трек Shazam.
-  3. Зарегистрировать маршруты в Chi-роутере под middleware аутентификации.
-  4. Протестировать с флагом `-race`.
-
-### Агент 3: Frontend Puddletag Modal & Integration Specialist
-- **Роль:** `Frontend Puddletag UI Specialist`
-- **Файлы:**
-  - `[NEW] web/templates/components/puddletag_source_modal.html`
-  - `[NEW] web/static/js/puddletag/sources.js`
-  - `[MODIFY] web/templates/components/puddletag_toolbar.html` (добавление кнопки «🌐 Базы тегов»)
-  - `[MODIFY] web/templates/index.html` (подключение `sources.js` и шаблона модала)
-  - `[MODIFY] web/static/js/puddletag/puddletag_workstation.js` (интеграция данных, применение тегов)
-- **Задачи:**
-  1. Создать верстку двухпанельного модального окна в Tailwind CSS точно по сгенерированному макету.
-  2. Реализовать переключение 3 вкладок (Deezer / MusicBrainz / Shazam) с бейджами количества найденных совпадений.
-  3. Реализовать логику сопоставления треков релиза с выделенными строками в таблице Puddletag (по номеру дорожки / позиции).
-  4. Реализовать применение выбранных полей (чекбоксы) в staged-состояние:
-     - Обновление `track.title`, `track.artist`, `track.album`, `track.year`, `track.genre`, `track.track_number`, `track.disc_number`.
-     - Применение обложки `track.cover_preview_url` и `track.cover_base64`.
-     - Добавление индексов в `this.dirtyIndices` и подсветка янтарным цветом.
+- [ ] **База данных (`internal/db/db_test.go`):**
+  - Тест миграции и структуры таблицы `radar_releases`.
+  - Тест upsert логики новинок с дедупликацией по уникальному ключу `(artist_id, clean_title, release_type)`.
+  - Тест выборок ленты новинок и шкалы дискографии.
+- [ ] **Каталожный агрегатор (`internal/services/resolver/discography_aggregator_test.go`):**
+  - Мок-тесты с `httptest.Server` для объединения результатов Deezer, MusicBrainz и Shazam.
+  - Тест слияния одинаковых релизов с разницей в год $\le 1$.
+  - Тест детекции Deluxe версий (`version_exists`).
+- [ ] **Планировщик и воркер (`internal/services/radar/service_test.go`):**
+  - Тест темпа опроса (Paced Worker) с контролем таймаутов.
+  - Тест триггера автозагрузки новинок при включенном флаге `auto_download`.
+- [ ] **HTTP API (`internal/api/handlers/radar_handlers_test.go`):**
+  - Тесты всех эндпоинтов `/api/radar/*` с проверкой кодов 200, 400, 404, валидацией авторизации и структуры JSON ответов.
+- [ ] **Race Detector & Компиляция:**
+  - `go test -race ./...` — 100% PASS, 0 data races.
+  - `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешная компиляция статического бинарника.
 
 ---
 
-## 8. Анализ рисков и краевых случаев
+## 8. Критерии приемки (Definition of Done)
 
-| Риск / Краевой случай | Вероятность | Влияние | Стратегия митигации |
-|---|---|---|---|
-| **Разное количество треков в релизе и выделении** | Высокая | Среднее | Если в найденном релизе 12 треков, а выделено 10 — обновляются только первые 10 с предупреждением в UI. Если выделено больше, лишние треки не ломаются. |
-| **Deezer Rate Limit (429 Too Many Requests)** | Средняя | Высокое | Ограничение пула воркеров до 8 и задержка 50 мс при 429; автоматический fallback на базовые названия треков альбома. |
-| **MusicBrainz 1 req/sec лимит без токена** | Высокая | Среднее | Кеширование результатов поиска в памяти на 5 минут; поддержка поля ввода персонального токена. |
-| **Несоответствие порядка треков (диски / стороны винила)** | Средняя | Низкое | Сортировка треклиста релиза строго по `DiscNumber` и `TrackNumber` перед сопоставлением с таблицей. |
-
----
-
-## 9. План тестирования и верификации (Verification Matrix)
-
-1. **Go Unit & Race Tests:**
-   ```bash
-   go test -v -race ./internal/services/resolver/...
-   go test -v -race ./internal/api/handlers/...
-   go test -v -race ./...
-   ```
-   *Критерий успеха:* 100% PASS, 0 data races.
-2. **Компиляция бинарника:**
-   ```bash
-   CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go
-   ```
-   *Критерий успеха:* Успешная сборка статического бинарника.
-3. **Ручная верификация UI:**
-   - Открыть Puddletag в разделе «Файлы».
-   - Выделить 10 треков альбома, нажать «🌐 Базы тегов».
-   - Проверить параллельный поиск: вкладка Deezer (с соавторами), вкладка MusicBrainz (с Cover Art Archive), вкладка Shazam.
-   - Снять чекбокс «Обложка», нажать «Применить теги».
-   - Убедиться, что в таблице обновились названия и соавторы, подсветились янтарным цветом, а обложка осталась прежней.
-   - Нажать `Ctrl+S` — теги успешно записаны в ID3v2.4.
-4. **Деплой:**
-   - Раскатка на оба боевых сервера (`nl_music` и Сервер 2), перезапуск `systemd`, проверка health check.
-
----
-
-## 11. Умное сопоставление (Intelligent Matching) и ручной выбор файлов в Puddletag Multi-Source Tag Search
-
-### 11.1. Контекст и согласованные решения (/grill-me)
-- **Проблема:** Ранее `matchTracks` в `web/static/js/puddletag/sources.js` сопоставлял треки релиза с локальными файлами строго по порядковому номеру массива (`idx < localTracks.length ? localTracks[idx] : null`). Если в альбоме 28 треков, а в папке/выделении только 2 файла (например, трек №1 «MAJOR TOM» и трек №28 «ВСЕ БУДЕТ НОРМАЛЬНО»), 2-й файл ошибочно сопоставлялся с дорожкой №2 «ЮНОСТЬ», а для трека №28 выводилось «⚠️ Без файла». Пользователь не мог сопоставить файлы по названиям, исключить конкретный трек или вручную выбрать, какой файл к какой строке относится.
-- **Согласованные решения:**
-  1. **Алгоритм сопоставления:** Интеллектуальный fuzzy-matching строго по **сходству названий песен и имен файлов** (игнорируя текущие локальные `track_number`, которые часто сбиты, пусты или равны 1). Очистка от ведущих номеров (`^\d+[\.\-\s]+`), префиксов исполнителей (`Artist - `), расширений (`.mp3`), клипового мусора и нормализация регистра/пробелов.
-  2. **Порог уверенности:** Если сходство ниже безопасного порога (0.50), строка остаётся со статусом «⚠️ Без файла (пропустить)», чтобы исключить случайное повреждение тегов чужой песней.
-  3. **Интерфейс в таблице:**
-     - В каждой строке трека релиза добавлен чекбокс `[✓]` для быстрого включения/отключения применения тегов к этой дорожке.
-     - В столбце «Файл таблицы» вместо статичной плашки размещается интерактивный `<select>` выпадающий список:
-       - Первая опция: `⚠️ Без файла (пропустить)` (значение `""`).
-       - Далее список всех доступных целевых локальных файлов с отображением имени файла/названия.
-     - **Строго уникальное сопоставление (1-к-1):** При выборе файла в строке X, если этот же файл был ранее сопоставлен со строкой Y, он автоматически освобождается в строке Y (строка Y становится «Без файла»).
-  4. **Групповые элементы управления в шапке:**
-     - Мастер-чекбокс в заголовке таблицы (`<th>`): включить/выключить все сопоставленные треки в 1 клик.
-     - Кнопка «Авто-сопоставить заново»: мгновенный сброс ручных правок и повторный прогон нечёткого матчера.
-     - Информационный бейдж: `Сопоставлено: X из Y файлов` (где X — уникально привязанные файлы, Y — всего локальных файлов в выборке).
-  5. **Применение тегов (`applySourceTags`):**
-     - Теги применяются **только** к тем парам, у которых `isMatched === true` и `isChecked === true`.
-     - Динамический счетчик внизу: `Будет обновлено X треков в staged-режиме`.
-
-### 11.2. Декомпозиция изменений в коде
-
-1. **`web/static/js/puddletag/sources.js`:**
-   - Добавить функцию нормализации текста `normalizeTitleForMatching(text)`:
-     - Удаление расширений (`.mp3`, `.flac`, `.wav`, `.m4a`).
-     - Удаление ведущих номеров треков (`^(\d{1,3}[\.\-_\s]+)+`).
-     - Удаление разделителей исполнитель-трек (если левая часть совпадает с артистом или есть ` - `).
-     - Удаление скобок с мусором (`(Official Audio)`, `[Audio]`, `(Remastered)` и т.д.).
-     - Приведение к нижнему регистру, замена `ё` -> `е`, удаление пунктуации.
-   - Добавить функцию вычисления похожести `calculateTitleSimilarity(str1, str2)`:
-     - Оценка подстроки (containment) + n-граммный коэффициент Дайса/Жаккара.
-   - Модернизировать `matchTracks(releaseTracks, localTracks, localIndices)`:
-     - Для каждого локального трека предварительно вычислять нормализованный поисковый токен (из `title` или `filename`).
-     - Жадное (greedy best-match) или оптимальное сопоставление: находить пару (releaseTrack, localTrack) с максимальным score >= 0.50.
-     - Возвращать пары с полями:
-       `{ index, releaseTrack, localTrack, originalIndex, isMatched: !!localTrack, isChecked: !!localTrack }`.
-
-2. **`web/static/js/puddletag/puddletag_workstation.js`:**
-   - Добавить методы управления сопоставлением:
-     - `onMatchedFileChange(pairIndex, newLocalIndex)`: ручная смена файла из `<select>`, снятие дубликатов в других строках, авто-обновление `isChecked`.
-     - `toggleAllMatched(checked)`: переключение мастер-чекбокса.
-     - `reMatchTracks()`: повторный запуск `matchTracks` по текущим `selectedReleaseDetails` и целевым файлам.
-     - Геттер `matchedCount`: подсчет сопоставленных файлов для бейджа и кнопки применения.
-   - В `applySourceTags()` учитывать `pair.isChecked && pair.isMatched`.
-
-3. **`web/templates/components/puddletag_source_modal.html`:**
-   - Обновить шапку таблицы:
-     - Мастер-чекбокс в первой колонке.
-     - Бейдж «Сопоставлено: X из Y файлов».
-     - Кнопка «Авто-сопоставить заново» рядом со статусом.
-   - Обновить строки треклиста:
-     - Чекбокс `[✓]` перед номером трека (`x-model="pair.isChecked"`).
-     - Выпадающий `<select>` в столбце «Файл таблицы» с компактным стилем Tailwind:
-       `<select :value="pair.originalIndex ?? ''" @change="onMatchedFileChange(pair.index, $event.target.value)">`
-       - `<option value="">⚠️ Без файла (пропустить)</option>`
-       - `<template x-for="t in targetTrackOptions">...<option ...>...</option></template>`
-
-4. **Тестирование и проверка:**
-   - Верификация в браузере сценария неполного альбома (2 файла из 28: трек №1 и трек №28).
-   - Проверка переключения чекбоксов и выпадающих списков.
-   - Проверка автоматического разрешения дубликатов при выборе одного и того же файла.
-   - `go test -race ./...` и сборка бинарника `bin/music-manager`.
-
+1. В главной шапке приложения появилась 5-я вкладка «📡 Радар и Дискографии».
+2. Все артисты медиатеки автоматически отслеживаются (`is_followed = 1`) с возможностью отключения.
+3. Лента новинок (Radar Feed) отображает свежие релизы артистов за последние 2 года с бейджами `NEW`.
+4. В ленте новинок работают 1-click скачивание, скрытие релиза, пакетная загрузка и переключатель автозагрузки.
+5. Карточка артиста отображает полную шкалу дискографии с подсветкой пробелов (`⚪ Отсутствует`) и кнопками скачивания недостающих альбомов.
+6. В карточке артиста можно вручную привязать альтернативное поисковое имя или прямые ID сервисов.
+7. Кнопка «🔄 Обновить дискографию» у артиста мгновенно опрашивает каталоги, а кнопка «🔄 Проверить новинки» в Радаре запускает деликатный фоновый обход с индикатором прогресса.
+8. Все тесты `go test -race ./...` зеленые, бинарник `bin/music-manager` собирается без внешних зависимостей.

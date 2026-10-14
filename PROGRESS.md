@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 65 блоков задач полностью реализованы, протестированы и задеплоены).
+- **Статус готовности:** **100% DONE** (Все 66 блоков задач полностью реализованы и протестированы).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 13 пакетов зеленые).
@@ -540,6 +540,43 @@
     - В столбце «Файл таблицы» размещен выпадающий список `<select>` с опцией `⚠️ Без файла (пропустить)` и списком локальных файлов.
     - В шапку таблицы добавлены: мастер-чекбокс в `<th>`, информационный бейдж `Сопоставлено: X из Y файлов` и кнопка `⚡ Авто-сопоставить`.
     - В нижней панели динамический счётчик отображает точное количество выбранных сопоставленных дорожек (`matchedPairs.filter(p => p.isMatched && p.isChecked).length`).
+- **Блок 66 (Интерактивный поиск и ручной фоллбэк для ненайденных треков / Manual Fallback & Source Picker):**
+  - **66.1. База данных SQLite и персистентность ручных пинов (`internal/db/`):**
+    - Добавлены поля `pinned_source_url` в таблицы `tracks` и `missing_tracks`.
+    - Создана таблица `pinned_track_sources` (`cache_key`, `artist_name`, `track_title`, `isrc`, `pinned_url`, `source_type`, `duration`, `updated_at`) и индекс `idx_pinned_sources_artist_title`.
+    - Реализованы запросы `SavePinnedSource`, `GetPinnedSource`, `UpdateTrackPinnedURL`, `UpdateMissingTrackPinnedURL`.
+  - **66.2. Резолвер и мульти-поиск кандидатов (`internal/services/resolver/`):**
+    - Разработан параллельный Fast Fan-Out модуль `SearchMultiCandidates` (`candidate_search.go`): одновременный опрос YouTube Music (Innertube API), SoundCloud (`scsearch10`) и YouTube (`ytsearch10`) через горутины и `sync.WaitGroup`.
+    - Реализован скоринг кандидатов `calculateCandidateScore` (0–100) с бонусом за официальные Topic/YTMusic релизы (+25), дельту хронометража ($\le 2$с: +25, $\le 5$с: +15, $> 30$с: -30), совпадение названия/автора и штрафами за live/remix/slowed/reverb.
+    - Добавлена поддержка домена `bandcamp.com` в `IsAllowedURL`, `DetectSource` и `Resolve`.
+    - Проверка `GetPinnedSource` в `FindBestMatchWithDetails` с наивысшим приоритетом перед онлайн-поиском.
+  - **66.3. Стриминг предпрослушивания (Preview Stream Proxy):**
+    - Эндпоинт `GET /api/downloads/preview?url=...` (`download_preview_handler.go`): извлечение прямого потока через `yt-dlp -g` и кодирование фрагмента 15 секунд со сдвигом на 30с (`ffmpeg -ss 30 -t 15 -f mp3 -`) потоково в `ResponseWriter` с `Content-Type: audio/mpeg` без сохранения на диск.
+    - Добавлен метод `playPreviewStream(streamUrl, title, artist)` в `player.js` для мгновенного прослушивания через встроенный Web Audio Player.
+  - **66.4. Движок загрузчика и статус `PARTIAL_READY` («Пакетная докачка»):**
+    - Внедрен статус задачи `StatusPartialReady = "PARTIAL_READY"` и метод `SetPartialReady(completed, total)`.
+    - При сбое поиска отдельных треков альбома они помечаются как `waiting_source`, а задача переходит в статус `PARTIAL_READY` (например, "9 из 10 треков готовы").
+    - Кнопки «В теги» и «Весь релиз» разблокированы для `PARTIAL_READY`: пользователь может сразу отправить готовые треки в Tag Editor, не ожидая проблемные.
+    - Метод `SwitchTrackVersion` адаптирован для любых разрешенных источников (YouTube, YouTube Music, SoundCloud, Bandcamp): прямое скачивание, транскодирование в MP3 320 kbps CBR, накат канонических ID3v2.4 тегов альбома и оригинальной обложки, обновление статуса и сохранение пина в базу данных.
+  - **66.5. HTTP API & Маршрутизация:**
+    - `GET /api/downloads/candidates`: параллельный поиск кандидатов по `{Artist} - {Title}` или произвольному запросу.
+    - `GET /api/downloads/preview`: проксирование превью аудиопотока.
+    - `POST /api/downloads/tracks/{trackId}/bind-source`: ручная привязка источника для трека из очереди.
+    - `POST /api/downloads/backfill/bind-source`: привязка источника и докачка отсутствующего трека альбома из аудита.
+  - **66.6. No-Build фронтенд (Alpine.js + Tailwind):**
+    - Создан компонент модального окна `downloader_source_picker_modal.html`:
+      - Вкладка 1 (Прямая ссылка): инпут для вставки ссылки на YouTube, YouTube Music, SoundCloud, Bandcamp + кнопка «Привязать и скачать».
+      - Вкладка 2 (Мульти-поиск кандидатов): карточки с иконками источников (SoundCloud / YouTube / Topic), название и автор, дельта длительности $\Delta$ с цветовой подсветкой ($\le 3$с зеленый, $\le 30$с желтый, $> 30$с красный), битрейт/кодек потока, кнопка ▶ Preview и кнопка «Выбрать».
+      - Инлайн-индикатор прогресса внутри модального окна с отображением шагов обработки и автозакрытием при успехе.
+    - Создан стор `Alpine.store('sourcePicker')` (`source_picker.js`).
+    - Добавлены кнопки «🔍 Выбрать источник» / «Источник» в карточки очереди (`downloader_queue.html`) и таблицу неполных альбомов (`audit_incomplete.html`).
+    - Поддержка `PARTIAL_READY` во всех компонентах очередей (`downloader_queue.html`, `queue_manager.js`, `queue_editor_bridge.js`, `polling.js`).
+  - **66.7. Тестирование:**
+    - Добавлены юнит-тесты для `SavePinnedSource`/`GetPinnedSource`/`UpdateTrackPinnedURL` в `db_test.go`.
+    - Добавлены юнит-тесты `IsAllowedURL`, `calculateCandidateScore`, `SearchMultiCandidates` в `candidate_search_test.go`.
+    - Добавлены юнит-тесты валидации эндпоинтов `PreviewAudio`, `GetCandidates`, `BindBackfillSource` в `download_handlers_test.go`.
+    - Добавлены юнит-тесты `SetPartialReady` и сводки очереди в `job_test.go`.
+    - Все 13 пакетов репозитория успешно проходят `go test -race ./...` (0 data races), бинарник компилируется чисто.
 
 ---
 
