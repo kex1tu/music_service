@@ -168,3 +168,10 @@ CREATE TABLE IF NOT EXISTS soundcloud_uncensored_cache (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_sc_cache_key ON soundcloud_uncensored_cache(cache_key);
+
+-- 9. Системные настройки и OAuth токены
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT '',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

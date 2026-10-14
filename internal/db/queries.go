@@ -764,3 +764,33 @@ func (db *DB) GetTracksMetadataCache(ctx context.Context) (map[string]TrackMetad
 	return cache, nil
 }
 
+// GetSetting возвращает строковое значение настройки из таблицы app_settings.
+// Если настройка не найдена, возвращает пустую строку и nil error.
+func (db *DB) GetSetting(ctx context.Context, key string) (string, error) {
+	var val string
+	err := db.conn.QueryRowContext(ctx, "SELECT value FROM app_settings WHERE key = ?", key).Scan(&val)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", err
+	}
+	return val, nil
+}
+
+// SetSetting вставляет или обновляет строковое значение настройки в app_settings.
+func (db *DB) SetSetting(ctx context.Context, key, val string) error {
+	query := `
+	INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+	ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP;
+	`
+	_, err := db.conn.ExecContext(ctx, query, key, val)
+	return err
+}
+
+// DeleteSetting удаляет настройку по ключу из app_settings.
+func (db *DB) DeleteSetting(ctx context.Context, key string) error {
+	_, err := db.conn.ExecContext(ctx, "DELETE FROM app_settings WHERE key = ?", key)
+	return err
+}
+

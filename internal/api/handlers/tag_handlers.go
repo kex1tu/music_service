@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"music-manager/internal/config"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/organizer"
@@ -21,6 +22,9 @@ type TagHandler struct {
 	organizer    *organizer.Service
 	deezer       *resolver.DeezerClient
 	enricher     *resolver.FeatEnricher
+	musicbrainz  *resolver.MusicBrainzClient
+	shazam       *resolver.ShazamProvider
+	cfg          *config.Config
 }
 
 func NewTagHandler(
@@ -40,7 +44,21 @@ func NewTagHandler(
 		organizer:    organizer,
 		deezer:       deezer,
 		enricher:     e,
+		musicbrainz:  resolver.NewMusicBrainzClient(""),
+		shazam:       resolver.NewShazamProvider(nil),
 	}
+}
+
+func (h *TagHandler) SetConfig(cfg *config.Config) {
+	h.cfg = cfg
+}
+
+func (h *TagHandler) SetMusicBrainz(mb *resolver.MusicBrainzClient) {
+	h.musicbrainz = mb
+}
+
+func (h *TagHandler) SetShazam(sh *resolver.ShazamProvider) {
+	h.shazam = sh
 }
 
 func (h *TagHandler) SetEnricher(e *resolver.FeatEnricher) {

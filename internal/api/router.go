@@ -52,6 +52,11 @@ func NewRouter(p RouterParams) http.Handler {
 
 	// Main Web UI page
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		// Автоматическая обработка callback, если в настройках MusicBrainz указан корневой URL
+		if r.URL.Query().Get("code") != "" {
+			p.TagHandler.MusicBrainzCallback(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if tmpl != nil && tmpl.Lookup("index.html") != nil {
 			if err := tmpl.ExecuteTemplate(w, "index.html", nil); err == nil {
@@ -74,10 +79,21 @@ func NewRouter(p RouterParams) http.Handler {
 		r.Post("/login", p.AuthHandler.Login)
 		r.Post("/logout", p.AuthHandler.Logout)
 		r.Get("/me", p.AuthHandler.Me)
+
+		// MusicBrainz OAuth (публичный callback для перенаправления с musicbrainz.org)
+		r.Get("/musicbrainz/callback", p.TagHandler.MusicBrainzCallback)
 	})
 
 	// Protected Endpoints
 	authMiddleware := auth.Middleware(p.Config.SecretKey)
+
+	// MusicBrainz OAuth Protected Endpoints
+	r.Route("/api/auth/musicbrainz", func(r chi.Router) {
+		r.Use(authMiddleware)
+		r.Get("/login", p.TagHandler.MusicBrainzLogin)
+		r.Get("/status", p.TagHandler.MusicBrainzStatus)
+		r.Post("/disconnect", p.TagHandler.MusicBrainzDisconnect)
+	})
 
 	// Downloads API
 	r.Route("/downloads", func(r chi.Router) {
@@ -124,6 +140,15 @@ func NewRouter(p RouterParams) http.Handler {
 		r.Get("/deezer/tracks", p.TagHandler.SearchDeezerTracks)
 		r.Get("/deezer-track-details", p.TagHandler.GetDeezerTrackDetails)
 		r.Get("/deezer/tracks/{id}", p.TagHandler.GetDeezerTrackDetails)
+	})
+
+	// Unified Catalog API (Multi-Source Tag Search: Deezer, MusicBrainz, Shazam)
+	r.Route("/api/catalog", func(r chi.Router) {
+		r.Use(authMiddleware)
+		r.Get("/search", p.TagHandler.SearchCatalog)
+		r.Get("/deezer/album/{id}", p.TagHandler.GetCatalogDeezerAlbum)
+		r.Get("/musicbrainz/release/{id}", p.TagHandler.GetCatalogMusicBrainzRelease)
+		r.Get("/shazam/track/{id}", p.TagHandler.GetCatalogShazamTrack)
 	})
 
 	// Lyrics API

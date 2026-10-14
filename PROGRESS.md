@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 62 блока задач полностью реализованы и протестированы).
+- **Статус готовности:** **100% DONE** (Все 63 блока задач полностью реализованы и протестированы).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 15 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 13 пакетов зеленые).
@@ -465,6 +465,67 @@
     - Добавлен тест `TestDB_GetTracksMetadataCache` в `db_test.go`.
     - Все тесты `go test -race ./...` пройдены успешно (0 data races).
     - Развернуто на боевых серверах `nl_music` (194.76.168.20) и Сервер 2 (`13.143.193.207`).
+- **Блок 63 (Multi-Source Release & Tag Search for Puddletag Workstation: Deezer, MusicBrainz, Shazam):**
+  - **63.1. Unified Models & MusicBrainz Client (`internal/services/resolver/`):**
+    - Унифицированные DTO модели `CatalogReleaseSummary`, `CatalogTrackDetail`, `CatalogReleaseDetails`, `CatalogSearchResponse` в [`catalog_models.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/catalog_models.go).
+    - Разработан клиент MusicBrainz API v2 [`musicbrainz.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/musicbrainz.go): поиск `SearchReleases` и деталей `GetRelease`, rate-limiting (с защитой от 503/429), in-memory кэширование на 5 минут, интеграция с Cover Art Archive (`coverartarchive.org`), парсинг соавторов через `\\`, дат, номеров дисков и треков.
+    - Добавлена переменная `MUSICBRAINZ_USER_TOKEN` в `Config` и `.env.example`.
+    - Герметичные unit-тесты [`musicbrainz_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/musicbrainz_test.go) с `httptest.Server`.
+  - **63.2. Shazam Hybrid Provider & Unified Catalog Handlers (`internal/services/resolver/`, `internal/api/handlers/`):**
+    - Реализован гибридный провайдер Shazam [`shazam.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/shazam.go): акустический фингерпринтинг локального файла через `songrec` + каталог Apple/Shazam через `ITunesClient`.
+    - Unit-тесты [`shazam_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/shazam_test.go) с мокированием команд и API.
+    - Контроллеры [`catalog_unified_handlers.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/catalog_unified_handlers.go):
+      - `GET /api/catalog/search`: параллельный fan-out горутинами к Deezer, MusicBrainz и Shazam с агрегацией результатов.
+      - `GET /api/catalog/deezer/album/{id}`: параллельный 8-воркерный пул дозапросов `/track/{id}` для гарантированного получения всех соавторов (`contributors`) и ISRC.
+      - `GET /api/catalog/musicbrainz/release/{id}`: детальный просмотр релиза с треклистом и обложкой Cover Art Archive.
+      - `GET /api/catalog/shazam/track/{id}`: акустическое или текстовое разрешение трека.
+    - Регистрация маршрутов в Chi роутере ([`internal/api/router.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/router.go)) под `authMiddleware`.
+    - Unit и race-тесты [`catalog_unified_handlers_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/catalog_unified_handlers_test.go) с проверкой изоляции PathSandbox от `../../`.
+  - **63.3. Puddletag UI & No-Build Frontend (`web/templates/`, `web/static/js/`):**
+    - Разработано модальное окно [`puddletag_source_modal.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/puddletag_source_modal.html) по утвержденному визуальному макету: поиск, кнопки «🔍 Искать во всех базах» и «🎵 Распознать по аудио (Shazam)», 3 вкладки с бейджами совпадений (`🟣 Deezer`, `🟠 MusicBrainz`, `🔵 Shazam`), левая панель карточек релизов, правая панель сопоставления треклиста и чекбоксы полей (`☑ Названия и авторы`, `☑ Номера треков и дисков`, `☑ Альбом и год`, `☑ Жанры`, `☑ Обложка`).
+    - Модуль [`web/static/js/puddletag/sources.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/puddletag/sources.js) (`window.PuddletagSources`): клиентский движок поиска, сопоставления и применения тегов.
+    - Кнопка «🌐 Базы тегов» на командном тулбаре [`puddletag_toolbar.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/puddletag_toolbar.html).
+    - Интеграция в [`puddletag_workstation.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/puddletag/puddletag_workstation.js): перенос выбранных тегов в staged dirty state (янтарная подсветка ячеек таблицы), обновление превью обложки, возможность ручной доработки и надежное сохранение по `Ctrl+S`.
+    - Подключение шаблона модала в [`file_manager.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/file_manager.html) и [`tag_editor.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/modals/tag_editor.html), подключение скрипта `sources.js` в [`index.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/index.html).
+  - **Тестирование и верификация:**
+    - `go test -race ./...` — **100% PASS (0 data races)** во всех пакетах.
+    - `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешная компиляция бинарника.
+
+- **Блок 64 (MusicBrainz OAuth 2.0 Web Application Integration & Persistence):**
+  - **64.1. Конфигурация и окружение (`internal/config/`, `.env.example`):**
+    - В `Config` добавлены поля `MusicBrainzClientID`, `MusicBrainzClientSecret`, `MusicBrainzRedirectURI`.
+    - В `.env.example` задокументированы параметры подключения официального Web Application MusicBrainz OAuth 2.0 с объяснением регистрации и scope (`profile tag rating collection`).
+  - **64.2. MusicBrainz OAuth 2.0 Engine (`internal/services/resolver/musicbrainz.go`):**
+    - В `MusicBrainzClient` реализованы методы:
+      - `GetAuthorizationURL`: генерация ссылки авторизации с передачей `response_type=code`, `client_id`, `redirect_uri`, `scope`, `access_type=offline`, `state`.
+      - `ExchangeCode`: обмен authorization code на access_token и refresh_token через `POST /oauth2/token`.
+      - `RefreshToken`: автоматическое и ручное обновление токена через `grant_type=refresh_token`.
+      - `FetchUserInfo`: запрос `sub` (имени пользователя) через `GET /oauth2/userinfo`.
+      - `SetTokens`, `SetAccessToken`, `SetRefreshToken`, `Disconnect`, `GetOAuthStatus`.
+      - Автоматическое упреждающее обновление access токена (`ensureToken`) при оставшемся сроке жизни менее 1 минуты перед выполнением запросов к каталогу.
+      - Повышение rate limit с 1 req/s (1050ms) до 4 req/s (250ms) при активной авторизации.
+    - Герметичные unit-тесты `musicbrainz_test.go` с mock-сервером `httptest.Server` (100% PASS c `-race`).
+  - **64.3. Персистентность сессий в SQLite (`internal/db/`):**
+    - В схему SQLite добавлена таблица `app_settings` (key, value, updated_at).
+    - В `internal/db/queries.go` добавлены методы `GetSetting`, `SetSetting`, `DeleteSetting` (покрыты тестом `TestAppSettings`).
+    - В `cmd/server/main.go` реализован `dbTokenPersistence`, сохраняющий токены в SQLite при авторизации и обновлении, и автоматически восстанавливающий активную сессию пользователя MusicBrainz при перезапуске сервиса.
+  - **64.4. HTTP API и обработчики (`internal/api/handlers/`, `internal/api/router.go`):**
+    - Создан файл `musicbrainz_oauth_handlers.go`:
+      - `GET /api/auth/musicbrainz/login`: валидация конфигурации, установка cookie с CSRF state, генерация ссылки авторизации (с поддержкой браузерного редиректа и JSON ответа).
+      - `GET /api/auth/musicbrainz/callback`: обработка обратного вызова MusicBrainz, обмен кода на токены, безопасное закрытие всплывающего окна с `postMessage` или редирект в приложение.
+      - `GET /api/auth/musicbrainz/status`: статус подключения (`configured`, `connected`, `username`, `expires_at`).
+      - `POST /api/auth/musicbrainz/disconnect`: сброс авторизации и удаление токенов.
+    - Обработчик обратного вызова также перехватывает запросы с параметром `code` на корневом пути `/`, обеспечивая надежность даже при указании корневого URL в настройках приложения MusicBrainz.
+    - Unit-тесты `musicbrainz_oauth_handlers_test.go` с проверкой всех сценариев (100% PASS c `-race`).
+  - **64.5. Фронтенд интерфейс (`web/templates/`, `web/static/js/`):**
+    - В `web/static/js/puddletag/sources.js` добавлены методы `getMusicBrainzOAuthStatus` и `disconnectMusicBrainzOAuth`.
+    - В `puddletag_workstation.js` добавлено реактивное состояние `mbOAuth`, методы `checkMusicBrainzOAuth()`, `openMusicBrainzOAuth(event)` (с открытием центрированного всплывающего окна и отслеживанием `postMessage`) и `disconnectMusicBrainzOAuth()`.
+    - В шапку вкладок `puddletag_source_modal.html` добавлен статус авторизации:
+      - При активном подключении: бейдж `🟢 OAuth подключен (Повышенные лимиты)` с отображением никнейма пользователя и кнопкой отключения.
+      - При отсутствии подключения: кнопка `🔗 Подключить MusicBrainz (OAuth)` с красивой подсветкой.
+  - **Тестирование и верификация:**
+    - `go test -race ./...` — **100% PASS (0 data races)** во всех пакетах репозитория.
+    - `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешная сборка бинарника (16 МБ).
 
 ---
 

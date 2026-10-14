@@ -28,6 +28,10 @@ type Config struct {
 	CookiesFile            string
 	YandexMusicToken       string
 	YandexMusicProxy       string
+	MusicBrainzUserToken   string
+	MusicBrainzClientID     string
+	MusicBrainzClientSecret string
+	MusicBrainzRedirectURI  string
 	Debug                  bool
 
 	// Uncensored SoundCloud Resolver
@@ -81,6 +85,10 @@ func Load() (*Config, error) {
 		CookiesFile:                 getEnv("YTDLP_COOKIES_PATH", "cookies.txt"),
 		YandexMusicToken:            getEnv("YANDEX_MUSIC_TOKEN", ""),
 		YandexMusicProxy:            getEnv("YANDEX_MUSIC_PROXY", ""),
+		MusicBrainzUserToken:        getEnv("MUSICBRAINZ_USER_TOKEN", ""),
+		MusicBrainzClientID:         getEnv("MUSICBRAINZ_CLIENT_ID", ""),
+		MusicBrainzClientSecret:     getEnv("MUSICBRAINZ_CLIENT_SECRET", ""),
+		MusicBrainzRedirectURI:      getEnv("MUSICBRAINZ_REDIRECT_URI", ""),
 		Debug:                       debug,
 		UncensoredDurationTolerance: uncensoredTolerance,
 		UncensoredCandidatesLimit:   uncensoredLimit,

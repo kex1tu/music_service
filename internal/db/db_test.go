@@ -61,6 +61,59 @@ func TestDB_OpenAndQueries(t *testing.T) {
 	}
 }
 
+func TestAppSettings(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "db_settings_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	database, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer database.Close()
+
+	ctx := context.Background()
+
+	// Initial get returns empty
+	val, err := database.GetSetting(ctx, "mb_token")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val != "" {
+		t.Errorf("expected empty string, got %s", val)
+	}
+
+	// Set and get
+	if err := database.SetSetting(ctx, "mb_token", "secret_tok_123"); err != nil {
+		t.Fatalf("failed to set setting: %v", err)
+	}
+	val, err = database.GetSetting(ctx, "mb_token")
+	if err != nil || val != "secret_tok_123" {
+		t.Errorf("expected secret_tok_123, got %s (err: %v)", val, err)
+	}
+
+	// Update setting
+	if err := database.SetSetting(ctx, "mb_token", "updated_tok_456"); err != nil {
+		t.Fatalf("failed to update setting: %v", err)
+	}
+	val, err = database.GetSetting(ctx, "mb_token")
+	if err != nil || val != "updated_tok_456" {
+		t.Errorf("expected updated_tok_456, got %s (err: %v)", val, err)
+	}
+
+	// Delete setting
+	if err := database.DeleteSetting(ctx, "mb_token"); err != nil {
+		t.Fatalf("failed to delete setting: %v", err)
+	}
+	val, err = database.GetSetting(ctx, "mb_token")
+	if err != nil || val != "" {
+		t.Errorf("expected empty string after deletion, got %s", val)
+	}
+}
+
 func TestSoundCloudCache(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "db_sc_test_*")
 	if err != nil {

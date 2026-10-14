@@ -140,6 +140,12 @@ func NewDeezerClient(customTransport ...http.RoundTripper) *DeezerClient {
 	}
 }
 
+// SetBaseURL overrides baseURL and clears fallbackBaseURL (primarily for tests).
+func (c *DeezerClient) SetBaseURL(u string) {
+	c.baseURL = strings.TrimRight(u, "/")
+	c.fallbackBaseURL = ""
+}
+
 // fetchDeezerJSON performs an HTTP request to Deezer API with automatic fallback mirror upon 403 or network error.
 func (c *DeezerClient) fetchDeezerJSON(ctx context.Context, path string, target any) error {
 	path = "/" + strings.TrimPrefix(path, "/")

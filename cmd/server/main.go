@@ -120,6 +120,27 @@ func main() {
 	yandexClient := resolver.NewYandexMusicClient(cfg.YandexMusicToken, cfg.YandexMusicProxy)
 	ytmusicClient := resolver.NewYouTubeMusicClient("")
 	itunesClient := resolver.NewITunesClient(nil)
+	mbClient := resolver.NewMusicBrainzClient(cfg.MusicBrainzUserToken)
+	mbClient.SetOAuthConfig(cfg.MusicBrainzClientID, cfg.MusicBrainzClientSecret, cfg.MusicBrainzRedirectURI)
+	if database != nil {
+		mbClient.SetPersistence(&dbTokenPersistence{db: database})
+		if savedAccess, err := database.GetSetting(appCtx, "mb_access_token"); err == nil && savedAccess != "" {
+			savedRefresh, _ := database.GetSetting(appCtx, "mb_refresh_token")
+			savedExpStr, _ := database.GetSetting(appCtx, "mb_expires_at")
+			savedUser, _ := database.GetSetting(appCtx, "mb_username")
+			var exp time.Time
+			if savedExpStr != "" {
+				exp, _ = time.Parse(time.RFC3339, savedExpStr)
+			}
+			mbClient.SetTokens(savedAccess, savedRefresh, exp, savedUser)
+			log.Printf("[MusicBrainz] Loaded persisted OAuth session for user: %s", savedUser)
+		}
+	}
+	shazamProvider := resolver.NewShazamProvider(itunesClient)
+
+	tagHandler.SetConfig(cfg)
+	tagHandler.SetMusicBrainz(mbClient)
+	tagHandler.SetShazam(shazamProvider)
 
 	fileHandler := handlers.NewFileHandler(handlers.FileHandlerParams{
 		MusicSandbox: musicSandbox,
@@ -179,3 +200,24 @@ func main() {
 	}
 	log.Println("[Main] Server stopped.")
 }
+
+type dbTokenPersistence struct {
+	db *db.DB
+}
+
+func (p *dbTokenPersistence) SaveTokens(ctx context.Context, accessToken, refreshToken string, expiresAt time.Time, username string) error {
+	_ = p.db.SetSetting(ctx, "mb_access_token", accessToken)
+	_ = p.db.SetSetting(ctx, "mb_refresh_token", refreshToken)
+	_ = p.db.SetSetting(ctx, "mb_expires_at", expiresAt.Format(time.RFC3339))
+	_ = p.db.SetSetting(ctx, "mb_username", username)
+	return nil
+}
+
+func (p *dbTokenPersistence) ClearTokens(ctx context.Context) error {
+	_ = p.db.DeleteSetting(ctx, "mb_access_token")
+	_ = p.db.DeleteSetting(ctx, "mb_refresh_token")
+	_ = p.db.DeleteSetting(ctx, "mb_expires_at")
+	_ = p.db.DeleteSetting(ctx, "mb_username")
+	return nil
+}
+
