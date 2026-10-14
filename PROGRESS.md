@@ -1,11 +1,11 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 63 блока задач полностью реализованы и протестированы).
+- **Статус готовности:** **100% DONE** (Все 64 блока задач полностью реализованы, протестированы и задеплоены).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
-- **Размер бинарника:** 15 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
+- **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 13 пакетов зеленые).
 - **Безопасность:** Проведен глубокий аудит безопасности и фаззинг, сформирован [`SECURITY_AUDIT_REPORT.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/SECURITY_AUDIT_REPORT.md).
-- **Продакшен-деплой:** Развернут под управлением `systemd` (`music-manager.service`) на боевых серверах `nl_music` (194.76.168.20) и Сервер 2 (13.143.193.207 / `mymusicdownload.verymad.net`).
+- **Продакшен-деплой:** Развернут под управлением `systemd` (`music-manager.service`) на боевых серверах `nl_music` (194.76.168.20 / `https://musicdownloader.verymad.net/`) и Сервер 2 (13.143.193.207 / `https://mymusicdownload.verymad.net/`).
 
 
 ---
@@ -529,7 +529,7 @@
 
 ---
 
-## 4. Верификация
+## 4. Верификация и Продакшен-Деплой
 
 1. **Компиляция бинарника:**
    ```bash
@@ -539,7 +539,26 @@
    ```bash
    go test -race ./...
    ```
-   **Результат:** 100% PASS, 0 race conditions во всех пакетах.
+   **Результат:** 100% PASS, 0 race conditions во всех 13 пакетах.
+
+3. **Развертывание на боевых серверах:**
+   - **Сервер 1 (`nl_music`):** `https://musicdownloader.verymad.net/`
+     - Git: актуализирован до последней ревизии `main` (`00d8afa`).
+     - Бинарный файл: синхронизирован в `/opt/music-manager/bin/music-manager`.
+     - Переменные окружения: `MUSICBRAINZ_CLIENT_ID`, `MUSICBRAINZ_CLIENT_SECRET`, `MUSICBRAINZ_REDIRECT_URI` сконфигурированы в `.env`.
+     - Сервис: `systemctl restart music-manager.service` (active/running, сканирование 8747 треков успешно завершено).
+     - Проверка эндпоинтов:
+       - `https://musicdownloader.verymad.net/api/health` — `200 OK`.
+       - `https://musicdownloader.verymad.net/api/auth/musicbrainz/callback` — `400 Bad Request` с валидацией обязательного параметра `code` (маршрут публичен и доступен для внешних редиректов).
+   - **Сервер 2:** `https://mymusicdownload.verymad.net/`
+     - Git: актуализирован до последней ревизии `main` (`00d8afa`).
+     - Бинарный файл: синхронизирован в `/root/music_service/bin/music-manager`.
+     - Переменные окружения: `MUSICBRAINZ_CLIENT_ID`, `MUSICBRAINZ_CLIENT_SECRET`, `MUSICBRAINZ_REDIRECT_URI` сконфигурированы в `.env`.
+     - Nginx: настроен сквозной проброс статус-кодов приложения (`proxy_intercept_errors off`), исключающий подмену страниц ошибок приложения общим шаблоном 404.
+     - Сервис: `systemctl restart music-manager.service` (active/running).
+     - Проверка эндпоинтов:
+       - `https://mymusicdownload.verymad.net/api/health` — `200 OK`.
+       - `https://mymusicdownload.verymad.net/api/auth/musicbrainz/callback` — `400 Bad Request` с валидацией обязательного параметра `code`.
 
 
 
