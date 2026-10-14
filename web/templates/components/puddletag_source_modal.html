@@ -270,17 +270,33 @@
 
                 <!-- Шапка выбранного релиза -->
                 <template x-if="selectedReleaseDetails">
-                    <div class="px-3 py-2 bg-surface-panel border-b border-surface-borderSubtle flex items-center space-x-3">
-                        <template x-if="selectedReleaseDetails.cover_url">
-                            <img :src="selectedReleaseDetails.cover_url" class="w-12 h-12 rounded-lg object-cover border border-surface-borderSubtle shrink-0">
-                        </template>
-                        <div class="min-w-0 flex-1">
-                            <div class="flex items-center space-x-2">
-                                <h4 class="text-xs font-bold text-content-primary truncate" x-text="selectedReleaseDetails.title"></h4>
-                                <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-surface-elevated text-content-muted" x-text="selectedReleaseDetails.source.toUpperCase()"></span>
+                    <div class="px-3 py-2 bg-surface-panel border-b border-surface-borderSubtle flex items-center justify-between gap-3">
+                        <div class="flex items-center space-x-3 min-w-0">
+                            <template x-if="selectedReleaseDetails.cover_url">
+                                <img :src="selectedReleaseDetails.cover_url" class="w-12 h-12 rounded-lg object-cover border border-surface-borderSubtle shrink-0">
+                            </template>
+                            <div class="min-w-0 flex-1">
+                                <div class="flex items-center space-x-2">
+                                    <h4 class="text-xs font-bold text-content-primary truncate" x-text="selectedReleaseDetails.title"></h4>
+                                    <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-surface-elevated text-content-muted" x-text="selectedReleaseDetails.source.toUpperCase()"></span>
+                                </div>
+                                <p class="text-[11px] text-content-secondary truncate" x-text="selectedReleaseDetails.artist"></p>
+                                <p class="text-[10px] text-content-muted" x-text="`${selectedReleaseDetails.year || ''} • ${selectedReleaseDetails.genre || ''} • ${selectedReleaseDetails.track_count || 0} треков`"></p>
                             </div>
-                            <p class="text-[11px] text-content-secondary truncate" x-text="selectedReleaseDetails.artist"></p>
-                            <p class="text-[10px] text-content-muted" x-text="`${selectedReleaseDetails.year || ''} • ${selectedReleaseDetails.genre || ''} • ${selectedReleaseDetails.track_count || 0} треков`"></p>
+                        </div>
+
+                        <!-- Информационный бейдж и сброс сопоставления -->
+                        <div class="flex items-center space-x-2 shrink-0">
+                            <span class="text-[11px] px-2 py-1 rounded bg-surface-base border border-surface-border text-content-secondary">
+                                Сопоставлено: <b class="text-emerald-400 font-bold" x-text="matchedPairs.filter(p => p.isMatched).length"></b> из <span x-text="targetTrackOptions.length"></span> файлов
+                            </span>
+                            <button type="button"
+                                @click="reMatchTracks()"
+                                title="Сбросить ручные изменения и запустить нечеткое авто-сопоставление заново"
+                                class="px-2.5 py-1 text-[11px] rounded bg-surface-elevated border border-surface-border hover:bg-surface-hover text-content-primary transition flex items-center space-x-1 active:scale-95">
+                                <span>⚡</span>
+                                <span>Авто-сопоставить</span>
+                            </button>
                         </div>
                     </div>
                 </template>
@@ -311,41 +327,58 @@
                         <table class="w-full text-left border-collapse text-xs">
                             <thead class="bg-surface-elevated/90 sticky top-0 border-b border-surface-border text-[11px] text-content-muted">
                                 <tr>
-                                    <th class="py-1.5 px-2.5 w-10 text-center">№</th>
+                                    <th class="py-1.5 px-2 w-8 text-center">
+                                        <input type="checkbox"
+                                            :checked="isAllMatchedChecked()"
+                                            @change="toggleAllMatched($event.target.checked)"
+                                            title="Выбрать / Снять все сопоставленные"
+                                            class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 w-3.5 h-3.5 cursor-pointer">
+                                    </th>
+                                    <th class="py-1.5 px-1.5 w-8 text-center">№</th>
                                     <th class="py-1.5 px-2.5">Название песни</th>
                                     <th class="py-1.5 px-2.5">Исполнитель / Соавторы</th>
-                                    <th class="py-1.5 px-2.5 w-16 text-right">Время</th>
-                                    <th class="py-1.5 px-2.5 w-32">Файл таблицы</th>
+                                    <th class="py-1.5 px-2 w-14 text-right">Время</th>
+                                    <th class="py-1.5 px-2.5 w-56">Файл таблицы</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-surface-borderSubtle font-mono text-[11px]">
                                 <template x-for="pair in matchedPairs" :key="pair.index">
-                                    <tr :class="pair.isMatched ? 'hover:bg-surface-hover/50' : 'bg-rose-500/5 hover:bg-rose-500/10'">
+                                    <tr :class="pair.isMatched ? (pair.isChecked ? 'hover:bg-surface-hover/50' : 'opacity-60 bg-surface-panel/20 hover:bg-surface-hover/30') : 'bg-rose-500/5 hover:bg-rose-500/10'">
+                                        <!-- Чекбокс включения/выключения трека -->
+                                        <td class="py-1.5 px-2 text-center">
+                                            <input type="checkbox"
+                                                x-model="pair.isChecked"
+                                                :disabled="!pair.isMatched"
+                                                class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 w-3.5 h-3.5 cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed">
+                                        </td>
+
                                         <!-- Номер трека -->
-                                        <td class="py-1.5 px-2.5 text-center text-content-muted" x-text="pair.releaseTrack.disc_number > 1 ? `${pair.releaseTrack.disc_number}-${pair.releaseTrack.track_number}` : pair.releaseTrack.track_number"></td>
+                                        <td class="py-1.5 px-1.5 text-center text-content-muted" x-text="pair.releaseTrack.disc_number > 1 ? `${pair.releaseTrack.disc_number}-${pair.releaseTrack.track_number}` : pair.releaseTrack.track_number"></td>
                                         
                                         <!-- Название -->
-                                        <td class="py-1.5 px-2.5 font-sans font-medium text-content-primary truncate max-w-[160px]" x-text="pair.releaseTrack.title"></td>
+                                        <td class="py-1.5 px-2.5 font-sans font-medium text-content-primary truncate max-w-[150px]" x-text="pair.releaseTrack.title" :title="pair.releaseTrack.title"></td>
                                         
                                         <!-- Исполнители -->
-                                        <td class="py-1.5 px-2.5 font-sans text-content-secondary truncate max-w-[160px]" x-text="pair.releaseTrack.artist"></td>
+                                        <td class="py-1.5 px-2.5 font-sans text-content-secondary truncate max-w-[140px]" x-text="pair.releaseTrack.artist" :title="pair.releaseTrack.artist"></td>
                                         
                                         <!-- Длительность -->
-                                        <td class="py-1.5 px-2.5 text-right text-content-muted" x-text="window.PuddletagSources ? window.PuddletagSources.formatDuration(pair.releaseTrack.duration) : '--:--'"></td>
+                                        <td class="py-1.5 px-2 text-right text-content-muted" x-text="window.PuddletagSources ? window.PuddletagSources.formatDuration(pair.releaseTrack.duration) : '--:--'"></td>
                                         
-                                        <!-- Сопоставление с локальным треком -->
-                                        <td class="py-1.5 px-2.5 truncate">
-                                            <template x-if="pair.isMatched">
-                                                <span class="text-emerald-400 text-[10px] flex items-center space-x-1" :title="pair.localTrack.filename || pair.localTrack.title">
-                                                    <span>✓</span>
-                                                    <span class="truncate font-sans" x-text="pair.localTrack.title || pair.localTrack.filename"></span>
-                                                </span>
-                                            </template>
-                                            <template x-if="!pair.isMatched">
-                                                <span class="text-amber-400/80 text-[10px]" title="Нет выделенного трека для этой позиции">
-                                                    ⚠️ Без файла
-                                                </span>
-                                            </template>
+                                        <!-- Селектор локального файла таблицы -->
+                                        <td class="py-1 px-2.5">
+                                            <select
+                                                :value="pair.originalIndex !== null && pair.originalIndex !== undefined ? pair.originalIndex : ''"
+                                                @change="onMatchedFileChange(pair.index, $event.target.value)"
+                                                class="w-full text-[11px] font-sans py-1 px-2 rounded border transition focus:outline-none focus:ring-1 focus:ring-brand truncate"
+                                                :class="pair.isMatched ? (pair.isChecked ? 'bg-surface-panel border-emerald-500/50 text-emerald-300 font-medium' : 'bg-surface-panel border-surface-border text-content-muted') : 'bg-surface-panel border-surface-border text-amber-400/80'">
+                                                <option value="" class="text-amber-400 bg-surface-elevated">⚠️ Без файла (пропустить)</option>
+                                                <template x-for="opt in targetTrackOptions" :key="opt.originalIndex">
+                                                    <option :value="opt.originalIndex"
+                                                        x-text="opt.label"
+                                                        class="text-content-primary bg-surface-elevated">
+                                                    </option>
+                                                </template>
+                                            </select>
                                         </td>
                                     </tr>
                                 </template>
@@ -361,7 +394,7 @@
             <!-- Информационная сводка -->
             <div class="text-content-muted">
                 <template x-if="selectedReleaseDetails">
-                    <span>Будет обновлено <b class="text-amber-400 font-bold" x-text="matchedPairs.filter(p => p.isMatched).length"></b> треков в staged-режиме (янтарная подсветка)</span>
+                    <span>Будет обновлено <b class="text-amber-400 font-bold" x-text="matchedPairs.filter(p => p.isMatched && p.isChecked).length"></b> треков в staged-режиме (янтарная подсветка)</span>
                 </template>
                 <template x-if="!selectedReleaseDetails">
                     <span>Выберите релиз для просмотра изменений</span>
@@ -380,7 +413,7 @@
                 <button
                     type="button"
                     @click="applySourceTags()"
-                    :disabled="!selectedReleaseDetails || matchedPairs.filter(p => p.isMatched).length === 0"
+                    :disabled="!selectedReleaseDetails || matchedPairs.filter(p => p.isMatched && p.isChecked).length === 0"
                     class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold shadow-md transition flex items-center space-x-1.5 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed">
                     <span>✓</span>
                     <span>Применить теги к выделенным трекам</span>

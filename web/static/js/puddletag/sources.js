@@ -87,11 +87,89 @@
     }
 
     /**
+     * Очищает и нормализует строку для нечеткого сравнения названий песен.
+     * @param {string} text 
+     * @returns {string}
+     */
+    function normalizeTitleForMatching(text) {
+        if (!text) return '';
+        let s = String(text);
+        // 1. Отрезаем расширение файла, если есть
+        s = s.replace(/\.(mp3|flac|wav|m4a|ogg|opus|aac)$/i, '');
+        // 2. Отрезаем ведущие номера треков (например "01. ", "1 - ", "01 ", "01_")
+        s = s.replace(/^[\s\d]+[\.\-_\s]+/i, '');
+        // 3. Отрезаем префикс исполнителя "Artist - Title", если есть дефис с пробелами
+        if (s.includes(' - ')) {
+            const parts = s.split(' - ');
+            if (parts.length >= 2 && parts[1].trim().length > 0) {
+                s = parts.slice(1).join(' - ');
+            }
+        }
+        // 4. Отрезаем клиповый мусор в скобках
+        s = s.replace(/\s*[\(\[](?:official\s*(?:video|audio|music\s*video|lyric\s*video)?|audio|remaster(?:ed)?|clip|клип|премьера|hd|4k|hq)[\)\]]/gi, '');
+        // 5. Нижний регистр, замена ё -> е, удаление спецсимволов и пунктуации
+        s = s.toLowerCase().replace(/ё/g, 'е');
+        s = s.replace(/[^\p{L}\p{N}\s]/gu, ' ');
+        // 6. Схлопывание пробелов
+        s = s.replace(/\s+/g, ' ').trim();
+        return s;
+    }
+
+    /**
+     * Вычисляет коэффициент похожести двух названий (от 0.0 до 1.0).
+     * Сочетает точное совпадение, вхождение подстроки (containment) и биграммный коэффициент Дайса.
+     * @param {string} strA 
+     * @param {string} strB 
+     * @returns {number}
+     */
+    function calculateTitleSimilarity(strA, strB) {
+        const normA = normalizeTitleForMatching(strA);
+        const normB = normalizeTitleForMatching(strB);
+
+        if (!normA || !normB) return 0;
+        if (normA === normB) return 1.0;
+
+        // Если одно название целиком содержится в другом
+        if (normA.includes(normB) || normB.includes(normA)) {
+            const minLen = Math.min(normA.length, normB.length);
+            const maxLen = Math.max(normA.length, normB.length);
+            if (minLen / maxLen >= 0.5) {
+                return 0.80 + 0.20 * (minLen / maxLen);
+            }
+            return 0.65;
+        }
+
+        // Вычисляем биграммы для Dice's coefficient
+        const getBigrams = (str) => {
+            const s = str.replace(/\s+/g, '');
+            const bigrams = new Set();
+            for (let i = 0; i < s.length - 1; i++) {
+                bigrams.add(s.substring(i, i + 2));
+            }
+            return bigrams;
+        };
+
+        const bigramsA = getBigrams(normA);
+        const bigramsB = getBigrams(normB);
+        if (bigramsA.size === 0 || bigramsB.size === 0) return 0;
+
+        let intersection = 0;
+        for (const bg of bigramsA) {
+            if (bigramsB.has(bg)) intersection++;
+        }
+
+        return (2.0 * intersection) / (bigramsA.size + bigramsB.size);
+    }
+
+    /**
      * Сопоставляет треки найденного релиза с локальными треками в таблице Puddletag.
+     * Выполняет нечеткое сопоставление (fuzzy matching) по названиям треков и именам файлов.
      * Сортирует треклист релиза по DiscNumber и TrackNumber.
+     * 
      * @param {Array} releaseTracks Треклист из каталога
      * @param {Array} localTracks Локальные треки, выбранные пользователем
-     * @returns {Array} Массив пар { releaseTrack, localTrack, localIndex }
+     * @param {Array} localIndices Оригинальные индексы локальных треков
+     * @returns {Array} Массив пар { index, releaseTrack, localTrack, originalIndex, isMatched, isChecked }
      */
     function matchTracks(releaseTracks, localTracks, localIndices) {
         if (!releaseTracks) return [];
@@ -101,15 +179,69 @@
             return (a.track_number || 0) - (b.track_number || 0);
         });
 
+        // 1. Подготавливаем локальные треки с их оригинальными индексами
+        const candidates = [];
+        if (localTracks && localIndices) {
+            for (let i = 0; i < localTracks.length; i++) {
+                const tr = localTracks[i];
+                if (!tr) continue;
+                const origIdx = localIndices[i];
+                const fname = tr.filename || (tr.path ? tr.path.split('/').pop() : '') || '';
+                candidates.push({
+                    localTrack: tr,
+                    originalIndex: origIdx,
+                    title: tr.title || '',
+                    filename: fname,
+                    normTitle: normalizeTitleForMatching(tr.title || ''),
+                    normFilename: normalizeTitleForMatching(fname),
+                    used: false
+                });
+            }
+        }
+
+        // 2. Строим матрицу совпадений и выполняем жадное сопоставление (Best Match First)
+        const matches = [];
+        sortedRelease.forEach((relTrack, relIdx) => {
+            const relTitle = relTrack.title || '';
+            candidates.forEach((cand, candIdx) => {
+                const scoreTitle = calculateTitleSimilarity(relTitle, cand.title);
+                const scoreFile = calculateTitleSimilarity(relTitle, cand.filename);
+                const bestScore = Math.max(scoreTitle, scoreFile);
+                if (bestScore >= 0.50) {
+                    matches.push({
+                        relIdx,
+                        candIdx,
+                        score: bestScore
+                    });
+                }
+            });
+        });
+
+        // Сортируем пары по убыванию уверенности
+        matches.sort((a, b) => b.score - a.score);
+
+        const assignedRel = new Map(); // relIdx -> candIdx
+        const assignedCand = new Set(); // candIdx
+
+        for (const m of matches) {
+            if (!assignedRel.has(m.relIdx) && !assignedCand.has(m.candIdx)) {
+                assignedRel.set(m.relIdx, m.candIdx);
+                assignedCand.add(m.candIdx);
+            }
+        }
+
+        // 3. Формируем финальный массив пар matchedPairs
         return sortedRelease.map((relTrack, idx) => {
-            const localTrack = localTracks && idx < localTracks.length ? localTracks[idx] : null;
-            const originalIndex = localIndices && idx < localIndices.length ? localIndices[idx] : null;
+            const candIdx = assignedRel.get(idx);
+            const cand = candIdx !== undefined ? candidates[candIdx] : null;
+
             return {
                 index: idx,
                 releaseTrack: relTrack,
-                localTrack: localTrack,
-                originalIndex: originalIndex,
-                isMatched: !!localTrack
+                localTrack: cand ? cand.localTrack : null,
+                originalIndex: cand ? cand.originalIndex : null,
+                isMatched: !!cand,
+                isChecked: !!cand
             };
         });
     }
@@ -139,7 +271,7 @@
         const totalTracks = releaseDetails.tracks ? releaseDetails.tracks.length : 0;
 
         for (const pair of matchedPairs) {
-            if (!pair.localTrack || pair.originalIndex === null || pair.originalIndex === undefined) {
+            if (!pair.isChecked || !pair.localTrack || pair.originalIndex === null || pair.originalIndex === undefined) {
                 continue;
             }
 
@@ -238,6 +370,8 @@
 
     // Экспортируем во внешнее окружение
     window.PuddletagSources = {
+        normalizeTitleForMatching,
+        calculateTitleSimilarity,
         formatDuration,
         searchAllSources,
         fetchReleaseDetails,

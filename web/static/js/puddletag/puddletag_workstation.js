@@ -105,6 +105,7 @@ function puddletagWorkstationComponent() {
         selectedReleaseSummary: null,
         selectedReleaseDetails: null,
         matchedPairs: [],
+        targetTrackOptions: [],
         sourceOptions: {
             titleArtist: true,
             trackDisc: true,
@@ -1003,6 +1004,7 @@ function puddletagWorkstationComponent() {
             this.selectedReleaseSummary = null;
             this.selectedReleaseDetails = null;
             this.matchedPairs = [];
+            this.targetTrackOptions = [];
             this.showSourceModal = true;
             this.checkMusicBrainzOAuth();
 
@@ -1024,6 +1026,7 @@ function puddletagWorkstationComponent() {
             this.selectedReleaseSummary = null;
             this.selectedReleaseDetails = null;
             this.matchedPairs = [];
+            this.targetTrackOptions = [];
 
             try {
                 // Извлекаем относительный путь первого трека, если доступен
@@ -1115,12 +1118,25 @@ function puddletagWorkstationComponent() {
                 const details = await window.PuddletagSources.fetchReleaseDetails(rel.source, rel.id, audioPath);
                 this.selectedReleaseDetails = details;
 
-                // Формируем сопоставление с выделенными или всеми треками в таблице
+                // Формируем список целевых файлов из выделенных или всех строк в таблице
                 const targetIndices = (this.selectedIndices.length > 0)
                     ? this.selectedIndices
                     : this.tracks.map((_, i) => i);
 
                 const targetTracks = targetIndices.map(i => this.tracks[i]);
+
+                this.targetTrackOptions = targetIndices.map(origIdx => {
+                    const tr = this.tracks[origIdx];
+                    const fname = tr.filename || (tr.path ? tr.path.split('/').pop() : '') || `Трек #${origIdx + 1}`;
+                    const label = tr.title
+                        ? (tr.artist ? `${tr.artist} — ${tr.title}` : tr.title)
+                        : fname;
+                    return {
+                        originalIndex: origIdx,
+                        label: label,
+                        filename: fname
+                    };
+                });
 
                 this.matchedPairs = window.PuddletagSources.matchTracks(
                     details.tracks,
@@ -1132,6 +1148,68 @@ function puddletagWorkstationComponent() {
             } finally {
                 this.isLoadingReleaseDetails = false;
             }
+        },
+
+        onMatchedFileChange(pairIndex, newOrigIndexStr) {
+            const pair = this.matchedPairs[pairIndex];
+            if (!pair) return;
+
+            if (newOrigIndexStr === '' || newOrigIndexStr === null || newOrigIndexStr === undefined) {
+                pair.localTrack = null;
+                pair.originalIndex = null;
+                pair.isMatched = false;
+                pair.isChecked = false;
+                return;
+            }
+
+            const newOrigIdx = parseInt(newOrigIndexStr, 10);
+            if (isNaN(newOrigIdx)) return;
+
+            // Строго уникальное сопоставление (1-к-1):
+            // Если выбранный локальный трек был привязан к другой строке, освобождаем её
+            for (const otherPair of this.matchedPairs) {
+                if (otherPair.index !== pairIndex && otherPair.originalIndex === newOrigIdx) {
+                    otherPair.localTrack = null;
+                    otherPair.originalIndex = null;
+                    otherPair.isMatched = false;
+                    otherPair.isChecked = false;
+                }
+            }
+
+            const localTrk = this.tracks[newOrigIdx];
+            pair.localTrack = localTrk || null;
+            pair.originalIndex = localTrk ? newOrigIdx : null;
+            pair.isMatched = !!localTrk;
+            pair.isChecked = !!localTrk;
+        },
+
+        toggleAllMatched(checked) {
+            for (const pair of this.matchedPairs) {
+                if (pair.isMatched) {
+                    pair.isChecked = !!checked;
+                }
+            }
+        },
+
+        isAllMatchedChecked() {
+            const matched = this.matchedPairs.filter(p => p.isMatched);
+            if (matched.length === 0) return false;
+            return matched.every(p => p.isChecked);
+        },
+
+        reMatchTracks() {
+            if (!this.selectedReleaseDetails || !window.PuddletagSources) return;
+            const targetIndices = (this.selectedIndices.length > 0)
+                ? this.selectedIndices
+                : this.tracks.map((_, i) => i);
+            const targetTracks = targetIndices.map(i => this.tracks[i]);
+
+            this.matchedPairs = window.PuddletagSources.matchTracks(
+                this.selectedReleaseDetails.tracks,
+                targetTracks,
+                targetIndices
+            );
+            Alpine.store('app').toast('Авто-сопоставление треков выполнено заново', 'info');
         },
 
         applySourceTags() {
