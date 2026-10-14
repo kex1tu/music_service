@@ -25,6 +25,11 @@ var (
 	}
 )
 
+// CleanArtistKey приводит имя исполнителя к стандартному нижнему регистру для ключей словарей и индексов.
+func CleanArtistKey(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
 // NormalizeUnicodeText converts decomposed combining characters (NFD) to precomposed NFC.
 func NormalizeUnicodeText(s string) string {
 	s = strings.ReplaceAll(s, "\u0438\u0306", "й")

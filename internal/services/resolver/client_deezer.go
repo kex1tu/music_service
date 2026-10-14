@@ -445,3 +445,93 @@ func (a *DeezerAlbum) PrimaryGenre() string {
 	}
 	return ""
 }
+
+// DeezerRelatedArtist represents a related artist from Deezer API.
+type DeezerRelatedArtist struct {
+	ID      int64  `json:"id"`
+	Name    string `json:"name"`
+	Picture string `json:"picture_medium"`
+}
+
+// SearchArtist searches for an artist by name.
+func (c *DeezerClient) SearchArtist(ctx context.Context, name string) (*DeezerArtist, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("artist name cannot be empty")
+	}
+
+	searchURL := fmt.Sprintf("%s/search/artist?q=%s&limit=1", c.baseURL, url.QueryEscape(name))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("deezer search artist failed with status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Data  []DeezerArtist `json:"data"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	if result.Error != nil {
+		return nil, fmt.Errorf("deezer API error: %s", result.Error.Message)
+	}
+	if len(result.Data) == 0 {
+		return nil, fmt.Errorf("artist not found: %s", name)
+	}
+
+	return &result.Data[0], nil
+}
+
+// GetRelatedArtists fetches related artists for a given Deezer artist ID.
+func (c *DeezerClient) GetRelatedArtists(ctx context.Context, artistID string) ([]DeezerRelatedArtist, error) {
+	artistID = strings.TrimSpace(artistID)
+	if artistID == "" {
+		return nil, fmt.Errorf("artist ID cannot be empty")
+	}
+
+	relURL := fmt.Sprintf("%s/artist/%s/related?limit=20", c.baseURL, url.PathEscape(artistID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, relURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("deezer related artists failed with status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Data  []DeezerRelatedArtist `json:"data"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	if result.Error != nil {
+		return nil, fmt.Errorf("deezer API error: %s", result.Error.Message)
+	}
+
+	return result.Data, nil
+}
+
+

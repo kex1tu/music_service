@@ -626,4 +626,195 @@ func TestDB_PinnedSources(t *testing.T) {
 	}
 }
 
+func TestRadarAndRadioQueries(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "db_radar_radio_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	database, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer database.Close()
+
+	ctx := context.Background()
+
+	// 1. Тест Tracked Artists
+	if err := database.UpsertTrackedArtist(ctx, "Daft Punk"); err != nil {
+		t.Fatalf("UpsertTrackedArtist failed: %v", err)
+	}
+	if err := database.UpsertTrackedArtist(ctx, "The Weeknd"); err != nil {
+		t.Fatalf("UpsertTrackedArtist failed: %v", err)
+	}
+
+	artists, err := database.GetTrackedArtists(ctx, false)
+	if err != nil {
+		t.Fatalf("GetTrackedArtists failed: %v", err)
+	}
+	if len(artists) != 2 {
+		t.Fatalf("expected 2 tracked artists, got %d", len(artists))
+	}
+
+	if err := database.SetArtistAutoDownload(ctx, "Daft Punk", true); err != nil {
+		t.Fatalf("SetArtistAutoDownload failed: %v", err)
+	}
+	if err := database.SetArtistFollowed(ctx, "The Weeknd", false); err != nil {
+		t.Fatalf("SetArtistFollowed failed: %v", err)
+	}
+
+	followedOnly, err := database.GetTrackedArtists(ctx, true)
+	if err != nil {
+		t.Fatalf("GetTrackedArtists(followed=true) failed: %v", err)
+	}
+	if len(followedOnly) != 1 || followedOnly[0].Name != "Daft Punk" || !followedOnly[0].AutoDownload {
+		t.Fatalf("unexpected followed artists: %+v", followedOnly)
+	}
+
+	if err := database.UpdateArtistCustomLinks(ctx, "Daft Punk", "DaftPunkAlias", "dz-123", "mb-456", "ya-789"); err != nil {
+		t.Fatalf("UpdateArtistCustomLinks failed: %v", err)
+	}
+	if err := database.UpdateArtistLastChecked(ctx, "Daft Punk"); err != nil {
+		t.Fatalf("UpdateArtistLastChecked failed: %v", err)
+	}
+
+	artistDP, err := database.GetTrackedArtistByName(ctx, "daft punk")
+	if err != nil {
+		t.Fatalf("GetTrackedArtistByName failed: %v", err)
+	}
+	if artistDP.CustomSearchAlias != "DaftPunkAlias" || artistDP.DeezerID != "dz-123" || artistDP.LastCheckedAt == nil {
+		t.Fatalf("unexpected artist custom links: %+v", artistDP)
+	}
+
+	// 2. Тест Radar Releases
+	rel1 := &RadarReleaseEntity{
+		ArtistName:  "Daft Punk",
+		Title:       "Random Access Memories (10th Anniversary)",
+		ReleaseType: "album",
+		ReleaseDate: "2023-05-12",
+		Year:        2023,
+		CoverURL:    "https://example.com/ram.jpg",
+		TrackCount:  13,
+		DeezerID:    "dz-ram",
+		SourceURL:   "https://deezer.com/album/ram",
+		Status:      "new",
+		IsRadar:     true,
+	}
+	if err := database.UpsertRadarRelease(ctx, rel1); err != nil {
+		t.Fatalf("UpsertRadarRelease failed: %v", err)
+	}
+
+	rel2 := &RadarReleaseEntity{
+		ArtistName:  "Daft Punk",
+		Title:       "Homework",
+		ReleaseType: "album",
+		ReleaseDate: "1997-01-20",
+		Year:        1997,
+		CoverURL:    "https://example.com/hw.jpg",
+		TrackCount:  16,
+		SourceURL:   "https://deezer.com/album/hw",
+		Status:      "missing",
+		IsRadar:     false,
+	}
+	if err := database.UpsertRadarRelease(ctx, rel2); err != nil {
+		t.Fatalf("UpsertRadarRelease 2 failed: %v", err)
+	}
+
+	unreadCount, err := database.GetRadarUnreadCount(ctx)
+	if err != nil {
+		t.Fatalf("GetRadarUnreadCount failed: %v", err)
+	}
+	if unreadCount != 1 {
+		t.Fatalf("expected 1 unread radar release, got %d", unreadCount)
+	}
+
+	feed, total, err := database.GetRadarFeed(ctx, "all", "", 10, 0)
+	if err != nil {
+		t.Fatalf("GetRadarFeed failed: %v", err)
+	}
+	if total != 1 || len(feed) != 1 || feed[0].Title != rel1.Title {
+		t.Fatalf("unexpected feed: total=%d, len=%d", total, len(feed))
+	}
+
+	disco, err := database.GetArtistDiscography(ctx, "daft punk")
+	if err != nil {
+		t.Fatalf("GetArtistDiscography failed: %v", err)
+	}
+	if len(disco) != 2 {
+		t.Fatalf("expected 2 disco releases, got %d", len(disco))
+	}
+
+	// 3. Тест Artist Relations
+	sims := []ArtistRelationItem{
+		{ArtistName: "Daft Punk", RelatedName: "Justice", Score: 0.95, Source: "deezer"},
+		{ArtistName: "Daft Punk", RelatedName: "Kavinsky", Score: 0.88, Source: "lastfm"},
+	}
+	if err := database.SaveArtistRelations(ctx, "Daft Punk", sims); err != nil {
+		t.Fatalf("SaveArtistRelations failed: %v", err)
+	}
+	related, err := database.GetRelatedArtists(ctx, "Daft Punk", 5)
+	if err != nil {
+		t.Fatalf("GetRelatedArtists failed: %v", err)
+	}
+	if len(related) != 2 || related[0] != "justice" {
+		t.Fatalf("unexpected related artists: %+v", related)
+	}
+
+	// 4. Тест Radio History
+	// Создаем тестовый трек для foreign key
+	_, err = database.conn.ExecContext(ctx, `
+		INSERT INTO artists (id, name, clean_name) VALUES (1, 'Daft Punk', 'daft punk');
+		INSERT INTO albums (id, title, clean_title, artist_id, folder_path) VALUES (1, 'RAM', 'ram', 1, 'RAM');
+		INSERT INTO tracks (id, album_id, artist_id, title, clean_title, file_path, duration, bitrate, file_size, mtime, file_hash)
+		VALUES (500, 1, 1, 'Get Lucky', 'get lucky', 'Daft Punk/RAM/01. Get Lucky.mp3', 248, 320, 10000000, CURRENT_TIMESTAMP, 'hash500');
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert test track for radio: %v", err)
+	}
+
+	if err := database.RecordRadioPlay(ctx, 500, "wave", ""); err != nil {
+		t.Fatalf("RecordRadioPlay failed: %v", err)
+	}
+	recentTracks, err := database.GetRecentRadioTracks(ctx, "wave", 6)
+	if err != nil {
+		t.Fatalf("GetRecentRadioTracks failed: %v", err)
+	}
+	if len(recentTracks) != 1 || recentTracks[0] != 500 {
+		t.Fatalf("unexpected recent tracks: %+v", recentTracks)
+	}
+
+	recentArtists, err := database.GetRecentRadioArtists(ctx, "wave", 5)
+	if err != nil {
+		t.Fatalf("GetRecentRadioArtists failed: %v", err)
+	}
+	if len(recentArtists) != 1 || recentArtists[0] != "daft punk" {
+		t.Fatalf("unexpected recent artists: %+v", recentArtists)
+	}
+
+	// 5. Тест сохранения персистентных данных при ResetLibraryTables
+	if err := database.ResetLibraryTables(ctx); err != nil {
+		t.Fatalf("ResetLibraryTables failed: %v", err)
+	}
+
+	// Проверяем, что кэш tracks/albums очищен
+	var trackCount int
+	_ = database.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM tracks").Scan(&trackCount)
+	if trackCount != 0 {
+		t.Fatalf("expected tracks to be cleared, got %d", trackCount)
+	}
+
+	// Проверяем, что tracked_artists и radar_releases сохранены!
+	artistsAfterReset, err := database.GetTrackedArtists(ctx, false)
+	if err != nil || len(artistsAfterReset) != 2 {
+		t.Fatalf("tracked_artists lost after ResetLibraryTables: err=%v, count=%d", err, len(artistsAfterReset))
+	}
+	unreadAfterReset, err := database.GetRadarUnreadCount(ctx)
+	if err != nil || unreadAfterReset != 1 {
+		t.Fatalf("radar_releases lost after ResetLibraryTables: err=%v, unread=%d", err, unreadAfterReset)
+	}
+}
+
+
 

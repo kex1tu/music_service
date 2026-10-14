@@ -21,6 +21,8 @@ type RouterParams struct {
 	TagHandler      *handlers.TagHandler
 	FileHandler     *handlers.FileHandler
 	LyricsHandler   *handlers.LyricsHandler
+	RadarHandler    *handlers.RadarHandler
+	RadioHandler    *handlers.RadioHandler
 }
 
 // NewRouter constructs and configures the main Chi HTTP router.
@@ -234,6 +236,44 @@ func NewRouter(p RouterParams) http.Handler {
 			r.Post("/tag-issues/apply-catalog-album", p.FileHandler.ApplyCatalogAlbum)
 		})
 	})
+
+	// Public/Token-authorized ICY Radio Stream Endpoints (for VLC, Navidrome Radio, browser audio)
+	if p.RadioHandler != nil {
+		r.Get("/api/radio/stream/wave", p.RadioHandler.StreamWave)
+		r.Get("/api/radio/stream/genre/{name}", p.RadioHandler.StreamGenre)
+		r.Get("/api/radio/stream/artist/{name}", p.RadioHandler.StreamArtist)
+	}
+
+	// Release Radar API
+	if p.RadarHandler != nil {
+		r.Route("/api/radar", func(r chi.Router) {
+			r.Use(authMiddleware)
+			r.Get("/feed", p.RadarHandler.GetFeed)
+			r.Get("/unread-count", p.RadarHandler.GetUnreadCount)
+			r.Get("/artists", p.RadarHandler.GetTrackedArtists)
+			r.Post("/artists", p.RadarHandler.AddTrackedArtist)
+			r.Post("/artists/{name}/follow", p.RadarHandler.FollowArtist)
+			r.Post("/artists/{name}/auto-download", p.RadarHandler.SetAutoDownload)
+			r.Post("/artists/{name}/custom-links", p.RadarHandler.UpdateCustomLinks)
+			r.Get("/artists/{name}/discography", p.RadarHandler.GetArtistDiscography)
+			r.Post("/scan", p.RadarHandler.TriggerScan)
+			r.Get("/progress", p.RadarHandler.GetScanProgress)
+			r.Post("/cancel", p.RadarHandler.CancelScan)
+			r.Post("/releases/{id}/status", p.RadarHandler.SetReleaseStatus)
+		})
+	}
+
+	// Radio & Wave Control API
+	if p.RadioHandler != nil {
+		r.Route("/api/radio", func(r chi.Router) {
+			r.Use(authMiddleware)
+			r.Get("/wave/queue", p.RadioHandler.GetWaveQueue)
+			r.Get("/wave/stats", p.RadioHandler.GetWaveStats)
+			r.Get("/genres", p.RadioHandler.GetGenres)
+			r.Post("/m3u/generate", p.RadioHandler.GenerateM3U)
+			r.Post("/navidrome/sync-radio", p.RadioHandler.SyncNavidromeRadio)
+		})
+	}
 
 	return r
 }

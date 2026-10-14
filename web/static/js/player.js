@@ -239,6 +239,41 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        playRadioStream(streamUrl, stationName) {
+            if (!streamUrl) return;
+            if (this.currentTrack && this.currentTrack.stream_url === streamUrl && this.isPlaying) {
+                this.togglePlay();
+                return;
+            }
+            this.currentTrack = {
+                title: stationName || 'Моя Волна',
+                artist: 'Бесконечный ICY-поток (320 kbps)',
+                duration: 0,
+                is_radio: true,
+                stream_url: streamUrl,
+            };
+            this.isVisible = true;
+            this.currentTime = 0;
+            this.duration = 0;
+            this.ensureAudioContext();
+            if (this.audioElement) {
+                this.isLoading = true;
+                this.audioElement.src = streamUrl;
+                this.audioElement.load();
+                this.audioElement.play()
+                    .then(() => {
+                        this.isPlaying = true;
+                        this.isLoading = false;
+                        this.startVisualizer();
+                    })
+                    .catch((err) => {
+                        console.warn('Ошибка воспроизведения радиопотока:', err);
+                        this.isPlaying = false;
+                        this.isLoading = false;
+                    });
+            }
+        },
+
         togglePlay() {
             if (!this.audioElement || !this.currentTrack) return;
 

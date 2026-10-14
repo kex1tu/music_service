@@ -840,3 +840,60 @@ func parseYear(dateStr string) int {
 	}
 	return 0
 }
+
+// GetArtistReleaseGroups запрашивает дискографию релиз-групп артиста.
+func (c *MusicBrainzClient) GetArtistReleaseGroups(ctx context.Context, mbid string) ([]CatalogReleaseSummary, error) {
+	mbid = strings.TrimSpace(mbid)
+	if mbid == "" {
+		return nil, fmt.Errorf("mbid cannot be empty")
+	}
+
+	reqURL := fmt.Sprintf("%s/release-group?artist=%s&type=album|ep|single|compilation&limit=100&fmt=json", c.baseURL, url.PathEscape(mbid))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", defaultMusicBrainzUserAgnt)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("musicbrainz request failed with status %d", resp.StatusCode)
+	}
+
+	var data struct {
+		ReleaseGroups []struct {
+			ID               string           `json:"id"`
+			Title            string           `json:"title"`
+			PrimaryType      string           `json:"primary-type"`
+			SecondaryTypes   []string         `json:"secondary-types"`
+			FirstReleaseDate string           `json:"first-release-date"`
+			ArtistCredit     []mbArtistCredit `json:"artist-credit"`
+		} `json:"release-groups"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, err
+	}
+
+	var results []CatalogReleaseSummary
+	for _, rg := range data.ReleaseGroups {
+		artist := formatArtistCredit(rg.ArtistCredit)
+		year := parseYear(rg.FirstReleaseDate)
+		results = append(results, CatalogReleaseSummary{
+			ID:     rg.ID,
+			Source: "musicbrainz",
+			Title:  rg.Title,
+			Artist: artist,
+			Year:   year,
+			Date:   rg.FirstReleaseDate,
+		})
+	}
+	return results, nil
+}
+

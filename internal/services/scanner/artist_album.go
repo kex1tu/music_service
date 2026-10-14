@@ -17,6 +17,12 @@ func (s *Scanner) getOrCreateArtist(name string) (int64, error) {
 	}
 
 	cleanName := strings.ToLower(name)
+	// Автоматический мониторинг артистов медиатеки: регистрация в tracked_artists с сохранением пользовательских настроек
+	_, _ = s.database.Conn().Exec(
+		"INSERT INTO tracked_artists (name, clean_name, is_followed) VALUES (?, ?, 1) ON CONFLICT(name) DO NOTHING;",
+		name, cleanName,
+	)
+
 	res, err := s.database.Conn().Exec("INSERT INTO artists (name, clean_name) VALUES (?, ?)", name, cleanName)
 	if err != nil {
 		// Concurrent insert race check

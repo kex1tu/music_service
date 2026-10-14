@@ -119,6 +119,10 @@
     <script src="/static/js/audit/tag_audit.js?v=20261003_02"></script>
     <script src="/static/js/audit/library_audit.js?v=20261003_02"></script>
 
+    <!-- Модули Радара и Радио -->
+    <script src="/static/js/radar/radar.js?v=20261014_01"></script>
+    <script src="/static/js/radio/radio.js?v=20261014_01"></script>
+
     <!-- Alpine.js CDN -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
@@ -132,6 +136,8 @@
         {{ template "downloader" . }}
         {{ template "file_manager" . }}
         {{ template "audit" . }}
+        {{ template "radar" . }}
+        {{ template "radio" . }}
         {{ template "player_tab" . }}
     </main>
 
@@ -140,6 +146,7 @@
     {{ template "modal_confirmations" . }}
     {{ template "modal_login" . }}
     {{ template "downloader_source_picker_modal" . }}
+    {{ template "radar_discography_modal" . }}
     {{ template "queue_drawer" . }}
     {{ template "toasts" . }}
     {{ template "audio_player" . }}

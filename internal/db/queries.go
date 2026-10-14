@@ -393,7 +393,9 @@ func CleanString(s string) string {
 	return fmt.Sprintf("%s", s)
 }
 
-// ResetLibraryTables очищает все таблицы кэша медиатеки при запуске сервиса, сохраняя таблицу download_jobs.
+// ResetLibraryTables очищает таблицы кэша медиатеки при запуске сервиса, сохраняя персистентные таблицы:
+// download_jobs, soundcloud_uncensored_cache, app_settings, pinned_track_sources,
+// tracked_artists, radar_releases, artist_relations, radio_history.
 func (db *DB) ResetLibraryTables(ctx context.Context) error {
 	queries := []string{
 		"DELETE FROM track_genres;",

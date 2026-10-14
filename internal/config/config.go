@@ -40,6 +40,19 @@ type Config struct {
 	UncensoredPreferYear        int
 	UncensoredCacheTTLHours     int
 	UncensoredDistributors      []string
+
+	// Radio & Wave Settings
+	RadioStreamToken  string
+	RadioWaveSize     int
+	NavidromeDBPath   string
+	NavidromeURL      string
+	NavidromeUser     string
+	NavidromePassword string
+	LastfmAPIKey      string
+
+	// Radar Settings
+	RadarScanIntervalHours int
+	RadarAutoDownload      bool
 }
 
 // Load загружает настройки из .env и переменных окружения, а также проверяет права на запись.
@@ -69,6 +82,20 @@ func Load() (*Config, error) {
 		}
 	}
 
+	radioToken := getEnv("RADIO_STREAM_TOKEN", "")
+	if radioToken == "" {
+		radioToken = uuid.New().String()
+	}
+	radioWaveSize, _ := strconv.Atoi(getEnv("RADIO_WAVE_SIZE", "60"))
+	if radioWaveSize <= 0 {
+		radioWaveSize = 60
+	}
+	radarIntervalHours, _ := strconv.Atoi(getEnv("RADAR_SCAN_INTERVAL_HOURS", "24"))
+	if radarIntervalHours <= 0 {
+		radarIntervalHours = 24
+	}
+	radarAutoDL := getEnv("RADAR_AUTO_DOWNLOAD", "false") == "true"
+
 	cfg := &Config{
 		Host:                        getEnv("HOST", "127.0.0.1"),
 		Port:                        port,
@@ -95,6 +122,15 @@ func Load() (*Config, error) {
 		UncensoredPreferYear:        uncensoredPreferYear,
 		UncensoredCacheTTLHours:     uncensoredTTLHours,
 		UncensoredDistributors:      distributors,
+		RadioStreamToken:            radioToken,
+		RadioWaveSize:               radioWaveSize,
+		NavidromeDBPath:             getEnv("NAVIDROME_DB_PATH", ""),
+		NavidromeURL:                getEnv("NAVIDROME_URL", ""),
+		NavidromeUser:               getEnv("NAVIDROME_USER", ""),
+		NavidromePassword:           getEnv("NAVIDROME_PASSWORD", ""),
+		LastfmAPIKey:                getEnv("LASTFM_API_KEY", ""),
+		RadarScanIntervalHours:      radarIntervalHours,
+		RadarAutoDownload:           radarAutoDL,
 	}
 
 	// Fail-fast проверка прав на запись в директории

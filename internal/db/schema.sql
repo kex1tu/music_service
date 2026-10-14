@@ -191,3 +191,69 @@ CREATE TABLE IF NOT EXISTS pinned_track_sources (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_pinned_sources_artist_title ON pinned_track_sources(artist_name, track_title);
+
+-- 11. Персистентные настройки отслеживания артистов (не сбрасываются при рестарте)
+CREATE TABLE IF NOT EXISTS tracked_artists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    clean_name TEXT NOT NULL,
+    is_followed BOOLEAN DEFAULT 1,
+    auto_download BOOLEAN DEFAULT 0,
+    custom_search_alias TEXT,
+    deezer_id TEXT,
+    musicbrainz_id TEXT,
+    yandex_id TEXT,
+    last_checked_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_tracked_artists_clean ON tracked_artists(clean_name);
+CREATE INDEX IF NOT EXISTS idx_tracked_artists_followed ON tracked_artists(is_followed);
+
+-- 12. Релизы Радара и дискографий (новинки и пробелы)
+CREATE TABLE IF NOT EXISTS radar_releases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    artist_name TEXT NOT NULL,
+    clean_artist_name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    clean_title TEXT NOT NULL,
+    release_type TEXT NOT NULL, -- 'album', 'single', 'ep', 'compilation'
+    release_date TEXT,          -- 'YYYY-MM-DD' or 'YYYY'
+    year INTEGER,
+    cover_url TEXT,
+    track_count INTEGER DEFAULT 1,
+    deezer_id TEXT,
+    musicbrainz_id TEXT,
+    shazam_id TEXT,
+    source_url TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new', -- 'new', 'in_library', 'version_exists', 'downloaded', 'ignored'
+    is_radar BOOLEAN DEFAULT 0,         -- 1 если дата релиза за последние 2 года
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(clean_artist_name, clean_title, release_type)
+);
+CREATE INDEX IF NOT EXISTS idx_radar_releases_artist ON radar_releases(clean_artist_name);
+CREATE INDEX IF NOT EXISTS idx_radar_releases_status ON radar_releases(status);
+CREATE INDEX IF NOT EXISTS idx_radar_releases_is_radar ON radar_releases(is_radar);
+
+-- 13. Граф связей и похожих артистов (для Моей Волны и рекомендаций)
+CREATE TABLE IF NOT EXISTS artist_relations (
+    artist_name TEXT NOT NULL,
+    related_name TEXT NOT NULL,
+    score REAL NOT NULL, -- 0.0 to 1.0
+    source TEXT NOT NULL, -- 'deezer', 'lastfm', 'manual'
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (artist_name, related_name)
+);
+CREATE INDEX IF NOT EXISTS idx_artist_rel_source ON artist_relations(artist_name);
+
+-- 14. История воспроизведения радиостанций (анти-повторы)
+CREATE TABLE IF NOT EXISTS radio_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id INTEGER REFERENCES tracks(id) ON DELETE CASCADE,
+    station_type TEXT NOT NULL, -- 'wave', 'genre', 'artist'
+    station_param TEXT,         -- жанр или имя артиста
+    played_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_radio_hist_track_time ON radio_history(track_id, played_at);
+

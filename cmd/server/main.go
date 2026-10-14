@@ -20,6 +20,8 @@ import (
 	"music-manager/internal/services/downloader"
 	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/organizer"
+	"music-manager/internal/services/radar"
+	"music-manager/internal/services/radio"
 	"music-manager/internal/services/resolver"
 	"music-manager/internal/services/scanner"
 )
@@ -157,7 +159,52 @@ func main() {
 	})
 	lyricsHandler := handlers.NewLyricsHandler(lyricsService)
 
-	// 7. Initialize Router
+	// 7. Initialize Radar & Radio Services
+	discographyAggregator := resolver.NewDiscographyAggregator(deezerClient, mbClient, itunesClient, database)
+	lastfmClient := resolver.NewLastfmClient(cfg.LastfmAPIKey)
+	similarityEngine := resolver.NewSimilarityEngine(deezerClient, lastfmClient, database)
+
+	navidromeReader := radio.NewNavidromeReader(cfg.NavidromeDBPath)
+	navidromeSubsonic := radio.NewNavidromeSubsonicClient(cfg.NavidromeURL, cfg.NavidromeUser, cfg.NavidromePassword)
+
+	waveSelector := radio.NewWaveSelector(database, navidromeReader, similarityEngine)
+	icyStreamer := radio.NewIcyStreamer(waveSelector, musicSandbox, database, cfg.RadioStreamToken)
+	m3uGenerator := radio.NewM3UGenerator(waveSelector, musicSandbox, cfg.RadioWaveSize)
+
+	radarService := radar.NewService(database, discographyAggregator, downloadService, cfg)
+	radarService.Start(appCtx)
+
+	// Daily 05:00 cron for «Моя Волна.m3u»
+	go func() {
+		// Generate once on startup in background if not generated
+		if path, err := m3uGenerator.GenerateWaveM3U(appCtx); err == nil && path != "" {
+			log.Printf("[Wave] Начальный плейлист «Моя Волна.m3u» сгенерирован: %s", path)
+		}
+
+		for {
+			now := time.Now()
+			next := time.Date(now.Year(), now.Month(), now.Day(), 5, 0, 0, 0, now.Location())
+			if !next.After(now) {
+				next = next.Add(24 * time.Hour)
+			}
+			select {
+			case <-time.After(time.Until(next)):
+				log.Println("[Wave] Обновление ежедневного плейлиста «Моя Волна.m3u»...")
+				if path, err := m3uGenerator.GenerateWaveM3U(appCtx); err != nil {
+					log.Printf("[Wave] Ошибка генерации M3U: %v", err)
+				} else {
+					log.Printf("[Wave] Плейлист «Моя Волна.m3u» обновлен: %s", path)
+				}
+			case <-appCtx.Done():
+				return
+			}
+		}
+	}()
+
+	radarHandler := handlers.NewRadarHandler(radarService, database)
+	radioHandler := handlers.NewRadioHandler(waveSelector, icyStreamer, m3uGenerator, navidromeSubsonic, navidromeReader, database, cfg)
+
+	// 8. Initialize Router
 	router := api.NewRouter(api.RouterParams{
 		Config:          cfg,
 		AuthHandler:     authHandler,
@@ -165,9 +212,11 @@ func main() {
 		TagHandler:      tagHandler,
 		FileHandler:     fileHandler,
 		LyricsHandler:   lyricsHandler,
+		RadarHandler:    radarHandler,
+		RadioHandler:    radioHandler,
 	})
 
-	// 8. Start HTTP Server
+	// 9. Start HTTP Server
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	srv := &http.Server{
 		Addr:         addr,
