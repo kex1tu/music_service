@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -53,9 +54,11 @@ type DeezerAlbum struct {
 	ReleaseDate string           `json:"release_date"`
 	RecordType  string           `json:"record_type"`
 	NbTracks    int              `json:"nb_tracks"`
-	Artist      DeezerArtist     `json:"artist"`
-	Genres      *DeezerGenres    `json:"genres,omitempty"`
-	Tracks      *DeezerTrackList `json:"tracks,omitempty"`
+	Artist       DeezerArtist     `json:"artist"`
+	Contributors []DeezerArtist   `json:"contributors,omitempty"`
+	Artists      []DeezerArtist   `json:"artists,omitempty"`
+	Genres       *DeezerGenres    `json:"genres,omitempty"`
+	Tracks       *DeezerTrackList `json:"tracks,omitempty"`
 }
 
 type DeezerGenres struct {
@@ -314,6 +317,56 @@ func (c *DeezerClient) GetArtistAlbums(ctx context.Context, artistID string) ([]
 	}
 
 	return allAlbums, nil
+}
+
+// EnrichAlbumsContributors параллельно наполняет список альбомов официальными соавторами из Deezer API.
+func (c *DeezerClient) EnrichAlbumsContributors(ctx context.Context, albums []DeezerAlbum) []DeezerAlbum {
+	if len(albums) == 0 {
+		return albums
+	}
+
+	result := make([]DeezerAlbum, len(albums))
+	copy(result, albums)
+
+	sem := make(chan struct{}, 6)
+	var wg sync.WaitGroup
+
+	for i := range result {
+		if result[i].ID <= 0 {
+			continue
+		}
+		// Если contributors уже заполнены, пропускаем
+		if len(result[i].Contributors) > 0 || len(result[i].Artists) > 0 {
+			continue
+		}
+
+		wg.Add(1)
+		go func(idx int, albID int64) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-sem }()
+
+			reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+
+			var detailed DeezerAlbum
+			if err := c.fetchDeezerJSON(reqCtx, fmt.Sprintf("/album/%d", albID), &detailed); err == nil && detailed.ID > 0 {
+				if len(detailed.Contributors) > 0 {
+					result[idx].Contributors = detailed.Contributors
+				}
+				if len(detailed.Artists) > 0 {
+					result[idx].Artists = detailed.Artists
+				}
+			}
+		}(i, result[i].ID)
+	}
+
+	wg.Wait()
+	return result
 }
 
 // SearchAlbums searches albums by query text with iTunes fallback and artist aliases.

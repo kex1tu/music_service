@@ -68,6 +68,13 @@ func (s *Service) Start(ctx context.Context) {
 		intervalHours = s.cfg.RadarScanIntervalHours
 	}
 
+	// Асинхронная актуализация существующих записей в radar_releases при старте
+	go func() {
+		if count, err := s.db.ReconcileAllRadarReleases(ctx); err == nil && count > 0 {
+			log.Printf("[Radar] Стартовая актуализация: скрыто %d ранее скачанных релизов из ленты", count)
+		}
+	}()
+
 	ticker := time.NewTicker(time.Duration(intervalHours) * time.Hour)
 	go func() {
 		defer ticker.Stop()
@@ -130,6 +137,9 @@ func (s *Service) ScanAll(parentCtx context.Context, trigger string) error {
 			s.progress.IsRunning = false
 			s.cancelScan = nil
 			s.mu.Unlock()
+			if count, err := s.db.ReconcileAllRadarReleases(context.Background()); err == nil && count > 0 {
+				log.Printf("[Radar] Пост-сканирование: скрыто %d ранее скачанных релизов из ленты", count)
+			}
 			log.Printf("[Radar] Сканирование завершено (триггер: %s, найдено новинок: %d)", trigger, s.GetProgress().NewReleasesFound)
 		}()
 

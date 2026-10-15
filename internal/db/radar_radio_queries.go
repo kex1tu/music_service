@@ -227,13 +227,60 @@ func (db *DB) UpsertRadarRelease(ctx context.Context, r *RadarReleaseEntity) err
 		return fmt.Errorf("artist name and title are required")
 	}
 	r.CleanArtistName = CleanArtistKey(r.ArtistName)
-	r.CleanTitle = strings.ToLower(strings.TrimSpace(r.Title))
+	if r.CleanTitle == "" {
+		r.CleanTitle = strings.ToLower(strings.TrimSpace(r.Title))
+	}
 	if r.ReleaseType == "" {
 		r.ReleaseType = "album"
 	}
 	isRadarVal := 0
 	if r.IsRadar {
 		isRadarVal = 1
+	}
+
+	// 1. Дедупликация: если релиз с таким Deezer ID уже существует, обновляем его
+	if r.DeezerID != "" {
+		var existingID int64
+		var existingArtist string
+		err := db.conn.QueryRowContext(ctx, "SELECT id, artist_name FROM radar_releases WHERE deezer_id = ? LIMIT 1", r.DeezerID).Scan(&existingID, &existingArtist)
+		if err == nil && existingID > 0 {
+			finalArtist := r.ArtistName
+			if len(existingArtist) > len(finalArtist) || (strings.Contains(existingArtist, ",") && !strings.Contains(finalArtist, ",")) {
+				finalArtist = existingArtist
+			}
+			query := `
+			UPDATE radar_releases SET
+				artist_name = ?,
+				title = ?,
+				release_date = CASE WHEN ? != '' THEN ? ELSE release_date END,
+				year = CASE WHEN ? > 0 THEN ? ELSE year END,
+				cover_url = CASE WHEN ? != '' THEN ? ELSE cover_url END,
+				track_count = CASE WHEN ? > 0 THEN ? ELSE track_count END,
+				source_url = ?,
+				status = CASE 
+					WHEN radar_releases.status IN ('downloaded', 'ignored') THEN radar_releases.status 
+					ELSE ? 
+				END,
+				is_radar = CASE 
+					WHEN radar_releases.status IN ('downloaded', 'ignored') OR ? IN ('downloaded', 'ignored', 'in_library', 'version_exists', 'missing') THEN 0 
+					ELSE ? 
+				END,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?;
+			`
+			_, err = db.conn.ExecContext(ctx, query,
+				finalArtist, r.Title,
+				r.ReleaseDate, r.ReleaseDate,
+				r.Year, r.Year,
+				r.CoverURL, r.CoverURL,
+				r.TrackCount, r.TrackCount,
+				r.SourceURL,
+				r.Status,
+				r.Status, isRadarVal,
+				existingID,
+			)
+			return err
+		}
 	}
 
 	query := `
@@ -257,7 +304,10 @@ func (db *DB) UpsertRadarRelease(ctx context.Context, r *RadarReleaseEntity) err
 			WHEN radar_releases.status IN ('downloaded', 'ignored') THEN radar_releases.status 
 			ELSE excluded.status 
 		END,
-		is_radar = excluded.is_radar,
+		is_radar = CASE 
+			WHEN radar_releases.status IN ('downloaded', 'ignored') OR excluded.status IN ('downloaded', 'ignored', 'in_library', 'version_exists', 'missing') THEN 0 
+			ELSE excluded.is_radar 
+		END,
 		updated_at = CURRENT_TIMESTAMP;
 	`
 	_, err := db.conn.ExecContext(ctx, query,
@@ -280,8 +330,8 @@ func (db *DB) GetRadarFeed(ctx context.Context, releaseType, search string, limi
 	var conditions []string
 	var args []any
 
-	// Показываем релизы со статусом 'new' и 'downloaded' (или всё кроме ignored)
-	conditions = append(conditions, "rr.is_radar = 1", "rr.status != 'ignored'")
+	// Показываем строго нескачанные новинки (is_radar = 1, status = 'new')
+	conditions = append(conditions, "rr.is_radar = 1", "rr.status = 'new'")
 
 	if releaseType != "" && releaseType != "all" {
 		conditions = append(conditions, "rr.release_type = ?")
@@ -297,7 +347,7 @@ func (db *DB) GetRadarFeed(ctx context.Context, releaseType, search string, limi
 
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM radar_releases rr %s", whereClause)
+	countQuery := fmt.Sprintf("SELECT COUNT(DISTINCT COALESCE(NULLIF(rr.deezer_id, ''), rr.clean_title)) FROM radar_releases rr %s", whereClause)
 	var total int
 	if err := db.conn.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, err
@@ -305,13 +355,14 @@ func (db *DB) GetRadarFeed(ctx context.Context, releaseType, search string, limi
 
 	dataQuery := fmt.Sprintf(`
 	SELECT 
-		rr.id, rr.artist_name, rr.clean_artist_name, rr.title, rr.clean_title,
+		MIN(rr.id), rr.artist_name, rr.clean_artist_name, rr.title, rr.clean_title,
 		rr.release_type, COALESCE(rr.release_date, ''), rr.year, COALESCE(rr.cover_url, ''),
 		rr.track_count, COALESCE(rr.deezer_id, ''), COALESCE(rr.musicbrainz_id, ''),
 		COALESCE(rr.shazam_id, ''), rr.source_url, rr.status, rr.is_radar,
 		rr.created_at, rr.updated_at
 	FROM radar_releases rr
 	%s
+	GROUP BY COALESCE(NULLIF(rr.deezer_id, ''), rr.clean_title)
 	ORDER BY rr.release_date DESC, rr.created_at DESC
 	LIMIT ? OFFSET ?;
 	`, whereClause)
@@ -349,16 +400,18 @@ func (db *DB) GetArtistDiscography(ctx context.Context, artistName string) ([]Ra
 	cleanName := CleanArtistKey(artistName)
 	query := `
 	SELECT 
-		rr.id, rr.artist_name, rr.clean_artist_name, rr.title, rr.clean_title,
+		MIN(rr.id), rr.artist_name, rr.clean_artist_name, rr.title, rr.clean_title,
 		rr.release_type, COALESCE(rr.release_date, ''), rr.year, COALESCE(rr.cover_url, ''),
 		rr.track_count, COALESCE(rr.deezer_id, ''), COALESCE(rr.musicbrainz_id, ''),
 		COALESCE(rr.shazam_id, ''), rr.source_url, rr.status, rr.is_radar,
 		rr.created_at, rr.updated_at
 	FROM radar_releases rr
-	WHERE rr.clean_artist_name = ?
+	WHERE rr.clean_artist_name = ? OR LOWER(rr.artist_name) LIKE ?
+	GROUP BY COALESCE(NULLIF(rr.deezer_id, ''), rr.clean_title)
 	ORDER BY rr.year DESC, rr.release_date DESC;
 	`
-	rows, err := db.conn.QueryContext(ctx, query, cleanName)
+	pattern := "%" + cleanName + "%"
+	rows, err := db.conn.QueryContext(ctx, query, cleanName, pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -386,9 +439,68 @@ func (db *DB) GetArtistDiscography(ctx context.Context, artistName string) ([]Ra
 
 // SetRadarReleaseStatus меняет статус релиза (например: 'ignored', 'downloaded', 'new').
 func (db *DB) SetRadarReleaseStatus(ctx context.Context, releaseID int64, status string) error {
-	query := `UPDATE radar_releases SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;`
-	_, err := db.conn.ExecContext(ctx, query, status, releaseID)
+	isRadar := 0
+	if status == "new" {
+		isRadar = 1
+	}
+	query := `UPDATE radar_releases SET status = ?, is_radar = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;`
+	_, err := db.conn.ExecContext(ctx, query, status, isRadar, releaseID)
 	return err
+}
+
+// ReconcileAllRadarReleases проверяет все релизы со статусом 'new' или 'downloaded' и при наличии в медиатеке переводит в in_library.
+func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
+	rows, err := db.conn.QueryContext(ctx, `
+		SELECT id, clean_title
+		FROM radar_releases
+		WHERE is_radar = 1 OR status IN ('new', 'downloaded');
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	type releaseRef struct {
+		id         int64
+		cleanTitle string
+	}
+	var toCheck []releaseRef
+	for rows.Next() {
+		var ref releaseRef
+		if err := rows.Scan(&ref.id, &ref.cleanTitle); err == nil {
+			toCheck = append(toCheck, ref)
+		}
+	}
+	rows.Close()
+
+	if len(toCheck) == 0 {
+		return 0, nil
+	}
+
+	updatedCount := 0
+	for _, ref := range toCheck {
+		inLibrary := false
+
+		// 1. Проверяем наличие в альбомах
+		var dummy int
+		if err := db.conn.QueryRowContext(ctx, "SELECT 1 FROM albums WHERE clean_title = ? OR ? LIKE '%' || clean_title || '%' LIMIT 1", ref.cleanTitle, ref.cleanTitle).Scan(&dummy); err == nil {
+			inLibrary = true
+		}
+
+		// 2. Проверяем наличие в треках
+		if !inLibrary {
+			if err := db.conn.QueryRowContext(ctx, "SELECT 1 FROM tracks WHERE clean_title = ? OR ? LIKE '%' || clean_title || '%' LIMIT 1", ref.cleanTitle, ref.cleanTitle).Scan(&dummy); err == nil {
+				inLibrary = true
+			}
+		}
+
+		if inLibrary {
+			_, _ = db.conn.ExecContext(ctx, "UPDATE radar_releases SET status = 'in_library', is_radar = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", ref.id)
+			updatedCount++
+		}
+	}
+
+	return updatedCount, nil
 }
 
 // GetRadarUnreadCount возвращает количество нескачанных и нескрытых новинок Радара.

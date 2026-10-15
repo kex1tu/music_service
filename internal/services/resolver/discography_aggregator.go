@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"music-manager/internal/db"
+	"music-manager/internal/id3"
 )
 
 var deluxeRemasterRegex = regexp.MustCompile(`(?i)\s*[\(\[](?:deluxe|expanded|remaster(?:ed)?|special|bonus|anniversary|reissue|collectors?|edition|version)[^\)\]]*[\)\]]`)
@@ -45,6 +46,120 @@ type AggregatedRelease struct {
 	SourceURL     string `json:"source_url"`
 	Status        string `json:"status"` // new, in_library, version_exists, missing, downloaded, ignored
 	IsRadar       bool   `json:"is_radar"`
+}
+
+// ExtractAllReleaseArtists объединяет имя основного исполнителя, contributors из каталога и фиты из названия.
+func ExtractAllReleaseArtists(primaryArtist string, contributors []DeezerArtist, title string) []string {
+	var artists []string
+	seen := make(map[string]bool)
+
+	addArtist := func(name string) {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			return
+		}
+		for _, part := range id3.ParseMultiValue(trimmed) {
+			p := strings.TrimSpace(part)
+			if p == "" {
+				continue
+			}
+			clean, feats := ExtractFeatFromText(p)
+			for _, item := range append([]string{clean}, feats...) {
+				item = strings.TrimSpace(item)
+				if item == "" {
+					continue
+				}
+				for _, sub := range strings.FieldsFunc(item, func(r rune) bool {
+					return r == ',' || r == '&' || r == '/' || r == ';'
+				}) {
+					subTrim := strings.TrimSpace(sub)
+					if subTrim != "" {
+						lower := strings.ToLower(CleanQueryText(subTrim))
+						if lower != "" && !seen[lower] {
+							seen[lower] = true
+							artists = append(artists, subTrim)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if primaryArtist != "" {
+		addArtist(primaryArtist)
+	}
+	for _, c := range contributors {
+		addArtist(c.Name)
+	}
+
+	// Извлекаем соавторов из названия релиза (например, "Stick Out (feat. Big Baby Tape)")
+	_, titleFeats := ExtractFeatFromText(title)
+	for _, f := range titleFeats {
+		addArtist(f)
+	}
+
+	if len(artists) == 0 && primaryArtist != "" {
+		return []string{primaryArtist}
+	}
+	return artists
+}
+
+// extractArtistTokens разбивает строку исполнителей на отдельные имена (по запятым, амперсандам, \x00, \\, feat)
+func extractArtistTokens(artistStr string) []string {
+	var tokens []string
+	seen := make(map[string]bool)
+
+	addToken := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return
+		}
+		for _, part := range id3.ParseMultiValue(s) {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			clean, feats := ExtractFeatFromText(part)
+			candidates := append([]string{clean}, feats...)
+			for _, item := range candidates {
+				item = strings.TrimSpace(item)
+				if item == "" {
+					continue
+				}
+				for _, sub := range strings.FieldsFunc(item, func(r rune) bool {
+					return r == ',' || r == '&' || r == '/' || r == ';'
+				}) {
+					subTrim := strings.TrimSpace(sub)
+					if subTrim != "" {
+						lower := strings.ToLower(CleanQueryText(subTrim))
+						if lower != "" && !seen[lower] {
+							seen[lower] = true
+							tokens = append(tokens, subTrim)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	addToken(artistStr)
+	return tokens
+}
+
+// matchesAnyArtist проверяет, пересекается ли хотя бы один артист из releaseArtists с localArtist
+func matchesAnyArtist(releaseArtists []string, localArtist string) bool {
+	if len(releaseArtists) == 0 {
+		return false
+	}
+	localTokens := extractArtistTokens(localArtist)
+	for _, ra := range releaseArtists {
+		for _, la := range localTokens {
+			if AreArtistsEquivalent(ra, la) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // DiscographyAggregator выполняет кросс-каталожный сбор, склейку дубликатов и сверку с локальной БД.
@@ -102,6 +217,9 @@ func (a *DiscographyAggregator) Aggregate(ctx context.Context, artistName, alias
 			if deezerID != "" {
 				albums, err := a.deezer.GetArtistAlbums(ctx, deezerID)
 				if err == nil {
+					// Обогащаем альбомы официальными соавторами из Deezer API
+					albums = a.deezer.EnrichAlbumsContributors(ctx, albums)
+
 					mu.Lock()
 					for _, alb := range albums {
 						relType := strings.ToLower(alb.RecordType)
@@ -120,9 +238,19 @@ func (a *DiscographyAggregator) Aggregate(ctx context.Context, artistName, alias
 							cover = alb.CoverMedium
 						}
 
+						primaryArt := alb.Artist.Name
+						if primaryArt == "" {
+							primaryArt = artistName
+						}
+						allArtists := ExtractAllReleaseArtists(primaryArt, alb.Contributors, alb.Title)
+						formattedArtist := strings.Join(allArtists, ", ")
+						if formattedArtist == "" {
+							formattedArtist = artistName
+						}
+
 						collected = append(collected, AggregatedRelease{
-							ArtistName:  artistName,
-							CleanArtist: CleanArtistKey(artistName),
+							ArtistName:  formattedArtist,
+							CleanArtist: CleanArtistKey(primaryArt),
 							Title:       alb.Title,
 							CleanTitle:  CleanReleaseTitle(alb.Title),
 							ReleaseType: relType,
@@ -155,8 +283,14 @@ func (a *DiscographyAggregator) Aggregate(ctx context.Context, artistName, alias
 				if err == nil {
 					mu.Lock()
 					for _, rg := range rgs {
+						allArtists := ExtractAllReleaseArtists(artistName, nil, rg.Title)
+						formattedArtist := strings.Join(allArtists, ", ")
+						if formattedArtist == "" {
+							formattedArtist = artistName
+						}
+
 						collected = append(collected, AggregatedRelease{
-							ArtistName:    artistName,
+							ArtistName:    formattedArtist,
 							CleanArtist:   CleanArtistKey(artistName),
 							Title:         rg.Title,
 							CleanTitle:    CleanReleaseTitle(rg.Title),
@@ -218,6 +352,10 @@ func (a *DiscographyAggregator) deduplicateReleases(raw []AggregatedRelease) []A
 					existing.ReleaseDate = item.ReleaseDate
 					existing.Year = item.Year
 				}
+				// Склеиваем соавторов: выбираем вариант с наибольшим числом соавторов
+				if len(item.ArtistName) > len(existing.ArtistName) || (strings.Contains(item.ArtistName, ",") && !strings.Contains(existing.ArtistName, ",")) {
+					existing.ArtistName = item.ArtistName
+				}
 				merged = true
 				break
 			}
@@ -231,57 +369,133 @@ func (a *DiscographyAggregator) deduplicateReleases(raw []AggregatedRelease) []A
 	return deduped
 }
 
-// reconcileWithLibrary проверяет наличие релизов на диске и классифицирует статусы.
+// reconcileWithLibrary проверяет наличие релизов на диске по соавторам и двум таблицам: albums и tracks.
 func (a *DiscographyAggregator) reconcileWithLibrary(ctx context.Context, artistName string, releases []AggregatedRelease) {
-	cleanArt := CleanArtistKey(artistName)
-
-	// Выбираем все локальные альбомы этого артиста из SQLite
-	query := `
-	SELECT a.title, COALESCE(a.year, 0)
-	FROM albums a
-	WHERE LOWER(a.album_artist) = ? OR a.artist_id = (SELECT id FROM artists WHERE LOWER(name) = ?);
-	`
-	rows, err := a.db.Conn().QueryContext(ctx, query, cleanArt, cleanArt)
-	if err != nil {
+	if a.db == nil || len(releases) == 0 {
 		return
 	}
-	defer rows.Close()
 
-	type localAlbum struct {
+	type localEntry struct {
 		cleanTitle string
 		rawTitle   string
+		artist     string
 		year       int
 	}
-	var localAlbums []localAlbum
-	for rows.Next() {
-		var title string
-		var year int
-		if err := rows.Scan(&title, &year); err == nil {
-			localAlbums = append(localAlbums, localAlbum{
-				cleanTitle: CleanReleaseTitle(title),
-				rawTitle:   title,
-				year:       year,
-			})
+
+	// 1. Извлекаем локальные альбомы, связанные с артистом
+	cleanArt := CleanArtistKey(artistName)
+	var localAlbums []localEntry
+
+	albumQuery := `
+	SELECT a.title, COALESCE(NULLIF(a.album_artist, ''), ar.name), COALESCE(a.year, 0)
+	FROM albums a
+	JOIN artists ar ON ar.id = a.artist_id
+	WHERE LOWER(a.album_artist) LIKE ? OR LOWER(ar.name) LIKE ?;
+	`
+	pattern := "%" + cleanArt + "%"
+	if rows, err := a.db.Conn().QueryContext(ctx, albumQuery, pattern, pattern); err == nil {
+		for rows.Next() {
+			var t, art string
+			var yr int
+			if err := rows.Scan(&t, &art, &yr); err == nil {
+				localAlbums = append(localAlbums, localEntry{
+					cleanTitle: CleanReleaseTitle(t),
+					rawTitle:   t,
+					artist:     art,
+					year:       yr,
+				})
+			}
 		}
+		rows.Close()
+	}
+
+	// 2. Извлекаем локальные треки, связанные с артистом (для обнаружения синглов и треков в сборниках)
+	var localTracks []localEntry
+	trackQuery := `
+	SELECT t.title, COALESCE(NULLIF(al.album_artist, ''), ar.name), COALESCE(al.year, 0)
+	FROM tracks t
+	JOIN artists ar ON ar.id = t.artist_id
+	JOIN albums al ON al.id = t.album_id
+	WHERE LOWER(al.album_artist) LIKE ? OR LOWER(ar.name) LIKE ?;
+	`
+	if rows, err := a.db.Conn().QueryContext(ctx, trackQuery, pattern, pattern); err == nil {
+		for rows.Next() {
+			var t, art string
+			var yr int
+			if err := rows.Scan(&t, &art, &yr); err == nil {
+				localTracks = append(localTracks, localEntry{
+					cleanTitle: CleanReleaseTitle(t),
+					rawTitle:   t,
+					artist:     art,
+					year:       yr,
+				})
+			}
+		}
+		rows.Close()
 	}
 
 	currentYear := time.Now().Year()
 
 	for i := range releases {
 		rel := &releases[i]
+		relArtists := extractArtistTokens(rel.ArtistName)
+		if len(relArtists) == 0 {
+			relArtists = []string{artistName}
+		}
 
-		// 1. Проверяем точное совпадение с локальным альбомом
 		inLibrary := false
 		versionExists := false
 
+		// 1) Сверка со списком локальных альбомов артиста
 		for _, local := range localAlbums {
-			if local.cleanTitle == rel.CleanTitle {
+			if local.cleanTitle == rel.CleanTitle && matchesAnyArtist(relArtists, local.artist) {
 				inLibrary = true
 				break
 			}
-			// Если базовая версия есть, а текущий релиз — Deluxe/Remaster
-			if strings.Contains(rel.CleanTitle, local.cleanTitle) && IsDeluxeOrRemaster(rel.Title) {
+			if strings.Contains(rel.CleanTitle, local.cleanTitle) && IsDeluxeOrRemaster(rel.Title) && matchesAnyArtist(relArtists, local.artist) {
 				versionExists = true
+			}
+		}
+
+		// 2) Сверка со списком локальных треков артиста (если в альбомах не найдено)
+		if !inLibrary && !versionExists {
+			for _, tr := range localTracks {
+				if tr.cleanTitle == rel.CleanTitle && matchesAnyArtist(relArtists, tr.artist) {
+					inLibrary = true
+					break
+				}
+			}
+		}
+
+		// 3) Дополнительный кросс-поиск в БД по точному clean_title (на случай если в локальной базе артист записан под другим соавтором)
+		if !inLibrary && !versionExists {
+			// Проверяем таблицу albums по точному clean_title
+			var albTitle, albArtist string
+			if err := a.db.Conn().QueryRowContext(ctx, `
+				SELECT a.title, COALESCE(NULLIF(a.album_artist, ''), ar.name)
+				FROM albums a
+				JOIN artists ar ON ar.id = a.artist_id
+				WHERE a.clean_title = ? LIMIT 1
+			`, rel.CleanTitle).Scan(&albTitle, &albArtist); err == nil {
+				if matchesAnyArtist(relArtists, albArtist) {
+					inLibrary = true
+				}
+			}
+
+			// Проверяем таблицу tracks по точному clean_title
+			if !inLibrary {
+				var trTitle, trArtist string
+				if err := a.db.Conn().QueryRowContext(ctx, `
+					SELECT t.title, COALESCE(NULLIF(al.album_artist, ''), ar.name)
+					FROM tracks t
+					JOIN artists ar ON ar.id = t.artist_id
+					JOIN albums al ON al.id = t.album_id
+					WHERE t.clean_title = ? LIMIT 1
+				`, rel.CleanTitle).Scan(&trTitle, &trArtist); err == nil {
+					if matchesAnyArtist(relArtists, trArtist) {
+						inLibrary = true
+					}
+				}
 			}
 		}
 

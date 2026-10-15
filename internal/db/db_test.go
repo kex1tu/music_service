@@ -746,6 +746,42 @@ func TestRadarAndRadioQueries(t *testing.T) {
 		t.Fatalf("expected 2 disco releases, got %d", len(disco))
 	}
 
+	// Проверяем что при установке статуса 'downloaded' релиз уходит из фида
+	if err := database.SetRadarReleaseStatus(ctx, disco[0].ID, "downloaded"); err != nil {
+		t.Fatalf("SetRadarReleaseStatus failed: %v", err)
+	}
+	feedAfterDl, totalAfterDl, err := database.GetRadarFeed(ctx, "all", "", 10, 0)
+	if err != nil || totalAfterDl != 0 || len(feedAfterDl) != 0 {
+		t.Fatalf("expected 0 releases in feed after downloaded, got total=%d len=%d", totalAfterDl, len(feedAfterDl))
+	}
+
+	// Тест ReconcileAllRadarReleases
+	// Вставляем артиста и альбом в albums с clean_title = 'random access memories' (соответствует rel1, который со статусом downloaded)
+	_, _ = database.Conn().ExecContext(ctx, "INSERT OR IGNORE INTO artists (id, name, clean_name) VALUES (1, 'Daft Punk', 'daft punk');")
+	_, err = database.Conn().ExecContext(ctx, "INSERT INTO albums (title, clean_title, album_artist, artist_id, folder_path) VALUES ('Random Access Memories', 'random access memories', 'Daft Punk', 1, 'path');")
+	if err != nil {
+		t.Fatalf("failed to insert album for reconcile test: %v", err)
+	}
+	fixedCount, err := database.ReconcileAllRadarReleases(ctx)
+	if err != nil {
+		t.Fatalf("ReconcileAllRadarReleases failed: %v", err)
+	}
+	if fixedCount != 1 {
+		t.Fatalf("expected 1 release reconciled, got %d", fixedCount)
+	}
+
+	// Добавляем свежий непрочитанный релиз для последующей проверки в ResetLibraryTables
+	_ = database.UpsertRadarRelease(ctx, &RadarReleaseEntity{
+		ArtistName:  "Daft Punk",
+		Title:       "Fresh Track 2026",
+		ReleaseType: "single",
+		ReleaseDate: "2026-01-01",
+		Year:        2026,
+		SourceURL:   "https://example.com/fresh",
+		Status:      "new",
+		IsRadar:     true,
+	})
+
 	// 3. Тест Artist Relations
 	sims := []ArtistRelationItem{
 		{ArtistName: "Daft Punk", RelatedName: "Justice", Score: 0.95, Source: "deezer"},
@@ -765,9 +801,9 @@ func TestRadarAndRadioQueries(t *testing.T) {
 	// 4. Тест Radio History
 	// Создаем тестовый трек для foreign key
 	_, err = database.conn.ExecContext(ctx, `
-		INSERT INTO artists (id, name, clean_name) VALUES (1, 'Daft Punk', 'daft punk');
-		INSERT INTO albums (id, title, clean_title, artist_id, folder_path) VALUES (1, 'RAM', 'ram', 1, 'RAM');
-		INSERT INTO tracks (id, album_id, artist_id, title, clean_title, file_path, duration, bitrate, file_size, mtime, file_hash)
+		INSERT OR IGNORE INTO artists (id, name, clean_name) VALUES (1, 'Daft Punk', 'daft punk');
+		INSERT OR IGNORE INTO albums (id, title, clean_title, artist_id, folder_path) VALUES (1, 'RAM', 'ram', 1, 'RAM');
+		INSERT OR IGNORE INTO tracks (id, album_id, artist_id, title, clean_title, file_path, duration, bitrate, file_size, mtime, file_hash)
 		VALUES (500, 1, 1, 'Get Lucky', 'get lucky', 'Daft Punk/RAM/01. Get Lucky.mp3', 248, 320, 10000000, CURRENT_TIMESTAMP, 'hash500');
 	`)
 	if err != nil {

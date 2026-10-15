@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 72 блока задач полностью реализованы и протестированы).
+- **Статус готовности:** **100% DONE** (Все 73 блока задач полностью реализованы и протестированы).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 13 пакетов зеленые).
@@ -695,6 +695,31 @@
     - **72.3. Прямое принятие скачанного релиза в 1 клик (1-Click Accept):**
       - В `web/static/js/downloader/polling.js` и `queue_manager.js` реализован метод `acceptJobDirectly(jobId)`, считывающий треки из задачи и отправляющий их на перенос в медиатеку в один клик.
       - В шаблоны `downloader_active.html`, `downloader_queue.html` и `queue_drawer.html` добавлены прямые кнопки «Принять в медиатеку» цвета emerald для задач в статусе `READY`, позволяя мгновенно переносить скачанные релизы без захода в редактор тегов.
+
+  - **Блок 73 (Multi-Artist Radar Reconciliation, Deezer Contributors Enrichment & Radar Feed Zero-State Deduplication):**
+    - **73.1. Обогащение альбомов соавторами из Deezer API (`contributors`):**
+      - В `internal/services/resolver/client_deezer.go` расширена структура `DeezerAlbum` полями `Contributors` и `Artists`.
+      - Реализован метод `EnrichAlbumsContributors(ctx, albums []*DeezerAlbum)`, пакетно запрашивающий `/album/{id}` через семафорный worker pool (`sem := make(chan struct{}, 6)`) с индивидуальными таймаутами 3 сек. и graceful fallback на базовое имя артиста при сетевых сбоях.
+    - **73.2. Токенизация мульти-артистов и двухуровневая сверка с медиатекой (`albums` + `tracks`):**
+      - В `internal/services/resolver/discography_aggregator.go` реализованы функции `ExtractAllReleaseArtists`, `extractArtistTokens` (разбиение по `,`, `&`, `feat.`, `ft.`, `vs.`, `with`, `\x00`, `\\`, `/`) и `matchesAnyArtist`.
+      - Метод `Aggregate` обогащает найденные релизы всеми официальными контрибьюторами Deezer и формирует объединенную строку исполнителей через запятую (`«Артист 1, Артист 2»`).
+      - Функция дедупликации `deduplicateReleases` объединяет альтернативные имена артистов и сохраняет наиболее полный список соавторов при обнаружении релиза по нескольким артистам.
+      - Функция `reconcileWithLibrary` переработана на двухуровневую сверку:
+        1. Сверка по таблице `albums`: поиск по очищенному названию (`clean_title` / `title`) с последующей валидацией пересечения токенов артистов между релизом и локальным `album_artist`.
+        2. Сверка по таблице `tracks`: для синглов и треков из сборников выполняется поиск дорожек по названию трека с валидацией соавторов в `track_artist`.
+        - Если релиз найден на диске, ему присваивается `InLibrary = true`.
+    - **73.3. Дедупликация и строгая инбокс-фильтрация ленты Радара в SQLite:**
+      - В `internal/db/radar_radio_queries.go` обновлен метод `UpsertRadarRelease`: при совпадении `deezer_id` записи объединяются с сохранением объединенных имен артистов, а при статусе `status != 'new'` флаг `is_radar` принудительно сбрасывается в `0`.
+      - Метод `GetRadarFeed` переведен на строгую инбокс-логику: возвращаются только `rr.is_radar = 1 AND rr.status = 'new'`, исключая ранее скачанные или находящиеся в медиатеке релизы. Добавлена группировка `GROUP BY COALESCE(NULLIF(rr.deezer_id, ''), rr.clean_title)` для предотвращения дублирования карточек совместных релизов.
+      - Метод `GetArtistDiscography` адаптирован под поиск по первичному артисту и подстрокам с дедупликацией по Deezer ID / названию.
+      - Реализован метод `ReconcileAllRadarReleases(ctx)`: фоновая реконсиляция всех записей в таблице `radar_releases` со статусом `!= 'in_library'`, сверяющая их с `albums` и `tracks` и переводящая совпадения в `status = 'in_library', is_radar = 0`.
+      - Метод `SetRadarReleaseStatus` при любом статусе `!= 'new'` гарантированно сбрасывает `is_radar = 0`.
+    - **73.4. Автоматическая фоновая реконсиляция и синхронизация статусов:**
+      - В `internal/services/radar/service.go` фоновая реконсиляция `ReconcileAllRadarReleases` вызывается в фоновой горутине при старте сервиса `Start()`, а также автоматически после каждого общего сканирования `ScanAll()`.
+      - При автозагрузке релиза в `ScanArtist` статус сразу помечается как `downloaded` с `is_radar = 0`.
+    - **73.5. Реактивность фронтенда и парсинг первичного артиста:**
+      - В `web/static/js/radar/radar.js` в `setReleaseStatus` карточка мгновенно удаляется из `feedItems` и уменьшается счетчик `feedTotal`.
+      - В `openDiscography` добавлено извлечение первичного артиста (`release.artist_name.split(/[,&]/)[0].trim()`) для надежной загрузки дискографии из каталога.
 
 ---
 

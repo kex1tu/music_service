@@ -248,6 +248,10 @@ document.addEventListener('alpine:init', () => {
                     if (status === 'ignored') {
                         Alpine.store('app').showToast(`Релиз скрыт: ${release.title}`, 'info');
                     }
+                    if (status === 'ignored' || status === 'downloaded') {
+                        this.feedItems = this.feedItems.filter(item => item.id !== release.id);
+                        this.feedTotal = Math.max(0, this.feedTotal - 1);
+                    }
                     this.fetchUnreadCount();
                 }
             } catch (err) {
@@ -282,13 +286,14 @@ document.addEventListener('alpine:init', () => {
         },
 
         async openDiscography(artistName) {
-            this.selectedArtist = artistName;
+            const targetArtist = artistName ? artistName.split(',')[0].trim() : artistName;
+            this.selectedArtist = targetArtist;
             this.isDiscographyModalOpen = true;
             this.isDiscographyLoading = true;
             this.discographyReleases = [];
 
             try {
-                const res = await fetch(`/api/radar/artists/${encodeURIComponent(artistName)}/discography`);
+                const res = await fetch(`/api/radar/artists/${encodeURIComponent(targetArtist)}/discography`);
                 if (res.ok) {
                     const data = await res.json();
                     this.discographyReleases = data.releases || [];

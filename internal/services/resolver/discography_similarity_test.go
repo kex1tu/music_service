@@ -262,3 +262,111 @@ func TestSimilarityEngine(t *testing.T) {
 		t.Fatalf("unexpected cached related artists: %+v", cached)
 	}
 }
+
+func TestReconcileWithLibrary_MultiArtistAndTracks(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "reconcile_multi_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer database.Close()
+
+	ctx := context.Background()
+
+	// 1. Создаем альбом с несколькими артистами (Big Baby Tape\\Kizaru)
+	// В БД album_artist записан как Big Baby Tape, а artist_id = Big Baby Tape
+	_, err = database.Conn().ExecContext(ctx, `
+		INSERT INTO artists (id, name, clean_name) VALUES (1, 'Big Baby Tape', 'big baby tape');
+		INSERT INTO artists (id, name, clean_name) VALUES (2, 'Aarne', 'aarne');
+		INSERT INTO albums (id, title, clean_title, album_artist, artist_id, year, folder_path)
+		VALUES (1, 'Bandana I', 'bandana i', 'Big Baby Tape\\Kizaru', 1, 2021, 'Bandana I');
+		
+		-- Сингл в сборнике "Singles" от Aarne
+		INSERT INTO albums (id, title, clean_title, album_artist, artist_id, year, folder_path)
+		VALUES (2, 'Singles', 'singles', 'Aarne', 2, 2024, 'Singles');
+		
+		-- Дорожка сингла "Вместе" в таблице tracks
+		INSERT INTO tracks (id, album_id, artist_id, title, clean_title, file_path, file_size, mtime)
+		VALUES (1, 2, 2, 'Вместе', 'вместе', 'Aarne/Singles/01. Вместе.mp3', 1000, 1.0);
+	`)
+	if err != nil {
+		t.Fatalf("failed to setup test database: %v", err)
+	}
+
+	agg := NewDiscographyAggregator(nil, nil, nil, database)
+
+	releases := []AggregatedRelease{
+		// Релиз 1: Bandana I, сканируется под Kizaru (хотя в БД artist_id = Big Baby Tape)
+		{
+			ArtistName:  "Kizaru, Big Baby Tape",
+			CleanArtist: "kizaru",
+			Title:       "Bandana I",
+			CleanTitle:  CleanReleaseTitle("Bandana I"),
+			Year:        2021,
+			DeezerID:    "1111",
+		},
+		// Релиз 2: Сингл "Вместе" (Aarne, Big Baby Tape), проверяется для Big Baby Tape
+		// В albums альбом называется "Singles", но в tracks есть дорожка "Вместе"
+		{
+			ArtistName:  "Big Baby Tape, Aarne",
+			CleanArtist: "big baby tape",
+			Title:       "Вместе",
+			CleanTitle:  CleanReleaseTitle("Вместе"),
+			Year:        2024,
+			DeezerID:    "2222",
+		},
+		// Релиз 3: Совершенно новый релиз от Kizaru (нет в библиотеке)
+		{
+			ArtistName:  "Kizaru",
+			CleanArtist: "kizaru",
+			Title:       "Brand New 2026",
+			CleanTitle:  CleanReleaseTitle("Brand New 2026"),
+			Year:        2026,
+			DeezerID:    "3333",
+		},
+	}
+
+	agg.reconcileWithLibrary(ctx, "Kizaru", releases)
+
+	for _, r := range releases {
+		switch r.Title {
+		case "Bandana I":
+			if r.Status != "in_library" || r.IsRadar {
+				t.Errorf("Bandana I: expected in_library and !is_radar, got status=%s, is_radar=%v", r.Status, r.IsRadar)
+			}
+		case "Вместе":
+			if r.Status != "in_library" || r.IsRadar {
+				t.Errorf("Вместе (single in tracks): expected in_library and !is_radar, got status=%s, is_radar=%v", r.Status, r.IsRadar)
+			}
+		case "Brand New 2026":
+			if r.Status != "new" || !r.IsRadar {
+				t.Errorf("Brand New 2026: expected new and is_radar=true, got status=%s, is_radar=%v", r.Status, r.IsRadar)
+			}
+		}
+	}
+}
+
+func TestExtractAllReleaseArtists(t *testing.T) {
+	contributors := []DeezerArtist{
+		{Name: "21 Savage"},
+		{Name: "Drake"},
+	}
+	artists := ExtractAllReleaseArtists("Drake", contributors, "Her Loss (feat. Travis Scott)")
+	want := []string{"Drake", "21 Savage", "Travis Scott"}
+
+	if len(artists) != len(want) {
+		t.Fatalf("expected %d artists, got %d: %v", len(want), len(artists), artists)
+	}
+	for i, w := range want {
+		if artists[i] != w {
+			t.Errorf("artist[%d]: got %q, want %q", i, artists[i], w)
+		}
+	}
+}
+
