@@ -12,6 +12,7 @@ document.addEventListener('alpine:init', () => {
         feedSearch: '',
         unreadCount: 0,
         isLoading: false,
+        isLoadingMore: false,
 
         artists: [],
         artistsTotal: 0,
@@ -44,6 +45,7 @@ document.addEventListener('alpine:init', () => {
         init() {
             this.fetchUnreadCount();
             this.fetchFeed(1);
+            this.fetchArtists();
             this.pollProgress();
         },
 
@@ -81,6 +83,47 @@ document.addEventListener('alpine:init', () => {
             } finally {
                 this.isLoading = false;
             }
+        },
+
+        async loadMoreFeed() {
+            if (this.isLoadingMore || this.isLoading || this.feedItems.length >= this.feedTotal) {
+                return;
+            }
+            this.isLoadingMore = true;
+            const nextPage = this.feedPage + 1;
+            try {
+                const params = new URLSearchParams({
+                    page: nextPage,
+                    limit: this.feedLimit,
+                    type: this.feedType,
+                    search: this.feedSearch.trim()
+                });
+                const res = await fetch(`/api/radar/feed?${params.toString()}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const newItems = data.items || [];
+                    this.feedItems.push(...newItems);
+                    this.feedPage = nextPage;
+                    this.feedTotal = data.total || 0;
+                    this.unreadCount = data.unread || 0;
+                }
+            } catch (err) {
+                console.error('[Radar] Error loading more feed items:', err);
+            } finally {
+                this.isLoadingMore = false;
+            }
+        },
+
+        changeFeedLimit(newLimit) {
+            this.feedLimit = newLimit;
+            this.fetchFeed(1);
+        },
+
+        goToFeedPage(page) {
+            if (page < 1 || (page > Math.ceil(this.feedTotal / this.feedLimit) && this.feedTotal > 0)) {
+                return;
+            }
+            this.fetchFeed(page);
         },
 
         async fetchArtists() {

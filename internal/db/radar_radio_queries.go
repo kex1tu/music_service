@@ -21,6 +21,7 @@ type TrackedArtistEntity struct {
 	YandexID          string     `json:"yandex_id,omitempty"`
 	LastCheckedAt     *time.Time `json:"last_checked_at,omitempty"`
 	AlbumCount        int        `json:"album_count"`
+	TrackCount        int        `json:"track_count"`
 	GapCount          int        `json:"gap_count"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
@@ -97,10 +98,29 @@ func (db *DB) GetTrackedArtists(ctx context.Context, onlyFollowed bool) ([]Track
 		COALESCE(ta.musicbrainz_id, ''),
 		COALESCE(ta.yandex_id, ''),
 		ta.last_checked_at,
-		COALESCE((SELECT COUNT(DISTINCT a.id) FROM albums a WHERE LOWER(a.album_artist) = ta.clean_name OR LOWER(a.artist_id) = (SELECT id FROM artists WHERE LOWER(name) = ta.clean_name)), 0) as album_count,
-		COALESCE((SELECT COUNT(*) FROM radar_releases rr WHERE rr.clean_artist_name = ta.clean_name AND rr.status = 'missing'), 0) as gap_count,
+		COALESCE(al_cnt.cnt, 0) as album_count,
+		COALESCE(tr_cnt.cnt, 0) as track_count,
+		COALESCE(gap_cnt.cnt, 0) as gap_count,
 		ta.created_at, ta.updated_at
 	FROM tracked_artists ta
+	LEFT JOIN (
+		SELECT ar.clean_name, COUNT(DISTINCT a.id) as cnt
+		FROM artists ar
+		JOIN albums a ON (a.artist_id = ar.id OR a.id IN (SELECT album_id FROM tracks WHERE artist_id = ar.id))
+		GROUP BY ar.clean_name
+	) al_cnt ON al_cnt.clean_name = ta.clean_name
+	LEFT JOIN (
+		SELECT ar.clean_name, COUNT(t.id) as cnt
+		FROM artists ar
+		JOIN tracks t ON t.artist_id = ar.id
+		GROUP BY ar.clean_name
+	) tr_cnt ON tr_cnt.clean_name = ta.clean_name
+	LEFT JOIN (
+		SELECT clean_artist_name, COUNT(*) as cnt
+		FROM radar_releases
+		WHERE status = 'missing'
+		GROUP BY clean_artist_name
+	) gap_cnt ON gap_cnt.clean_artist_name = ta.clean_name
 	%s
 	ORDER BY ta.name COLLATE NOCASE ASC;
 	`, whereClause)
@@ -120,7 +140,7 @@ func (db *DB) GetTrackedArtists(ctx context.Context, onlyFollowed bool) ([]Track
 		err := rows.Scan(
 			&a.ID, &a.Name, &a.CleanName, &isFollowedInt, &autoDownloadInt,
 			&a.CustomSearchAlias, &a.DeezerID, &a.MusicBrainzID, &a.YandexID,
-			&lastChecked, &a.AlbumCount, &a.GapCount, &a.CreatedAt, &a.UpdatedAt,
+			&lastChecked, &a.AlbumCount, &a.TrackCount, &a.GapCount, &a.CreatedAt, &a.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -146,10 +166,29 @@ func (db *DB) GetTrackedArtistByName(ctx context.Context, name string) (*Tracked
 		COALESCE(ta.musicbrainz_id, ''),
 		COALESCE(ta.yandex_id, ''),
 		ta.last_checked_at,
-		COALESCE((SELECT COUNT(DISTINCT a.id) FROM albums a WHERE LOWER(a.album_artist) = ta.clean_name), 0) as album_count,
-		COALESCE((SELECT COUNT(*) FROM radar_releases rr WHERE rr.clean_artist_name = ta.clean_name AND rr.status = 'missing'), 0) as gap_count,
+		COALESCE(al_cnt.cnt, 0) as album_count,
+		COALESCE(tr_cnt.cnt, 0) as track_count,
+		COALESCE(gap_cnt.cnt, 0) as gap_count,
 		ta.created_at, ta.updated_at
 	FROM tracked_artists ta
+	LEFT JOIN (
+		SELECT ar.clean_name, COUNT(DISTINCT a.id) as cnt
+		FROM artists ar
+		JOIN albums a ON (a.artist_id = ar.id OR a.id IN (SELECT album_id FROM tracks WHERE artist_id = ar.id))
+		GROUP BY ar.clean_name
+	) al_cnt ON al_cnt.clean_name = ta.clean_name
+	LEFT JOIN (
+		SELECT ar.clean_name, COUNT(t.id) as cnt
+		FROM artists ar
+		JOIN tracks t ON t.artist_id = ar.id
+		GROUP BY ar.clean_name
+	) tr_cnt ON tr_cnt.clean_name = ta.clean_name
+	LEFT JOIN (
+		SELECT clean_artist_name, COUNT(*) as cnt
+		FROM radar_releases
+		WHERE status = 'missing'
+		GROUP BY clean_artist_name
+	) gap_cnt ON gap_cnt.clean_artist_name = ta.clean_name
 	WHERE ta.clean_name = ?
 	LIMIT 1;
 	`
@@ -160,7 +199,7 @@ func (db *DB) GetTrackedArtistByName(ctx context.Context, name string) (*Tracked
 	err := db.conn.QueryRowContext(ctx, query, cleanName).Scan(
 		&a.ID, &a.Name, &a.CleanName, &isFollowedInt, &autoDownloadInt,
 		&a.CustomSearchAlias, &a.DeezerID, &a.MusicBrainzID, &a.YandexID,
-		&lastChecked, &a.AlbumCount, &a.GapCount, &a.CreatedAt, &a.UpdatedAt,
+		&lastChecked, &a.AlbumCount, &a.TrackCount, &a.GapCount, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -406,12 +445,13 @@ func (db *DB) GetArtistDiscography(ctx context.Context, artistName string) ([]Ra
 		COALESCE(rr.shazam_id, ''), rr.source_url, rr.status, rr.is_radar,
 		rr.created_at, rr.updated_at
 	FROM radar_releases rr
-	WHERE rr.clean_artist_name = ? OR LOWER(rr.artist_name) LIKE ?
+	WHERE rr.clean_artist_name = ? OR rr.clean_artist_name LIKE ? OR rr.artist_name LIKE ?
 	GROUP BY COALESCE(NULLIF(rr.deezer_id, ''), rr.clean_title)
 	ORDER BY rr.year DESC, rr.release_date DESC;
 	`
 	pattern := "%" + cleanName + "%"
-	rows, err := db.conn.QueryContext(ctx, query, cleanName, pattern)
+	rawPattern := "%" + artistName + "%"
+	rows, err := db.conn.QueryContext(ctx, query, cleanName, pattern, rawPattern)
 	if err != nil {
 		return nil, err
 	}
@@ -450,57 +490,216 @@ func (db *DB) SetRadarReleaseStatus(ctx context.Context, releaseID int64, status
 
 // ReconcileAllRadarReleases проверяет все релизы со статусом 'new' или 'downloaded' и при наличии в медиатеке переводит в in_library.
 func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
-	rows, err := db.conn.QueryContext(ctx, `
-		SELECT id, clean_title
+	// 1. Быстро загружаем карту альбомов медиатеки
+	albumRows, err := db.conn.QueryContext(ctx, `
+		SELECT a.clean_title, COALESCE(a.album_artist, ''), COALESCE(ar.name, ''), COALESCE(ar.clean_name, ''), a.folder_path
+		FROM albums a
+		JOIN artists ar ON a.artist_id = ar.id;
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer albumRows.Close()
+
+	type localAlb struct {
+		cleanTitle  string
+		albumArtist string
+		artistName  string
+		artistClean string
+		folderPath  string
+	}
+	albumMap := make(map[string][]localAlb)
+	for albumRows.Next() {
+		var alb localAlb
+		if err := albumRows.Scan(&alb.cleanTitle, &alb.albumArtist, &alb.artistName, &alb.artistClean, &alb.folderPath); err == nil {
+			albumMap[alb.cleanTitle] = append(albumMap[alb.cleanTitle], alb)
+		}
+	}
+	albumRows.Close()
+
+	// 2. Быстро загружаем набор заголовков треков
+	trackRows, err := db.conn.QueryContext(ctx, `SELECT clean_title FROM tracks;`)
+	if err != nil {
+		return 0, err
+	}
+	defer trackRows.Close()
+
+	trackSet := make(map[string]struct{})
+	for trackRows.Next() {
+		var ct string
+		if err := trackRows.Scan(&ct); err == nil {
+			trackSet[ct] = struct{}{}
+		}
+	}
+	trackRows.Close()
+
+	// 3. Выгружаем релизы для проверки
+	radarRows, err := db.conn.QueryContext(ctx, `
+		SELECT id, clean_title, artist_name, clean_artist_name
 		FROM radar_releases
 		WHERE is_radar = 1 OR status IN ('new', 'downloaded');
 	`)
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
+	defer radarRows.Close()
 
-	type releaseRef struct {
-		id         int64
-		cleanTitle string
-	}
-	var toCheck []releaseRef
-	for rows.Next() {
-		var ref releaseRef
-		if err := rows.Scan(&ref.id, &ref.cleanTitle); err == nil {
-			toCheck = append(toCheck, ref)
+	var matchedIDs []int64
+	for radarRows.Next() {
+		var id int64
+		var cleanTitle, artistName, cleanArtistName string
+		if err := radarRows.Scan(&id, &cleanTitle, &artistName, &cleanArtistName); err != nil {
+			continue
 		}
-	}
-	rows.Close()
 
-	if len(toCheck) == 0 {
-		return 0, nil
-	}
-
-	updatedCount := 0
-	for _, ref := range toCheck {
 		inLibrary := false
 
-		// 1. Проверяем наличие в альбомах
-		var dummy int
-		if err := db.conn.QueryRowContext(ctx, "SELECT 1 FROM albums WHERE clean_title = ? OR ? LIKE '%' || clean_title || '%' LIMIT 1", ref.cleanTitle, ref.cleanTitle).Scan(&dummy); err == nil {
-			inLibrary = true
+		// 3.1. Сверка по альбомам с учетом мульти-артистов и папок
+		matchedAlb := false
+		tokens := extractArtistTokens(artistName)
+		if len(tokens) == 0 {
+			tokens = []string{cleanArtistName}
 		}
 
-		// 2. Проверяем наличие в треках
+		if candidates, ok := albumMap[cleanTitle]; ok {
+			for _, c := range candidates {
+				if matchesAnyArtist(tokens, c.artistName) ||
+					matchesAnyArtist(tokens, c.albumArtist) ||
+					matchesAnyArtist(tokens, c.artistClean) ||
+					containsAnyToken(c.folderPath, tokens) {
+					inLibrary = true
+					matchedAlb = true
+					break
+				}
+			}
+		}
+
+		if !matchedAlb {
+			for albClean, candidates := range albumMap {
+				if (len(albClean) >= 4 && strings.Contains(cleanTitle, albClean)) ||
+					(len(cleanTitle) >= 4 && strings.Contains(albClean, cleanTitle)) {
+					for _, c := range candidates {
+						if matchesAnyArtist(tokens, c.artistName) ||
+							matchesAnyArtist(tokens, c.albumArtist) ||
+							matchesAnyArtist(tokens, c.artistClean) ||
+							containsAnyToken(c.folderPath, tokens) {
+							inLibrary = true
+							matchedAlb = true
+							break
+						}
+					}
+					if matchedAlb {
+						break
+					}
+				}
+			}
+		}
+
+		// 3.2. Сверка по трекам (для синглов)
 		if !inLibrary {
-			if err := db.conn.QueryRowContext(ctx, "SELECT 1 FROM tracks WHERE clean_title = ? OR ? LIKE '%' || clean_title || '%' LIMIT 1", ref.cleanTitle, ref.cleanTitle).Scan(&dummy); err == nil {
+			if _, ok := trackSet[cleanTitle]; ok {
 				inLibrary = true
 			}
 		}
 
 		if inLibrary {
-			_, _ = db.conn.ExecContext(ctx, "UPDATE radar_releases SET status = 'in_library', is_radar = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", ref.id)
-			updatedCount++
+			matchedIDs = append(matchedIDs, id)
+		}
+	}
+	radarRows.Close()
+
+	if len(matchedIDs) == 0 {
+		return 0, nil
+	}
+
+	// 4. Пакетное обновление в транзакции чанками по 500
+	tx, err := db.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	batchSize := 500
+	for i := 0; i < len(matchedIDs); i += batchSize {
+		end := i + batchSize
+		if end > len(matchedIDs) {
+			end = len(matchedIDs)
+		}
+		chunk := matchedIDs[i:end]
+
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk))
+		for j, id := range chunk {
+			placeholders[j] = "?"
+			args[j] = id
+		}
+		query := fmt.Sprintf("UPDATE radar_releases SET status = 'in_library', is_radar = 0, updated_at = CURRENT_TIMESTAMP WHERE id IN (%s)", strings.Join(placeholders, ","))
+		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+			return 0, err
 		}
 	}
 
-	return updatedCount, nil
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return len(matchedIDs), nil
+}
+
+func extractArtistTokens(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	replacer := strings.NewReplacer(
+		",", "|",
+		"&", "|",
+		"feat.", "|",
+		"feat", "|",
+		"ft.", "|",
+		"ft", "|",
+		"vs.", "|",
+		"vs", "|",
+		"with", "|",
+		"\\", "|",
+		"/", "|",
+		";", "|",
+		"\x00", "|",
+	)
+	normalized := replacer.Replace(raw)
+	parts := strings.Split(normalized, "|")
+	var tokens []string
+	seen := make(map[string]bool)
+	for _, p := range parts {
+		cleaned := CleanArtistKey(p)
+		if cleaned != "" && !seen[cleaned] {
+			seen[cleaned] = true
+			tokens = append(tokens, cleaned)
+		}
+	}
+	return tokens
+}
+
+func containsAnyToken(str string, tokens []string) bool {
+	lower := strings.ToLower(str)
+	for _, t := range tokens {
+		if t != "" && strings.Contains(lower, t) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesAnyArtist(tokens []string, target string) bool {
+	cleanedTarget := CleanArtistKey(target)
+	if cleanedTarget == "" {
+		return false
+	}
+	for _, t := range tokens {
+		if t == cleanedTarget || strings.Contains(cleanedTarget, t) || strings.Contains(t, cleanedTarget) {
+			return true
+		}
+	}
+	return false
 }
 
 // GetRadarUnreadCount возвращает количество нескачанных и нескрытых новинок Радара.

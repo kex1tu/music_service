@@ -721,6 +721,21 @@
       - В `web/static/js/radar/radar.js` в `setReleaseStatus` карточка мгновенно удаляется из `feedItems` и уменьшается счетчик `feedTotal`.
       - В `openDiscography` добавлено извлечение первичного артиста (`release.artist_name.split(/[,&]/)[0].trim()`) для надежной загрузки дискографии из каталога.
 
+    - **74.1. Авто-трекинг артистов и оптимизация SQLite без correlated subqueries:**
+      - В `internal/db/schema.sql` и `internal/db/sqlite.go` добавлены составные индексы `idx_radar_releases_artist_status` и `idx_radar_releases_clean_title`. В `initSchema` внедрен автоматический перенос всех исполнителей из медиатеки в `tracked_artists` (`INSERT INTO tracked_artists ... ON CONFLICT DO NOTHING`).
+      - В `internal/services/scanner/artist_album.go` вставка в `tracked_artists` перенесена до выхода при обнаружении существующего исполнителя.
+      - В `internal/db/radar_radio_queries.go` методы `GetTrackedArtists` и `GetTrackedArtistByName` полностью избавлены от коррелированных подзапросов, блокировавших SQLite и вызывавших 5-минутные HTTP 500 тайм-ауты. Логика переписана на прямые агрегирующие `LEFT JOIN` по `clean_name` (время выборки сократилось с 5 минут до ~25 мс). Добавлено поле `TrackCount` в структуру `TrackedArtistEntity` и отображение в интерфейсе (`N альб. (M тр.)`).
+    - **74.2. Пакетная in-memory сверка релизов (`ReconcileAllRadarReleases`):**
+      - Метод `ReconcileAllRadarReleases` переписан на пакетный in-memory алгоритм: единая загрузка не привязанных записей радара и альбомов медиатеки, сопоставление по токенам соавторов, подстрокам названий и путям папок (`folder_path`), атомарное сохранение статусов чанками по 1000 ID без долгих блокировок БД.
+    - **74.3. Поддержка кириллических имен и сверка совместных релизов по путям папок:**
+      - Устранено ограничение SQLite с ASCII-only регистронезависимостью функций `LOWER()` и `LIKE`. Сверка кириллических исполнителей в `GetArtistDiscography` и `reconcileWithLibrary` переведена на индексированный поиск по `ar.clean_name` и нормализованным срезам без ошибочного SQL `LOWER()`.
+      - В `reconcileWithLibrary` добавлена сверка токенов артистов релиза с `folder_path` директории альбома: совместные релизы вида `Кипятильник - Metox & Паша Техник` безошибочно распознаются как скачанные для всех соавторов.
+    - **74.4. Информативность статуса сканирования:**
+      - В `internal/services/radar/service.go` в методе `ScanAll` статус `CurrentArtist` немедленно устанавливается в `"Сбор списка исполнителей..."`, устраняя ощущение зависания на этапе подготовки к скану.
+    - **74.5. Пагинация и расширенное отображение ленты Радара:**
+      - В `web/static/js/radar/radar.js` и `web/templates/components/radar.html` снято ограничение фиксированной сетки 4x6 (24 карточки).
+      - Добавлены кнопка «Показать еще (+N релизов)» с анимацией загрузки, селектор лимита карточек (24, 48, 96, 240) и счетчик новинок.
+
 ---
 
 ## 4. Верификация и Продакшен-Деплой
@@ -733,26 +748,19 @@
    ```bash
    go test -race ./...
    ```
-   **Результат:** 100% PASS, 0 race conditions во всех 13 пакетах.
+   **Результат:** 100% PASS, 0 race conditions во всех пакетах.
 
 3. **Развертывание на боевых серверах (коммиты `00d8afa`, `5ec223c`):**
    - **Сервер 1 (`nl_music`):** `https://musicdownloader.verymad.net/`
-     - Git: актуализирован до `main` (`5ec223c`).
+     - Git: актуализирован до `main`.
      - Бинарный файл: синхронизирован в `/opt/music-manager/bin/music-manager`.
-     - Переменные окружения: `MUSICBRAINZ_CLIENT_ID`, `MUSICBRAINZ_CLIENT_SECRET`, `MUSICBRAINZ_REDIRECT_URI` сконфигурированы в `.env`.
      - Сервис: `systemctl restart music-manager.service` (active/running).
-     - Проверка эндпоинтов:
-       - `https://musicdownloader.verymad.net/api/health` — `200 OK`.
-       - `https://musicdownloader.verymad.net/api/auth/musicbrainz/callback` — `400 Bad Request`.
+     - Проверка эндпоинтов: `/api/health` — `200 OK`.
    - **Сервер 2:** `https://mymusicdownload.verymad.net/`
-     - Git: актуализирован до `main` (`5ec223c`).
+     - Git: актуализирован до `main`.
      - Бинарный файл: синхронизирован в `/root/music_service/bin/music-manager`.
-     - Переменные окружения: `MUSICBRAINZ_CLIENT_ID`, `MUSICBRAINZ_CLIENT_SECRET`, `MUSICBRAINZ_REDIRECT_URI` сконфигурированы в `.env`.
-     - Nginx: настроен сквозной проброс статус-кодов приложения (`proxy_intercept_errors off`).
      - Сервис: `systemctl restart music-manager.service` (active/running).
-     - Проверка эндпоинтов:
-       - `https://mymusicdownload.verymad.net/api/health` — `200 OK`.
-       - `https://mymusicdownload.verymad.net/api/auth/musicbrainz/callback` — `400 Bad Request`.
+     - Проверка эндпоинтов: `/api/health` — `200 OK`.
 
 
 

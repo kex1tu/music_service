@@ -376,58 +376,101 @@ func (a *DiscographyAggregator) reconcileWithLibrary(ctx context.Context, artist
 	}
 
 	type localEntry struct {
-		cleanTitle string
-		rawTitle   string
-		artist     string
-		year       int
+		cleanTitle  string
+		rawTitle    string
+		artist      string
+		albumArtist string
+		folderPath  string
+		year        int
 	}
 
-	// 1. Извлекаем локальные альбомы, связанные с артистом
 	cleanArt := CleanArtistKey(artistName)
-	var localAlbums []localEntry
+	cleanTitles := make([]string, 0, len(releases))
+	titleSet := make(map[string]bool)
+	for _, rel := range releases {
+		if rel.CleanTitle != "" && !titleSet[rel.CleanTitle] {
+			titleSet[rel.CleanTitle] = true
+			cleanTitles = append(cleanTitles, rel.CleanTitle)
+		}
+	}
 
-	albumQuery := `
-	SELECT a.title, COALESCE(NULLIF(a.album_artist, ''), ar.name), COALESCE(a.year, 0)
+	// 1. Извлекаем локальные альбомы, связанные с артистом или названиями релизов
+	var localAlbums []localEntry
+	albumArgs := []any{cleanArt, "%" + artistName + "%"}
+	albumPlaceholders := make([]string, len(cleanTitles))
+	for i, ct := range cleanTitles {
+		albumPlaceholders[i] = "?"
+		albumArgs = append(albumArgs, ct)
+	}
+
+	inClause := "1=0"
+	if len(albumPlaceholders) > 0 {
+		inClause = fmt.Sprintf("a.clean_title IN (%s)", strings.Join(albumPlaceholders, ","))
+	}
+
+	albumQuery := fmt.Sprintf(`
+	SELECT a.title, a.clean_title, COALESCE(NULLIF(a.album_artist, ''), ar.name), ar.name, a.folder_path, COALESCE(a.year, 0)
 	FROM albums a
 	JOIN artists ar ON ar.id = a.artist_id
-	WHERE LOWER(a.album_artist) LIKE ? OR LOWER(ar.name) LIKE ?;
-	`
-	pattern := "%" + cleanArt + "%"
-	if rows, err := a.db.Conn().QueryContext(ctx, albumQuery, pattern, pattern); err == nil {
+	WHERE ar.clean_name = ? 
+	   OR a.folder_path LIKE ?
+	   OR %s;
+	`, inClause)
+
+	if rows, err := a.db.Conn().QueryContext(ctx, albumQuery, albumArgs...); err == nil {
 		for rows.Next() {
-			var t, art string
+			var t, ct, albArt, art, fp string
 			var yr int
-			if err := rows.Scan(&t, &art, &yr); err == nil {
+			if err := rows.Scan(&t, &ct, &albArt, &art, &fp, &yr); err == nil {
 				localAlbums = append(localAlbums, localEntry{
-					cleanTitle: CleanReleaseTitle(t),
-					rawTitle:   t,
-					artist:     art,
-					year:       yr,
+					cleanTitle:  ct,
+					rawTitle:    t,
+					albumArtist: albArt,
+					artist:      art,
+					folderPath:  fp,
+					year:        yr,
 				})
 			}
 		}
 		rows.Close()
 	}
 
-	// 2. Извлекаем локальные треки, связанные с артистом (для обнаружения синглов и треков в сборниках)
+	// 2. Извлекаем локальные треки, связанные с артистом или названиями релизов (для синглов)
 	var localTracks []localEntry
-	trackQuery := `
-	SELECT t.title, COALESCE(NULLIF(al.album_artist, ''), ar.name), COALESCE(al.year, 0)
+	trackArgs := []any{cleanArt, "%" + artistName + "%"}
+	trackPlaceholders := make([]string, len(cleanTitles))
+	for i, ct := range cleanTitles {
+		trackPlaceholders[i] = "?"
+		trackArgs = append(trackArgs, ct)
+	}
+
+	trackInClause := "1=0"
+	if len(trackPlaceholders) > 0 {
+		trackInClause = fmt.Sprintf("t.clean_title IN (%s)", strings.Join(trackPlaceholders, ","))
+	}
+
+	trackQuery := fmt.Sprintf(`
+	SELECT t.title, t.clean_title, COALESCE(NULLIF(al.album_artist, ''), ar.name), ar.name, al.folder_path, COALESCE(al.year, 0)
 	FROM tracks t
 	JOIN artists ar ON ar.id = t.artist_id
 	JOIN albums al ON al.id = t.album_id
-	WHERE LOWER(al.album_artist) LIKE ? OR LOWER(ar.name) LIKE ?;
-	`
-	if rows, err := a.db.Conn().QueryContext(ctx, trackQuery, pattern, pattern); err == nil {
+	WHERE ar.clean_name = ? 
+	   OR al.folder_path LIKE ?
+	   OR %s;
+	`, trackInClause)
+
+	if rows, err := a.db.Conn().QueryContext(ctx, trackQuery, trackArgs...); err == nil {
 		for rows.Next() {
-			var t, art string
+			var t, ct, albArt, art, fp string
 			var yr int
-			if err := rows.Scan(&t, &art, &yr); err == nil {
+			if err := rows.Scan(&t, &ct, &albArt, &art, &fp, &yr); err == nil {
 				localTracks = append(localTracks, localEntry{
-					cleanTitle: CleanReleaseTitle(t),
-					rawTitle:   t,
-					artist:     art,
-					year:       yr,
+					cleanTitle:  ct,
+					rawTitle:    t,
+					albumArtist: albArt,
+					artist:      art,
+					folderPath:  fp,
+					year:        yr,
 				})
 			}
 		}
@@ -448,11 +491,16 @@ func (a *DiscographyAggregator) reconcileWithLibrary(ctx context.Context, artist
 
 		// 1) Сверка со списком локальных альбомов артиста
 		for _, local := range localAlbums {
-			if local.cleanTitle == rel.CleanTitle && matchesAnyArtist(relArtists, local.artist) {
+			artistMatches := matchesAnyArtist(relArtists, local.artist) ||
+				matchesAnyArtist(relArtists, local.albumArtist) ||
+				containsAnyToken(local.folderPath, relArtists) ||
+				containsAnyToken(local.folderPath, []string{artistName})
+
+			if local.cleanTitle == rel.CleanTitle && artistMatches {
 				inLibrary = true
 				break
 			}
-			if strings.Contains(rel.CleanTitle, local.cleanTitle) && IsDeluxeOrRemaster(rel.Title) && matchesAnyArtist(relArtists, local.artist) {
+			if strings.Contains(rel.CleanTitle, local.cleanTitle) && IsDeluxeOrRemaster(rel.Title) && artistMatches {
 				versionExists = true
 			}
 		}
@@ -460,39 +508,42 @@ func (a *DiscographyAggregator) reconcileWithLibrary(ctx context.Context, artist
 		// 2) Сверка со списком локальных треков артиста (если в альбомах не найдено)
 		if !inLibrary && !versionExists {
 			for _, tr := range localTracks {
-				if tr.cleanTitle == rel.CleanTitle && matchesAnyArtist(relArtists, tr.artist) {
+				artistMatches := matchesAnyArtist(relArtists, tr.artist) ||
+					matchesAnyArtist(relArtists, tr.albumArtist) ||
+					containsAnyToken(tr.folderPath, relArtists) ||
+					containsAnyToken(tr.folderPath, []string{artistName})
+
+				if tr.cleanTitle == rel.CleanTitle && artistMatches {
 					inLibrary = true
 					break
 				}
 			}
 		}
 
-		// 3) Дополнительный кросс-поиск в БД по точному clean_title (на случай если в локальной базе артист записан под другим соавтором)
+		// 3) Дополнительный кросс-поиск в БД по точному clean_title
 		if !inLibrary && !versionExists {
-			// Проверяем таблицу albums по точному clean_title
-			var albTitle, albArtist string
+			var albTitle, albArtist, albFp string
 			if err := a.db.Conn().QueryRowContext(ctx, `
-				SELECT a.title, COALESCE(NULLIF(a.album_artist, ''), ar.name)
+				SELECT a.title, COALESCE(NULLIF(a.album_artist, ''), ar.name), a.folder_path
 				FROM albums a
 				JOIN artists ar ON ar.id = a.artist_id
 				WHERE a.clean_title = ? LIMIT 1
-			`, rel.CleanTitle).Scan(&albTitle, &albArtist); err == nil {
-				if matchesAnyArtist(relArtists, albArtist) {
+			`, rel.CleanTitle).Scan(&albTitle, &albArtist, &albFp); err == nil {
+				if matchesAnyArtist(relArtists, albArtist) || containsAnyToken(albFp, relArtists) || containsAnyToken(albFp, []string{artistName}) {
 					inLibrary = true
 				}
 			}
 
-			// Проверяем таблицу tracks по точному clean_title
 			if !inLibrary {
-				var trTitle, trArtist string
+				var trTitle, trArtist, trFp string
 				if err := a.db.Conn().QueryRowContext(ctx, `
-					SELECT t.title, COALESCE(NULLIF(al.album_artist, ''), ar.name)
+					SELECT t.title, COALESCE(NULLIF(al.album_artist, ''), ar.name), al.folder_path
 					FROM tracks t
 					JOIN artists ar ON ar.id = t.artist_id
 					JOIN albums al ON al.id = t.album_id
 					WHERE t.clean_title = ? LIMIT 1
-				`, rel.CleanTitle).Scan(&trTitle, &trArtist); err == nil {
-					if matchesAnyArtist(relArtists, trArtist) {
+				`, rel.CleanTitle).Scan(&trTitle, &trArtist, &trFp); err == nil {
+					if matchesAnyArtist(relArtists, trArtist) || containsAnyToken(trFp, relArtists) || containsAnyToken(trFp, []string{artistName}) {
 						inLibrary = true
 					}
 				}
@@ -517,3 +568,15 @@ func (a *DiscographyAggregator) reconcileWithLibrary(ctx context.Context, artist
 		}
 	}
 }
+
+func containsAnyToken(str string, tokens []string) bool {
+	lower := strings.ToLower(str)
+	for _, t := range tokens {
+		tLower := strings.ToLower(CleanArtistKey(t))
+		if tLower != "" && strings.Contains(lower, tLower) {
+			return true
+		}
+	}
+	return false
+}
+

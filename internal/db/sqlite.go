@@ -65,6 +65,9 @@ func (db *DB) initSchema() error {
 	// Инкрементальные миграции для существующих баз данных
 	_, _ = db.conn.ExecContext(ctx, "ALTER TABLE tracks ADD COLUMN pinned_source_url TEXT;")
 	_, _ = db.conn.ExecContext(ctx, "ALTER TABLE missing_tracks ADD COLUMN pinned_source_url TEXT;")
+	_, _ = db.conn.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_radar_releases_artist_status ON radar_releases(clean_artist_name, status);")
+	_, _ = db.conn.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_radar_releases_clean_title ON radar_releases(clean_title);")
+	_, _ = db.conn.ExecContext(ctx, "INSERT INTO tracked_artists (name, clean_name, is_followed) SELECT name, clean_name, 1 FROM artists ON CONFLICT(name) DO NOTHING;")
 
 	return nil
 }

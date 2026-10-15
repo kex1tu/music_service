@@ -207,6 +207,51 @@
             </template>
         </div>
 
+        <!-- Пагинация и управление загрузкой ленты -->
+        <template x-if="$store.radar.feedTotal > 0">
+            <div class="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-surface-border">
+                <div class="text-xs text-content-muted">
+                    Показано <strong class="text-white" x-text="$store.radar.feedItems.length"></strong> из <strong class="text-white" x-text="$store.radar.feedTotal"></strong> новинок
+                </div>
+
+                <!-- Кнопка "Загрузить еще" -->
+                <template x-if="$store.radar.feedItems.length < $store.radar.feedTotal">
+                    <button
+                        @click="$store.radar.loadMoreFeed()"
+                        :disabled="$store.radar.isLoadingMore"
+                        class="px-5 py-2.5 bg-surface-elevated hover:bg-brand text-white text-xs font-semibold rounded-xl border border-surface-border hover:border-brand transition flex items-center space-x-2 shadow-sm disabled:opacity-50">
+                        <template x-if="$store.radar.isLoadingMore">
+                            <svg class="w-4 h-4 animate-spin text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                        </template>
+                        <template x-if="!$store.radar.isLoadingMore">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                            </svg>
+                        </template>
+                        <span x-text="$store.radar.isLoadingMore ? 'Загрузка...' : `Показать еще (${Math.min($store.radar.feedLimit, $store.radar.feedTotal - $store.radar.feedItems.length)})`"></span>
+                    </button>
+                </template>
+
+                <!-- Выбор количества на странице -->
+                <div class="flex items-center space-x-2 text-xs text-content-muted">
+                    <span>Показывать по:</span>
+                    <div class="flex space-x-1">
+                        <template x-for="lim in [24, 48, 96, 240]">
+                            <button
+                                @click="$store.radar.changeFeedLimit(lim)"
+                                :class="$store.radar.feedLimit === lim ? 'bg-brand text-white font-bold' : 'bg-surface-input text-content-secondary hover:text-white'"
+                                class="px-2.5 py-1 rounded-lg transition font-mono text-[11px]"
+                                x-text="lim">
+                            </button>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </template>
+
         <!-- Пустое состояние -->
         <template x-if="!$store.radar.isLoading && $store.radar.feedItems.length === 0">
             <div class="bg-surface-panel border border-surface-border rounded-2xl p-12 text-center text-content-muted space-y-3">
@@ -261,7 +306,7 @@
                     <thead class="bg-surface-input border-b border-surface-border text-content-muted font-mono uppercase text-[10px]">
                         <tr>
                             <th class="p-3.5">Исполнитель</th>
-                            <th class="p-3.5 text-center">Альбомов на диске</th>
+                            <th class="p-3.5 text-center">Релизов / Треков</th>
                             <th class="p-3.5 text-center">Пробелов (Gaps)</th>
                             <th class="p-3.5 text-center">Отслеживание</th>
                             <th class="p-3.5 text-center">Автозагрузка</th>
@@ -282,7 +327,12 @@
                                         </div>
                                     </div>
                                 </td>
-                                <td class="p-3.5 text-center font-mono font-semibold text-content-secondary" x-text="art.album_count || 0"></td>
+                                <td class="p-3.5 text-center font-mono text-content-secondary">
+                                    <span class="font-bold text-white" x-text="art.album_count || 0"></span><span class="text-[10px] text-content-muted"> альб.</span>
+                                    <template x-if="art.track_count > 0">
+                                        <span class="ml-1 text-[10px] text-content-muted" x-text="`(${art.track_count} тр.)`"></span>
+                                    </template>
+                                </td>
                                 <td class="p-3.5 text-center font-mono font-semibold" :class="art.gap_count > 0 ? 'text-amber-400 font-bold' : 'text-content-muted'" x-text="art.gap_count || 0"></td>
                                 <td class="p-3.5 text-center">
                                     <button

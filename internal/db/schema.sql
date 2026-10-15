@@ -235,6 +235,8 @@ CREATE TABLE IF NOT EXISTS radar_releases (
 CREATE INDEX IF NOT EXISTS idx_radar_releases_artist ON radar_releases(clean_artist_name);
 CREATE INDEX IF NOT EXISTS idx_radar_releases_status ON radar_releases(status);
 CREATE INDEX IF NOT EXISTS idx_radar_releases_is_radar ON radar_releases(is_radar);
+CREATE INDEX IF NOT EXISTS idx_radar_releases_artist_status ON radar_releases(clean_artist_name, status);
+CREATE INDEX IF NOT EXISTS idx_radar_releases_clean_title ON radar_releases(clean_title);
 
 -- 13. Граф связей и похожих артистов (для Моей Волны и рекомендаций)
 CREATE TABLE IF NOT EXISTS artist_relations (

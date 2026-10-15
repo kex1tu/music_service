@@ -126,6 +126,7 @@ func (s *Service) ScanAll(parentCtx context.Context, trigger string) error {
 		StartedAt:        time.Now(),
 		CurrentIndex:     0,
 		TotalArtists:     0,
+		CurrentArtist:    "Сбор списка исполнителей...",
 		NewReleasesFound: 0,
 		LastError:        "",
 	}
