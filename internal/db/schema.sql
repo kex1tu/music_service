@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS missing_tracks (
     pinned_source_url TEXT,
     status TEXT DEFAULT 'missing',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(album_id, track_number, disc_number)
 );
 

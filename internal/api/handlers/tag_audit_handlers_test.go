@@ -479,3 +479,146 @@ func TestFileHandler_CatalogMatchTrack(t *testing.T) {
 	}
 }
 
+func TestCatalogMatchTrack_MockDeezer(t *testing.T) {
+	h, _, _, database, _, _ := setupTestFileHandler(t)
+	defer database.Close()
+
+	mockDeezer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"data": [
+				{
+					"id": 1001,
+					"title": "Mock Deezer Track",
+					"duration": 210,
+					"track_position": 2,
+					"artist": {
+						"id": 501,
+						"name": "Deezer Artist"
+					},
+					"album": {
+						"id": 701,
+						"title": "Deezer Album",
+						"cover_xl": "http://example.com/cover_xl.jpg",
+						"release_date": "2023-05-10"
+					}
+				}
+			]
+		}`))
+	}))
+	defer mockDeezer.Close()
+
+	deezerClient := resolver.NewDeezerClient(mockDeezer.Client().Transport)
+	deezerClient.SetBaseURL(mockDeezer.URL)
+	h.deezer = deezerClient
+	h.itunes = nil
+	h.yandex = nil
+	h.ytmusic = nil
+
+	req := httptest.NewRequest(http.MethodGet, "/files/audit/catalog-match?artist=Deezer+Artist&title=Mock+Deezer+Track", nil)
+	w := httptest.NewRecorder()
+	h.CatalogMatchTrack(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Current map[string]any      `json:"current"`
+		Matches []CatalogTrackMatch `json:"matches"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(resp.Matches) == 0 {
+		t.Fatalf("expected at least 1 match from mocked Deezer, got 0")
+	}
+
+	topMatch := resp.Matches[0]
+	if topMatch.Source != "deezer" {
+		t.Errorf("expected source 'deezer', got %q", topMatch.Source)
+	}
+	if topMatch.Title != "Mock Deezer Track" {
+		t.Errorf("expected title 'Mock Deezer Track', got %q", topMatch.Title)
+	}
+	if topMatch.MatchScore <= 0 {
+		t.Errorf("expected MatchScore > 0, got %d", topMatch.MatchScore)
+	}
+}
+
+func TestFixSelected_ByTrackID(t *testing.T) {
+	h, _, _, database, musicDir, _ := setupTestFileHandler(t)
+	defer database.Close()
+
+	albumDir := filepath.Join(musicDir, "SelectiveAlbum")
+	_ = os.MkdirAll(albumDir, 0755)
+
+	// Track 1: Target to be fixed
+	t1Path := filepath.Join(albumDir, "01. First Track.mp3")
+	_ = os.WriteFile(t1Path, []byte("track 1 audio bytes"), 0644)
+	_ = id3.WriteTags(t1Path, id3.TrackTags{
+		Title:  "Original Title 1",
+		Artist: "Artist 1",
+		Album:  "Old Album",
+	}, nil)
+	rel1 := "SelectiveAlbum/01. First Track.mp3"
+	_ = h.scanner.IndexFile(t1Path, rel1)
+
+	// Track 2: Should remain untouched
+	t2Path := filepath.Join(albumDir, "02. Second Track.mp3")
+	_ = os.WriteFile(t2Path, []byte("track 2 audio bytes"), 0644)
+	_ = id3.WriteTags(t2Path, id3.TrackTags{
+		Title:  "Original Title 2",
+		Artist: "Artist 2",
+		Album:  "Old Album",
+	}, nil)
+	rel2 := "SelectiveAlbum/02. Second Track.mp3"
+	_ = h.scanner.IndexFile(t2Path, rel2)
+
+	// Send fix request ONLY for rel1
+	reqBody := FixSelectedTagsRequest{
+		Items: []FixTagIssueRequest{
+			{
+				Path:   rel1,
+				Title:  "Fixed Title 1",
+				Artist: "Fixed Artist 1",
+				Album:  "Fixed Album",
+				Year:   2024,
+			},
+		},
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/files/audit/tag-issues/fix-selected", bytes.NewReader(bodyBytes))
+	w := httptest.NewRecorder()
+	h.FixSelectedTagIssues(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Success    bool `json:"success"`
+		FixedCount int  `json:"fixed_count"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.FixedCount != 1 {
+		t.Fatalf("expected 1 fixed track, got %d", resp.FixedCount)
+	}
+
+	// Verify Track 1 was updated
+	tags1, _ := id3.ReadTags(t1Path, rel1)
+	if tags1.Title != "Fixed Title 1" || tags1.Artist != "Fixed Artist 1" {
+		t.Errorf("track 1 was not updated properly: %+v", tags1)
+	}
+
+	// Verify Track 2 remained unchanged
+	tags2, _ := id3.ReadTags(t2Path, rel2)
+	if tags2.Title != "Original Title 2" || tags2.Artist != "Artist 2" {
+		t.Errorf("track 2 should not have been modified: %+v", tags2)
+	}
+}
+

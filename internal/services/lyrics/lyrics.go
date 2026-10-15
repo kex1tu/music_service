@@ -36,6 +36,11 @@ type LyricsResponse struct {
 	Synced    bool    `json:"synced"`
 }
 
+// LyricsProvider defines the contract for searching lyrics from remote providers.
+type LyricsProvider interface {
+	Search(ctx context.Context, artist, title, album string, duration int) (*LyricsSearchResult, error)
+}
+
 // LrclibClient is an HTTP client for lrclib.net.
 type LrclibClient struct {
 	client  *http.Client
@@ -48,6 +53,11 @@ func NewLrclibClient() *LrclibClient {
 		client:  &http.Client{Timeout: 10 * time.Second},
 		baseURL: "https://lrclib.net/api",
 	}
+}
+
+// SetBaseURL overrides the API base URL (useful for testing with mock servers).
+func (c *LrclibClient) SetBaseURL(baseURL string) {
+	c.baseURL = strings.TrimRight(baseURL, "/")
 }
 
 // Search searches LRCLIB for track lyrics.
@@ -162,14 +172,18 @@ func (c *LrclibClient) Search(ctx context.Context, artist, title, album string, 
 // Service provides local and remote lyrics management.
 type Service struct {
 	musicSandbox *sandbox.PathSandbox
-	lrclib       *LrclibClient
+	provider     LyricsProvider
 }
 
-// NewService creates a new LyricsService.
-func NewService(musicSandbox *sandbox.PathSandbox) *Service {
+// NewService creates a new LyricsService with an optional custom LyricsProvider.
+func NewService(musicSandbox *sandbox.PathSandbox, provider ...LyricsProvider) *Service {
+	var p LyricsProvider = NewLrclibClient()
+	if len(provider) > 0 && provider[0] != nil {
+		p = provider[0]
+	}
 	return &Service{
 		musicSandbox: musicSandbox,
-		lrclib:       NewLrclibClient(),
+		provider:     p,
 	}
 }
 
@@ -215,9 +229,12 @@ func (s *Service) GetLyrics(relPath string) (*LyricsResponse, error) {
 	}, nil
 }
 
-// SearchLyrics searches LRCLIB for lyrics.
+// SearchLyrics searches for lyrics using the configured provider.
 func (s *Service) SearchLyrics(ctx context.Context, artist, title, album string, duration int) (*LyricsSearchResult, error) {
-	res, err := s.lrclib.Search(ctx, artist, title, album, duration)
+	if s.provider == nil {
+		return &LyricsSearchResult{Source: "none"}, nil
+	}
+	res, err := s.provider.Search(ctx, artist, title, album, duration)
 	if err != nil {
 		return nil, err
 	}

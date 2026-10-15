@@ -104,6 +104,7 @@ htmlcov/
 nosetests.xml
 coverage.xml
 *.cover
+*.out
 
 # ==============================================================================
 # IDEs & Operating Systems

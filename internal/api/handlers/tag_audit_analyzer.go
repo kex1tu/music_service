@@ -15,7 +15,7 @@ var (
 )
 
 // analyzeTrackIssues анализирует метаданные трека и возвращает обнаруженные дефекты.
-func analyzeTrackIssues(id int64, filePath, title, artist, album string, year, trackNumber int, duration float64) *TagIssueItem {
+func analyzeTrackIssues(id int64, filePath, title, artist, album string, year, trackNumber int, duration float64, albumArtist ...string) *TagIssueItem {
 	var issues []string
 	cleanTitle := resolver.CleanYouTubeVideoTitle(title)
 
@@ -111,6 +111,11 @@ func analyzeTrackIssues(id int64, filePath, title, artist, album string, year, t
 		issues = append(issues, "censored_version")
 	}
 
+	// 10. Проверка на отсутствие AlbumArtist (TPE2)
+	if len(albumArtist) > 0 && strings.TrimSpace(albumArtist[0]) == "" && strings.TrimSpace(artist) != "" {
+		issues = append(issues, "missing_album_artist")
+	}
+
 	if len(issues) == 0 {
 		return nil
 	}
@@ -173,7 +178,7 @@ func analyzeTrackIssues(id int64, filePath, title, artist, album string, year, t
 
 	for _, iss := range issues {
 		switch iss {
-		case "literal_backslash_artist", "track_num_in_title", "dirty_title", "label_as_artist":
+		case "literal_backslash_artist", "track_num_in_title", "dirty_title", "label_as_artist", "missing_album_artist":
 			hasSafeIssues = true
 		case "unparsed_feat", "artist_in_title", "missing_album", "censored_version":
 			hasReviewNeeded = true

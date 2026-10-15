@@ -198,3 +198,49 @@ func TestRadioHandler_Endpoints(t *testing.T) {
 		t.Errorf("expected Accept-Ranges: none, got %q", wHead.Header().Get("Accept-Ranges"))
 	}
 }
+
+func TestRadioHandler_NowPlaying_And_SyncNavidrome(t *testing.T) {
+	handler, _, _, cleanup := setupTestRadioHandler(t)
+	defer cleanup()
+
+	// 1. GET /api/radio/now-playing
+	reqNow := httptest.NewRequest("GET", "/api/radio/stream/now-playing", nil)
+	wNow := httptest.NewRecorder()
+	handler.GetNowPlaying(wNow, reqNow)
+	if wNow.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for GetNowPlaying, got %d", wNow.Code)
+	}
+
+	var nowResp map[string]any
+	if err := json.Unmarshal(wNow.Body.Bytes(), &nowResp); err != nil {
+		t.Fatalf("failed to parse now-playing json: %v", err)
+	}
+
+	// 2. POST /api/radio/navidrome/sync with unconfigured subsonic -> 400
+	reqSync := httptest.NewRequest("POST", "/api/radio/navidrome/sync", strings.NewReader(`{}`))
+	wSync := httptest.NewRecorder()
+	handler.SyncNavidromeRadio(wSync, reqSync)
+	if wSync.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 when subsonic client is unconfigured, got %d", wSync.Code)
+	}
+
+	// 3. POST /api/radio/navidrome/sync with configured mock subsonic server
+	tsSub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"subsonic-response": {
+				"status": "ok",
+				"version": "1.16.1"
+			}
+		}`))
+	}))
+	defer tsSub.Close()
+
+	handler.subsonic = radio.NewNavidromeSubsonicClient(tsSub.URL, "admin", "pass")
+	reqSyncOk := httptest.NewRequest("POST", "/api/radio/navidrome/sync", strings.NewReader(`{"name":"My Test Wave"}`))
+	wSyncOk := httptest.NewRecorder()
+	handler.SyncNavidromeRadio(wSyncOk, reqSyncOk)
+	if wSyncOk.Code != http.StatusOK {
+		t.Errorf("expected 200 OK from SyncNavidromeRadio, got %d: %s", wSyncOk.Code, wSyncOk.Body.String())
+	}
+}

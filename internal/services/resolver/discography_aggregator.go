@@ -14,7 +14,7 @@ import (
 	"music-manager/internal/id3"
 )
 
-var deluxeRemasterRegex = regexp.MustCompile(`(?i)\s*[\(\[](?:deluxe|expanded|remaster(?:ed)?|special|bonus|anniversary|reissue|collectors?|edition|version)[^\)\]]*[\)\]]`)
+var deluxeRemasterRegex = regexp.MustCompile(`(?i)\s*[\(\[](?:[^\)\]]*\b)?(?:deluxe|expanded|remaster(?:ed)?|special|bonus|anniversary|reissue|collectors?|edition|version)[^\)\]]*[\)\]]`)
 var cleanupPunctRegex = regexp.MustCompile(`[^\p{L}\p{N}\s]`)
 
 // CleanReleaseTitle нормализует название релиза, отсекая суффиксы Deluxe, Remastered и спецсимволы.

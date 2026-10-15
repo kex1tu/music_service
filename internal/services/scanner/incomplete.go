@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"strconv"
 	"strings"
@@ -280,14 +281,20 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 				if artistName == "" {
 					artistName = album.Artist
 				}
-				_, _ = s.database.Conn().ExecContext(ctx, `
+				discNum := rt.DiskNumber
+				if discNum <= 0 {
+					discNum = 1
+				}
+				if _, err := s.database.Conn().ExecContext(ctx, `
 					INSERT INTO missing_tracks (
 						album_id, title, artist, track_number, disc_number,
 						expected_duration, deezer_id, deezer_url, isrc, status, updated_at
 					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'missing', CURRENT_TIMESTAMP)
 					ON CONFLICT(album_id, track_number, disc_number) DO NOTHING
-				`, album.ID, rt.Title, artistName, pos, rt.DiskNumber, rt.Duration,
-					strconv.FormatInt(rt.ID, 10), rt.Link, rt.ISRC)
+				`, album.ID, rt.Title, artistName, pos, discNum, rt.Duration,
+					strconv.FormatInt(rt.ID, 10), rt.Link, rt.ISRC); err != nil {
+					log.Printf("[Scanner] failed to insert missing track %d for album %d: %v", pos, album.ID, err)
+				}
 			}
 		}
 

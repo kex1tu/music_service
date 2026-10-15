@@ -370,3 +370,219 @@ func TestExtractAllReleaseArtists(t *testing.T) {
 	}
 }
 
+func TestIsDeluxeOrRemaster(t *testing.T) {
+	cases := []struct {
+		title    string
+		expected bool
+	}{
+		{"In Rainbows (Deluxe Edition)", true},
+		{"OK Computer (Remastered 2017)", true},
+		{"Kid A (Bonus Tracks)", true},
+		{"Amnesiac (Expanded Edition)", true},
+		{"The Bends (20th Anniversary Edition)", true},
+		{"Hail to the Thief (Special Edition)", true},
+		{"Paranoid Android", false},
+		{"Karma Police", false},
+	}
+
+	for _, tc := range cases {
+		if got := IsDeluxeOrRemaster(tc.title); got != tc.expected {
+			t.Errorf("IsDeluxeOrRemaster(%q) = %v, want %v", tc.title, got, tc.expected)
+		}
+	}
+}
+
+func TestAggregator_MultiArtistName(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/search/artist" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{"id": 55, "name": "PrimaryArtist"},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/artist/55/albums" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{
+						"id":           501,
+						"title":        "Big Collab",
+						"release_date": "2024-01-01",
+						"record_type":  "album",
+						"nb_tracks":    10,
+						"artist": map[string]any{
+							"name": "PrimaryArtist",
+						},
+					},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/album/501" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":    501,
+				"title": "Big Collab",
+				"contributors": []map[string]any{
+					{"name": "PrimaryArtist"},
+					{"name": "CoArtistOne"},
+					{"name": "CoArtistTwo"},
+				},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	deezerClient := NewDeezerClient()
+	deezerClient.SetBaseURL(ts.URL)
+
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_agg.db")
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	agg := NewDiscographyAggregator(deezerClient, nil, nil, database)
+	releases, err := agg.Aggregate(context.Background(), "PrimaryArtist", "", nil)
+	if err != nil {
+		t.Fatalf("Aggregate failed: %v", err)
+	}
+
+	if len(releases) != 1 {
+		t.Fatalf("expected 1 aggregated release, got %d", len(releases))
+	}
+
+	rel := releases[0]
+	expectedArtist := "PrimaryArtist, CoArtistOne, CoArtistTwo"
+	if rel.ArtistName != expectedArtist {
+		t.Errorf("expected ArtistName %q, got %q", expectedArtist, rel.ArtistName)
+	}
+}
+
+func TestDeezerClient_AdditionalMethods(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/artist/27" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":         27,
+				"name":       "Daft Punk",
+				"picture_xl": "https://example.com/dp_xl.jpg",
+			})
+			return
+		}
+		if r.URL.Path == "/search/track" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{
+						"id":             111,
+						"title":          "One More Time",
+						"duration":       320,
+						"track_position": 1,
+						"artist": map[string]any{
+							"id":   27,
+							"name": "Daft Punk",
+						},
+					},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/cover.jpg" {
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write([]byte("fake_image_bytes"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	client := NewDeezerClient()
+	client.SetBaseURL(ts.URL)
+
+	// 1. GetArtist
+	art, err := client.GetArtist(context.Background(), "27")
+	if err != nil {
+		t.Fatalf("GetArtist failed: %v", err)
+	}
+	if art.Name != "Daft Punk" {
+		t.Errorf("expected Daft Punk, got %q", art.Name)
+	}
+
+	// 2. SearchTracks
+	tracks, err := client.SearchTracks(context.Background(), "One More Time")
+	if err != nil {
+		t.Fatalf("SearchTracks failed: %v", err)
+	}
+	if len(tracks) != 1 || tracks[0].Title != "One More Time" {
+		t.Errorf("expected 1 track 'One More Time', got %+v", tracks)
+	}
+
+	// 3. SearchTrackVersions
+	versions, err := client.SearchTrackVersions(context.Background(), "Daft Punk", "One More Time")
+	if err != nil {
+		t.Fatalf("SearchTrackVersions failed: %v", err)
+	}
+	if len(versions) != 1 {
+		t.Errorf("expected 1 track version, got %d", len(versions))
+	}
+
+	// 4. DownloadCoverBytes
+	bytes, err := client.DownloadCoverBytes(context.Background(), ts.URL+"/cover.jpg")
+	if err != nil {
+		t.Fatalf("DownloadCoverBytes failed: %v", err)
+	}
+	if string(bytes) != "fake_image_bytes" {
+		t.Errorf("unexpected image bytes: %s", string(bytes))
+	}
+}
+
+func TestDeduplicateReleases(t *testing.T) {
+	agg := NewDiscographyAggregator(nil, nil, nil, nil)
+
+	raw := []AggregatedRelease{
+		{
+			Title:      "Discovery",
+			CleanTitle: CleanReleaseTitle("Discovery"),
+			ArtistName: "Daft Punk",
+			Year:       2001,
+			DeezerID:   "101",
+			TrackCount: 14,
+		},
+		{
+			Title:         "Discovery",
+			CleanTitle:    CleanReleaseTitle("Discovery"),
+			ArtistName:    "Daft Punk, Romanthony",
+			Year:          2001,
+			MusicBrainzID: "mb-disc-101",
+			TrackCount:    14,
+		},
+		{
+			Title:      "Human After All",
+			CleanTitle: CleanReleaseTitle("Human After All"),
+			ArtistName: "Daft Punk",
+			Year:       2005,
+			DeezerID:   "202",
+			TrackCount: 10,
+		},
+	}
+
+	deduped := agg.deduplicateReleases(raw)
+	if len(deduped) != 2 {
+		t.Fatalf("expected 2 deduped releases, got %d", len(deduped))
+	}
+
+	disc := deduped[0]
+	if disc.DeezerID != "101" || disc.MusicBrainzID != "mb-disc-101" {
+		t.Errorf("expected merged IDs (deezer: 101, mb: mb-disc-101), got deezer:%s mb:%s", disc.DeezerID, disc.MusicBrainzID)
+	}
+	if disc.ArtistName != "Daft Punk, Romanthony" {
+		t.Errorf("expected merged artist 'Daft Punk, Romanthony', got %q", disc.ArtistName)
+	}
+}
+
+

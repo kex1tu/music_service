@@ -114,7 +114,7 @@ func (h *FileHandler) FixSafeTagIssues(w http.ResponseWriter, r *http.Request) {
 		// Исправляем только треки с дефектами категории safe_autofix
 		hasSafeIssue := false
 		for _, iss := range item.Issues {
-			if iss == "dirty_title" || iss == "track_num_in_title" || iss == "literal_backslash_artist" || iss == "label_as_artist" {
+			if iss == "dirty_title" || iss == "track_num_in_title" || iss == "literal_backslash_artist" || iss == "label_as_artist" || iss == "missing_album_artist" {
 				hasSafeIssue = true
 				break
 			}

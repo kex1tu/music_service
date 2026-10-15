@@ -120,8 +120,8 @@ func (s *Service) findDownloadedFile(outputTemplate string) (string, error) {
 	return matches[0], nil
 }
 
-func (s *Service) transcodeToMP3(ctx context.Context, inputRaw, outputMP3 string) error {
-	args := []string{
+func buildFfmpegArgs(inputRaw, outputMP3 string) []string {
+	return []string{
 		"-y",
 		"-threads", "0",
 		"-i", inputRaw,
@@ -134,6 +134,10 @@ func (s *Service) transcodeToMP3(ctx context.Context, inputRaw, outputMP3 string
 		"-map_metadata", "-1",
 		outputMP3,
 	}
+}
+
+func (s *Service) transcodeToMP3(ctx context.Context, inputRaw, outputMP3 string) error {
+	args := buildFfmpegArgs(inputRaw, outputMP3)
 
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	var stderr bytes.Buffer

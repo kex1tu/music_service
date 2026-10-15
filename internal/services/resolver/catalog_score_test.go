@@ -77,3 +77,41 @@ func TestComputeCatalogMatchScore_DurationPenalty(t *testing.T) {
 		t.Errorf("expected scoreNormal (%d) to be greater than scoreWithDiff (%d)", scoreNormal, scoreWithDiff)
 	}
 }
+
+func TestComputeCatalogMatchScore_Ranking(t *testing.T) {
+	targetTitle := "Starboy"
+	targetArtist := "The Weeknd"
+	targetDuration := 230.0
+
+	exactCand := CatalogCandidate{
+		Title:    "Starboy",
+		Artist:   "The Weeknd",
+		Duration: 230,
+	}
+	deltaCand := CatalogCandidate{
+		Title:    "Starboy",
+		Artist:   "The Weeknd",
+		Duration: 215,
+	}
+	remixCand := CatalogCandidate{
+		Title:    "Starboy Remix",
+		Artist:   "The Weeknd",
+		Duration: 240,
+	}
+	unrelatedCand := CatalogCandidate{
+		Title:    "Blinding Lights",
+		Artist:   "The Weeknd",
+		Duration: 200,
+	}
+
+	scoreExact := ComputeCatalogMatchScore(targetTitle, targetArtist, targetDuration, exactCand)
+	scoreDelta := ComputeCatalogMatchScore(targetTitle, targetArtist, targetDuration, deltaCand)
+	scoreRemix := ComputeCatalogMatchScore(targetTitle, targetArtist, targetDuration, remixCand)
+	scoreUnrelated := ComputeCatalogMatchScore(targetTitle, targetArtist, targetDuration, unrelatedCand)
+
+	if !(scoreExact > scoreDelta && scoreDelta > scoreRemix && scoreRemix > scoreUnrelated) {
+		t.Errorf("expected ranking scoreExact(%d) > scoreDelta(%d) > scoreRemix(%d) > scoreUnrelated(%d)",
+			scoreExact, scoreDelta, scoreRemix, scoreUnrelated)
+	}
+}
+

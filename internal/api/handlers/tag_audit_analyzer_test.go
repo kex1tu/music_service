@@ -52,3 +52,38 @@ func TestAnalyzeTrackIssues_CensoredDetection(t *testing.T) {
 	}
 }
 
+func TestAnalyzeTrackIssues_MissingTPE2(t *testing.T) {
+	// 1. Missing AlbumArtist (empty string passed as variadic)
+	itemMissing := analyzeTrackIssues(1, "/test.mp3", "Valid Title", "Main Artist", "Valid Album", 2024, 1, 200.0, "")
+	if itemMissing == nil {
+		t.Fatal("expected item to have issues when album_artist is empty")
+	}
+
+	foundMissing := false
+	for _, iss := range itemMissing.Issues {
+		if iss == "missing_album_artist" {
+			foundMissing = true
+			break
+		}
+	}
+	if !foundMissing {
+		t.Errorf("expected missing_album_artist issue, got %v", itemMissing.Issues)
+	}
+	if itemMissing.Severity != "safe_autofix" {
+		t.Errorf("expected safe_autofix severity, got %s", itemMissing.Severity)
+	}
+	if itemMissing.Proposed.AlbumArtist != "Main Artist" {
+		t.Errorf("expected proposed album_artist 'Main Artist', got %q", itemMissing.Proposed.AlbumArtist)
+	}
+
+	// 2. Present AlbumArtist
+	itemPresent := analyzeTrackIssues(2, "/test2.mp3", "Valid Title", "Main Artist", "Valid Album", 2024, 1, 200.0, "Main Artist")
+	if itemPresent != nil {
+		for _, iss := range itemPresent.Issues {
+			if iss == "missing_album_artist" {
+				t.Errorf("did not expect missing_album_artist when album_artist is set")
+			}
+		}
+	}
+}
+

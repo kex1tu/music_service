@@ -91,9 +91,14 @@ func (s *Scanner) ScanAll(ctx context.Context) (int, error) {
 			return nil
 		}
 
+		resolvedPath, rErr := s.musicSandbox.Resolve(relPath, false)
+		if rErr != nil {
+			return nil
+		}
+
 		seenPaths[relPath] = true
 
-		if err := s.indexFile(path, relPath); err == nil {
+		if err := s.indexFile(resolvedPath, relPath); err == nil {
 			count++
 		}
 		return nil

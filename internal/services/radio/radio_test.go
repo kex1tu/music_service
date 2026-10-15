@@ -290,3 +290,94 @@ func TestIcyStreamerOptionsAndHeaders(t *testing.T) {
 		t.Errorf("expected CORS allow methods")
 	}
 }
+
+func TestWaveSelector_GeneratePlaylist(t *testing.T) {
+	database, tempDir, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	simEngine := resolver.NewSimilarityEngine(nil, nil, database)
+	selector := NewWaveSelector(database, nil, simEngine)
+
+	ctx := context.Background()
+
+	// 1. Успешная генерация плейлиста
+	playlist, err := selector.GeneratePlaylist(ctx, 3)
+	if err != nil {
+		t.Fatalf("GeneratePlaylist failed: %v", err)
+	}
+	if len(playlist) == 0 {
+		t.Errorf("expected non-empty playlist")
+	}
+
+	// 2. Пустая библиотека возвращает ошибку
+	emptyDBPath := filepath.Join(tempDir, "empty_sel.db")
+	emptyDB, err := db.Open(emptyDBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer emptyDB.Close()
+
+	emptySelector := NewWaveSelector(emptyDB, nil, simEngine)
+	_, errEmpty := emptySelector.GeneratePlaylist(ctx, 10)
+	if errEmpty == nil {
+		t.Errorf("expected error for empty library playlist generation")
+	}
+}
+
+func TestNavidromeSubsonicClient_Errors(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Ненастроенный клиент
+	unconf := NewNavidromeSubsonicClient("", "", "")
+	if unconf.IsConfigured() {
+		t.Error("expected IsConfigured=false")
+	}
+	err := unconf.CreateRadioStation(ctx, "Name", "http://stream", "http://home")
+	if err == nil {
+		t.Error("expected error for unconfigured client")
+	}
+
+	// 2. Сервер Subsonic возвращает HTTP 500
+	tsErr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer tsErr.Close()
+
+	clientErr := NewNavidromeSubsonicClient(tsErr.URL, "user", "pass")
+	err = clientErr.CreateRadioStation(ctx, "Name", "http://stream", "http://home")
+	if err == nil {
+		t.Error("expected error when Subsonic server returns 500")
+	}
+
+	// 3. Сервер Subsonic возвращает ошибку в теле JSON
+	tsSubErr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"subsonic-response": {
+				"status": "failed",
+				"error": {
+					"code": 40,
+					"message": "Wrong username or password"
+				}
+			}
+		}`))
+	}))
+	defer tsSubErr.Close()
+
+	clientSubErr := NewNavidromeSubsonicClient(tsSubErr.URL, "user", "wrong_pass")
+	err = clientSubErr.CreateRadioStation(ctx, "Name", "http://stream", "http://home")
+	if err == nil {
+		t.Error("expected error when Subsonic returns status=failed")
+	}
+}
+
+func TestNavidromeReader_NotAvailable(t *testing.T) {
+	reader := NewNavidromeReader("/path/to/nonexistent/db.sqlite")
+	if reader.IsAvailable() {
+		t.Error("expected IsAvailable=false for nonexistent path")
+	}
+	_, err := reader.GetUserListeningStats(context.Background())
+	if err == nil {
+		t.Error("expected error for unavailable database")
+	}
+}

@@ -238,3 +238,97 @@ func TestFileHandler_BatchLyricsProgress_Empty(t *testing.T) {
 		t.Errorf("expected is_running false")
 	}
 }
+
+func TestFileHandler_DeleteFile_SingleAndDirectory(t *testing.T) {
+	h, _, _, database, musicDir, _ := setupTestFileHandler(t)
+	defer database.Close()
+
+	// 1. Missing path -> 400
+	reqEmpty := httptest.NewRequest("DELETE", "/files/delete", nil)
+	recEmpty := httptest.NewRecorder()
+	h.DeleteFile(recEmpty, reqEmpty)
+	if recEmpty.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty path, got %d", recEmpty.Code)
+	}
+
+	// 2. Path Traversal -> 403 Forbidden
+	reqTrav := httptest.NewRequest("DELETE", "/files/delete?path=../../etc/passwd", nil)
+	recTrav := httptest.NewRecorder()
+	h.DeleteFile(recTrav, reqTrav)
+	if recTrav.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for path traversal, got %d", recTrav.Code)
+	}
+
+	// 3. Delete single file
+	albumDir := filepath.Join(musicDir, "SingleDelAlbum")
+	_ = os.MkdirAll(albumDir, 0755)
+	trackFile := filepath.Join(albumDir, "01. Song.mp3")
+	_ = os.WriteFile(trackFile, []byte("data"), 0644)
+
+	// Insert into DB
+	_, _ = database.Conn().Exec("INSERT INTO artists (id, name, clean_name) VALUES (99, 'Art', 'art')")
+	_, _ = database.Conn().Exec("INSERT INTO albums (id, title, clean_title, artist_id, folder_path) VALUES (99, 'SingleDelAlbum', 'singledelalbum', 99, 'SingleDelAlbum')")
+	_, _ = database.Conn().Exec("INSERT INTO tracks (id, album_id, artist_id, title, clean_title, file_path, file_size, bitrate, mtime) VALUES (99, 99, 99, 'Song', 'song', 'SingleDelAlbum/01. Song.mp3', 100, 320, 100.0)")
+
+	reqDelFile := httptest.NewRequest("DELETE", "/files/delete?path=SingleDelAlbum/01.%20Song.mp3", nil)
+	recDelFile := httptest.NewRecorder()
+	h.DeleteFile(recDelFile, reqDelFile)
+	if recDelFile.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for file delete, got %d: %s", recDelFile.Code, recDelFile.Body.String())
+	}
+
+	// Verify file is gone from disk
+	if _, err := os.Stat(trackFile); !os.IsNotExist(err) {
+		t.Errorf("expected file to be deleted from disk")
+	}
+
+	// 4. Delete entire directory
+	dirToDel := filepath.Join(musicDir, "FolderToDelete")
+	_ = os.MkdirAll(dirToDel, 0755)
+	_ = os.WriteFile(filepath.Join(dirToDel, "cover.jpg"), []byte("cover"), 0644)
+
+	reqDelDir := httptest.NewRequest("DELETE", "/files/delete?path=FolderToDelete", nil)
+	recDelDir := httptest.NewRecorder()
+	h.DeleteFile(recDelDir, reqDelDir)
+	if recDelDir.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for dir delete, got %d: %s", recDelDir.Code, recDelDir.Body.String())
+	}
+	if _, err := os.Stat(dirToDel); !os.IsNotExist(err) {
+		t.Errorf("expected directory to be deleted from disk")
+	}
+}
+
+func TestFileHandler_ListFiles(t *testing.T) {
+	h, _, _, database, musicDir, _ := setupTestFileHandler(t)
+	defer database.Close()
+
+	// Create test folder structure
+	folder := filepath.Join(musicDir, "Artist - Album")
+	_ = os.MkdirAll(folder, 0755)
+	_ = os.WriteFile(filepath.Join(folder, "01. Song.mp3"), []byte("audio"), 0644)
+	_ = os.WriteFile(filepath.Join(folder, "01. Song.lrc"), []byte("[00:01.00]text"), 0644)
+
+	// 1. List root
+	reqRoot := httptest.NewRequest("GET", "/files/list", nil)
+	recRoot := httptest.NewRecorder()
+	h.ListFiles(recRoot, reqRoot)
+	if recRoot.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", recRoot.Code)
+	}
+
+	// 2. List subfolder
+	reqSub := httptest.NewRequest("GET", "/files/list?path=Artist%20-%20Album", nil)
+	recSub := httptest.NewRecorder()
+	h.ListFiles(recSub, reqSub)
+	if recSub.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", recSub.Code)
+	}
+
+	// 3. Traversal blocked
+	reqTrav := httptest.NewRequest("GET", "/files/list?path=../../etc", nil)
+	recTrav := httptest.NewRecorder()
+	h.ListFiles(recTrav, reqTrav)
+	if recTrav.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for traversal list, got %d", recTrav.Code)
+	}
+}

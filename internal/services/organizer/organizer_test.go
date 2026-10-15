@@ -318,3 +318,67 @@ func TestSaveBatch_SingleTrackMetadataPropagationToRelease(t *testing.T) {
 		t.Errorf("expected DestinationDir %q, got %q", expectedDir, res.DestinationDir)
 	}
 }
+
+func TestOrganizer_EmptyDirCleanup(t *testing.T) {
+	tempDir := t.TempDir()
+	musicDir := filepath.Join(tempDir, "music")
+	_ = os.MkdirAll(musicDir, 0755)
+
+	// 1. Full empty hierarchy cleanup
+	nestedDir := filepath.Join(musicDir, "EmptyArtist", "EmptyAlbum", "SubDir")
+	if err := os.MkdirAll(nestedDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	CleanEmptyParents(nestedDir, musicDir)
+
+	if fileExists(filepath.Join(musicDir, "EmptyArtist")) || dirExists(filepath.Join(musicDir, "EmptyArtist")) {
+		t.Errorf("expected EmptyArtist to be cleaned up")
+	}
+	if !dirExists(musicDir) {
+		t.Errorf("expected root musicDir to remain intact")
+	}
+
+	// 2. Partial cleanup when sibling has files
+	artistDir := filepath.Join(musicDir, "ActiveArtist")
+	album1 := filepath.Join(artistDir, "EmptyAlbum")
+	album2 := filepath.Join(artistDir, "FullAlbum")
+	_ = os.MkdirAll(album1, 0755)
+	_ = os.MkdirAll(album2, 0755)
+	_ = os.WriteFile(filepath.Join(album2, "song.mp3"), []byte("data"), 0644)
+
+	CleanEmptyParents(album1, musicDir)
+
+	if dirExists(album1) {
+		t.Errorf("expected album1 to be removed")
+	}
+	if !dirExists(artistDir) {
+		t.Errorf("expected active artistDir to be preserved because album2 has files")
+	}
+}
+
+func TestOrganizer_RemoveIfEmpty(t *testing.T) {
+	tempDir := t.TempDir()
+	emptyDir := filepath.Join(tempDir, "empty")
+	_ = os.MkdirAll(emptyDir, 0755)
+
+	RemoveIfEmpty(emptyDir)
+	if dirExists(emptyDir) {
+		t.Errorf("expected empty dir to be removed")
+	}
+
+	fullDir := filepath.Join(tempDir, "full")
+	_ = os.MkdirAll(fullDir, 0755)
+	_ = os.WriteFile(filepath.Join(fullDir, "file.txt"), []byte("hi"), 0644)
+
+	RemoveIfEmpty(fullDir)
+	if !dirExists(fullDir) {
+		t.Errorf("expected non-empty dir to not be removed")
+	}
+}
+
+func dirExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
+}
+

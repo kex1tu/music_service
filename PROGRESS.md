@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 73 блока задач полностью реализованы и протестированы).
+- **Статус готовности:** **100% DONE** (Все 76 блоков задач полностью реализованы, аудит и стресс-тесты завершены, 100% тестов пройдены).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 13 пакетов зеленые).
@@ -721,6 +721,7 @@
       - В `web/static/js/radar/radar.js` в `setReleaseStatus` карточка мгновенно удаляется из `feedItems` и уменьшается счетчик `feedTotal`.
       - В `openDiscography` добавлено извлечение первичного артиста (`release.artist_name.split(/[,&]/)[0].trim()`) для надежной загрузки дискографии из каталога.
 
+  - **Блок 74 (Radar & SQLite Indexing, Cyrillic Search, Tracked Artists Optimization):**
     - **74.1. Авто-трекинг артистов и оптимизация SQLite без correlated subqueries:**
       - В `internal/db/schema.sql` и `internal/db/sqlite.go` добавлены составные индексы `idx_radar_releases_artist_status` и `idx_radar_releases_clean_title`. В `initSchema` внедрен автоматический перенос всех исполнителей из медиатеки в `tracked_artists` (`INSERT INTO tracked_artists ... ON CONFLICT DO NOTHING`).
       - В `internal/services/scanner/artist_album.go` вставка в `tracked_artists` перенесена до выхода при обнаружении существующего исполнителя.
@@ -735,6 +736,65 @@
     - **74.5. Пагинация и расширенное отображение ленты Радара:**
       - В `web/static/js/radar/radar.js` и `web/templates/components/radar.html` снято ограничение фиксированной сетки 4x6 (24 карточки).
       - Добавлены кнопка «Показать еще (+N релизов)» с анимацией загрузки, селектор лимита карточек (24, 48, 96, 240) и счетчик новинок.
+
+  - **Блок 75 (Comprehensive Codebase Audit, End-to-End Test Harness & Pipeline Hardening):**
+    - **75.1. Аудит модуля Scanner (Покрытие 72.2%, цель >=70%):**
+      - Усиление изоляции файловой системы: в `scanner.go` внедрена проверка `sandbox.Resolve()` для защиты от symlink escape за пределы `MUSIC_DIR`.
+      - Исправление схемы БД: в таблице `missing_tracks` обнаружено отсутствие колонки `updated_at`, вызывавшее тихие ошибки SQLite при вставках; добавлена колонка и автоматическая миграция `ALTER TABLE missing_tracks ADD COLUMN updated_at DATETIME`.
+      - Модульные тесты (`scanner_test.go`): `TestScanner_RemoveFile`, `TestScanner_SymlinkEscape`, `TestScanner_EmptyAlbumFolder`, `TestScanner_Concurrent`, `TestScanner_DeleteMissingFiles`, `TestScanner_CheckIncompleteAlbums_MockDeezer`.
+    - **75.2. Аудит модуля Radar (Покрытие 77.4%, цель >=75%):**
+      - Валидация входных данных: обязательные поля `ReleaseType` и `SourceURL` при вставке в SQLite.
+      - Потокобезопасность и защита от повторного запуска: верифицирована блокировка параллельных сканирований `ScanAll`.
+      - Модульные тесты (`radar_test.go`): `TestRadar_GetRadarFeed_ExcludesDownloadedAndInLibrary`, `TestRadar_MultiArtist_Deduplication`, `TestRadar_Reconcile_RemovesExistingReleases`, `TestRadar_ValidationAndConcurrency`, `TestRadar_ScanArtist_AutoDownload`, `TestRadar_ScanAll_AlreadyRunning`.
+    - **75.3. Аудит модуля Resolver & Catalog Scoring (Покрытие 63.9%):**
+      - Улучшение регулярного выражения `deluxeRemasterRegex` в `discography_aggregator.go` для точного распознавания префиксных модификаторов (например, `(20th Anniversary Edition)`).
+      - Модульные тесты (`catalog_score_test.go`, `discography_similarity_test.go`): `TestIsDeluxeOrRemaster`, `TestAggregator_MultiArtistName`, `TestDeezerClient_AdditionalMethods`, `TestDeduplicateReleases`, `TestComputeCatalogMatchScore_Ranking`.
+    - **75.4. Аудит модуля Organizer (Покрытие 81.0%, цель >=90% combined):**
+      - Тестирование очистки пустых каталогов при реорганизации и санитизации спецсимволов.
+      - Проверка синхронизации сопутствующих файлов `.lrc` при переименовании и перемещении треков.
+      - Модульные тесты (`organizer_test.go`): `TestOrganizer_EmptyDirCleanup`, `TestOrganizer_RemoveIfEmpty`.
+    - **75.5. Аудит подсистемы Tag Audit Analyzer & Handlers:**
+      - Добавлена проверка `missing_album_artist` (TPE2) в чистую функцию анализа `analyzeTrackIssues` с безопасным авто-исправлением (`safe_autofix`).
+      - Изоляция селективного обновления треков в `FixSelectedTagIssues` по `track_id`.
+      - Модульные тесты (`tag_audit_analyzer_test.go`, `tag_audit_handlers_test.go`): `TestAnalyzeTrackIssues_MissingTPE2`, `TestCatalogMatchTrack_MockDeezer` (httptest.NewServer mock), `TestFixSelected_ByTrackID`, `TestFileHandler_FixSafeTagIssues`.
+    - **75.6. Аудит и стресс-тестирование Downloader Pipeline (Покрытие 57.4%, up from 34.2%):**
+      - Проверка инвариантов аудио: строгое соответствие аргументов ffmpeg `-b:a 320k -ar 44100 -codec:a libmp3lame -map_metadata -1`.
+      - Проверка изоляции задач в песочнице `tmp_downloads/{job_id}/` до подтверждения пользователем.
+      - Проверка дебаунса фоновой синхронизации `syncJob` (500 мс) и отсутствия утечек горутин в `startCleaner` при закрытии сервиса.
+      - Проверка доменного белого списка (включая `soundcloud.com` и `snd.sc`).
+      - Тесты (`downloader_test.go`, `media_processor_test.go`, `switch_version_test.go`, `pipeline_test.go`): `TestDomainWhitelist_SoundcloudIO`, `TestStartCleaner_NoLeakAfterClose`, `TestSyncJob_Debounce`, `TestJob_FilesInTmpDir`, `TestFfmpegArgs_320kbps`, `TestTranscodeToMP3_RealFFmpeg`, `TestDownloadCover`, `TestSwitchTrackVersion_Validation`, `TestProcessTracksPipeline_ZeroTracks`.
+    - **75.7. Интеграционное тестирование API на реальном сервере Chi (100% PASS):**
+      - Создан файл `internal/api/integration_test.go` с запуском `httptest.NewServer(router)` на реальном TCP-сокете:
+        - `TestIntegration_AuthFlow`: авторизация bcrypt, HMAC-SHA256 сессионная cookie `music_manager_session`, проверка доступа и логаут.
+        - `TestIntegration_PathTraversalBlocked`: строгая блокировка Path Traversal (`../../etc/passwd`) с ответом `403 Forbidden`.
+        - `TestIntegration_ScanAndSearch`: сквозной цикл индексации тестовых MP3-файлов сканером и полнотекстовый поиск по SQLite FTS.
+        - `TestIntegration_StreamRange`: воспроизведение по стандарту RFC 7233 (206 Partial Content, Range `bytes=0-1023`, заголовок `Content-Range`, `Accept-Ranges: bytes`, ETag).
+        - `TestIntegration_RadarReconcile`: фильтрация ленты Радара (исключение `downloaded` и `in_library` релизов).
+        - `TestIntegration_FullDownloadFlow`: создание задачи скачивания через POST `/downloads/`, опрос статуса через GET `/downloads/{id}`.
+    - **75.8. Внешний Playwright E2E-тестовый каркас (No-Build Frontend Assurance):**
+      - Создан изолированный тестовый модуль `scripts/playwright/` (`playwright.config.ts`, `audit.spec.ts`, `README.md`) без загрязнения корня репозитория `package.json` или `node_modules`.
+  - **Блок 76 (Advanced Test Suite, Service Hardening & SQLite WAL Concurrency Stress):**
+    - **76.1. Модуль текстов песен (`lyrics`, рост покрытия с 37.8% до 95.8%):**
+      - Введён интерфейс `LyricsProvider`, позволяющий подменять провайдеры текстов без нарушения сигнатуры конструктора `NewService`.
+      - В `LrclibClient` добавлен метод `SetBaseURL(baseURL string)` для мокирования HTTP API LRCLIB через `httptest.NewServer`.
+      - Реализованы тесты точного совпадения (`/api/get`) с валидацией `syncedLyrics` и `plainLyrics`, каскадного перехода на поиск (`/api/search`), обработки сетевых сбоев и ошибок 500.
+      - Проверена атомарная очистка альтернативных файлов при смене формата (`.lrc` <-> `.txt`) и блокировка Path Traversal в `GetLyrics`, `SaveLyrics`, `DeleteLyrics`.
+    - **76.2. Ядро аутентификации (`auth`, рост покрытия с 57.1% до 100.0%):**
+      - Полное матричное тестирование `auth.Middleware` по всем трём каналам: cookie `session_token`, заголовок `Authorization: Bearer <token>`, query-параметр `?token=...`.
+      - Проверено отклонение неавторизованных запросов (`401 Unauthorized`), токенов из будущего (> 300 сек), просроченных токенов (> 7 дней) и повреждённых подписей HMAC-SHA256.
+      - Верифицированы атрибуты безопасности `SetSessionCookie` (`HttpOnly`, `SameSite=Strict`, `MaxAge=604800`) и инвалидация сессии в `ClearSessionCookie` (`MaxAge=-1`).
+    - **76.3. Модуль Радио и стриминг ICY (`radio`, рост покрытия с 48.1% до 79.6%):**
+      - Создан файл `streamer_test.go` с генератором валидных синтетических фреймов MPEG 1 Layer 3 (320 kbps, 44.1 kHz, `0xFF 0xFB`).
+      - Протестирован полный жизненный цикл стриминга: стартовый burst-буфер 320 КБ, заголовок `icy-metaint: 16384`, инжекция блоков `StreamTitle='Artist - Title';` и нулевых байтов `\x00` при неизменном треке.
+      - Проверены обработка `HEAD`-запросов, чистый возврат `404 Not Found` при пустой медиатеке, валидация токена радиовещания и мгновенное завершение вещания при отмене контекста клиента (`r.Context().Done()`) без утечки горутин.
+      - Добавлены тесты `GeneratePlaylist` селектора волны, обработки ошибок Subsonic REST API и чтения базы Navidrome.
+    - **76.4. Тестирование HTTP-хэндлеров API (`internal/api/handlers`):**
+      - Создан `lyrics_handlers_test.go`: проверка эндпоинтов `GET /api/lyrics`, `POST /api/lyrics`, `DELETE /api/lyrics`, `GET /api/lyrics/search` и защита от path traversal.
+      - Расширен `radio_handlers_test.go`: проверка `GetNowPlaying` и `SyncNavidromeRadio` с моком Subsonic-сервера.
+      - Расширен `file_handlers_test.go`: тестирование `DeleteFile` для отдельных файлов и директорий со связной очисткой SQLite, `ListFiles` и блокировка обхода песочницы.
+    - **76.5. Стресс-тестирование конкурентности SQLite WAL (`concurrency_stress_test.go`):**
+      - Реализован стресс-тест `TestSQLite_HighConcurrencyWAL`: 50 параллельных горутин выполняют 500 смешанных операций (вставка/удаление задач загрузки, обновление прогресса, запись истории радио, выборка треков по хэшу, вставка радар-релизов, FTS-поиск и реконсиляция).
+      - Завершение за 1.5 сек. Результат: 0 ошибок `database is locked`, 0 гонок данных (-race) и полная согласованность транзакций.
 
 ---
 
