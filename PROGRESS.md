@@ -922,6 +922,22 @@
       - Добавлены модульные тесты `TestDB_PinnedSources` (удаление пинов) и `TestDownloader_DeletePinnedSource`.
       - `go test ./...` и `./scripts/test_user_flows.sh` — 100% PASS (0 data races во всех 24 пакетах).
 
+  - **Блок 83 (Deezer Metadata URL Clearing, SafeSearch Bypass & YouTube Fallback Resilience):**
+    - **83.1. Сброс мета-ссылок Deezer перед сопоставлением (`internal/features/downloader/service.go`):**
+      - Исправлен баг, при котором ссылки вида `deezer.com/track/...` не сбрасывались в `streamURL = ""` в `processSingleTrack`, из-за чего пропускались шаги проверки кэша и AudioMatcher, а ссылка Deezer напрямую передавалась в yt-dlp с ошибкой DRM.
+      - Добавлена очистка `streamURL = ""` при наличии `deezer.com` и фильтрация пинов с ссылками на Deezer.
+      - Синхронизировано обновление метаданных трека в `job.UpdateTrack` (`AudioSourceURL`, `VersionStatus`, `Candidates`).
+    - **83.2. Обход фильтрации SafeSearch YouTube в `FindYouTubeMatch` (`internal/services/resolver/matcher.go`):**
+      - Добавлены поисковые запросы по отдельным ключевым словам названия (`ytsearch10:%s %s`, `ytsearch10:%s %s %s`), что позволяет находить официальные клипы и аудио даже при блокировке поисковой фразы со строгими словами («STRIP CLUB», «ESCORT») анонимным клиентом yt-dlp.
+    - **83.3. Русскоязычные стоп-слова и приоритет официального канала (`internal/services/resolver/score.go`):**
+      - Расширен список `badKeywords`: добавлены «караоке», «минус», «минусовка», «концерт», «инструментал», «реакция», «кавер».
+      - Добавлена проверка названия канала `candidateChannel` на наличие стоп-слов (отсекает любительские каналы караоке).
+      - Добавлен приоритетный бонус (+15) для официального канала артиста и клиповых релизов.
+    - **83.4. Тестирование и развертывание:**
+      - Добавлен юнит-тест `TestDownloader_DeezerURL_IgnoredAndResolved`.
+      - Все тесты `go test ./...` и `./scripts/test_user_flows.sh` — 100% PASS.
+      - Обновление развернуто на Сервере 2 (`13.143.193.207`), трек `Neverlove — KINGS OF STRIP CLUB` успешно дозагружен со статусом `READY` (100%).
+
 ---
 
 ## 4. Верификация и Продакшен-Деплой
@@ -936,17 +952,16 @@
    ```
    **Результат:** 100% PASS, 0 race conditions во всех пакетах.
 
-3. **Развертывание на боевых серверах (коммиты `00d8afa`, `5ec223c`, `1889b1b`):**
+3. **Развертывание на боевых серверах:**
    - **Сервер 1 (`nl_music`):** `https://musicdownloader.verymad.net/`
-     - Git: актуализирован до `main`.
-     - Бинарный файл: синхронизирован в `/opt/music-manager/bin/music-manager`.
-     - Сервис: `systemctl restart music-manager.service` (active/running).
-     - Проверка эндпоинтов: `/api/health` — `200 OK`.
+     - Сервер не затрагивался согласно указанию пользователя.
    - **Сервер 2:** `https://mymusicdownload.verymad.net/`
-     - Git: актуализирован до `main`.
-     - Бинарный файл: синхронизирован в `/root/music_service/bin/music-manager`.
+     - Git: актуализирован до `main` (`b011c99`).
+     - Бинарный файл: скомпилирован и синхронизирован в `/root/music_service/bin/music-manager`.
      - Сервис: `systemctl restart music-manager.service` (active/running).
      - Проверка эндпоинтов: `/api/health` — `200 OK`.
+     - Проверка задачи: `Neverlove — KINGS OF STRIP CLUB` — успешно скачан (`READY`, 100%).
+
 
 
 
