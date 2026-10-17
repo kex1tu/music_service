@@ -245,13 +245,25 @@ function puddletagWorkstationComponent() {
         },
 
         init() {
-            // Перехват глобальной комбинации клавиш Ctrl+S / Cmd+S
+            // Перехват глобальной комбинации клавиш Ctrl+S / Cmd+S и Delete
             window.addEventListener('keydown', (e) => {
                 if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
                     // Если активна вкладка файлов или открыто модальное окно Puddletag
                     if (Alpine.store('app').activeTab === 'files' || Alpine.store('app').activeModal === 'tag_editor') {
                         e.preventDefault();
                         this.saveAllChanges();
+                    }
+                } else if (e.key === 'Delete' || e.key === 'Del') {
+                    // Удаление выбранных файлов клавишей Delete при активной вкладке файлов
+                    const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+                    if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') {
+                        const app = Alpine.store('app');
+                        if (app && app.activeTab === 'files' && !app.activeModal) {
+                            if (this.selectedIndices && this.selectedIndices.length > 0) {
+                                e.preventDefault();
+                                this.promptDeleteSelected();
+                            }
+                        }
                     }
                 }
             });
@@ -1337,6 +1349,86 @@ function puddletagWorkstationComponent() {
                 if (Alpine.store('app') && Alpine.store('app').toast) {
                     Alpine.store('app').toast('Не удалось отключить MusicBrainz', 'error');
                 }
+            }
+        },
+
+        // ==================== УДАЛЕНИЕ ФАЙЛОВ И ПАПОК ====================
+
+        promptDeleteTrack(track) {
+            if (!track || !track.path) return;
+            const displayName = (track.artist && track.title) ? `${track.artist} - ${track.title}` : (track.name || track.path);
+            const app = Alpine.store('app');
+            if (app) {
+                app.deleteConfirmData = {
+                    name: displayName,
+                    path: track.path,
+                    type: 'file',
+                    onDeleted: async () => {
+                        await this.loadDirectory(this.currentPath);
+                    }
+                };
+                app.activeModal = 'delete_confirm';
+            }
+        },
+
+        promptDeleteDirectory(dir) {
+            if (!dir || !dir.path) return;
+            const app = Alpine.store('app');
+            if (app) {
+                app.deleteConfirmData = {
+                    name: dir.name || dir.path,
+                    path: dir.path,
+                    type: 'directory',
+                    onDeleted: async () => {
+                        await this.loadDirectory(this.currentPath);
+                    }
+                };
+                app.activeModal = 'delete_confirm';
+            }
+        },
+
+        promptDeleteCurrentFolder() {
+            if (!this.currentPath) return;
+            const app = Alpine.store('app');
+            if (app) {
+                const folderName = this.currentPath.split('/').pop() || this.currentPath;
+                app.deleteConfirmData = {
+                    name: folderName,
+                    path: this.currentPath,
+                    type: 'directory',
+                    onDeleted: async () => {
+                        const target = this.parentPath || '';
+                        await this.loadDirectory(target);
+                    }
+                };
+                app.activeModal = 'delete_confirm';
+            }
+        },
+
+        promptDeleteSelected() {
+            if (!this.selectedIndices || this.selectedIndices.length === 0) {
+                const app = Alpine.store('app');
+                if (app && app.toast) {
+                    app.toast('Нет выбранных треков для удаления', 'warning');
+                }
+                return;
+            }
+            const paths = this.selectedIndices.map(i => this.tracks[i] && this.tracks[i].path).filter(Boolean);
+            if (paths.length === 0) return;
+
+            const app = Alpine.store('app');
+            if (app) {
+                app.deleteConfirmData = {
+                    name: `${paths.length} выбранных треков`,
+                    paths: paths,
+                    type: 'batch',
+                    onDeleted: async () => {
+                        this.selectedIndices = [];
+                        this._selectedSet = new Set();
+                        await this.loadDirectory(this.currentPath);
+                    }
+                };
+                app.activeModal = 'delete_confirm';
             }
         },
 

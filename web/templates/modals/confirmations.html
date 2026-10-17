@@ -21,9 +21,18 @@
             <p class="text-xs text-content-secondary leading-relaxed">
                 Вы уверены, что хотите удалить:
                 <br>
+                <template x-if="$store.app.deleteConfirmData && $store.app.deleteConfirmData.type === 'directory'">
+                    <span class="text-amber-400 font-semibold">[Папка / Альбом] </span>
+                </template>
+                <template x-if="$store.app.deleteConfirmData && $store.app.deleteConfirmData.type === 'batch'">
+                    <span class="text-amber-400 font-semibold">[Выбранные треки] </span>
+                </template>
+                <template x-if="$store.app.deleteConfirmData && $store.app.deleteConfirmData.type === 'file'">
+                    <span class="text-sky-400 font-semibold">[Трек] </span>
+                </template>
                 <strong class="text-content-primary font-mono" x-text="$store.app.deleteConfirmData ? $store.app.deleteConfirmData.name : ''"></strong>?
                 <br>
-                <span class="text-red-400 text-[11px]">Это действие необратимо.</span>
+                <span class="text-red-400 text-[11px]">Это действие необратимо удалит файлы с диска.</span>
             </p>
 
             <div class="pt-2 flex justify-end space-x-3">

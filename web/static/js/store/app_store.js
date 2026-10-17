@@ -55,14 +55,32 @@ document.addEventListener('alpine:init', () => {
             const item = this.deleteConfirmData;
             if (!item) return;
             try {
-                if (window.api && window.api.files) {
-                    await window.api.files.delete(item.path);
-                } else {
-                    const res = await fetch(`/files?path=${encodeURIComponent(item.path)}`, { method: 'DELETE' });
-                    if (!res.ok) {
-                        const err = await res.json().catch(() => ({}));
-                        throw new Error(err.error || err.detail || err.message || 'Сбой при удалении');
+                if (item.paths && Array.isArray(item.paths) && item.paths.length > 0) {
+                    if (window.api && window.api.files) {
+                        await window.api.files.deleteBatch(item.paths);
+                    } else {
+                        const res = await fetch('/files', {
+                            method: 'DELETE',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ paths: item.paths })
+                        });
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            throw new Error(err.error || err.detail || err.message || 'Сбой при пакетном удалении');
+                        }
                     }
+                } else if (item.path) {
+                    if (window.api && window.api.files) {
+                        await window.api.files.delete(item.path);
+                    } else {
+                        const res = await fetch(`/files?path=${encodeURIComponent(item.path)}`, { method: 'DELETE' });
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            throw new Error(err.error || err.detail || err.message || 'Сбой при удалении');
+                        }
+                    }
+                } else {
+                    return;
                 }
                 this.toast(`Удалено: ${item.name}`, 'success');
                 this.activeModal = null;

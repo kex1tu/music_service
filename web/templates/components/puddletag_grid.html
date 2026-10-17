@@ -42,6 +42,7 @@
                     </th>
                     <th class="py-2.5 px-2 text-center w-14 font-mono" title="Текст песни">LRC</th>
                     <th class="py-2.5 px-3 min-w-[180px] font-mono text-content-muted">Имя файла</th>
+                    <th class="py-2.5 px-2 text-center w-10 font-mono text-content-muted" title="Удалить трек">Уд.</th>
                 </tr>
             </thead>
 
@@ -50,7 +51,7 @@
                 <!-- Пустое состояние или Просмотр подкаталогов -->
                 <template x-if="displayTracks.length === 0 && !isLoading">
                     <tr>
-                        <td colspan="14" class="py-10 px-4 text-center text-content-muted">
+                        <td colspan="15" class="py-10 px-4 text-center text-content-muted">
                             <!-- Если в текущей папке есть подкаталоги (например, в корне медиатеки) -->
                             <template x-if="directories && directories.length > 0">
                                 <div class="space-y-4 max-w-3xl mx-auto py-2">
@@ -83,23 +84,31 @@
                                     <!-- Сетка папок -->
                                     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 text-left pt-1 max-h-96 overflow-y-auto p-1">
                                         <template x-for="dir in visibleDirectories" :key="dir.path">
-                                            <button
-                                                type="button"
-                                                @click="navigateTo(dir.path)"
-                                                class="p-3 bg-surface-elevated hover:bg-surface-hover hover:border-brand/70 border border-surface-border rounded-xl flex items-center space-x-3 transition group active:scale-95 shadow-sm text-left">
-                                                <div class="w-9 h-9 rounded-lg bg-surface-input flex items-center justify-center text-amber-400 group-hover:scale-110 transition shrink-0">
-                                                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                                                        <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                                            <div class="p-3 bg-surface-elevated hover:bg-surface-hover hover:border-brand/70 border border-surface-border rounded-xl flex items-center space-x-3 transition group shadow-sm text-left">
+                                                <button
+                                                    type="button"
+                                                    @click="navigateTo(dir.path)"
+                                                    class="flex items-center space-x-3 flex-1 min-w-0 text-left active:scale-95 transition">
+                                                    <div class="w-9 h-9 rounded-lg bg-surface-input flex items-center justify-center text-amber-400 group-hover:scale-110 transition shrink-0">
+                                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                                                            <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                                                        </svg>
+                                                    </div>
+                                                    <div class="min-w-0 flex-1">
+                                                        <div class="font-bold text-content-primary group-hover:text-brand truncate text-xs" x-text="dir.name"></div>
+                                                        <div class="text-[11px] text-content-muted font-mono" x-text="dir.track_count !== undefined ? `${dir.track_count} треков` : 'Папка'"></div>
+                                                    </div>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    @click.stop="promptDeleteDirectory(dir)"
+                                                    title="Удалить папку"
+                                                    class="w-7 h-7 rounded-lg text-content-muted hover:text-red-400 hover:bg-red-500/15 flex items-center justify-center transition shrink-0">
+                                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                                        <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zm3.713-4.288Q11 16.426 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288"/>
                                                     </svg>
-                                                </div>
-                                                <div class="min-w-0 flex-1">
-                                                    <div class="font-bold text-content-primary group-hover:text-brand truncate text-xs" x-text="dir.name"></div>
-                                                    <div class="text-[11px] text-content-muted font-mono" x-text="dir.track_count !== undefined ? `${dir.track_count} треков` : 'Папка'"></div>
-                                                </div>
-                                                <svg class="w-4 h-4 text-content-muted group-hover:text-brand group-hover:translate-x-0.5 transition shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                                                    <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/>
-                                                </svg>
-                                            </button>
+                                                </button>
+                                            </div>
                                         </template>
                                     </div>
                                 </div>
@@ -325,6 +334,19 @@
 
                         <!-- Имя файла на диске -->
                         <td class="py-1.5 px-3 font-mono text-[11px] text-content-muted truncate max-w-xs" x-text="track.name"></td>
+
+                        <!-- Удаление трека -->
+                        <td class="py-1.5 px-2 text-center" @click.stop>
+                            <button
+                                type="button"
+                                @click="promptDeleteTrack(track)"
+                                title="Удалить трек с диска"
+                                class="w-6 h-6 rounded bg-surface-input hover:bg-red-500/20 text-content-muted hover:text-red-400 flex items-center justify-center transition border border-surface-border hover:border-red-500/40 shadow-sm mx-auto">
+                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zm3.713-4.288Q11 16.426 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288"/>
+                                </svg>
+                            </button>
+                        </td>
                     </tr>
                 </template>
             </tbody>

@@ -42,23 +42,35 @@ func (m *Module) ListFiles(w http.ResponseWriter, r *http.Request) {
 	httputil.RespondJSON(w, http.StatusOK, resp)
 }
 
-// DeleteFile обрабатывает DELETE /files, DELETE /api/files (удаление файла или директории).
+// DeleteFile обрабатывает DELETE /files, DELETE /api/files (удаление файла, директории или пакета файлов).
 func (m *Module) DeleteFile(w http.ResponseWriter, r *http.Request) {
 	relPath := httputil.QueryString(r, "path", "")
 	if relPath == "" {
 		relPath = httputil.QueryString(r, "file", "")
 	}
-	if relPath == "" {
-		var req struct {
-			Path string `json:"path"`
-		}
-		if err := httputil.DecodeJSON(r, &req); err == nil && req.Path != "" {
-			relPath = req.Path
-		}
+
+	var req DeleteRequest
+	if r.Body != nil && (relPath == "" || strings.Contains(r.Header.Get("Content-Type"), "json")) {
+		_ = httputil.DecodeJSON(r, &req)
+	}
+	if relPath == "" && req.Path != "" {
+		relPath = req.Path
 	}
 
+	// 1. Пакетное удаление путей
+	if len(req.Paths) > 0 {
+		res, err := m.service.DeleteBatch(r.Context(), req.Paths)
+		if err != nil {
+			httputil.RespondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		httputil.RespondJSON(w, http.StatusOK, res)
+		return
+	}
+
+	// 2. Одиночное удаление
 	if strings.TrimSpace(relPath) == "" {
-		httputil.RespondError(w, http.StatusBadRequest, "Параметр 'path' обязателен для удаления")
+		httputil.RespondError(w, http.StatusBadRequest, "Параметр 'path' или 'paths' обязателен для удаления")
 		return
 	}
 

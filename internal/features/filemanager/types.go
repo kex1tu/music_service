@@ -62,12 +62,20 @@ type RenameResponse struct {
 	AffectedTracks int      `json:"affected_tracks,omitempty"`
 }
 
-// DeleteResponse содержит результат удаления файла или каталога.
+// DeleteRequest содержит путь или список путей для удаления.
+type DeleteRequest struct {
+	Path  string   `json:"path,omitempty"`
+	Paths []string `json:"paths,omitempty"`
+}
+
+// DeleteResponse содержит результат удаления файла, каталога или пакета файлов.
 type DeleteResponse struct {
-	Success       bool   `json:"success"`
-	Message       string `json:"message"`
-	DeletedTracks int    `json:"deleted_tracks,omitempty"`
-	Path          string `json:"path"`
+	Success       bool     `json:"success"`
+	Message       string   `json:"message"`
+	DeletedTracks int      `json:"deleted_tracks,omitempty"`
+	Path          string   `json:"path,omitempty"`
+	DeletedPaths  []string `json:"deleted_paths,omitempty"`
+	FailedPaths   []string `json:"failed_paths,omitempty"`
 }
 
 // TrackMetadataResponse представляет полную информацию о треке для веб-плеера и клиентов.

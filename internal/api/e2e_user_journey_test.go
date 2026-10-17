@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -608,5 +609,120 @@ func TestUserJourney_FileManagerRootAndSubfoldersBrowsing(t *testing.T) {
 
 	if respRec.StatusCode != http.StatusOK {
 		t.Fatalf("ошибка рекурсивного запроса: ожидался 200 OK, получен %d", respRec.StatusCode)
+	}
+}
+
+// TestUserJourney_DeleteTrackFolderAndBatch:
+// Пользовательский сценарий удаления трека, альбома/папки и пакетного удаления:
+// 1. Удаление одиночного трека с диска и сопутствующего .lrc через DELETE /files?path=...
+// 2. Пакетное удаление нескольких выбранных треков через DELETE /files с JSON { "paths": [...] }
+// 3. Удаление всей папки альбома целиком со всеми файлами
+// 4. Попытка удаления корня (блокируется песочницей)
+func TestUserJourney_DeleteTrackFolderAndBatch(t *testing.T) {
+	it := setupIntegrationServer(t)
+	cookie := loginForCookie(t, it.server.URL)
+	client := it.server.Client()
+	ctx := context.Background()
+
+	// 1. Создаем структуру альбома с треками и текстом песни
+	albumDir := filepath.Join(it.musicSb.Root(), "The Prodigy - The Fat of the Land")
+	_ = os.MkdirAll(albumDir, 0755)
+	trk1 := filepath.Join(albumDir, "01. Smack My Bitch Up.mp3")
+	lrc1 := filepath.Join(albumDir, "01. Smack My Bitch Up.lrc")
+	trk2 := filepath.Join(albumDir, "02. Breathe.mp3")
+	trk3 := filepath.Join(albumDir, "03. Diesel Power.mp3")
+
+	_ = os.WriteFile(trk1, []byte("prodigy-audio-1"), 0644)
+	_ = os.WriteFile(lrc1, []byte("[00:05.00] Change my pitch up"), 0644)
+	_ = os.WriteFile(trk2, []byte("prodigy-audio-2"), 0644)
+	_ = os.WriteFile(trk3, []byte("prodigy-audio-3"), 0644)
+
+	_ = id3.WriteTags(trk1, id3.TrackTags{Title: "Smack My Bitch Up", Artist: "The Prodigy", Album: "The Fat of the Land"}, nil)
+	_ = id3.WriteTags(trk2, id3.TrackTags{Title: "Breathe", Artist: "The Prodigy", Album: "The Fat of the Land"}, nil)
+	_ = id3.WriteTags(trk3, id3.TrackTags{Title: "Diesel Power", Artist: "The Prodigy", Album: "The Fat of the Land"}, nil)
+
+	_, _ = it.scanner.ScanAll(ctx)
+
+	// Шаг 1: Удаление одного трека (Smack My Bitch Up)
+	delURL := fmt.Sprintf("%s/files?path=%s", it.server.URL, url.QueryEscape("The Prodigy - The Fat of the Land/01. Smack My Bitch Up.mp3"))
+	reqDel1, _ := http.NewRequest("DELETE", delURL, nil)
+	reqDel1.AddCookie(cookie)
+	respDel1, err := client.Do(reqDel1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respDel1.Body.Close()
+
+	if respDel1.StatusCode != http.StatusOK {
+		t.Fatalf("ожидался 200 OK при удалении трека, получен %d", respDel1.StatusCode)
+	}
+	if _, err := os.Stat(trk1); !os.IsNotExist(err) {
+		t.Errorf("трек 1 все еще существует на диске после удаления")
+	}
+	if _, err := os.Stat(lrc1); !os.IsNotExist(err) {
+		t.Errorf("сопутствующий .lrc все еще существует на диске после удаления")
+	}
+
+	// Шаг 2: Пакетное удаление треков (Breathe и Diesel Power)
+	batchPayload := map[string][]string{
+		"paths": {
+			"The Prodigy - The Fat of the Land/02. Breathe.mp3",
+			"The Prodigy - The Fat of the Land/03. Diesel Power.mp3",
+		},
+	}
+	bodyBytes, _ := json.Marshal(batchPayload)
+	reqBatch, _ := http.NewRequest("DELETE", it.server.URL+"/files", bytes.NewReader(bodyBytes))
+	reqBatch.Header.Set("Content-Type", "application/json")
+	reqBatch.AddCookie(cookie)
+	respBatch, err := client.Do(reqBatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respBatch.Body.Close()
+
+	if respBatch.StatusCode != http.StatusOK {
+		t.Fatalf("ожидался 200 OK при пакетном удалении, получен %d", respBatch.StatusCode)
+	}
+	if _, err := os.Stat(trk2); !os.IsNotExist(err) {
+		t.Errorf("трек 2 все еще существует после пакетного удаления")
+	}
+	if _, err := os.Stat(trk3); !os.IsNotExist(err) {
+		t.Errorf("трек 3 все еще существует после пакетного удаления")
+	}
+
+	// Шаг 3: Удаление целого альбома (директории)
+	newAlbum := filepath.Join(it.musicSb.Root(), "Nirvana - Nevermind")
+	_ = os.MkdirAll(newAlbum, 0755)
+	nirvTrk := filepath.Join(newAlbum, "01. Smells Like Teen Spirit.mp3")
+	_ = os.WriteFile(nirvTrk, []byte("nirvana-audio"), 0644)
+	_ = id3.WriteTags(nirvTrk, id3.TrackTags{Title: "Smells Like Teen Spirit", Artist: "Nirvana", Album: "Nevermind"}, nil)
+	_, _ = it.scanner.ScanAll(ctx)
+
+	delDirURL := fmt.Sprintf("%s/files?path=%s", it.server.URL, url.QueryEscape("Nirvana - Nevermind"))
+	reqDelDir, _ := http.NewRequest("DELETE", delDirURL, nil)
+	reqDelDir.AddCookie(cookie)
+	respDelDir, err := client.Do(reqDelDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respDelDir.Body.Close()
+
+	if respDelDir.StatusCode != http.StatusOK {
+		t.Fatalf("ожидался 200 OK при удалении папки альбома, получен %d", respDelDir.StatusCode)
+	}
+	if _, err := os.Stat(newAlbum); !os.IsNotExist(err) {
+		t.Errorf("папка альбома все еще существует после удаления")
+	}
+
+	// Шаг 4: Попытка удалить корень должна возвращать ошибку
+	reqDelRoot, _ := http.NewRequest("DELETE", it.server.URL+"/files?path=", nil)
+	reqDelRoot.AddCookie(cookie)
+	respDelRoot, err := client.Do(reqDelRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respDelRoot.Body.Close()
+	if respDelRoot.StatusCode == http.StatusOK {
+		t.Errorf("ожидалась ошибка при попытке удалить корень, получен 200 OK")
 	}
 }

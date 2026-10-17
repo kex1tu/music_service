@@ -522,6 +522,45 @@ func (s *Service) DeleteFile(ctx context.Context, relPath string) (*DeleteRespon
 		Message:       "Файл успешно удален",
 		DeletedTracks: int(deletedTracks),
 		Path:          relPath,
+		DeletedPaths:  []string{relPath},
+	}, nil
+}
+
+// DeleteBatch выполняет пакетное удаление файлов или каталогов.
+func (s *Service) DeleteBatch(ctx context.Context, relPaths []string) (*DeleteResponse, error) {
+	if len(relPaths) == 0 {
+		return nil, ErrInvalidPath
+	}
+
+	var totalDeletedTracks int
+	var deletedPaths []string
+	var failedPaths []string
+
+	for _, p := range relPaths {
+		res, err := s.DeleteFile(ctx, p)
+		if err != nil {
+			failedPaths = append(failedPaths, p)
+			continue
+		}
+		totalDeletedTracks += res.DeletedTracks
+		deletedPaths = append(deletedPaths, p)
+	}
+
+	if len(deletedPaths) == 0 && len(failedPaths) > 0 {
+		return nil, fmt.Errorf("failed to delete any paths: %v", failedPaths)
+	}
+
+	msg := fmt.Sprintf("Успешно удалено объектов: %d", len(deletedPaths))
+	if len(failedPaths) > 0 {
+		msg += fmt.Sprintf(" (сбоев: %d)", len(failedPaths))
+	}
+
+	return &DeleteResponse{
+		Success:       true,
+		Message:       msg,
+		DeletedTracks: totalDeletedTracks,
+		DeletedPaths:  deletedPaths,
+		FailedPaths:   failedPaths,
 	}, nil
 }
 

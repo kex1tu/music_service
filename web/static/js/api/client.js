@@ -145,6 +145,7 @@
         files: {
             list: (dir = '') => request(`/files${toQueryString({ dir })}`),
             delete: (path) => request(`/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
+            deleteBatch: (paths) => request('/files', { method: 'DELETE', body: { paths } }),
             rename: (oldPath, newPath) => request('/files/rename', { method: 'POST', body: { old_path: oldPath, new_path: newPath } }),
             reorganize: (payload) => request('/files/reorganize', { method: 'POST', body: payload }),
             search: (query) => request(`/files/search?query=${encodeURIComponent(query)}`),

@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 79 блоков задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js` и 100% тестов пройдены).
+- **Статус готовности:** **100% DONE** (Все 80 блоков задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js` и 100% тестов пройдены).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **Vertical Feature Slices**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 24 пакета зеленые).
@@ -863,6 +863,24 @@
       - Обновлены тесты `feature_test.go` в `internal/features/filemanager`: покрытие просмотра корня (`path=""`), подкаталогов, рекурсивного листинга и проверок безопасности песочницы.
       - В `internal/api/e2e_user_journey_test.go` добавлен сквозной тест `TestUserJourney_FileManagerRootAndSubfoldersBrowsing`.
       - `go test -race ./...` — 100% PASS (0 data races), `./scripts/test_user_flows.sh` — 100% PASS.
+
+  - **Блок 80 (Delete Functionality: Single Track, Album/Folder, and Batch Deletion):**
+    - **80.1. Бэкенд и поддержка пакетного удаления (`internal/features/filemanager`):**
+      - Расширен контракт `DELETE /files`: добавлена поддержка DTO `DeleteRequest` со списком путей (`paths: []string`), позволяющая выполнять удаление нескольких треков за один HTTP-запрос.
+      - В `Service` добавлен метод `DeleteBatch`: атомарная обработка путей с проверкой песочницы, очисткой сопутствующих файлов (`.lrc`, `.txt`, `.jpg`), удалением записей из SQLite (`tracks`, `track_genres`, `audit_issues`, `missing_tracks`) и удалением опустевших родительских директорий.
+      - В `internal/api/handlers/file_handlers.go` синхронизирована поддержка `paths` для обратной совместимости.
+    - **80.2. Интеграция API-клиента и хранилища (`api/client.js`, `app_store.js`):**
+      - В типизированный клиент `web/static/js/api/client.js` добавлен метод `api.files.deleteBatch(paths)`.
+      - В `app_store.js` метод `executeDeleteConfirm()` адаптирован для поддержки как одиночного удаления (`item.path`), так и пакетного (`item.paths`) с вызовом `deleteBatch` и обновлением интерфейса через `refresh-file-manager`.
+      - В модальном окне `modal_confirmations` (`web/templates/modals/confirmations.html`) добавлены бейджи типа удаляемого объекта: `[Трек]`, `[Папка / Альбом]` и `[Выбранные треки]`.
+    - **80.3. Пользовательский интерфейс Puddletag Workstation:**
+      - **Удаление отдельного трека:** в таблицу `puddletag_grid.html` добавлена колонка действий с кнопкой-корзиной (🗑️) на каждой строке трека.
+      - **Удаление папки/альбома:** на полосе подпапок (`file_manager.html`) и в карточках альбомов (`puddletag_grid.html`) добавлены кнопки удаления директории. При нахождении внутри альбома в тулбаре (`puddletag_toolbar.html`) отображается кнопка «Удалить папку».
+      - **Пакетное удаление:** в тулбар добавлена акцентная кнопка «Удалить (N)» при выборе треков чекбоксами, а также перехват клавиши `Delete` (Del) при активной таблице.
+    - **80.4. Тестирование и верификация:**
+      - В `feature_test.go` добавлены тесты пакетного удаления, удаления папки и валидации отказа при попытке удаления корня.
+      - В `e2e_user_journey_test.go` реализован сквозной сценарий `TestUserJourney_DeleteTrackFolderAndBatch`.
+      - Валидатор шаблонов `template_validator_test.go` подтвердил целостность всех `@click` вызовов и атрибутов `:key`.
 
 ---
 

@@ -406,14 +406,53 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 
 func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 	relPath := r.URL.Query().Get("path")
-	if relPath == "" && r.Body != nil {
-		var req struct {
-			Path string `json:"path"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-			relPath = req.Path
-		}
+	var req struct {
+		Path  string   `json:"path"`
+		Paths []string `json:"paths"`
 	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	if relPath == "" && req.Path != "" {
+		relPath = req.Path
+	}
+
+	if len(req.Paths) > 0 {
+		var deletedCount int
+		for _, p := range req.Paths {
+			if strings.TrimSpace(p) == "" {
+				continue
+			}
+			fPath, err := h.musicSandbox.Resolve(p, false)
+			if err != nil {
+				continue
+			}
+			st, err := os.Stat(fPath)
+			if err != nil {
+				continue
+			}
+			if st.IsDir() {
+				_ = os.RemoveAll(fPath)
+			} else {
+				_ = os.Remove(fPath)
+				ext := filepath.Ext(fPath)
+				base := strings.TrimSuffix(fPath, ext)
+				_ = os.Remove(base + ".lrc")
+				_ = os.Remove(base + ".txt")
+			}
+			cleanP := filepath.Clean(filepath.ToSlash(p))
+			_, _ = h.database.Conn().Exec("DELETE FROM tracks WHERE file_path = ?;", cleanP)
+			_, _ = h.database.Conn().Exec("DELETE FROM audit_issues WHERE file_path = ?;", cleanP)
+			deletedCount++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"deleted": deletedCount,
+		})
+		return
+	}
+
 	if relPath == "" {
 		http.Error(w, `{"error":"missing path parameter"}`, http.StatusBadRequest)
 		return

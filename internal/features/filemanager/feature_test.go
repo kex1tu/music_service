@@ -287,6 +287,45 @@ func TestFileManager_DeleteFile_AndCleanup(t *testing.T) {
 	if _, err := os.Stat(lrcAbs); !os.IsNotExist(err) {
 		t.Errorf("companion .lrc was not deleted")
 	}
+
+	// 2. Тестирование пакетного удаления треков
+	env.CreateDummyMP3("BatchDelete/01. TrackA.mp3", "TrackA", "Artist", "BatchDelete")
+	env.CreateDummyMP3("BatchDelete/02. TrackB.mp3", "TrackB", "Artist", "BatchDelete")
+	batchReq := filemanager.DeleteRequest{
+		Paths: []string{
+			"BatchDelete/01. TrackA.mp3",
+			"BatchDelete/02. TrackB.mp3",
+		},
+	}
+	respBatch := env.Do(env.NewRequest("DELETE", "/files", batchReq))
+	if respBatch.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for batch delete, got %d: %s", respBatch.StatusCode, string(env.ReadBody(respBatch)))
+	}
+	fA, _ := env.MusicSandbox.Resolve("BatchDelete/01. TrackA.mp3", false)
+	fB, _ := env.MusicSandbox.Resolve("BatchDelete/02. TrackB.mp3", false)
+	if _, err := os.Stat(fA); !os.IsNotExist(err) {
+		t.Errorf("batch file A still exists")
+	}
+	if _, err := os.Stat(fB); !os.IsNotExist(err) {
+		t.Errorf("batch file B still exists")
+	}
+
+	// 3. Тестирование удаления каталога / альбома
+	env.CreateDummyMP3("AlbumToDelete/01. Trk.mp3", "Trk", "Artist", "AlbumToDelete")
+	respDir := env.Do(env.NewRequest("DELETE", "/files?path="+url.QueryEscape("AlbumToDelete"), nil))
+	if respDir.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for directory delete, got %d: %s", respDir.StatusCode, string(env.ReadBody(respDir)))
+	}
+	dirAbs, _ := env.MusicSandbox.Resolve("AlbumToDelete", false)
+	if _, err := os.Stat(dirAbs); !os.IsNotExist(err) {
+		t.Errorf("deleted directory still exists on disk")
+	}
+
+	// 4. Попытка удалить корень должна быть заблокирована
+	respRoot := env.Do(env.NewRequest("DELETE", "/files?path=", nil))
+	if respRoot.StatusCode == http.StatusOK {
+		t.Errorf("expected error when trying to delete root directory, got 200 OK")
+	}
 }
 
 func TestFileManager_PathTraversal_Security(t *testing.T) {
