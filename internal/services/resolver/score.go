@@ -10,6 +10,7 @@ var badKeywords = []string{
 	"acoustic", "tutorial", "reaction", "speed up", "slowed",
 	"nightcore", "bass boosted", "8d", "clean", "radio edit",
 	"censored", "clean version", "tv edit", "censored version", "radio version",
+	"караоке", "кавер", "минус", "минусовка", "концерт", "инструментал", "инструментальная", "реакция", "трибьют",
 }
 
 var explicitKeywords = []string{
@@ -106,12 +107,16 @@ func (m *AudioMatcher) CalculateScore(targetTitle, targetArtist string, targetDu
 	candLower := strings.ToLower(candidateChannel)
 	if strings.HasSuffix(candLower, " - topic") || strings.HasSuffix(candLower, "- topic") {
 		score += 25.0 // Official YouTube Music track (uncut studio master)
-	} else if strings.Contains(candLower, "vevo") || strings.Contains(candLower, "official") {
+	} else if strings.Contains(candLower, "vevo") || strings.Contains(candLower, "official") || (tArt != "" && strings.Contains(candLower, tArt)) {
+		score += 15.0
+	}
+
+	rawCandLower := strings.ToLower(candidateTitle)
+	if strings.Contains(rawCandLower, "official music video") || strings.Contains(rawCandLower, "official audio") || strings.Contains(rawCandLower, "official video") {
 		score += 10.0
 	}
 
 	// 5. Explicit bonus (strict priority over clean / censored)
-	rawCandLower := strings.ToLower(candidateTitle)
 	rawTargetLower := strings.ToLower(targetTitle)
 	for _, ekw := range explicitKeywords {
 		if strings.Contains(rawCandLower, ekw) {
@@ -122,7 +127,7 @@ func (m *AudioMatcher) CalculateScore(targetTitle, targetArtist string, targetDu
 
 	// 6. Bad keywords penalty (censorship & unwanted versions)
 	for _, kw := range badKeywords {
-		if strings.Contains(rawCandLower, kw) && !strings.Contains(rawTargetLower, kw) {
+		if (strings.Contains(rawCandLower, kw) || strings.Contains(candLower, kw)) && !strings.Contains(rawTargetLower, kw) {
 			score -= 40.0
 			break
 		}
