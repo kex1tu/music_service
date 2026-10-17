@@ -41,10 +41,30 @@ type FileItem struct {
 	HasCover     bool     `json:"has_cover"`
 	HasLyrics    bool     `json:"has_lyrics,omitempty"`
 	LyricsStatus string   `json:"lyrics_status"`
-	ID           *string  `json:"id,omitempty"`
-	StreamURL    *string  `json:"stream_url,omitempty"`
-	TrackID      int64    `json:"track_id,omitempty"`
-	TrackHash    string   `json:"track_hash,omitempty"`
+	ID              *string  `json:"id,omitempty"`
+	StreamURL       *string  `json:"stream_url,omitempty"`
+	TrackID         int64    `json:"track_id,omitempty"`
+	TrackHash       string   `json:"track_hash,omitempty"`
+	DeezerID        string   `json:"deezer_id,omitempty"`
+	PinnedSourceURL string   `json:"pinned_source_url,omitempty"`
+	AlbumDeezerID   string   `json:"album_deezer_id,omitempty"`
+}
+
+// RedownloadRequest задает параметры повторной загрузки трека или альбома.
+type RedownloadRequest struct {
+	Path           string `json:"path"`
+	Type           string `json:"type,omitempty"` // "track" или "album"
+	DeleteExisting bool   `json:"delete_existing"`
+}
+
+// RedownloadResponse содержит результат инициации повторной загрузки.
+type RedownloadResponse struct {
+	Success   bool   `json:"success"`
+	Message   string `json:"message"`
+	JobID     string `json:"job_id,omitempty"`
+	SourceURL string `json:"source_url,omitempty"`
+	Deleted   bool   `json:"deleted"`
+	Type      string `json:"type"` // "track" или "album"
 }
 
 // RenameRequest задает параметры переименования или перемещения файла/каталога.

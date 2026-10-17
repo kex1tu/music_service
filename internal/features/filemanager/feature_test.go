@@ -1,6 +1,7 @@
 package filemanager_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -28,6 +29,37 @@ func (m *mockOrganizer) RenameFile(oldRel, newRel string) ([]string, error) {
 func (m *mockOrganizer) SyncCompanions(oldBaseRel, newBaseRel string) error {
 	return nil
 }
+
+type mockJobCreator struct {
+	createdURL string
+	createdJob string
+}
+
+func (m *mockJobCreator) CreateJob(ctx context.Context, rawURL, source string) (string, error) {
+	m.createdURL = rawURL
+	m.createdJob = "job-mock-uuid"
+	return "job-mock-uuid", nil
+}
+
+type mockSourceFinder struct {
+	trackURL string
+	albumURL string
+}
+
+func (m *mockSourceFinder) FindTrackURL(ctx context.Context, artist, title, album string, duration int) (string, error) {
+	if m.trackURL != "" {
+		return m.trackURL, nil
+	}
+	return "https://www.deezer.com/track/12345", nil
+}
+
+func (m *mockSourceFinder) FindAlbumURL(ctx context.Context, artist, album string) (string, error) {
+	if m.albumURL != "" {
+		return m.albumURL, nil
+	}
+	return "https://www.deezer.com/album/67890", nil
+}
+
 
 func setupFileManagerEnv(t *testing.T) (*testkit.TestEnv, *filemanager.Module) {
 	t.Helper()
@@ -419,3 +451,133 @@ func TestFileManager_ListLibraryTracks(t *testing.T) {
 		t.Errorf("expected 2 tracks, got %d", len(page.Tracks))
 	}
 }
+
+func setupFileManagerWithRedownloadEnv(t *testing.T, jobCreator *mockJobCreator, finder *mockSourceFinder) (*testkit.TestEnv, *filemanager.Module) {
+	t.Helper()
+	env := testkit.NewEnv(t)
+
+	repo := filemanager.NewRepository(env.DB.Conn())
+	svc := filemanager.NewService(filemanager.ServiceConfig{
+		MusicSandbox: env.MusicSandbox,
+		TmpSandbox:   env.TmpSandbox,
+		Repo:         repo,
+		JobCreator:   jobCreator,
+		SourceFinder: finder,
+	})
+
+	mod := filemanager.NewModule(svc)
+	r := chi.NewRouter()
+	authMiddleware := auth.Middleware(env.SecretKey)
+	r.Group(func(r chi.Router) {
+		r.Use(authMiddleware)
+		mod.RegisterRoutes(r)
+	})
+
+	env.Mount(r)
+	env.SetAuthUser("admin")
+
+	return env, mod
+}
+
+func TestFileManager_Redownload_Track(t *testing.T) {
+	jobCreator := &mockJobCreator{}
+	finder := &mockSourceFinder{}
+	env, _ := setupFileManagerWithRedownloadEnv(t, jobCreator, finder)
+
+	// Создаем тестовый файл на диске
+	env.CreateDummyMP3("Linkin Park/Meteora/01. Foreword.mp3", "Foreword", "Linkin Park", "Meteora")
+	// Заполняем базу
+	_, _ = env.DB.Conn().Exec("INSERT INTO artists (id, name, clean_name) VALUES (1, 'Linkin Park', 'linkin park')")
+	_, _ = env.DB.Conn().Exec("INSERT INTO albums (id, title, clean_title, artist_id, folder_path, deezer_id) VALUES (1, 'Meteora', 'meteora', 1, 'Linkin Park/Meteora', '1234')")
+	_, _ = env.DB.Conn().Exec(`
+		INSERT INTO tracks (id, album_id, artist_id, title, clean_title, file_path, file_hash, file_size, mtime, deezer_id)
+		VALUES (1, 1, 1, 'Foreword', 'foreword', 'Linkin Park/Meteora/01. Foreword.mp3', 'h1', 100, 100.0, '5678')
+	`)
+
+	// 1. Повторное скачивание с delete_existing: true
+	payload := map[string]interface{}{
+		"path":            "Linkin Park/Meteora/01. Foreword.mp3",
+		"delete_existing": true,
+	}
+	resp := env.PostJSON("/files/redownload", payload)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body: %s)", resp.StatusCode, env.ReadBody(resp))
+	}
+
+	var res filemanager.RedownloadResponse
+	if err := json.Unmarshal(env.ReadBody(resp), &res); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !res.Success {
+		t.Errorf("expected success true, got false")
+	}
+	if res.JobID != "job-mock-uuid" {
+		t.Errorf("expected jobID 'job-mock-uuid', got %q", res.JobID)
+	}
+	if !strings.Contains(res.SourceURL, "5678") {
+		t.Errorf("expected sourceURL to contain deezer track ID 5678, got %q", res.SourceURL)
+	}
+	if !res.Deleted {
+		t.Errorf("expected Deleted true, got false")
+	}
+
+	// Проверяем, что файл действительно удален с диска
+	fullPath, _ := env.MusicSandbox.Resolve("Linkin Park/Meteora/01. Foreword.mp3", false)
+	if _, err := os.Stat(fullPath); !os.IsNotExist(err) {
+		t.Errorf("expected file to be deleted from disk, but it still exists")
+	}
+}
+
+func TestFileManager_Redownload_Album(t *testing.T) {
+	jobCreator := &mockJobCreator{}
+	finder := &mockSourceFinder{}
+	env, _ := setupFileManagerWithRedownloadEnv(t, jobCreator, finder)
+
+	// Создаем тестовую директорию альбома
+	env.CreateDummyMP3("Queen/A Night at the Opera/01. Bohemian Rhapsody.mp3", "Bohemian Rhapsody", "Queen", "A Night at the Opera")
+	_, _ = env.DB.Conn().Exec("INSERT INTO artists (id, name, clean_name) VALUES (1, 'Queen', 'queen')")
+	_, _ = env.DB.Conn().Exec("INSERT INTO albums (id, title, clean_title, artist_id, folder_path, deezer_id) VALUES (1, 'A Night at the Opera', 'a night at the opera', 1, 'Queen/A Night at the Opera', '9999')")
+
+	// Повторное скачивание альбома
+	payload := map[string]interface{}{
+		"path":            "Queen/A Night at the Opera",
+		"type":            "album",
+		"delete_existing": true,
+	}
+	resp := env.PostJSON("/files/redownload", payload)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body: %s)", resp.StatusCode, env.ReadBody(resp))
+	}
+
+	var res filemanager.RedownloadResponse
+	if err := json.Unmarshal(env.ReadBody(resp), &res); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !res.Success {
+		t.Errorf("expected success true")
+	}
+	if !strings.Contains(res.SourceURL, "9999") {
+		t.Errorf("expected sourceURL to contain album deezer ID 9999, got %q", res.SourceURL)
+	}
+	if res.Type != "album" {
+		t.Errorf("expected type 'album', got %q", res.Type)
+	}
+}
+
+func TestFileManager_Redownload_PathTraversalSecurity(t *testing.T) {
+	jobCreator := &mockJobCreator{}
+	finder := &mockSourceFinder{}
+	env, _ := setupFileManagerWithRedownloadEnv(t, jobCreator, finder)
+
+	payload := map[string]interface{}{
+		"path":            "../../etc/passwd",
+		"delete_existing": false,
+	}
+	resp := env.PostJSON("/files/redownload", payload)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for path traversal, got %d", resp.StatusCode)
+	}
+}
+

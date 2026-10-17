@@ -234,6 +234,8 @@ func main() {
 		Repo:         fileManagerRepo,
 		Organizer:    &fileManagerOrganizerAdapter{sb: musicSandbox},
 		Scanner:      &fileManagerScannerAdapter{scanner: scannerService, sb: musicSandbox},
+		JobCreator:   &downloaderBackfillAdapter{svc: downloaderFeatureSvc},
+		SourceFinder: &fileManagerSourceFinder{deezer: deezerClient, matcher: audioMatcher},
 	})
 	fileManagerModule := featureFileManager.NewModule(fileManagerFeatureSvc)
 
@@ -442,5 +444,45 @@ func (a *fileManagerScannerAdapter) IndexFile(ctx context.Context, relPath strin
 func (a *fileManagerScannerAdapter) RemoveFile(ctx context.Context, relPath string) error {
 	return a.scanner.RemoveFile(relPath)
 }
+
+type fileManagerSourceFinder struct {
+	deezer  *resolver.DeezerClient
+	matcher *resolver.AudioMatcher
+}
+
+func (f *fileManagerSourceFinder) FindTrackURL(ctx context.Context, artist, title, album string, duration int) (string, error) {
+	if f.deezer != nil && (artist != "" || title != "") {
+		query := fmt.Sprintf(`artist:"%s" track:"%s"`, artist, title)
+		tracks, err := f.deezer.SearchTracks(ctx, query)
+		if err != nil || len(tracks) == 0 {
+			tracks, err = f.deezer.SearchTracks(ctx, fmt.Sprintf("%s %s", artist, title))
+		}
+		if err == nil && len(tracks) > 0 {
+			return fmt.Sprintf("https://www.deezer.com/track/%d", tracks[0].ID), nil
+		}
+	}
+	if f.matcher != nil && (title != "" || artist != "") {
+		ytURL, err := f.matcher.FindYouTubeMatch(ctx, title, artist, duration)
+		if err == nil && ytURL != "" {
+			return ytURL, nil
+		}
+	}
+	return "", fmt.Errorf("source not found for track %s - %s", artist, title)
+}
+
+func (f *fileManagerSourceFinder) FindAlbumURL(ctx context.Context, artist, album string) (string, error) {
+	if f.deezer != nil && (artist != "" || album != "") {
+		query := fmt.Sprintf(`artist:"%s" album:"%s"`, artist, album)
+		albums, err := f.deezer.SearchAlbums(ctx, query)
+		if err != nil || len(albums) == 0 {
+			albums, err = f.deezer.SearchAlbums(ctx, fmt.Sprintf("%s %s", artist, album))
+		}
+		if err == nil && len(albums) > 0 {
+			return fmt.Sprintf("https://www.deezer.com/album/%d", albums[0].ID), nil
+		}
+	}
+	return "", fmt.Errorf("source not found for album %s - %s", artist, album)
+}
+
 
 

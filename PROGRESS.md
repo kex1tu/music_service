@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 80 блоков задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js` и 100% тестов пройдены).
+- **Статус готовности:** **100% DONE** (Все 81 блок задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js` и 100% тестов пройдены).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **Vertical Feature Slices**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 24 пакета зеленые).
@@ -881,6 +881,29 @@
       - В `feature_test.go` добавлены тесты пакетного удаления, удаления папки и валидации отказа при попытке удаления корня.
       - В `e2e_user_journey_test.go` реализован сквозной сценарий `TestUserJourney_DeleteTrackFolderAndBatch`.
       - Валидатор шаблонов `template_validator_test.go` подтвердил целостность всех `@click` вызовов и атрибутов `:key`.
+
+  - **Блок 81 (Re-download Track & Release Functionality: Server Delete + Queue Enqueue):**
+    - **81.1. Бэкенд и интерфейсы повторного скачивания (`internal/features/filemanager`):**
+      - Введены интерфейсы `JobCreator` (`CreateJob(ctx, rawURL, source)`) и `SourceFinder` (`FindTrackURL`, `FindAlbumURL`).
+      - Разработаны DTO `RedownloadRequest` (`path`, `type`: "track"|"album", `delete_existing`: bool) и `RedownloadResponse`.
+      - В `Repository` добавлены методы `GetTrackDetailsForRedownload` и `GetAlbumDetailsForRedownload` с извлечением `deezer_id` и `pinned_source_url` для точного повторного скачивания треков и альбомов.
+      - В `Service.Redownload`: строгая валидация песочницы `PathSandbox`, детерминированное определение источника загрузки (прямой `pinned_source_url` -> `deezer_id` -> автоматический поиск в Deezer/YouTube через `SourceFinder`), условное удаление существующих файлов/папок с диска и БД (`delete_existing: true`), и постановка новой задачи в очередь через `JobCreator`.
+      - Зарегистрированы маршруты `POST /files/redownload` и `POST /api/files/redownload`.
+    - **81.2. Адаптеры интеграции (`cmd/server/main.go`, `internal/api/integration_test.go`):**
+      - Реализованы адаптеры `fileManagerSourceFinder` (интеграция с Deezer API и AudioMatcher) и связка с `downloaderFeatureSvc` в `main.go`.
+      - Подключен `FileManagerModule` в `setupIntegrationServer` для сквозных тестов API.
+    - **81.3. Пользовательский интерфейс Puddletag Workstation и модальные окна:**
+      - В `web/static/js/api/client.js` добавлен метод `api.files.redownload(path, type, deleteExisting)`.
+      - В `web/static/js/store/app_store.js` добавлены реактивное состояние `redownloadConfirmData` и метод `executeRedownloadConfirm()`.
+      - В `web/static/js/puddletag/puddletag_workstation.js` добавлены методы `promptRedownloadTrack`, `promptRedownloadDirectory` и `promptRedownloadCurrentFolder`.
+      - В таблицу треков `puddletag_grid.html` добавлена кнопка перекачивания (🔄) для каждого трека в колонке действий.
+      - В карточки папок/альбомов в сетке добавлена кнопка перекачивания релиза (🔄).
+      - В тулбар рабочей станции `puddletag_toolbar.html` добавлена кнопка «Перекачать» при просмотре содержимого папки/альбома.
+      - В `web/templates/modals/confirmations.html` добавлено модальное окно подтверждения перекачивания с чекбоксом «Удалить текущие файлы на сервере перед скачиванием» и понятным предупреждением.
+    - **81.4. Тестирование и верификация:**
+      - В `feature_test.go` добавлены юнит-тесты `TestFileManager_Redownload_Track`, `TestFileManager_Redownload_Album` и `TestFileManager_Redownload_PathTraversalSecurity`.
+      - В `internal/api/e2e_user_journey_test.go` реализован сквозной тест `TestUserJourney_RedownloadTrackAndRelease`.
+      - `./scripts/test_user_flows.sh` и `go test ./...` — 100% PASS.
 
 ---
 

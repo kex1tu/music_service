@@ -108,4 +108,76 @@
             </div>
         </div>
     </div>
+
+    <!-- ==================== МОДАЛЬНОЕ ОКНО: ПОДТВЕРЖДЕНИЕ ПЕРЕКАЧИВАНИЯ ==================== -->
+    <div
+        x-show="$store.app.activeModal === 'redownload_confirm'"
+        x-cloak
+        @click.self="$store.app.activeModal = null"
+        @keydown.escape.window="$store.app.activeModal = null"
+        class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
+        <div
+            @click.stop
+            class="bg-surface-panel border border-brand/40 rounded-2xl max-w-md w-full p-6 shadow-panel animate-scale-in space-y-4">
+            <div class="flex items-center space-x-3 text-brand">
+                <div class="w-10 h-10 rounded-xl bg-brand-muted flex items-center justify-center">
+                    <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6c0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6c0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4l-4-4v3z"/>
+                    </svg>
+                </div>
+                <h3 class="text-base font-bold text-content-primary">Повторное скачивание</h3>
+            </div>
+
+            <p class="text-xs text-content-secondary leading-relaxed">
+                Вы уверены, что хотите скачать заново:
+                <br>
+                <template x-if="$store.app.redownloadConfirmData && ($store.app.redownloadConfirmData.type === 'album' || $store.app.redownloadConfirmData.type === 'directory')">
+                    <span class="text-brand font-semibold">[Альбом / Релиз] </span>
+                </template>
+                <template x-if="$store.app.redownloadConfirmData && ($store.app.redownloadConfirmData.type === 'track' || $store.app.redownloadConfirmData.type === 'file')">
+                    <span class="text-sky-400 font-semibold">[Трек] </span>
+                </template>
+                <strong class="text-content-primary font-mono" x-text="$store.app.redownloadConfirmData ? $store.app.redownloadConfirmData.name : ''"></strong>?
+                <br>
+                <span class="text-content-muted text-[11px] block mt-1">
+                    Задача будет добавлена в очередь загрузчика со всеми тегами и обложкой.
+                </span>
+            </p>
+
+            <!-- Опция удаления с диска -->
+            <template x-if="$store.app.redownloadConfirmData">
+                <div class="p-3 bg-surface-input border border-surface-border rounded-xl">
+                    <label class="flex items-center space-x-2 text-xs text-content-primary cursor-pointer select-none">
+                        <input
+                            type="checkbox"
+                            x-model="$store.app.redownloadConfirmData.delete_existing"
+                            class="rounded bg-surface-elevated border-surface-border text-brand focus:ring-0 cursor-pointer w-4 h-4">
+                        <span class="font-medium text-amber-400">Удалить текущие файлы с сервера перед скачиванием</span>
+                    </label>
+                    <div class="text-[10px] text-content-muted ml-6 mt-0.5">
+                        Освободит место и удалит старые версии трека/релиза на диске
+                    </div>
+                </div>
+            </template>
+
+            <div class="pt-2 flex justify-end space-x-3">
+                <button
+                    type="button"
+                    @click="$store.app.activeModal = null"
+                    class="px-4 py-2 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-content-primary text-xs font-semibold rounded-lg transition border border-surface-border">
+                    Отмена
+                </button>
+                <button
+                    type="button"
+                    @click="$store.app.executeRedownloadConfirm()"
+                    class="px-5 py-2 bg-brand hover:bg-brand-hover text-white text-xs font-bold rounded-lg transition shadow-lg shadow-brand/20 flex items-center space-x-1.5 active:scale-95">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6c0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6c0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4l-4-4v3z"/>
+                    </svg>
+                    <span>Скачать заново</span>
+                </button>
+            </div>
+        </div>
+    </div>
 {{ end }}
+

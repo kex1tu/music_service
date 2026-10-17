@@ -726,3 +726,92 @@ func TestUserJourney_DeleteTrackFolderAndBatch(t *testing.T) {
 		t.Errorf("ожидалась ошибка при попытке удалить корень, получен 200 OK")
 	}
 }
+
+// TestUserJourney_RedownloadTrackAndRelease:
+// Пользовательский сценарий повторного скачивания трека и альбома:
+// 1. Повторное скачивание одиночного трека с удалением существующего файла и сопутствующего .lrc
+// 2. Повторное скачивание целого альбома с удалением существующей папки альбома
+// 3. Проверка постановки задачи в очередь и параметров ответа
+func TestUserJourney_RedownloadTrackAndRelease(t *testing.T) {
+	it := setupIntegrationServer(t)
+	cookie := loginForCookie(t, it.server.URL)
+	client := it.server.Client()
+	ctx := context.Background()
+
+	// 1. Подготавливаем файл трека на диске
+	albumDir := filepath.Join(it.musicSb.Root(), "Muse - Absolution")
+	_ = os.MkdirAll(albumDir, 0755)
+	trkPath := filepath.Join(albumDir, "01. Intro.mp3")
+	lrcPath := filepath.Join(albumDir, "01. Intro.lrc")
+	_ = os.WriteFile(trkPath, []byte("muse-intro-audio"), 0644)
+	_ = os.WriteFile(lrcPath, []byte("[00:01.00] Intro"), 0644)
+	_ = id3.WriteTags(trkPath, id3.TrackTags{Title: "Intro", Artist: "Muse", Album: "Absolution"}, nil)
+
+	_, _ = it.scanner.ScanAll(ctx)
+	// Добавляем deezer_id в tracks и albums
+	_, _ = it.database.Conn().Exec("UPDATE albums SET deezer_id = '8888' WHERE folder_path LIKE '%Absolution%'")
+	_, _ = it.database.Conn().Exec("UPDATE tracks SET deezer_id = '7777' WHERE file_path LIKE '%Intro.mp3'")
+
+	// Шаг 1: Повторное скачивание трека (POST /files/redownload)
+	bodyTrack, _ := json.Marshal(map[string]interface{}{
+		"path":            "Muse - Absolution/01. Intro.mp3",
+		"type":            "track",
+		"delete_existing": true,
+	})
+	reqTrk, _ := http.NewRequest("POST", it.server.URL+"/files/redownload", bytes.NewReader(bodyTrack))
+	reqTrk.Header.Set("Content-Type", "application/json")
+	reqTrk.AddCookie(cookie)
+	respTrk, err := client.Do(reqTrk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respTrk.Body.Close()
+
+	if respTrk.StatusCode != http.StatusOK {
+		t.Fatalf("ожидался 200 OK при повторном скачивании трека, получен %d", respTrk.StatusCode)
+	}
+
+	var resTrk map[string]interface{}
+	_ = json.NewDecoder(respTrk.Body).Decode(&resTrk)
+	if resTrk["success"] != true {
+		t.Errorf("expected success true, got %v", resTrk["success"])
+	}
+	if resTrk["deleted"] != true {
+		t.Errorf("expected deleted true, got %v", resTrk["deleted"])
+	}
+	if resTrk["type"] != "track" {
+		t.Errorf("expected type track, got %v", resTrk["type"])
+	}
+	// Проверяем удаление файла трека с диска
+	if _, err := os.Stat(trkPath); !os.IsNotExist(err) {
+		t.Errorf("файл трека все еще существует после redownload с delete_existing: true")
+	}
+
+	// Шаг 2: Повторное скачивание альбома
+	bodyAlbum, _ := json.Marshal(map[string]interface{}{
+		"path":            "Muse - Absolution",
+		"type":            "album",
+		"delete_existing": true,
+	})
+	reqAlb, _ := http.NewRequest("POST", it.server.URL+"/files/redownload", bytes.NewReader(bodyAlbum))
+	reqAlb.Header.Set("Content-Type", "application/json")
+	reqAlb.AddCookie(cookie)
+	respAlb, err := client.Do(reqAlb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respAlb.Body.Close()
+
+	if respAlb.StatusCode != http.StatusOK {
+		t.Fatalf("ожидался 200 OK при повторном скачивании альбома, получен %d", respAlb.StatusCode)
+	}
+	var resAlb map[string]interface{}
+	_ = json.NewDecoder(respAlb.Body).Decode(&resAlb)
+	if resAlb["type"] != "album" {
+		t.Errorf("expected type album, got %v", resAlb["type"])
+	}
+	if _, err := os.Stat(albumDir); !os.IsNotExist(err) {
+		t.Errorf("папка альбома все еще существует после redownload альбома")
+	}
+}
+

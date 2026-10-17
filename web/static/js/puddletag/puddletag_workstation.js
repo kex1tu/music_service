@@ -1432,6 +1432,62 @@ function puddletagWorkstationComponent() {
             }
         },
 
+        // ==================== ПОВТОРНОЕ СКАЧИВАНИЕ (REDOWNLOAD) ====================
+
+        promptRedownloadTrack(track) {
+            if (!track || !track.path) return;
+            const displayName = (track.artist && track.title) ? `${track.artist} - ${track.title}` : (track.name || track.path);
+            const app = Alpine.store('app');
+            if (app) {
+                app.redownloadConfirmData = {
+                    name: displayName,
+                    path: track.path,
+                    type: 'track',
+                    delete_existing: true,
+                    onSuccess: async () => {
+                        await this.loadDirectory(this.currentPath);
+                    }
+                };
+                app.activeModal = 'redownload_confirm';
+            }
+        },
+
+        promptRedownloadDirectory(dir) {
+            if (!dir || !dir.path) return;
+            const app = Alpine.store('app');
+            if (app) {
+                app.redownloadConfirmData = {
+                    name: dir.name || dir.path,
+                    path: dir.path,
+                    type: 'album',
+                    delete_existing: true,
+                    onSuccess: async () => {
+                        await this.loadDirectory(this.currentPath);
+                    }
+                };
+                app.activeModal = 'redownload_confirm';
+            }
+        },
+
+        promptRedownloadCurrentFolder() {
+            if (!this.currentPath) return;
+            const app = Alpine.store('app');
+            if (app) {
+                const folderName = this.currentPath.split('/').pop() || this.currentPath;
+                app.redownloadConfirmData = {
+                    name: folderName,
+                    path: this.currentPath,
+                    type: 'album',
+                    delete_existing: true,
+                    onSuccess: async () => {
+                        const target = this.parentPath || '';
+                        await this.loadDirectory(target);
+                    }
+                };
+                app.activeModal = 'redownload_confirm';
+            }
+        },
+
         // ==================== ВСПОМОГАТЕЛЬНЫЕ ФОРМАТТЕРЫ ====================
 
         formatDuration(seconds) {

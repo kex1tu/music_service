@@ -19,6 +19,7 @@ import (
 	"music-manager/internal/core/auth"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
+	featureFileManager "music-manager/internal/features/filemanager"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/downloader"
 	"music-manager/internal/services/lyrics"
@@ -107,14 +108,27 @@ func setupIntegrationServer(t *testing.T) *integrationContext {
 	lyrHandler := handlers.NewLyricsHandler(lyrSvc)
 	radarHandler := handlers.NewRadarHandler(radarSvc, database)
 
+	fileManagerRepo := featureFileManager.NewRepository(database.Conn())
+	fileManagerSvc := featureFileManager.NewService(featureFileManager.ServiceConfig{
+		MusicSandbox: musicSb,
+		TmpSandbox:   tmpSb,
+		Repo:         fileManagerRepo,
+		Organizer:    &testFileManagerOrganizerAdapter{sb: musicSb},
+		Scanner:      &testFileManagerScannerAdapter{scanner: scannerSvc, sb: musicSb},
+		JobCreator:   &testFileManagerJobCreator{downSvc: downSvc},
+		SourceFinder: &testFileManagerSourceFinder{deezer: deezerClient},
+	})
+	fileManagerModule := featureFileManager.NewModule(fileManagerSvc)
+
 	router := NewRouter(RouterParams{
-		Config:          cfg,
-		AuthHandler:     authHandler,
-		DownloadHandler: downHandler,
-		TagHandler:      tagHandler,
-		FileHandler:     fileHandler,
-		LyricsHandler:   lyrHandler,
-		RadarHandler:    radarHandler,
+		Config:            cfg,
+		AuthHandler:       authHandler,
+		DownloadHandler:   downHandler,
+		TagHandler:        tagHandler,
+		FileHandler:       fileHandler,
+		FileManagerModule: fileManagerModule,
+		LyricsHandler:     lyrHandler,
+		RadarHandler:      radarHandler,
 	})
 
 	server := httptest.NewServer(router)
@@ -545,3 +559,82 @@ func TestIntegration_FullDownloadFlow(t *testing.T) {
 		t.Errorf("expected non-empty status in job snapshot")
 	}
 }
+
+type testFileManagerOrganizerAdapter struct {
+	sb *sandbox.PathSandbox
+}
+
+func (a *testFileManagerOrganizerAdapter) RenameFile(oldRel, newRel string) ([]string, error) {
+	oldFull, err := a.sb.Resolve(oldRel, false)
+	if err != nil {
+		return nil, err
+	}
+	newFull, err := a.sb.Resolve(newRel, false)
+	if err != nil {
+		return nil, err
+	}
+	target, err := organizer.MoveTrackWithCompanions(oldFull, newFull, false)
+	if err != nil {
+		return nil, err
+	}
+	relTarget, _ := a.sb.ToRelative(target)
+	return []string{relTarget}, nil
+}
+
+func (a *testFileManagerOrganizerAdapter) SyncCompanions(oldBaseRel, newBaseRel string) error {
+	return nil
+}
+
+type testFileManagerScannerAdapter struct {
+	scanner *scanner.Scanner
+	sb      *sandbox.PathSandbox
+}
+
+func (a *testFileManagerScannerAdapter) IndexFile(ctx context.Context, relPath string) error {
+	full, err := a.sb.Resolve(relPath, false)
+	if err != nil {
+		return err
+	}
+	return a.scanner.IndexFile(full, relPath)
+}
+
+func (a *testFileManagerScannerAdapter) RemoveFile(ctx context.Context, relPath string) error {
+	return a.scanner.RemoveFile(relPath)
+}
+
+type testFileManagerJobCreator struct {
+	downSvc *downloader.Service
+}
+
+func (j *testFileManagerJobCreator) CreateJob(ctx context.Context, rawURL, source string) (string, error) {
+	job, err := j.downSvc.CreateJob(rawURL, source)
+	if err != nil {
+		return "", err
+	}
+	return job.ID, nil
+}
+
+type testFileManagerSourceFinder struct {
+	deezer *resolver.DeezerClient
+}
+
+func (f *testFileManagerSourceFinder) FindTrackURL(ctx context.Context, artist, title, album string, duration int) (string, error) {
+	if f.deezer != nil && (artist != "" || title != "") {
+		tracks, err := f.deezer.SearchTracks(ctx, fmt.Sprintf("%s %s", artist, title))
+		if err == nil && len(tracks) > 0 {
+			return fmt.Sprintf("https://www.deezer.com/track/%d", tracks[0].ID), nil
+		}
+	}
+	return "", fmt.Errorf("source not found for track %s - %s", artist, title)
+}
+
+func (f *testFileManagerSourceFinder) FindAlbumURL(ctx context.Context, artist, album string) (string, error) {
+	if f.deezer != nil && (artist != "" || album != "") {
+		albums, err := f.deezer.SearchAlbums(ctx, fmt.Sprintf("%s %s", artist, album))
+		if err == nil && len(albums) > 0 {
+			return fmt.Sprintf("https://www.deezer.com/album/%d", albums[0].ID), nil
+		}
+	}
+	return "", fmt.Errorf("source not found for album %s - %s", artist, album)
+}
+

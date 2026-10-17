@@ -13,6 +13,7 @@ document.addEventListener('alpine:init', () => {
 
         tagEditorData: null,
         deleteConfirmData: null,
+        redownloadConfirmData: null,
 
         // Подключаем менеджер очереди
         queue: null,
@@ -87,6 +88,47 @@ document.addEventListener('alpine:init', () => {
                 this.deleteConfirmData = null;
                 if (item.onDeleted && typeof item.onDeleted === 'function') {
                     await item.onDeleted();
+                }
+                window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
+            } catch (e) {
+                this.toast(`Ошибка: ${e.message}`, 'error');
+            }
+        },
+
+        async executeRedownloadConfirm() {
+            const item = this.redownloadConfirmData;
+            if (!item || !item.path) return;
+            try {
+                const payload = {
+                    path: item.path,
+                    type: item.type || 'track',
+                    delete_existing: item.delete_existing !== false,
+                };
+                let resData;
+                if (window.api && window.api.files && window.api.files.redownload) {
+                    resData = await window.api.files.redownload(payload);
+                } else {
+                    const res = await fetch('/files/redownload', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err.error || err.detail || err.message || 'Сбой при повторном скачивании');
+                    }
+                    resData = await res.json();
+                }
+
+                this.toast(resData.message || `Поставлено в очередь: ${item.name}`, 'success');
+                this.activeModal = null;
+                this.redownloadConfirmData = null;
+
+                if (this.queue && this.queue.fetchQueue) {
+                    await this.queue.fetchQueue();
+                }
+                if (item.onSuccess && typeof item.onSuccess === 'function') {
+                    await item.onSuccess(resData);
                 }
                 window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
             } catch (e) {

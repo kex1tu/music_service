@@ -148,6 +148,7 @@
             deleteBatch: (paths) => request('/files', { method: 'DELETE', body: { paths } }),
             rename: (oldPath, newPath) => request('/files/rename', { method: 'POST', body: { old_path: oldPath, new_path: newPath } }),
             reorganize: (payload) => request('/files/reorganize', { method: 'POST', body: payload }),
+            redownload: (payload) => request('/files/redownload', { method: 'POST', body: payload }),
             search: (query) => request(`/files/search?query=${encodeURIComponent(query)}`),
             streamTrackUrl: (id) => `/api/tracks/${encodeURIComponent(id)}/stream`,
             trackMetadata: (id) => request(`/api/tracks/${encodeURIComponent(id)}/metadata`),

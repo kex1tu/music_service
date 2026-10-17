@@ -36,6 +36,7 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 		r.Get("/search", m.SearchLibrary)
 		r.Post("/rename", m.RenameFile)
 		r.Post("/reorganize", m.ReorganizeLibrary)
+		r.Post("/redownload", m.Redownload)
 	})
 
 	// 2. Современные RESTful маршруты /api/files
@@ -43,6 +44,7 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 		r.Get("/", m.ListFiles)
 		r.Delete("/", m.DeleteFile)
 		r.Post("/rename", m.RenameFile)
+		r.Post("/redownload", m.Redownload)
 		r.Get("/search", m.SearchLibrary)
 	})
 

@@ -32,6 +32,8 @@ type Repository interface {
 	DeleteDirectoryRecords(ctx context.Context, dirRelPath string) (int64, error)
 	UpdateTrackPath(ctx context.Context, oldRelPath, newRelPath string) error
 	UpdateAlbumCoverStatus(ctx context.Context, folderPath string, hasCover bool) error
+	GetTrackDetailsForRedownload(ctx context.Context, relPath string) (artist, title, album, deezerID, pinnedURL string, duration int, albumDeezerID string, err error)
+	GetAlbumDetailsForRedownload(ctx context.Context, dirRelPath string) (artist, album, deezerID string, err error)
 }
 
 // SQLiteRepository реализует Repository поверх базы SQLite.
@@ -121,7 +123,10 @@ func (r *SQLiteRepository) GetTracksMetadataCache(ctx context.Context) (map[stri
 		COALESCE(t.bitrate, 320),
 		(t.has_embedded_cover OR al.has_cover), 
 		COALESCE(t.lyrics_status, 'none'),
-		COALESCE((SELECT GROUP_CONCAT(g.name, '\\') FROM track_genres tg JOIN genres g ON tg.genre_id = g.id WHERE tg.track_id = t.id), '')
+		COALESCE((SELECT GROUP_CONCAT(g.name, '\\') FROM track_genres tg JOIN genres g ON tg.genre_id = g.id WHERE tg.track_id = t.id), ''),
+		COALESCE(t.deezer_id, ''),
+		COALESCE(t.pinned_source_url, ''),
+		COALESCE(al.deezer_id, '')
 	FROM tracks t
 	LEFT JOIN albums al ON t.album_id = al.id
 	LEFT JOIN artists ar ON t.artist_id = ar.id;
@@ -143,11 +148,13 @@ func (r *SQLiteRepository) GetTracksMetadataCache(ctx context.Context) (map[stri
 		var durVal sql.NullFloat64
 		var bit sql.NullInt64
 		var cov sql.NullBool
+		var dzID, pinnedURL, albDzID sql.NullString
 
 		if err := rows.Scan(
 			&fPath, &id, &fHash, &trkNum, &trkTot, &discNum, &discTot,
 			&title, &artist, &album, &albArtist, &yr,
 			&durVal, &bit, &cov, &lyrStatus, &genre,
+			&dzID, &pinnedURL, &albDzID,
 		); err != nil {
 			continue
 		}
@@ -195,6 +202,9 @@ func (r *SQLiteRepository) GetTracksMetadataCache(ctx context.Context) (map[stri
 		}
 		it.LyricsStatus = lyr
 		it.HasLyrics = lyr == "lrc" || lyr == "txt"
+		it.DeezerID = dzID.String
+		it.PinnedSourceURL = pinnedURL.String
+		it.AlbumDeezerID = albDzID.String
 
 		cache[cleanPath] = it
 	}
@@ -446,3 +456,61 @@ func (r *SQLiteRepository) UpdateAlbumCoverStatus(ctx context.Context, folderPat
 	_, err := r.db.ExecContext(ctx, "UPDATE albums SET has_cover = ? WHERE folder_path = ?", val, folderPath)
 	return err
 }
+
+// GetTrackDetailsForRedownload извлекает необходимые метаданные и идентификаторы трека для повторной загрузки.
+func (r *SQLiteRepository) GetTrackDetailsForRedownload(ctx context.Context, relPath string) (artist, title, album, deezerID, pinnedURL string, duration int, albumDeezerID string, err error) {
+	cleanRel := filepath.ToSlash(filepath.Clean(relPath))
+	query := `
+	SELECT 
+		COALESCE(ar.name, ''), 
+		COALESCE(t.title, ''), 
+		COALESCE(al.title, ''), 
+		COALESCE(t.deezer_id, ''), 
+		COALESCE(t.pinned_source_url, ''), 
+		COALESCE(t.duration, 0.0), 
+		COALESCE(al.deezer_id, '')
+	FROM tracks t
+	JOIN albums al ON t.album_id = al.id
+	JOIN artists ar ON t.artist_id = ar.id
+	WHERE t.file_path = ? OR t.file_path = ?
+	LIMIT 1;
+	`
+	var dur float64
+	row := r.db.QueryRowContext(ctx, query, cleanRel, relPath)
+	err = row.Scan(&artist, &title, &album, &deezerID, &pinnedURL, &dur, &albumDeezerID)
+	duration = int(dur)
+	return
+}
+
+// GetAlbumDetailsForRedownload извлекает метаданные и deezer_id альбома по пути к его директории.
+func (r *SQLiteRepository) GetAlbumDetailsForRedownload(ctx context.Context, dirRelPath string) (artist, album, deezerID string, err error) {
+	cleanRel := filepath.ToSlash(filepath.Clean(dirRelPath))
+	// 1. Попытка прямого сопоставления по folder_path альбома
+	query := `
+	SELECT COALESCE(ar.name, al.album_artist, ''), COALESCE(al.title, ''), COALESCE(al.deezer_id, '')
+	FROM albums al
+	JOIN artists ar ON al.artist_id = ar.id
+	WHERE al.folder_path = ? OR al.folder_path = ?
+	LIMIT 1;
+	`
+	row := r.db.QueryRowContext(ctx, query, cleanRel, dirRelPath)
+	err = row.Scan(&artist, &album, &deezerID)
+	if err == nil && (artist != "" || album != "") {
+		return artist, album, deezerID, nil
+	}
+
+	// 2. Фоллбэк: поиск трека внутри этой папки
+	prefix := cleanRel + "/%"
+	query2 := `
+	SELECT COALESCE(ar.name, ''), COALESCE(al.title, ''), COALESCE(al.deezer_id, '')
+	FROM tracks t
+	JOIN albums al ON t.album_id = al.id
+	JOIN artists ar ON t.artist_id = ar.id
+	WHERE t.file_path LIKE ?
+	LIMIT 1;
+	`
+	row2 := r.db.QueryRowContext(ctx, query2, prefix)
+	err = row2.Scan(&artist, &album, &deezerID)
+	return
+}
+

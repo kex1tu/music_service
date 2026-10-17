@@ -42,7 +42,7 @@
                     </th>
                     <th class="py-2.5 px-2 text-center w-14 font-mono" title="Текст песни">LRC</th>
                     <th class="py-2.5 px-3 min-w-[180px] font-mono text-content-muted">Имя файла</th>
-                    <th class="py-2.5 px-2 text-center w-10 font-mono text-content-muted" title="Удалить трек">Уд.</th>
+                    <th class="py-2.5 px-2 text-center w-16 font-mono text-content-muted" title="Действия над треком (Скачать заново / Удалить)">Действ.</th>
                 </tr>
             </thead>
 
@@ -98,6 +98,15 @@
                                                         <div class="font-bold text-content-primary group-hover:text-brand truncate text-xs" x-text="dir.name"></div>
                                                         <div class="text-[11px] text-content-muted font-mono" x-text="dir.track_count !== undefined ? `${dir.track_count} треков` : 'Папка'"></div>
                                                     </div>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    @click.stop="promptRedownloadDirectory(dir)"
+                                                    title="Скачать весь релиз/папку заново"
+                                                    class="w-7 h-7 rounded-lg text-content-muted hover:text-brand hover:bg-brand/15 flex items-center justify-center transition shrink-0 mr-1">
+                                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                                        <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6c0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6c0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4l-4-4v3z"/>
+                                                    </svg>
                                                 </button>
                                                 <button
                                                     type="button"
@@ -335,17 +344,28 @@
                         <!-- Имя файла на диске -->
                         <td class="py-1.5 px-3 font-mono text-[11px] text-content-muted truncate max-w-xs" x-text="track.name"></td>
 
-                        <!-- Удаление трека -->
+                        <!-- Действия над треком (Скачать заново / Удалить) -->
                         <td class="py-1.5 px-2 text-center" @click.stop>
-                            <button
-                                type="button"
-                                @click="promptDeleteTrack(track)"
-                                title="Удалить трек с диска"
-                                class="w-6 h-6 rounded bg-surface-input hover:bg-red-500/20 text-content-muted hover:text-red-400 flex items-center justify-center transition border border-surface-border hover:border-red-500/40 shadow-sm mx-auto">
-                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                                    <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zm3.713-4.288Q11 16.426 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288"/>
-                                </svg>
-                            </button>
+                            <div class="flex items-center justify-center space-x-1">
+                                <button
+                                    type="button"
+                                    @click="promptRedownloadTrack(track)"
+                                    title="Скачать трек заново (поставить в загрузки)"
+                                    class="w-6 h-6 rounded bg-surface-input hover:bg-brand/20 text-content-muted hover:text-brand flex items-center justify-center transition border border-surface-border hover:border-brand/40 shadow-sm">
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6c0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6c0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4l-4-4v3z"/>
+                                    </svg>
+                                </button>
+                                <button
+                                    type="button"
+                                    @click="promptDeleteTrack(track)"
+                                    title="Удалить трек с диска"
+                                    class="w-6 h-6 rounded bg-surface-input hover:bg-red-500/20 text-content-muted hover:text-red-400 flex items-center justify-center transition border border-surface-border hover:border-red-500/40 shadow-sm">
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zm3.713-4.288Q11 16.426 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288"/>
+                                    </svg>
+                                </button>
+                            </div>
                         </td>
                     </tr>
                 </template>

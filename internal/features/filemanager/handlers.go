@@ -281,3 +281,34 @@ func (m *Module) ReorganizeLibrary(w http.ResponseWriter, r *http.Request) {
 
 	httputil.RespondJSON(w, http.StatusOK, res)
 }
+
+// Redownload обрабатывает POST /files/redownload, POST /api/files/redownload (повторное скачивание трека или альбома).
+func (m *Module) Redownload(w http.ResponseWriter, r *http.Request) {
+	var req RedownloadRequest
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.RespondError(w, http.StatusBadRequest, "Некорректный JSON: "+err.Error())
+		return
+	}
+
+	if strings.TrimSpace(req.Path) == "" {
+		httputil.RespondError(w, http.StatusBadRequest, "Поле 'path' обязательно")
+		return
+	}
+
+	res, err := m.service.Redownload(r.Context(), req)
+	if err != nil {
+		if errors.Is(err, ErrSandboxViolation) || errors.Is(err, sandbox.ErrPathTraversal) {
+			httputil.RespondError(w, http.StatusForbidden, "Доступ запрещен (path traversal)")
+			return
+		}
+		if errors.Is(err, ErrInvalidPath) {
+			httputil.RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	httputil.RespondJSON(w, http.StatusOK, res)
+}
+
