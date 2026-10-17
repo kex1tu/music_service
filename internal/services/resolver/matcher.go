@@ -259,14 +259,23 @@ func (m *AudioMatcher) FindYouTubeMatch(ctx context.Context, title, artist strin
 		queries = append(queries, fmt.Sprintf("ytsearch5:%s %s Topic", cleanArt, cleanTitFull))
 	}
 	queries = append(queries,
-		fmt.Sprintf("ytsearch5:%s %s Audio", cleanArt, cleanTit),
-		fmt.Sprintf("ytsearch5:%s %s", cleanArt, cleanTit),
+		fmt.Sprintf("ytsearch10:%s %s Audio", cleanArt, cleanTit),
+		fmt.Sprintf("ytsearch10:%s %s", cleanArt, cleanTit),
 	)
 	for _, artVar := range TransliterateArtist(artist) {
 		cleanVar := CleanQueryText(artVar)
 		if cleanVar != "" && cleanVar != cleanArt {
 			queries = append(queries, fmt.Sprintf("ytsearch5:%s %s Topic", cleanVar, cleanTit))
 		}
+	}
+
+	// Фоллбэк запросы на случай фильтрации специфических слов в названии SafeSearch алгоритмами
+	words := strings.Fields(cleanTit)
+	if len(words) >= 2 {
+		queries = append(queries, fmt.Sprintf("ytsearch10:%s %s", cleanArt, words[0]))
+	}
+	if len(words) >= 3 {
+		queries = append(queries, fmt.Sprintf("ytsearch10:%s %s %s", cleanArt, words[0], words[1]))
 	}
 
 	var bestCandidate *YtCandidate
