@@ -15,23 +15,20 @@ document.addEventListener('alpine:init', () => {
         deleteConfirmData: null,
 
         // Подключаем менеджер очереди
-        queue: window.createQueueManager(),
+        queue: null,
 
         init() {
+            this.queue = window.createQueueManager();
+            Alpine.store('queue', this.queue);
             this.checkAuth();
             this.queue.init();
         },
 
         async checkAuth() {
             try {
-                const res = await fetch('/api/auth/me');
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.authenticated && data.login) {
-                        this.user = data.login;
-                    } else {
-                        this.user = null;
-                    }
+                const data = window.api ? await window.api.auth.me() : await fetch('/api/auth/me').then(r => r.json());
+                if (data && data.authenticated && data.login) {
+                    this.user = data.login;
                 } else {
                     this.user = null;
                 }
@@ -42,12 +39,41 @@ document.addEventListener('alpine:init', () => {
 
         async logout() {
             try {
-                await fetch('/logout', { method: 'POST' });
+                if (window.api) {
+                    await window.api.auth.logout();
+                } else {
+                    await fetch('/logout', { method: 'POST' });
+                }
             } catch (e) {
                 console.error('Ошибка выхода:', e);
             }
             this.user = null;
             this.toast('Вы вышли из системы', 'info');
+        },
+
+        async executeDeleteConfirm() {
+            const item = this.deleteConfirmData;
+            if (!item) return;
+            try {
+                if (window.api && window.api.files) {
+                    await window.api.files.delete(item.path);
+                } else {
+                    const res = await fetch(`/files?path=${encodeURIComponent(item.path)}`, { method: 'DELETE' });
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err.message || 'Сбой при удалении');
+                    }
+                }
+                this.toast(`Удалено: ${item.name}`, 'success');
+                this.activeModal = null;
+                this.deleteConfirmData = null;
+                if (item.onDeleted && typeof item.onDeleted === 'function') {
+                    await item.onDeleted();
+                }
+                window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
+            } catch (e) {
+                this.toast(`Ошибка: ${e.message}`, 'error');
+            }
         },
 
         toast(message, type = 'info') {

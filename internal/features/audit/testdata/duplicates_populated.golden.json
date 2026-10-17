@@ -1,0 +1,30 @@
+{
+  "groups": [
+    {
+      "album": "Album Dup",
+      "album_dir": "Artist Dup/Album Dup",
+      "artist": "Artist Dup",
+      "key": "Artist Dup/Album Dup::track one",
+      "title": "Track One",
+      "tracks": [
+        {
+          "bitrate": 320,
+          "duration": 0,
+          "filename": "01. Track One (1).mp3",
+          "modified_at": "2026-10-15T12:00:00Z",
+          "path": "Artist Dup/Album Dup/01. Track One (1).mp3",
+          "size_bytes": 5335
+        },
+        {
+          "bitrate": 320,
+          "duration": 0,
+          "filename": "01. Track One.mp3",
+          "modified_at": "2026-10-15T12:00:00Z",
+          "path": "Artist Dup/Album Dup/01. Track One.mp3",
+          "size_bytes": 5335
+        }
+      ]
+    }
+  ],
+  "total_duplicate_files": 1
+}

@@ -249,4 +249,19 @@ window.TagSelection = {
 
         Alpine.store('app').toast(`Исключено треков: ${count}`, 'info');
     },
+
+    /**
+     * Исключает одиночный трек по индексу.
+     */
+    removeTrack(index) {
+        if (index === undefined || index === null || index < 0 || index >= this.tracks.length) return;
+        this.tracks.splice(index, 1);
+        if (this.clearTrackSelection) {
+            this.clearTrackSelection();
+        }
+        if (this.buildReleasesFromTracks) {
+            this.buildReleasesFromTracks();
+        }
+        Alpine.store('app').toast('Трек исключен из сохранения', 'info');
+    },
 };

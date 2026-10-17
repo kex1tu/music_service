@@ -17,6 +17,12 @@ import (
 	"music-manager/internal/config"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
+	featureAudit "music-manager/internal/features/audit"
+	featureDownloader "music-manager/internal/features/downloader"
+	featureFileManager "music-manager/internal/features/filemanager"
+	featureRadar "music-manager/internal/features/radar"
+	featureRadio "music-manager/internal/features/radio"
+	featureTagEditor "music-manager/internal/features/tageditor"
 	"music-manager/internal/services/downloader"
 	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/organizer"
@@ -87,6 +93,23 @@ func main() {
 		cfg.MaxConcurrentDownloads,
 	)
 	defer downloadService.Close()
+
+	// Initialize Downloader Vertical Feature Slice
+	downloaderRepo := featureDownloader.NewRepository(database.Conn())
+	downloaderFeatureSvc := featureDownloader.NewService(featureDownloader.ServiceConfig{
+		Repo:          downloaderRepo,
+		Resolver:      sourceResolver,
+		Matcher:       audioMatcher,
+		TmpSandbox:    tmpSandbox,
+		MusicSandbox:  musicSandbox,
+		CookiesPath:   cfg.CookiesFile,
+		MaxConcurrent: cfg.MaxConcurrentDownloads,
+	})
+	if err := downloaderFeatureSvc.Start(appCtx); err != nil {
+		log.Printf("[Main] Warning: downloader vertical slice service failed to start: %v", err)
+	}
+	defer downloaderFeatureSvc.Close()
+	downloaderModule := featureDownloader.NewModule(downloaderFeatureSvc, deezerClient)
 
 	organizerService := organizer.NewService(musicSandbox, tmpSandbox)
 	lyricsService := lyrics.NewService(musicSandbox)
@@ -159,6 +182,61 @@ func main() {
 	})
 	lyricsHandler := handlers.NewLyricsHandler(lyricsService)
 
+	// Initialize Audit Vertical Feature Slice
+	auditRepo := featureAudit.NewRepository(database.Conn())
+	auditAdapter := &downloaderBackfillAdapter{svc: downloaderFeatureSvc}
+	auditFeatureSvc := featureAudit.NewService(featureAudit.ServiceConfig{
+		MusicSandbox:    musicSandbox,
+		TmpSandbox:      tmpSandbox,
+		Repo:            auditRepo,
+		DB:              database.Conn(),
+		JobStarter:      auditAdapter,
+		BackfillStarter: auditAdapter,
+		Organizer:       organizerService,
+		Scanner:         scannerService,
+		Lyrics:          lyricsService,
+		Enricher:        sourceResolver.Enricher(),
+		Deezer:          deezerClient,
+		Yandex:          yandexClient,
+		YTMusic:         ytmusicClient,
+		ITunes:          itunesClient,
+	})
+	defer auditFeatureSvc.Close()
+	auditModule := featureAudit.NewModule(auditFeatureSvc)
+
+	// Initialize TagEditor Vertical Feature Slice
+	tagRepo := featureTagEditor.NewRepository(database.Conn())
+	tagFeatureSvc := featureTagEditor.NewService(featureTagEditor.ServiceConfig{
+		MusicSandbox: musicSandbox,
+		TmpSandbox:   tmpSandbox,
+		Repo:         tagRepo,
+		Organizer:    organizerService,
+		Deezer:       deezerClient,
+		MusicBrainz:  mbClient,
+		Shazam:       shazamProvider,
+		Lyrics:       lyricsService,
+		Enricher:     sourceResolver.Enricher(),
+		TokenStore:   tagRepo,
+		MusicBrainzConf: featureTagEditor.MusicBrainzConfig{
+			ClientID:     cfg.MusicBrainzClientID,
+			ClientSecret: cfg.MusicBrainzClientSecret,
+			RedirectURI:  cfg.MusicBrainzRedirectURI,
+		},
+		RedirectURI: cfg.MusicBrainzRedirectURI,
+	})
+	tagEditorModule := featureTagEditor.NewModule(tagFeatureSvc)
+
+	// Initialize FileManager Vertical Feature Slice
+	fileManagerRepo := featureFileManager.NewRepository(database.Conn())
+	fileManagerFeatureSvc := featureFileManager.NewService(featureFileManager.ServiceConfig{
+		MusicSandbox: musicSandbox,
+		TmpSandbox:   tmpSandbox,
+		Repo:         fileManagerRepo,
+		Organizer:    &fileManagerOrganizerAdapter{sb: musicSandbox},
+		Scanner:      &fileManagerScannerAdapter{scanner: scannerService, sb: musicSandbox},
+	})
+	fileManagerModule := featureFileManager.NewModule(fileManagerFeatureSvc)
+
 	// 7. Initialize Radar & Radio Services
 	discographyAggregator := resolver.NewDiscographyAggregator(deezerClient, mbClient, itunesClient, database)
 	lastfmClient := resolver.NewLastfmClient(cfg.LastfmAPIKey)
@@ -204,16 +282,44 @@ func main() {
 	radarHandler := handlers.NewRadarHandler(radarService, database)
 	radioHandler := handlers.NewRadioHandler(waveSelector, icyStreamer, m3uGenerator, navidromeSubsonic, navidromeReader, database, cfg)
 
+	// Initialize Radio & Radar Vertical Feature Slices
+	radioRepo := featureRadio.NewRepository(database.Conn())
+	radioFeatureSvc := featureRadio.NewService(featureRadio.ServiceConfig{
+		Selector:         waveSelector,
+		Streamer:         icyStreamer,
+		M3U:              m3uGenerator,
+		Subsonic:         navidromeSubsonic,
+		NavidromeReader:  navidromeReader,
+		Repo:             radioRepo,
+		RadioStreamToken: cfg.RadioStreamToken,
+		SecretKey:        cfg.SecretKey,
+		RadioWaveSize:    cfg.RadioWaveSize,
+	})
+	radioModule := featureRadio.NewModule(radioFeatureSvc)
+
+	radarRepo := featureRadar.NewRepository(database.Conn())
+	radarFeatureSvc := featureRadar.NewService(featureRadar.ServiceConfig{
+		Repo:    radarRepo,
+		Scanner: radarService,
+	})
+	radarModule := featureRadar.NewModule(radarFeatureSvc)
+
 	// 8. Initialize Router
 	router := api.NewRouter(api.RouterParams{
-		Config:          cfg,
-		AuthHandler:     authHandler,
-		DownloadHandler: downloadHandler,
-		TagHandler:      tagHandler,
-		FileHandler:     fileHandler,
-		LyricsHandler:   lyricsHandler,
-		RadarHandler:    radarHandler,
-		RadioHandler:    radioHandler,
+		Config:            cfg,
+		AuthHandler:       authHandler,
+		DownloadHandler:   downloadHandler,
+		DownloaderModule:  downloaderModule,
+		AuditModule:       auditModule,
+		TagEditorModule:   tagEditorModule,
+		FileManagerModule: fileManagerModule,
+		RadioModule:       radioModule,
+		RadarModule:       radarModule,
+		TagHandler:        tagHandler,
+		FileHandler:       fileHandler,
+		LyricsHandler:     lyricsHandler,
+		RadarHandler:      radarHandler,
+		RadioHandler:      radioHandler,
 	})
 
 	// 9. Start HTTP Server
@@ -269,4 +375,72 @@ func (p *dbTokenPersistence) ClearTokens(ctx context.Context) error {
 	_ = p.db.DeleteSetting(ctx, "mb_username")
 	return nil
 }
+
+type downloaderBackfillAdapter struct {
+	svc *featureDownloader.Service
+}
+
+func (a *downloaderBackfillAdapter) CreateJob(ctx context.Context, rawURL, source string) (string, error) {
+	job, err := a.svc.CreateJob(ctx, rawURL, source)
+	if err != nil {
+		return "", err
+	}
+	return job.ID, nil
+}
+
+func (a *downloaderBackfillAdapter) CreateBackfillJob(
+	ctx context.Context,
+	targetAlbumPath, albumTitle, artistName, deezerAlbumID string,
+	trackURLs []string,
+	trackNumbers []int,
+) (string, error) {
+	job, err := a.svc.CreateBackfillJob(ctx, targetAlbumPath, albumTitle, artistName, deezerAlbumID, trackURLs, trackNumbers)
+	if err != nil {
+		return "", err
+	}
+	return job.ID, nil
+}
+
+type fileManagerOrganizerAdapter struct {
+	sb *sandbox.PathSandbox
+}
+
+func (a *fileManagerOrganizerAdapter) RenameFile(oldRel, newRel string) ([]string, error) {
+	oldFull, err := a.sb.Resolve(oldRel, false)
+	if err != nil {
+		return nil, err
+	}
+	newFull, err := a.sb.Resolve(newRel, false)
+	if err != nil {
+		return nil, err
+	}
+	target, err := organizer.MoveTrackWithCompanions(oldFull, newFull, false)
+	if err != nil {
+		return nil, err
+	}
+	relTarget, _ := a.sb.ToRelative(target)
+	return []string{relTarget}, nil
+}
+
+func (a *fileManagerOrganizerAdapter) SyncCompanions(oldBaseRel, newBaseRel string) error {
+	return nil
+}
+
+type fileManagerScannerAdapter struct {
+	scanner *scanner.Scanner
+	sb      *sandbox.PathSandbox
+}
+
+func (a *fileManagerScannerAdapter) IndexFile(ctx context.Context, relPath string) error {
+	full, err := a.sb.Resolve(relPath, false)
+	if err != nil {
+		return err
+	}
+	return a.scanner.IndexFile(full, relPath)
+}
+
+func (a *fileManagerScannerAdapter) RemoveFile(ctx context.Context, relPath string) error {
+	return a.scanner.RemoveFile(relPath)
+}
+
 

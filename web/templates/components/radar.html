@@ -105,7 +105,7 @@
                     { id: 'single', label: 'Синглы' },
                     { id: 'ep', label: 'EP' },
                     { id: 'compilation', label: 'Сборники' }
-                ]">
+                ]" :key="t.id">
                     <button
                         @click="$store.radar.feedType = t.id; $store.radar.fetchFeed(1)"
                         :class="$store.radar.feedType === t.id ? 'bg-brand text-white font-semibold' : 'bg-surface-input text-content-secondary hover:text-white'"
@@ -239,7 +239,7 @@
                 <div class="flex items-center space-x-2 text-xs text-content-muted">
                     <span>Показывать по:</span>
                     <div class="flex space-x-1">
-                        <template x-for="lim in [24, 48, 96, 240]">
+                        <template x-for="lim in [24, 48, 96, 240]" :key="lim">
                             <button
                                 @click="$store.radar.changeFeedLimit(lim)"
                                 :class="$store.radar.feedLimit === lim ? 'bg-brand text-white font-bold' : 'bg-surface-input text-content-secondary hover:text-white'"

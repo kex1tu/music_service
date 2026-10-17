@@ -11,18 +11,30 @@ import (
 	"music-manager/internal/api/handlers"
 	"music-manager/internal/config"
 	"music-manager/internal/core/auth"
+	featureAudit "music-manager/internal/features/audit"
+	"music-manager/internal/features/downloader"
+	featureFileManager "music-manager/internal/features/filemanager"
+	featureRadar "music-manager/internal/features/radar"
+	featureRadio "music-manager/internal/features/radio"
+	featureTagEditor "music-manager/internal/features/tageditor"
 	"music-manager/web"
 )
 
 type RouterParams struct {
-	Config          *config.Config
-	AuthHandler     *handlers.AuthHandler
-	DownloadHandler *handlers.DownloadHandler
-	TagHandler      *handlers.TagHandler
-	FileHandler     *handlers.FileHandler
-	LyricsHandler   *handlers.LyricsHandler
-	RadarHandler    *handlers.RadarHandler
-	RadioHandler    *handlers.RadioHandler
+	Config            *config.Config
+	AuthHandler       *handlers.AuthHandler
+	DownloadHandler   *handlers.DownloadHandler
+	DownloaderModule  *downloader.Module
+	AuditModule       *featureAudit.Module
+	TagEditorModule   *featureTagEditor.Module
+	FileManagerModule *featureFileManager.Module
+	RadioModule       *featureRadio.Module
+	RadarModule       *featureRadar.Module
+	TagHandler        *handlers.TagHandler
+	FileHandler       *handlers.FileHandler
+	LyricsHandler     *handlers.LyricsHandler
+	RadarHandler      *handlers.RadarHandler
+	RadioHandler      *handlers.RadioHandler
 }
 
 // NewRouter constructs and configures the main Chi HTTP router.
@@ -56,7 +68,11 @@ func NewRouter(p RouterParams) http.Handler {
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		// Автоматическая обработка callback, если в настройках MusicBrainz указан корневой URL
 		if r.URL.Query().Get("code") != "" {
-			p.TagHandler.MusicBrainzCallback(w, r)
+			if p.TagEditorModule != nil {
+				p.TagEditorModule.MusicBrainzCallback(w, r)
+			} else if p.TagHandler != nil {
+				p.TagHandler.MusicBrainzCallback(w, r)
+			}
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -87,82 +103,101 @@ func NewRouter(p RouterParams) http.Handler {
 	authMiddleware := auth.Middleware(p.Config.SecretKey)
 
 	// MusicBrainz OAuth Endpoints
-	r.Route("/api/auth/musicbrainz", func(r chi.Router) {
-		// Публичный callback для редиректа от musicbrainz.org
-		r.Get("/callback", p.TagHandler.MusicBrainzCallback)
+	if p.TagEditorModule != nil {
+		r.Get("/api/auth/musicbrainz/callback", p.TagEditorModule.MusicBrainzCallback)
+	} else if p.TagHandler != nil {
+		r.Route("/api/auth/musicbrainz", func(r chi.Router) {
+			// Публичный callback для редиректа от musicbrainz.org
+			r.Get("/callback", p.TagHandler.MusicBrainzCallback)
 
-		// Защищенные эндпоинты (требуют сессии администратора)
+			// Защищенные эндпоинты (требуют сессии администратора)
+			r.Group(func(r chi.Router) {
+				r.Use(authMiddleware)
+				r.Get("/login", p.TagHandler.MusicBrainzLogin)
+				r.Get("/status", p.TagHandler.MusicBrainzStatus)
+				r.Post("/disconnect", p.TagHandler.MusicBrainzDisconnect)
+			})
+		})
+	}
+
+	// Downloads API - Downloader Vertical Slice
+	if p.DownloaderModule != nil {
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware)
-			r.Get("/login", p.TagHandler.MusicBrainzLogin)
-			r.Get("/status", p.TagHandler.MusicBrainzStatus)
-			r.Post("/disconnect", p.TagHandler.MusicBrainzDisconnect)
+			p.DownloaderModule.RegisterRoutes(r)
 		})
-	})
+	} else if p.DownloadHandler != nil {
+		r.Route("/downloads", func(r chi.Router) {
+			r.Use(authMiddleware)
+			r.Post("/", p.DownloadHandler.CreateDownload)
+			r.Post("/batch", p.DownloadHandler.CreateBatchDownload)
+			r.Get("/discography", p.DownloadHandler.GetDiscography)
+			r.Post("/torrent", p.DownloadHandler.UploadTorrent)
+			r.Get("/", p.DownloadHandler.ListDownloads)
+			r.Get("/queue/summary", p.DownloadHandler.GetQueueSummary)
+			r.Post("/queue/clear", p.DownloadHandler.ClearQueue)
+			r.Delete("/completed", p.DownloadHandler.ClearCompleted)
+			r.Post("/clear-completed", p.DownloadHandler.ClearCompleted)
+			r.Post("/retry-failed", p.DownloadHandler.RetryAllFailed)
+			r.Post("/pause", p.DownloadHandler.PauseQueue)
+			r.Post("/resume", p.DownloadHandler.ResumeQueue)
+			r.Get("/{id}", p.DownloadHandler.GetDownload)
+			r.Delete("/{id}", p.DownloadHandler.DeleteDownload)
+			r.Post("/{id}/retry", p.DownloadHandler.RetryDownload)
+			r.Get("/{id}/tracks", p.DownloadHandler.GetDownloadTracks)
+			r.Post("/tracks/{trackId}/switch-version", p.DownloadHandler.SwitchTrackVersion)
+			r.Post("/tracks/{trackId}/bind-source", p.DownloadHandler.SwitchTrackVersion)
+			r.Get("/candidates", p.DownloadHandler.GetCandidates)
+			r.Get("/preview", p.DownloadHandler.PreviewAudio)
+			r.Post("/backfill/bind-source", p.DownloadHandler.BindBackfillSource)
+		})
 
-	// Downloads API
-	r.Route("/downloads", func(r chi.Router) {
-		r.Use(authMiddleware)
-		r.Post("/", p.DownloadHandler.CreateDownload)
-		r.Post("/batch", p.DownloadHandler.CreateBatchDownload)
-		r.Get("/discography", p.DownloadHandler.GetDiscography)
-		r.Post("/torrent", p.DownloadHandler.UploadTorrent)
-		r.Get("/", p.DownloadHandler.ListDownloads)
-		r.Get("/queue/summary", p.DownloadHandler.GetQueueSummary)
-		r.Post("/queue/clear", p.DownloadHandler.ClearQueue)
-		r.Delete("/completed", p.DownloadHandler.ClearCompleted)
-		r.Post("/clear-completed", p.DownloadHandler.ClearCompleted)
-		r.Post("/retry-failed", p.DownloadHandler.RetryAllFailed)
-		r.Post("/pause", p.DownloadHandler.PauseQueue)
-		r.Post("/resume", p.DownloadHandler.ResumeQueue)
-		r.Get("/{id}", p.DownloadHandler.GetDownload)
-		r.Delete("/{id}", p.DownloadHandler.DeleteDownload)
-		r.Post("/{id}/retry", p.DownloadHandler.RetryDownload)
-		r.Get("/{id}/tracks", p.DownloadHandler.GetDownloadTracks)
-		r.Post("/tracks/{trackId}/switch-version", p.DownloadHandler.SwitchTrackVersion)
-		r.Post("/tracks/{trackId}/bind-source", p.DownloadHandler.SwitchTrackVersion)
-		r.Get("/candidates", p.DownloadHandler.GetCandidates)
-		r.Get("/preview", p.DownloadHandler.PreviewAudio)
-		r.Post("/backfill/bind-source", p.DownloadHandler.BindBackfillSource)
-	})
+		r.Route("/api/downloads", func(r chi.Router) {
+			r.Use(authMiddleware)
+			r.Post("/tracks/{trackId}/switch-version", p.DownloadHandler.SwitchTrackVersion)
+			r.Post("/tracks/{trackId}/bind-source", p.DownloadHandler.SwitchTrackVersion)
+			r.Get("/candidates", p.DownloadHandler.GetCandidates)
+			r.Get("/preview", p.DownloadHandler.PreviewAudio)
+			r.Post("/backfill/bind-source", p.DownloadHandler.BindBackfillSource)
+		})
+	}
 
-	r.Route("/api/downloads", func(r chi.Router) {
-		r.Use(authMiddleware)
-		r.Post("/tracks/{trackId}/switch-version", p.DownloadHandler.SwitchTrackVersion)
-		r.Post("/tracks/{trackId}/bind-source", p.DownloadHandler.SwitchTrackVersion)
-		r.Get("/candidates", p.DownloadHandler.GetCandidates)
-		r.Get("/preview", p.DownloadHandler.PreviewAudio)
-		r.Post("/backfill/bind-source", p.DownloadHandler.BindBackfillSource)
-	})
+	// TagEditor API - TagEditor Vertical Slice
+	if p.TagEditorModule != nil {
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware)
+			p.TagEditorModule.RegisterRoutes(r)
+		})
+	} else if p.TagHandler != nil {
+		// Tags API
+		r.Route("/tags", func(r chi.Router) {
+			r.Use(authMiddleware)
+			r.Get("/", p.TagHandler.GetTags)
+			r.Post("/", p.TagHandler.SaveTags)
+			r.Post("/batch", p.TagHandler.BatchSaveTags)
+			r.Put("/batch", p.TagHandler.BatchSaveTags)
+			r.Post("/recognize-audio", p.TagHandler.RecognizeAudio)
+			r.Get("/cover", p.TagHandler.GetCover)
+			r.Get("/covers/search", p.TagHandler.SearchCovers)
+			r.Get("/search-deezer-albums", p.TagHandler.SearchDeezerAlbums)
+			r.Get("/deezer/albums", p.TagHandler.SearchDeezerAlbums)
+			r.Get("/deezer-album-details", p.TagHandler.GetDeezerAlbumDetails)
+			r.Get("/deezer/albums/{id}", p.TagHandler.GetDeezerAlbumDetails)
+			r.Get("/search-deezer-tracks", p.TagHandler.SearchDeezerTracks)
+			r.Get("/deezer/tracks", p.TagHandler.SearchDeezerTracks)
+			r.Get("/deezer-track-details", p.TagHandler.GetDeezerTrackDetails)
+			r.Get("/deezer/tracks/{id}", p.TagHandler.GetDeezerTrackDetails)
+		})
 
-	// Tags API
-	r.Route("/tags", func(r chi.Router) {
-		r.Use(authMiddleware)
-		r.Get("/", p.TagHandler.GetTags)
-		r.Post("/", p.TagHandler.SaveTags)
-		r.Post("/batch", p.TagHandler.BatchSaveTags)
-		r.Put("/batch", p.TagHandler.BatchSaveTags)
-		r.Post("/recognize-audio", p.TagHandler.RecognizeAudio)
-		r.Get("/cover", p.TagHandler.GetCover)
-		r.Get("/covers/search", p.TagHandler.SearchCovers)
-		r.Get("/search-deezer-albums", p.TagHandler.SearchDeezerAlbums)
-		r.Get("/deezer/albums", p.TagHandler.SearchDeezerAlbums)
-		r.Get("/deezer-album-details", p.TagHandler.GetDeezerAlbumDetails)
-		r.Get("/deezer/albums/{id}", p.TagHandler.GetDeezerAlbumDetails)
-		r.Get("/search-deezer-tracks", p.TagHandler.SearchDeezerTracks)
-		r.Get("/deezer/tracks", p.TagHandler.SearchDeezerTracks)
-		r.Get("/deezer-track-details", p.TagHandler.GetDeezerTrackDetails)
-		r.Get("/deezer/tracks/{id}", p.TagHandler.GetDeezerTrackDetails)
-	})
-
-	// Unified Catalog API (Multi-Source Tag Search: Deezer, MusicBrainz, Shazam)
-	r.Route("/api/catalog", func(r chi.Router) {
-		r.Use(authMiddleware)
-		r.Get("/search", p.TagHandler.SearchCatalog)
-		r.Get("/deezer/album/{id}", p.TagHandler.GetCatalogDeezerAlbum)
-		r.Get("/musicbrainz/release/{id}", p.TagHandler.GetCatalogMusicBrainzRelease)
-		r.Get("/shazam/track/{id}", p.TagHandler.GetCatalogShazamTrack)
-	})
+		// Unified Catalog API (Multi-Source Tag Search: Deezer, MusicBrainz, Shazam)
+		r.Route("/api/catalog", func(r chi.Router) {
+			r.Use(authMiddleware)
+			r.Get("/search", p.TagHandler.SearchCatalog)
+			r.Get("/deezer/album/{id}", p.TagHandler.GetCatalogDeezerAlbum)
+			r.Get("/musicbrainz/release/{id}", p.TagHandler.GetCatalogMusicBrainzRelease)
+			r.Get("/shazam/track/{id}", p.TagHandler.GetCatalogShazamTrack)
+		})
+	}
 
 	// Lyrics API
 	r.Route("/lyrics", func(r chi.Router) {
@@ -173,88 +208,97 @@ func NewRouter(p RouterParams) http.Handler {
 		r.Delete("/", p.LyricsHandler.DeleteLyrics)
 	})
 
-	// Tracks API (Audio Streaming with Range, Metadata, Covers)
-	r.Route("/api/tracks", func(r chi.Router) {
-		r.Use(authMiddleware)
-		r.Get("/{id}/stream", p.FileHandler.StreamTrack)
-		r.Get("/{id}/metadata", p.FileHandler.GetTrackMetadata)
-		r.Get("/{id}/cover", p.FileHandler.GetTrackCover)
-	})
-
-	// Library API & VPN Obfuscation Alias (xHTTP chunks)
-	r.Route("/api/library", func(r chi.Router) {
-		r.Use(authMiddleware)
-		r.Get("/tracks", p.FileHandler.ListLibraryTracks)
-		r.Get("/stream/{id}/chunks", p.FileHandler.StreamTrack)
-		r.Get("/stream/{id}/chunks/*", p.FileHandler.StreamTrack)
-	})
-
-	// Files API & Library Audit
-	r.Route("/files", func(r chi.Router) {
-		r.Use(authMiddleware)
-		r.Get("/", p.FileHandler.ListFiles)
-		r.Delete("/", p.FileHandler.DeleteFile)
-		r.Get("/stream", p.FileHandler.StreamAudio)
-		r.Get("/search", p.FileHandler.SearchLibrary)
-		r.Post("/rename-pattern", p.FileHandler.RenamePattern)
-
-		r.Route("/audit", func(r chi.Router) {
-			r.Get("/search", p.FileHandler.SearchLibrary)
-			r.Get("/summary", p.FileHandler.AuditSummary)
-			r.Post("/refresh", p.FileHandler.RefreshAudit)
-			r.Get("/invalid-paths", p.FileHandler.InvalidPaths)
-			r.Post("/fix-path", p.FileHandler.FixPath)
-			r.Post("/fix-all-paths", p.FileHandler.FixAllPaths)
-			r.Get("/missing-lyrics", p.FileHandler.MissingLyrics)
-			r.Post("/missing-lyrics/fetch-all", p.FileHandler.BatchLyricsFetch)
-			r.Get("/missing-lyrics/progress", p.FileHandler.BatchLyricsProgress)
-			r.Get("/missing-covers", p.FileHandler.MissingCovers)
-			r.Post("/missing-covers/backfill", p.FileHandler.BackfillAlbumCover)
-			r.Post("/missing-covers/backfill-all", p.FileHandler.BatchCoversBackfill)
-			r.Get("/missing-covers/progress", p.FileHandler.BatchCoversProgress)
-			r.Post("/missing-covers/cancel", p.FileHandler.CancelCoversBatch)
-			r.Post("/normalize-navidrome", p.FileHandler.NormalizeNavidrome)
-			r.Get("/duplicates", p.FileHandler.Duplicates)
-			r.Post("/duplicates/fix", p.FileHandler.FixDuplicates)
-			r.Post("/duplicates/fix-all", p.FileHandler.FixAllDuplicates)
-			r.Get("/non-en-genres", p.FileHandler.NonEnGenres)
-			r.Post("/retag-genres", p.FileHandler.RetagGenres)
-			r.Post("/reorganize", p.FileHandler.ReorganizeLibrary)
-			r.Get("/incomplete-albums", p.FileHandler.IncompleteAlbums)
-			r.Get("/incomplete-albums/catalog-match", p.FileHandler.CatalogMatch)
-			r.Get("/incomplete-albums/editor-data", p.FileHandler.BackfillEditorData)
-			r.Get("/incomplete-albums/backfill-editor-data", p.FileHandler.BackfillEditorData)
-			r.Post("/incomplete-albums/download-missing", p.FileHandler.DownloadMissing)
-			r.Get("/tag-issues", p.FileHandler.TagIssues)
-			r.Post("/tag-issues/fix", p.FileHandler.FixTagIssue)
-			r.Post("/tag-issues/fix-safe", p.FileHandler.FixSafeTagIssues)
-			r.Post("/tag-issues/fix-selected", p.FileHandler.FixSelectedTagIssues)
-			r.Post("/tag-issues/fix-all", p.FileHandler.FixAllTagIssues)
-			r.Get("/tag-issues/catalog-match", p.FileHandler.CatalogMatchTrack)
-			r.Get("/tag-issues/catalog-match-album", p.FileHandler.CatalogMatchAlbum)
-			r.Post("/tag-issues/apply-catalog", p.FileHandler.ApplyCatalogTags)
-			r.Post("/tag-issues/apply-catalog-album", p.FileHandler.ApplyCatalogAlbum)
+	// FileManager API - FileManager & Streaming Vertical Slice
+	if p.FileManagerModule != nil {
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware)
+			p.FileManagerModule.RegisterRoutes(r)
 		})
-	})
+	} else if p.FileHandler != nil {
+		// Tracks API (Audio Streaming with Range, Metadata, Covers)
+		r.Route("/api/tracks", func(r chi.Router) {
+			r.Use(authMiddleware)
+			r.Get("/{id}/stream", p.FileHandler.StreamTrack)
+			r.Get("/{id}/metadata", p.FileHandler.GetTrackMetadata)
+			r.Get("/{id}/cover", p.FileHandler.GetTrackCover)
+		})
 
-	// Public/Token-authorized ICY Radio Stream Endpoints (for VLC, Navidrome Radio, browser audio)
-	if p.RadioHandler != nil {
-		r.Route("/api/radio/stream", func(r chi.Router) {
-			r.Options("/*", p.RadioHandler.HandleStreamOptions)
-			r.Get("/now-playing", p.RadioHandler.GetNowPlaying)
-			r.Get("/wave", p.RadioHandler.StreamWave)
-			r.Head("/wave", p.RadioHandler.StreamWave)
-			r.Get("/wave.mp3", p.RadioHandler.StreamWave)
-			r.Head("/wave.mp3", p.RadioHandler.StreamWave)
-			r.Get("/genre/{name}", p.RadioHandler.StreamGenre)
-			r.Head("/genre/{name}", p.RadioHandler.StreamGenre)
-			r.Get("/artist/{name}", p.RadioHandler.StreamArtist)
-			r.Head("/artist/{name}", p.RadioHandler.StreamArtist)
+		// Library API & VPN Obfuscation Alias (xHTTP chunks)
+		r.Route("/api/library", func(r chi.Router) {
+			r.Use(authMiddleware)
+			r.Get("/tracks", p.FileHandler.ListLibraryTracks)
+			r.Get("/stream/{id}/chunks", p.FileHandler.StreamTrack)
+			r.Get("/stream/{id}/chunks/*", p.FileHandler.StreamTrack)
+		})
+
+		// Files API & Library Audit
+		r.Route("/files", func(r chi.Router) {
+			r.Use(authMiddleware)
+			r.Get("/", p.FileHandler.ListFiles)
+			r.Delete("/", p.FileHandler.DeleteFile)
+			r.Get("/stream", p.FileHandler.StreamAudio)
+			r.Get("/search", p.FileHandler.SearchLibrary)
+			if p.TagEditorModule == nil {
+				r.Post("/rename-pattern", p.FileHandler.RenamePattern)
+			}
+
+			if p.AuditModule == nil {
+				r.Route("/audit", func(r chi.Router) {
+					r.Get("/search", p.FileHandler.SearchLibrary)
+					r.Get("/summary", p.FileHandler.AuditSummary)
+					r.Post("/refresh", p.FileHandler.RefreshAudit)
+					r.Get("/invalid-paths", p.FileHandler.InvalidPaths)
+					r.Post("/fix-path", p.FileHandler.FixPath)
+					r.Post("/fix-all-paths", p.FileHandler.FixAllPaths)
+					r.Get("/missing-lyrics", p.FileHandler.MissingLyrics)
+					r.Post("/missing-lyrics/fetch-all", p.FileHandler.BatchLyricsFetch)
+					r.Get("/missing-lyrics/progress", p.FileHandler.BatchLyricsProgress)
+					r.Get("/missing-covers", p.FileHandler.MissingCovers)
+					r.Post("/missing-covers/backfill", p.FileHandler.BackfillAlbumCover)
+					r.Post("/missing-covers/backfill-all", p.FileHandler.BatchCoversBackfill)
+					r.Get("/missing-covers/progress", p.FileHandler.BatchCoversProgress)
+					r.Post("/missing-covers/cancel", p.FileHandler.CancelCoversBatch)
+					r.Post("/normalize-navidrome", p.FileHandler.NormalizeNavidrome)
+					r.Get("/duplicates", p.FileHandler.Duplicates)
+					r.Post("/duplicates/fix", p.FileHandler.FixDuplicates)
+					r.Post("/duplicates/fix-all", p.FileHandler.FixAllDuplicates)
+					r.Get("/non-en-genres", p.FileHandler.NonEnGenres)
+					r.Post("/retag-genres", p.FileHandler.RetagGenres)
+					r.Post("/reorganize", p.FileHandler.ReorganizeLibrary)
+					r.Get("/incomplete-albums", p.FileHandler.IncompleteAlbums)
+					r.Get("/incomplete-albums/catalog-match", p.FileHandler.CatalogMatch)
+					r.Get("/incomplete-albums/editor-data", p.FileHandler.BackfillEditorData)
+					r.Get("/incomplete-albums/backfill-editor-data", p.FileHandler.BackfillEditorData)
+					r.Post("/incomplete-albums/download-missing", p.FileHandler.DownloadMissing)
+					r.Get("/tag-issues", p.FileHandler.TagIssues)
+					r.Post("/tag-issues/fix", p.FileHandler.FixTagIssue)
+					r.Post("/tag-issues/fix-safe", p.FileHandler.FixSafeTagIssues)
+					r.Post("/tag-issues/fix-selected", p.FileHandler.FixSelectedTagIssues)
+					r.Post("/tag-issues/fix-all", p.FileHandler.FixAllTagIssues)
+					r.Get("/tag-issues/catalog-match", p.FileHandler.CatalogMatchTrack)
+					r.Get("/tag-issues/catalog-match-album", p.FileHandler.CatalogMatchAlbum)
+					r.Post("/tag-issues/apply-catalog", p.FileHandler.ApplyCatalogTags)
+					r.Post("/tag-issues/apply-catalog-album", p.FileHandler.ApplyCatalogAlbum)
+				})
+			}
 		})
 	}
 
-	// Release Radar API
-	if p.RadarHandler != nil {
+	// Audit API - Audit Vertical Slice
+	if p.AuditModule != nil {
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware)
+			p.AuditModule.RegisterRoutes(r)
+		})
+	}
+
+	// Release Radar API - Radar Vertical Slice
+	if p.RadarModule != nil {
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware)
+			p.RadarModule.RegisterRoutes(r)
+		})
+	} else if p.RadarHandler != nil {
 		r.Route("/api/radar", func(r chi.Router) {
 			r.Use(authMiddleware)
 			r.Get("/feed", p.RadarHandler.GetFeed)
@@ -272,8 +316,45 @@ func NewRouter(p RouterParams) http.Handler {
 		})
 	}
 
-	// Radio & Wave Control API
-	if p.RadioHandler != nil {
+	// Radio & Wave Control API - Radio Vertical Slice
+	if p.RadioModule != nil {
+		// Public/Token-authorized ICY Radio Stream Endpoints
+		r.Route("/api/radio/stream", func(r chi.Router) {
+			r.Options("/*", p.RadioModule.HandleStreamOptions)
+			r.Get("/now-playing", p.RadioModule.GetNowPlaying)
+			r.Get("/wave", p.RadioModule.StreamWave)
+			r.Head("/wave", p.RadioModule.StreamWave)
+			r.Get("/wave.mp3", p.RadioModule.StreamWave)
+			r.Head("/wave.mp3", p.RadioModule.StreamWave)
+			r.Get("/genre/{name}", p.RadioModule.StreamGenre)
+			r.Head("/genre/{name}", p.RadioModule.StreamGenre)
+			r.Get("/artist/{name}", p.RadioModule.StreamArtist)
+			r.Head("/artist/{name}", p.RadioModule.StreamArtist)
+		})
+
+		r.Route("/api/radio", func(r chi.Router) {
+			r.Use(authMiddleware)
+			r.Get("/now-playing", p.RadioModule.GetNowPlaying)
+			r.Get("/wave/queue", p.RadioModule.GetWaveQueue)
+			r.Get("/wave/stats", p.RadioModule.GetWaveStats)
+			r.Get("/genres", p.RadioModule.GetGenres)
+			r.Post("/m3u/generate", p.RadioModule.GenerateM3U)
+			r.Post("/navidrome/sync-radio", p.RadioModule.SyncNavidromeRadio)
+		})
+	} else if p.RadioHandler != nil {
+		r.Route("/api/radio/stream", func(r chi.Router) {
+			r.Options("/*", p.RadioHandler.HandleStreamOptions)
+			r.Get("/now-playing", p.RadioHandler.GetNowPlaying)
+			r.Get("/wave", p.RadioHandler.StreamWave)
+			r.Head("/wave", p.RadioHandler.StreamWave)
+			r.Get("/wave.mp3", p.RadioHandler.StreamWave)
+			r.Head("/wave.mp3", p.RadioHandler.StreamWave)
+			r.Get("/genre/{name}", p.RadioHandler.StreamGenre)
+			r.Head("/genre/{name}", p.RadioHandler.StreamGenre)
+			r.Get("/artist/{name}", p.RadioHandler.StreamArtist)
+			r.Head("/artist/{name}", p.RadioHandler.StreamArtist)
+		})
+
 		r.Route("/api/radio", func(r chi.Router) {
 			r.Use(authMiddleware)
 			r.Get("/now-playing", p.RadioHandler.GetNowPlaying)

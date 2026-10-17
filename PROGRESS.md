@@ -1,9 +1,9 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 76 блоков задач полностью реализованы, аудит и стресс-тесты завершены, 100% тестов пройдены).
-- **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
+- **Статус готовности:** **100% DONE** (Все 78 блоков задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js` и 100% тестов пройдены).
+- **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **Vertical Feature Slices**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
-- **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 13 пакетов зеленые).
+- **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 24 пакета зеленые).
 - **Безопасность:** Проведен глубокий аудит безопасности и фаззинг, сформирован [`SECURITY_AUDIT_REPORT.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/SECURITY_AUDIT_REPORT.md).
 - **Продакшен-деплой:** Развернут под управлением `systemd` (`music-manager.service`) на боевых серверах `nl_music` (194.76.168.20 / `https://musicdownloader.verymad.net/`) и Сервер 2 (13.143.193.207 / `https://mymusicdownload.verymad.net/`).
 
@@ -795,6 +795,58 @@
     - **76.5. Стресс-тестирование конкурентности SQLite WAL (`concurrency_stress_test.go`):**
       - Реализован стресс-тест `TestSQLite_HighConcurrencyWAL`: 50 параллельных горутин выполняют 500 смешанных операций (вставка/удаление задач загрузки, обновление прогресса, запись истории радио, выборка треков по хэшу, вставка радар-релизов, FTS-поиск и реконсиляция).
       - Завершение за 1.5 сек. Результат: 0 ошибок `database is locked`, 0 гонок данных (-race) и полная согласованность транзакций.
+
+  - **Блок 77 (User Interaction Testing Harness, No-Build Template Validator & E2E Journey Assurance):**
+    - **77.1. Статический валидатор No-Build шаблонов Alpine.js (`web/template_validator_test.go`):**
+      - Реализован анализатор встроенных HTML-шаблонов (`web.Assets`), выполняющийся в рамках стандартного `go test ./web/...` (< 30 мс, Pure Go, Zero-Node.js).
+      - Сканирует все директивы `@click`, `@submit`, `@change` и сверяет вызываемые функции с каталогом методов `web/static/js/**/*.js` и хранилищ Alpine (`$store.app`, `$store.queue`, `$store.radar`, `$store.sourcePicker`).
+      - В ходе аудита обнаружен и устранен дефект: отсутствовавший метод `removeTrack(index)` в `selection.js` при клике на иконку исключения трека в `tag_editor_flat.html` и `tag_editor_grouped_tracks.html`.
+      - Контролирует обязательное наличие атрибута `:key` во всех циклах `<template x-for="...">` (устранены пропуски в `radar.html`).
+      - Верифицирует логику кнопки сохранения Puddletag: в режиме загрузчика кнопка разблокирована даже при отсутствии ручных изменений (`!isDownloaderMode && !hasDirtyChanges`).
+    - **77.2. Сквозные тесты пользовательских сценариев (`internal/api/e2e_user_journey_test.go`):**
+      - Написан комплекс сквозных тестов на сокете `httptest.NewServer` с реальной БД SQLite и изоляцией песочницы:
+        - `TestUserJourney_RadarDeduplicationAndDownload`: проверка дедупликации совместного релиза двух артистов (строго 1 карточка в ленте), исчезновение релиза из новинок при скачивании (`status = 'downloaded'`, `is_radar = 0`) и при скрытии (`status = 'ignored'`).
+        - `TestUserJourney_PuddletagDownloaderModeAcceptance`: перенос чистого скачанного релиза из `tmp_downloads` в каноническую структуру библиотеки при сохранении без dirty-изменений и последующее удаление из очереди.
+        - `TestUserJourney_DirectOneClickAccept`: мгновенный перенос файлов в медиатеку по кнопке «Принять в медиатеку» в карточке очереди.
+        - `TestUserJourney_CyrillicMultiArtistReconciliation`: корректная сверка кириллических совместных релизов (например, `Metox & Паша Техник`) без появления ложных новинок.
+    - **77.3. Автономный Playwright E2E Runner на Python (`scripts/playwright/e2e_user_flows.py`):**
+      - Создан автономный скрипт для локального тестирования headless браузера без Node.js:
+      - Перехватывает любые необработанные исключения JS (`pageerror` и `console.error`).
+      - Проверяет интерактивность кнопок, переключение табов (Радар, Загрузки, Медиатека, Радио) и делает скриншоты при сбоях.
+    - **77.4. Единый скрипт аудита (`scripts/test_user_flows.sh`):**
+      - Скрипт в 1 команду: компиляция бинарника -> прогон валидатора шаблонов -> сквозные journey тесты -> опциональный Playwright.
+
+  - **Блок 78 (Vertical Feature Slices Architecture, Core httputil, Zero-Friction Testkit & Frontend API Client):**
+    - **78.1. Базовый платформенный пакет `internal/core/httputil`:**
+      - Типобезопасные обобщенные хелперы декодирования и сериализации: `DecodeJSON[T any](r, &req)` с защитой от переполнения буфера (10 МБ лимит `io.LimitReader`) и гарантированным закрытием тела запроса.
+      - Единые функции ответов: `RespondJSON(w, code, data)` и стандартизированный `RespondError(w, code, message)`.
+      - Хелперы для извлечения query-параметров с fallback: `QueryString`, `QueryInt`, `QueryBool`.
+      - Полное покрытие unit-тестами (`internal/core/httputil/httputil_test.go`).
+    - **78.2. Тестовый каркас `internal/testkit`:**
+      - Фабрика тестового окружения `testkit.NewEnv(t)`: создание изолированного in-memory SQLite окружения за 2 мс с временными песочницами `MusicDir` и `TmpDir`.
+      - Автомокающий HTTP-транспорт `MockTransport` (`http.RoundTripper`) для внешних сервисов (Deezer, SoundCloud, iTunes) без внешних сетевых вызовов в тестах.
+      - Движок Golden JSON снапшотов `AssertGoldenJSON(t, actual, goldenPath)` с поддержкой автообновления через переменную `UPDATE_GOLDEN=true`.
+      - Синтетические генераторы MP3 фикстур с валидными ID3v2.4 фреймами и хелперы `Get`, `PostJSON`.
+      - Модульные тесты каркаса и стресс-тесты конкурентности (`stress_test.go`).
+    - **78.3. Вертикальные слайсы функционала (`internal/features/`):**
+      - Декомпозиция системы на 6 самодостаточных модулей, реализующих интерфейс `Module { Name() string; RegisterRoutes(r chi.Router) }`:
+        1. `internal/features/downloader`: 26 маршрутов, потокобезопасный конечный автомат задач, локальный репозиторий SQLite WAL, SSRF/cloud-metadata hardening, golden files.
+        2. `internal/features/tageditor`: 39 маршрутов, строгое ID3v2.4 UTF-8 с null-байтами (`\x00`), извлечение обложек APIC, MusicBrainz OAuth, Puddletag batch engine.
+        3. `internal/features/filemanager`: 12 маршрутов (`/files`, `/api/files`, `/api/tracks`, `/api/library`), потоковое вещание RFC 7233 (206 Partial Content), обложки, переименование/удаление сопутствующих `.lrc`/`.jpg`, защита от path traversal.
+        4. `internal/features/audit`: 35 маршрутов (`/files/audit/*`, `/api/audit/*`), локальный изолированный репозиторий, движок инспекции целостности, синхронизация сопутствующих `.lrc`, полная разгрузка монолитного `queries.go`.
+        5. `internal/features/radio`: 16 маршрутов (`/api/radio`, `/api/radio/stream`), ICY стриминг с заголовками Shoutcast, CORS OPTIONS, генерация M3U, авторизация стримов по токену и cookie, синхронизация Navidrome.
+        6. `internal/features/radar`: 12 маршрутов (`/api/radar`), пагинация и фильтрация ленты релизов, отслеживание артистов, авто-скачивание, дискографии, отмена и прогресс сканирования.
+      - Исключение перекрестных зависимостей и связности: взаимодействие организовано через локальные интерфейсы потребителей и адаптеры в Composition Root (`cmd/server/main.go`, `internal/api/router.go`).
+    - **78.4. No-Build API-клиент и реактивные сторы фронтенда:**
+      - Разработан типизированный клиент `web/static/js/api/client.js` (`window.api`) со структурированными подсистемами (`api.downloader`, `api.tags`, `api.files`, `api.audit`, `api.radio`, `api.radar`, `api.auth`, `api.lyrics`).
+      - Внедрена централизованная обработка HTTP-ошибок с сохранением статуса и десериализацией JSON/текста.
+      - Зарегистрирован независимый стор Alpine.js `$store.queue` с сохранением алиаса `$store.app.queue` для 100% обратной совместимости.
+      - Удалены все прямые вызовы `fetch()` из шаблонов (`web/templates/modals/confirmations.html`), перевод на `$store.app.executeDeleteConfirm()`.
+      - Добавлен автоматический тест `TestTemplates_NoInlineFetch` в `web/template_validator_test.go`, гарантирующий 0 инлайн-вызовов `fetch()` в шаблонах.
+    - **78.5. 100% верификация и компиляция:**
+      - Полный прогон `go test -race ./...` по всем 24 пакетам завершен со статусом 100% PASS и 0 состояний гонки (Data Races).
+      - Комплексный скрипт пользовательских сценариев `./scripts/test_user_flows.sh` успешно проходит (компиляция бинарника, статический валидатор шаблонов, E2E journey тесты).
+      - Бинарный файл `bin/music-manager` собирается без единой ошибки.
 
 ---
 

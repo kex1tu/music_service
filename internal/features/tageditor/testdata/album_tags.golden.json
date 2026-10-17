@@ -1,0 +1,49 @@
+{
+  "album": {
+    "album": "Golden Album",
+    "album_artist": "Demo Band",
+    "disc_total": 1,
+    "genre": "Rock",
+    "track_total": 2,
+    "year": 2026
+  },
+  "cover_path": null,
+  "has_cover": false,
+  "source_dir": "Golden Album - Demo Band",
+  "tracks": [
+    {
+      "album": "Golden Album",
+      "album_artist": "",
+      "artist": "Demo Band",
+      "bitrate": 320,
+      "disc_number": 1,
+      "disc_total": 1,
+      "duration": 0.1044,
+      "genre": "Rock",
+      "has_cover": false,
+      "lyrics_status": "none",
+      "path": "Golden Album - Demo Band/01. Track One.mp3",
+      "title": "Track One",
+      "track_number": 1,
+      "track_total": 2,
+      "year": 2026
+    },
+    {
+      "album": "Golden Album",
+      "album_artist": "",
+      "artist": "Demo Band",
+      "bitrate": 320,
+      "disc_number": 1,
+      "disc_total": 1,
+      "duration": 0.1044,
+      "genre": "Rock",
+      "has_cover": false,
+      "lyrics_status": "none",
+      "path": "Golden Album - Demo Band/02. Track Two.mp3",
+      "title": "Track Two",
+      "track_number": 2,
+      "track_total": 2,
+      "year": 2026
+    }
+  ]
+}

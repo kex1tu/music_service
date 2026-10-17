@@ -1,0 +1,393 @@
+package filemanager
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+var (
+	// ErrTrackNotFound возвращается, когда запрашиваемый трек отсутствует в БД.
+	ErrTrackNotFound = errors.New("track not found")
+)
+
+// DBTX определяет контракт для выполнения SQL-запросов (совместим с *sql.DB и *sql.Tx).
+type DBTX interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// Repository определяет методы доступа к данным медиатеки в SQLite WAL.
+type Repository interface {
+	GetTrackByIDOrHash(ctx context.Context, idOrHash string) (*TrackMetadataResponse, error)
+	GetTracksMetadataCache(ctx context.Context) (map[string]FileItem, error)
+	ListLibraryTracks(ctx context.Context, query string, limit, offset int) ([]LibraryTrackItem, int, error)
+	SearchLibrary(ctx context.Context, q string, limit int) (*SearchLibraryResult, error)
+	DeleteTrackByPath(ctx context.Context, relPath string) (int64, error)
+	DeleteDirectoryRecords(ctx context.Context, dirRelPath string) (int64, error)
+	UpdateTrackPath(ctx context.Context, oldRelPath, newRelPath string) error
+	UpdateAlbumCoverStatus(ctx context.Context, folderPath string, hasCover bool) error
+}
+
+// SQLiteRepository реализует Repository поверх базы SQLite.
+type SQLiteRepository struct {
+	db DBTX
+}
+
+// NewRepository создает новый экземпляр репозитория FileManager.
+func NewRepository(db DBTX) *SQLiteRepository {
+	return &SQLiteRepository{db: db}
+}
+
+// GetTrackByIDOrHash находит трек по ID, хэшу или относительному пути.
+func (r *SQLiteRepository) GetTrackByIDOrHash(ctx context.Context, idOrHash string) (*TrackMetadataResponse, error) {
+	idOrHash = strings.TrimSpace(idOrHash)
+	if idOrHash == "" {
+		return nil, ErrTrackNotFound
+	}
+
+	var idNum int64
+	if num, err := strconv.ParseInt(idOrHash, 10, 64); err == nil && num > 0 {
+		idNum = num
+	}
+
+	query := `
+	SELECT t.id, COALESCE(t.file_hash, ''), t.title, ar.name AS artist, al.title AS album,
+	       COALESCE(al.year, 0),
+	       COALESCE((SELECT GROUP_CONCAT(g.name, ', ') FROM track_genres tg JOIN genres g ON tg.genre_id = g.id WHERE tg.track_id = t.id), ''),
+	       COALESCE(t.duration, 0.0), COALESCE(t.bitrate, 0), COALESCE(t.track_number, 1), t.file_size, t.file_path,
+	       (t.has_embedded_cover OR al.has_cover)
+	FROM tracks t
+	JOIN albums al ON t.album_id = al.id
+	JOIN artists ar ON t.artist_id = ar.id
+	WHERE (t.id = ? AND ? > 0) OR t.file_hash = ? OR t.file_path = ?
+	LIMIT 1;
+	`
+
+	var t TrackMetadataResponse
+	var rawID int64
+	var rawDur float64
+	var hasCover bool
+
+	row := r.db.QueryRowContext(ctx, query, idNum, idNum, idOrHash, idOrHash)
+	err := row.Scan(
+		&rawID, &t.ID, &t.Title, &t.Artist, &t.Album,
+		&t.Year, &t.Genre,
+		&rawDur, &t.BitrateKbps, &t.TrackNumber, &t.FileSize, &t.FilePath,
+		&hasCover,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrTrackNotFound
+		}
+		return nil, err
+	}
+
+	if t.ID == "" {
+		t.ID = strconv.FormatInt(rawID, 10)
+	}
+	t.DurationSec = int(rawDur)
+	t.HasCover = hasCover
+	t.SampleRate = 44100
+	t.Codec = "mp3"
+	t.StreamURL = fmt.Sprintf("/api/tracks/%s/stream", t.ID)
+	t.CoverURL = fmt.Sprintf("/api/tracks/%s/cover", t.ID)
+
+	return &t, nil
+}
+
+// GetTracksMetadataCache извлекает облегченный кэш метаданных всех треков для мгновенного построения дерева файлов.
+func (r *SQLiteRepository) GetTracksMetadataCache(ctx context.Context) (map[string]FileItem, error) {
+	query := `
+	SELECT t.id, COALESCE(t.file_hash, ''), t.file_path, t.title, ar.name AS artist, al.title AS album,
+	       t.duration, t.bitrate, (t.has_embedded_cover OR al.has_cover), COALESCE(t.lyrics_status, 'none')
+	FROM tracks t
+	LEFT JOIN albums al ON t.album_id = al.id
+	LEFT JOIN artists ar ON t.artist_id = ar.id;
+	`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cache := make(map[string]FileItem)
+	for rows.Next() {
+		var it FileItem
+		var id int64
+		var fHash, fPath, title, artist, album, lyrStatus sql.NullString
+		var dur sql.NullFloat64
+		var bit sql.NullInt64
+		var cov sql.NullBool
+
+		if err := rows.Scan(&id, &fHash, &fPath, &title, &artist, &album, &dur, &bit, &cov, &lyrStatus); err != nil {
+			continue
+		}
+		if !fPath.Valid || fPath.String == "" {
+			continue
+		}
+		it.TrackID = id
+		it.TrackHash = fHash.String
+		it.Title = title.String
+		it.Artist = artist.String
+		it.Album = album.String
+		it.Duration = dur.Float64
+		it.Bitrate = int(bit.Int64)
+		it.HasCover = cov.Bool
+		it.LyricsStatus = lyrStatus.String
+		it.HasLyrics = lyrStatus.String == "synced" || lyrStatus.String == "plain"
+
+		cache[fPath.String] = it
+	}
+
+	return cache, nil
+}
+
+// ListLibraryTracks возвращает пагинированный список треков медиатеки.
+func (r *SQLiteRepository) ListLibraryTracks(ctx context.Context, query string, limit, offset int) ([]LibraryTrackItem, int, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var countQuery string
+	var selectQuery string
+	var args []any
+	var countArgs []any
+
+	if strings.TrimSpace(query) != "" {
+		term := "%" + strings.TrimSpace(query) + "%"
+		countQuery = `
+		SELECT COUNT(*)
+		FROM tracks t
+		JOIN albums al ON t.album_id = al.id
+		JOIN artists ar ON t.artist_id = ar.id
+		WHERE t.title LIKE ? OR ar.name LIKE ? OR al.title LIKE ?;
+		`
+		countArgs = []any{term, term, term}
+
+		selectQuery = `
+		SELECT t.id, COALESCE(t.file_hash, ''), t.title, ar.name AS artist, al.title AS album,
+		       COALESCE(t.duration, 0.0), COALESCE(t.bitrate, 0), t.file_path
+		FROM tracks t
+		JOIN albums al ON t.album_id = al.id
+		JOIN artists ar ON t.artist_id = ar.id
+		WHERE t.title LIKE ? OR ar.name LIKE ? OR al.title LIKE ?
+		ORDER BY ar.name ASC, al.title ASC, t.track_number ASC
+		LIMIT ? OFFSET ?;
+		`
+		args = []any{term, term, term, limit, offset}
+	} else {
+		countQuery = "SELECT COUNT(*) FROM tracks;"
+		selectQuery = `
+		SELECT t.id, COALESCE(t.file_hash, ''), t.title, ar.name AS artist, al.title AS album,
+		       COALESCE(t.duration, 0.0), COALESCE(t.bitrate, 0), t.file_path
+		FROM tracks t
+		JOIN albums al ON t.album_id = al.id
+		JOIN artists ar ON t.artist_id = ar.id
+		ORDER BY t.id DESC
+		LIMIT ? OFFSET ?;
+		`
+		args = []any{limit, offset}
+	}
+
+	var total int
+	if err := r.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := r.db.QueryContext(ctx, selectQuery, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	items := make([]LibraryTrackItem, 0, limit)
+	for rows.Next() {
+		var it LibraryTrackItem
+		if err := rows.Scan(&it.ID, &it.FileHash, &it.Title, &it.Artist, &it.Album, &it.Duration, &it.Bitrate, &it.FilePath); err != nil {
+			continue
+		}
+		trackIDStr := strconv.FormatInt(it.ID, 10)
+		if it.FileHash != "" {
+			trackIDStr = it.FileHash
+		}
+		it.StreamURL = fmt.Sprintf("/api/tracks/%s/stream", trackIDStr)
+		it.CoverURL = fmt.Sprintf("/api/tracks/%s/cover", trackIDStr)
+		items = append(items, it)
+	}
+
+	return items, total, nil
+}
+
+// SearchLibrary выполняет глобальный поиск по трекам, альбомам и артистам.
+func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limit int) (*SearchLibraryResult, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	term := "%" + strings.TrimSpace(query) + "%"
+
+	result := &SearchLibraryResult{
+		Tracks:  make([]SearchTrackItem, 0),
+		Albums:  make([]SearchAlbumItem, 0),
+		Artists: make([]SearchArtistItem, 0),
+	}
+
+	// 1. Поиск по трекам
+	trackQuery := `
+	SELECT t.id, t.title, ar.name AS artist, al.title AS album,
+	       COALESCE(t.duration, 0.0), COALESCE(t.bitrate, 0), t.file_path, COALESCE(t.lyrics_status, 'none')
+	FROM tracks t
+	JOIN albums al ON t.album_id = al.id
+	JOIN artists ar ON t.artist_id = ar.id
+	WHERE t.title LIKE ? OR t.clean_title LIKE ?
+	LIMIT ?;
+	`
+	tRows, err := r.db.QueryContext(ctx, trackQuery, term, term, limit)
+	if err == nil {
+		defer tRows.Close()
+		for tRows.Next() {
+			var it SearchTrackItem
+			if err := tRows.Scan(&it.ID, &it.Title, &it.Artist, &it.Album, &it.Duration, &it.Bitrate, &it.FilePath, &it.LyricsStatus); err == nil {
+				it.StreamURL = fmt.Sprintf("/api/tracks/%d/stream", it.ID)
+				result.Tracks = append(result.Tracks, it)
+			}
+		}
+	}
+
+	// 2. Поиск по альбомам
+	albumQuery := `
+	SELECT al.id, al.title, ar.name AS artist, COALESCE(al.album_artist, ''), COALESCE(al.year, 0),
+	       al.folder_path, al.has_cover, COUNT(t.id) AS track_count
+	FROM albums al
+	JOIN artists ar ON al.artist_id = ar.id
+	LEFT JOIN tracks t ON t.album_id = al.id
+	WHERE al.title LIKE ? OR al.clean_title LIKE ?
+	GROUP BY al.id
+	LIMIT ?;
+	`
+	aRows, err := r.db.QueryContext(ctx, albumQuery, term, term, limit)
+	if err == nil {
+		defer aRows.Close()
+		for aRows.Next() {
+			var it SearchAlbumItem
+			if err := aRows.Scan(&it.ID, &it.Title, &it.Artist, &it.AlbumArtist, &it.Year, &it.FolderPath, &it.HasCover, &it.TrackCount); err == nil {
+				result.Albums = append(result.Albums, it)
+			}
+		}
+	}
+
+	// 3. Поиск по артистам
+	artistQuery := `
+	SELECT ar.id, ar.name, COUNT(DISTINCT t.id) AS track_count,
+	       COALESCE((SELECT al.folder_path FROM albums al WHERE al.artist_id = ar.id LIMIT 1), ''),
+	       COALESCE((SELECT t.file_path FROM tracks t WHERE t.artist_id = ar.id LIMIT 1), '')
+	FROM artists ar
+	LEFT JOIN tracks t ON t.artist_id = ar.id
+	WHERE ar.name LIKE ? OR ar.clean_name LIKE ?
+	GROUP BY ar.id
+	LIMIT ?;
+	`
+	arRows, err := r.db.QueryContext(ctx, artistQuery, term, term, limit)
+	if err == nil {
+		defer arRows.Close()
+		for arRows.Next() {
+			var it SearchArtistItem
+			if err := arRows.Scan(&it.ID, &it.Name, &it.TrackCount, &it.FolderPath, &it.FirstPath); err == nil {
+				result.Artists = append(result.Artists, it)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// DeleteTrackByPath удаляет трек по относительному пути и атомарно очищает осиротевшие альбомы и артистов.
+func (r *SQLiteRepository) DeleteTrackByPath(ctx context.Context, relPath string) (int64, error) {
+	var trackID int64
+	var albumID int64
+	err := r.db.QueryRowContext(ctx, "SELECT id, album_id FROM tracks WHERE file_path = ?", relPath).Scan(&trackID, &albumID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, err
+	}
+
+	_, _ = r.db.ExecContext(ctx, "DELETE FROM audit_issues WHERE (entity_type = 'track' AND entity_id = ?) OR file_path = ?", trackID, relPath)
+	_, _ = r.db.ExecContext(ctx, "DELETE FROM track_genres WHERE track_id = ?", trackID)
+	res, err := r.db.ExecContext(ctx, "DELETE FROM tracks WHERE id = ?", trackID)
+	if err != nil {
+		return 0, err
+	}
+	deleted, _ := res.RowsAffected()
+
+	if albumID > 0 {
+		var remainingTracks int
+		_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM tracks WHERE album_id = ?", albumID).Scan(&remainingTracks)
+		if remainingTracks == 0 {
+			_, _ = r.db.ExecContext(ctx, "DELETE FROM albums WHERE id = ?", albumID)
+			_, _ = r.db.ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id = ?", albumID)
+			_, _ = r.db.ExecContext(ctx, "DELETE FROM audit_issues WHERE (entity_type = 'album' AND entity_id = ?)", albumID)
+		}
+	}
+
+	_, _ = r.db.ExecContext(ctx, "DELETE FROM artists WHERE (SELECT COUNT(*) FROM albums WHERE artist_id = artists.id) = 0")
+	_, _ = r.db.ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums)")
+
+	return deleted, nil
+}
+
+// DeleteDirectoryRecords удаляет все треки и альбомы внутри заданной директории.
+func (r *SQLiteRepository) DeleteDirectoryRecords(ctx context.Context, dirRelPath string) (int64, error) {
+	prefix := dirRelPath + "/%"
+	_, _ = r.db.ExecContext(ctx, `
+		DELETE FROM audit_issues
+		WHERE file_path = ? OR file_path LIKE ?
+		   OR entity_id IN (SELECT id FROM tracks WHERE file_path = ? OR file_path LIKE ?)
+		   OR entity_id IN (SELECT id FROM albums WHERE folder_path = ? OR folder_path LIKE ?)
+	`, dirRelPath, prefix, dirRelPath, prefix, dirRelPath, prefix)
+
+	_, _ = r.db.ExecContext(ctx, `
+		DELETE FROM track_genres
+		WHERE track_id IN (SELECT id FROM tracks WHERE file_path = ? OR file_path LIKE ?)
+	`, dirRelPath, prefix)
+
+	res, err := r.db.ExecContext(ctx, "DELETE FROM tracks WHERE file_path = ? OR file_path LIKE ?", dirRelPath, prefix)
+	if err != nil {
+		return 0, err
+	}
+	deletedTracks, _ := res.RowsAffected()
+
+	_, _ = r.db.ExecContext(ctx, "DELETE FROM albums WHERE folder_path = ? OR folder_path LIKE ? OR id NOT IN (SELECT DISTINCT album_id FROM tracks)", dirRelPath, prefix)
+	_, _ = r.db.ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums)")
+	_, _ = r.db.ExecContext(ctx, "DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM albums)")
+
+	return deletedTracks, nil
+}
+
+// UpdateTrackPath обновляет путь к файлу трека и связанные задачи аудита.
+func (r *SQLiteRepository) UpdateTrackPath(ctx context.Context, oldRelPath, newRelPath string) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE file_path = ?", newRelPath, oldRelPath)
+	if err != nil {
+		return err
+	}
+	_, _ = r.db.ExecContext(ctx, "UPDATE audit_issues SET file_path = ? WHERE file_path = ?", newRelPath, oldRelPath)
+	return nil
+}
+
+// UpdateAlbumCoverStatus обновляет статус наличия обложки в каталоге.
+func (r *SQLiteRepository) UpdateAlbumCoverStatus(ctx context.Context, folderPath string, hasCover bool) error {
+	val := 0
+	if hasCover {
+		val = 1
+	}
+	_, err := r.db.ExecContext(ctx, "UPDATE albums SET has_cover = ? WHERE folder_path = ?", val, folderPath)
+	return err
+}

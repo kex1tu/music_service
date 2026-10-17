@@ -35,7 +35,7 @@
                 </button>
                 <button
                     type="button"
-                    @click="window.dispatchEvent(new CustomEvent('confirm-delete-action'))"
+                    @click="$store.app.executeDeleteConfirm()"
                     class="px-5 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-lg transition shadow-lg shadow-red-600/30 flex items-center space-x-1.5 active:scale-95">
                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zm3.713-4.288Q11 16.426 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288"/>
@@ -46,27 +46,8 @@
         </div>
     </div>
 
-    <!-- Слушатель события удаления -->
-    <div x-init="window.addEventListener('confirm-delete-action', async () => {
-        const item = $store.app.deleteConfirmData;
-        if (!item) return;
-        try {
-            const res = await fetch(`/files?path=${encodeURIComponent(item.path)}`, { method: 'DELETE' });
-            if (!res.ok) {
-                const err = await res.json();
-                throw new Error(err.message || 'Сбой при удалении');
-            }
-            $store.app.toast(`Удалено: ${item.name}`, 'success');
-            $store.app.activeModal = null;
-            $store.app.deleteConfirmData = null;
-            if (item.onDeleted && typeof item.onDeleted === 'function') {
-                await item.onDeleted();
-            }
-            $dispatch('refresh-file-manager', '');
-        } catch (e) {
-            $store.app.toast(`Ошибка: ${e.message}`, 'error');
-        }
-    })"></div>
+    <!-- Слушатель события удаления для обратной совместимости -->
+    <div x-init="window.addEventListener('confirm-delete-action', () => $store.app.executeDeleteConfirm())"></div>
 
     <!-- ==================== МОДАЛЬНОЕ ОКНО: ПОДТВЕРЖДЕНИЕ РЕОРГАНИЗАЦИИ ==================== -->
     <div

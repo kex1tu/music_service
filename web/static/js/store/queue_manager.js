@@ -50,17 +50,40 @@ window.createQueueManager = function() {
                 return;
             }
             try {
-                const [sumRes, jobsRes] = await Promise.all([
-                    fetch('/downloads/queue/summary'),
-                    fetch('/downloads'),
-                ]);
-                if (sumRes.status === 401 || jobsRes.status === 401) {
-                    Alpine.store('app').user = null;
-                    return;
+                let sumData = null;
+                let jobsData = null;
+
+                if (window.api && window.api.downloader) {
+                    try {
+                        const [s, j] = await Promise.all([
+                            window.api.downloader.queueSummary(),
+                            window.api.downloader.list(),
+                        ]);
+                        sumData = s;
+                        jobsData = j;
+                    } catch (netErr) {
+                        if (netErr.status === 401) {
+                            Alpine.store('app').user = null;
+                            return;
+                        }
+                        throw netErr;
+                    }
+                } else {
+                    const [sumRes, jobsRes] = await Promise.all([
+                        fetch('/downloads/queue/summary'),
+                        fetch('/downloads'),
+                    ]);
+                    if (sumRes.status === 401 || jobsRes.status === 401) {
+                        Alpine.store('app').user = null;
+                        return;
+                    }
+                    if (sumRes.ok) sumData = await sumRes.json();
+                    if (jobsRes.ok) jobsData = await jobsRes.json();
                 }
-                if (sumRes.ok) this.summary = await sumRes.json();
-                if (jobsRes.ok) {
-                    const data = await jobsRes.json();
+
+                if (sumData) this.summary = sumData;
+                if (jobsData) {
+                    const data = jobsData;
                     let newJobs = Array.isArray(data) ? data : (data?.jobs || []);
                     const getStatusPriority = (st) => {
                         switch (st) {
@@ -151,12 +174,11 @@ window.createQueueManager = function() {
 
         async clearCompleted() {
             try {
-                const res = await fetch('/downloads/clear-completed', { method: 'POST' });
-                if (res.ok) {
-                    const data = await res.json();
-                    Alpine.store('app').toast(`Очищено завершенных задач: ${data.cleared || data.count || 0}`, 'info');
-                    await this.fetchQueue();
-                }
+                const data = (window.api && window.api.downloader)
+                    ? await window.api.downloader.clearCompleted()
+                    : await fetch('/downloads/clear-completed', { method: 'POST' }).then(r => r.json());
+                Alpine.store('app').toast(`Очищено завершенных задач: ${data?.cleared || data?.count || 0}`, 'info');
+                await this.fetchQueue();
             } catch (e) {
                 Alpine.store('app').toast('Ошибка очистки очереди', 'error');
             }
@@ -164,11 +186,13 @@ window.createQueueManager = function() {
 
         async pauseQueue() {
             try {
-                const res = await fetch('/downloads/pause', { method: 'POST' });
-                if (res.ok) {
-                    Alpine.store('app').toast('Очередь загрузок приостановлена', 'info');
-                    await this.fetchQueue();
+                if (window.api && window.api.downloader) {
+                    await window.api.downloader.pause();
+                } else {
+                    await fetch('/downloads/pause', { method: 'POST' });
                 }
+                Alpine.store('app').toast('Очередь загрузок приостановлена', 'info');
+                await this.fetchQueue();
             } catch (e) {
                 Alpine.store('app').toast('Ошибка приостановки очереди', 'error');
             }
@@ -176,11 +200,13 @@ window.createQueueManager = function() {
 
         async resumeQueue() {
             try {
-                const res = await fetch('/downloads/resume', { method: 'POST' });
-                if (res.ok) {
-                    Alpine.store('app').toast('Очередь загрузок возобновлена', 'success');
-                    this.wakeUpPolling();
+                if (window.api && window.api.downloader) {
+                    await window.api.downloader.resume();
+                } else {
+                    await fetch('/downloads/resume', { method: 'POST' });
                 }
+                Alpine.store('app').toast('Очередь загрузок возобновлена', 'success');
+                this.wakeUpPolling();
             } catch (e) {
                 Alpine.store('app').toast('Ошибка возобновления очереди', 'error');
             }
@@ -188,44 +214,41 @@ window.createQueueManager = function() {
 
         async retryAllFailed() {
             try {
-                const res = await fetch('/downloads/retry-failed', { method: 'POST' });
-                if (res.ok) {
-                    const data = await res.json();
-                    Alpine.store('app').toast(`Перезапущено задач с ошибкой: ${data.retried_count || data.count || 0}`, 'info');
-                    this.wakeUpPolling();
-                } else {
-                    const data = await res.json();
-                    Alpine.store('app').toast(data.error || 'Ошибка перезапуска задач', 'error');
-                }
+                const data = (window.api && window.api.downloader)
+                    ? await window.api.downloader.retryFailed()
+                    : await fetch('/downloads/retry-failed', { method: 'POST' }).then(r => r.json());
+                Alpine.store('app').toast(`Перезапущено задач с ошибкой: ${data?.retried_count || data?.count || 0}`, 'info');
+                this.wakeUpPolling();
             } catch (e) {
-                Alpine.store('app').toast('Ошибка перезапуска задач', 'error');
+                Alpine.store('app').toast(e.message || 'Ошибка перезапуска задач', 'error');
             }
         },
 
         async cancelJob(jobId) {
             try {
-                const res = await fetch(`/downloads/${jobId}`, { method: 'DELETE' });
-                if (res.ok) {
-                    Alpine.store('app').toast('Задача отменена', 'info');
-                    await this.fetchQueue();
+                if (window.api && window.api.downloader) {
+                    await window.api.downloader.delete(jobId);
+                } else {
+                    await fetch(`/downloads/${jobId}`, { method: 'DELETE' });
                 }
+                Alpine.store('app').toast('Задача отменена', 'info');
+                await this.fetchQueue();
             } catch (e) {
-                Alpine.store('app').toast('Ошибка отмены задачи', 'error');
+                Alpine.store('app').toast(e.message || 'Ошибка отмены задачи', 'error');
             }
         },
 
         async retryJob(jobId) {
             try {
-                const res = await fetch(`/downloads/${jobId}/retry`, { method: 'POST' });
-                if (res.ok) {
-                    Alpine.store('app').toast('Задача перезапущена', 'info');
-                    this.wakeUpPolling();
+                if (window.api && window.api.downloader) {
+                    await window.api.downloader.retry(jobId);
                 } else {
-                    const data = await res.json();
-                    Alpine.store('app').toast(data.error || 'Ошибка перезапуска задачи', 'error');
+                    await fetch(`/downloads/${jobId}/retry`, { method: 'POST' });
                 }
+                Alpine.store('app').toast('Задача перезапущена', 'info');
+                this.wakeUpPolling();
             } catch (e) {
-                Alpine.store('app').toast('Ошибка перезапуска задачи', 'error');
+                Alpine.store('app').toast(e.message || 'Ошибка перезапуска задачи', 'error');
             }
         },
 

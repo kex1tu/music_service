@@ -869,9 +869,9 @@ func (db *DB) GetWaveCandidateTracks(ctx context.Context, limit int) ([]TrackEnt
 	}
 	query := `
 	SELECT t.id, t.album_id, t.artist_id, t.title, ar.name AS artist, al.title AS album,
-	       t.track_number, t.duration, t.bitrate, t.file_path, t.file_size,
-	       COALESCE(t.file_hash, ''), t.has_embedded_cover, t.lyrics_status,
-	       al.has_cover, COALESCE(al.cover_path, '')
+	       COALESCE(t.track_number, 1), COALESCE(t.duration, 0.0), COALESCE(t.bitrate, 320), t.file_path, t.file_size,
+	       COALESCE(t.file_hash, ''), COALESCE(t.has_embedded_cover, 0), COALESCE(t.lyrics_status, 'none'),
+	       COALESCE(al.has_cover, 0), COALESCE(al.cover_path, '')
 	FROM tracks t
 	JOIN albums al ON t.album_id = al.id
 	JOIN artists ar ON t.artist_id = ar.id
