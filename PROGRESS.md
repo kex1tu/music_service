@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 78 блоков задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js` и 100% тестов пройдены).
+- **Статус готовности:** **100% DONE** (Все 79 блоков задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js` и 100% тестов пройдены).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **Vertical Feature Slices**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 24 пакета зеленые).
@@ -847,6 +847,22 @@
       - Полный прогон `go test -race ./...` по всем 24 пакетам завершен со статусом 100% PASS и 0 состояний гонки (Data Races).
       - Комплексный скрипт пользовательских сценариев `./scripts/test_user_flows.sh` успешно проходит (компиляция бинарника, статический валидатор шаблонов, E2E journey тесты).
       - Бинарный файл `bin/music-manager` собирается без единой ошибки.
+
+  - **Блок 79 (Fix FileManager Root Browsing & Puddletag DTO Compatibility):**
+    - **79.1. Устранение ошибки «invalid file path» при открытии раздела «Файлы»:**
+      - В вертикальном слайсе `internal/features/filemanager` метод `ResolvePath` отклонял пустую строку (`trimmed == ""`), возвращая `ErrInvalidPath`, что вызывало ошибку 500 при открытии корня медиатеки (`/files?path=&recursive=false`).
+      - Разрешен безопасный резолв пустого пути (`trimmed == "" || trimmed == "."`) в корень песочницы медиатеки через `s.musicSandbox.Resolve("", true)`.
+      - Добавлена явная защита в `DeleteFile`: попытка удаления корневой директории (`trimmed == "" || trimmed == "." || trimmed == "/"`) пресекается с возвратом `ErrInvalidPath`.
+    - **79.2. Восстановление канонического DTO проводника (`DirectoryListingResponse`):**
+      - Эндпоинт `GET /files` и `filemanager.Service.ListFiles` приведены к ожидаемой структуре `DirectoryListingResponse`: поля `current_path`, `parent_path`, `breadcrumbs`, `items`, `total_directories`, `total_files`.
+      - Элементы `FileItem` дополнены обязательными для фронтенда (`puddletag_workstation.js`) полями: `type` (`"directory"` или `"file"`), `track_count` (для директорий), `track_number`, `track_total`, `disc_number`, `disc_total`, `album_artist`, `year`, `genre`, `id`, `stream_url`.
+      - В `internal/features/filemanager/repository.go` расширен SQL-запрос `GetTracksMetadataCache` для загрузки расширенных метаданных треков из SQLite.
+    - **79.3. Повышение устойчивости фронтенда к ошибкам:**
+      - В `web/static/js/store/app_store.js` в `executeDeleteConfirm` расширен парсинг ошибок удаления (`err.error || err.detail || err.message`).
+    - **79.4. Тестирование и регрессионный контроль:**
+      - Обновлены тесты `feature_test.go` в `internal/features/filemanager`: покрытие просмотра корня (`path=""`), подкаталогов, рекурсивного листинга и проверок безопасности песочницы.
+      - В `internal/api/e2e_user_journey_test.go` добавлен сквозной тест `TestUserJourney_FileManagerRootAndSubfoldersBrowsing`.
+      - `go test -race ./...` — 100% PASS (0 data races), `./scripts/test_user_flows.sh` — 100% PASS.
 
 ---
 

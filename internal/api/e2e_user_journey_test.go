@@ -482,3 +482,131 @@ func TestUserJourney_CyrillicMultiArtistReconciliation(t *testing.T) {
 		}
 	}
 }
+
+// TestUserJourney_FileManagerRootAndSubfoldersBrowsing:
+// Пользовательский сценарий открытия раздела "Файлы":
+// 1. Пользователь кликает раздел "Файлы", фронтенд отправляет GET /files?path=&recursive=false.
+// 2. Сервер НЕ возвращает ошибку 500/400 "invalid file path".
+// 3. Возвращается DirectoryListingResponse с хлебными крошками "Корень", списком подпапок (type: "directory") и треков.
+// 4. Пользователь переходит в подпапку и включает рекурсивный режим.
+func TestUserJourney_FileManagerRootAndSubfoldersBrowsing(t *testing.T) {
+	it := setupIntegrationServer(t)
+	cookie := loginForCookie(t, it.server.URL)
+	client := it.server.Client()
+	ctx := context.Background()
+
+	// 1. Создаем структуру альбома в медиатеке
+	albumDir := filepath.Join(it.musicSb.Root(), "Daft Punk - Discovery")
+	_ = os.MkdirAll(albumDir, 0755)
+	trackPath := filepath.Join(albumDir, "01. One More Time.mp3")
+	_ = os.WriteFile(trackPath, []byte("fake-audio-payload-daft-punk"), 0644)
+	_ = id3.WriteTags(trackPath, id3.TrackTags{
+		Title:       "One More Time",
+		Artist:      "Daft Punk",
+		Album:       "Discovery",
+		AlbumArtist: "Daft Punk",
+		TrackNumber: 1,
+		TrackTotal:  14,
+		Year:        2001,
+		Genre:       "House",
+	}, nil)
+
+	// Индексируем в базу данных
+	_, _ = it.scanner.ScanAll(ctx)
+
+	// 2. Открытие корня (как делает PuddletagWorkstation: /files?path=&recursive=false&_t=...)
+	reqRoot, _ := http.NewRequest("GET", it.server.URL+"/files?path=&recursive=false", nil)
+	reqRoot.AddCookie(cookie)
+	respRoot, err := client.Do(reqRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respRoot.Body.Close()
+
+	if respRoot.StatusCode != http.StatusOK {
+		t.Fatalf("ошибка открытия раздела 'Файлы' (корень): ожидался статус 200 OK, получен %d", respRoot.StatusCode)
+	}
+
+	var rootListing struct {
+		CurrentPath string `json:"current_path"`
+		Breadcrumbs []struct {
+			Name string `json:"name"`
+			Path string `json:"path"`
+		} `json:"breadcrumbs"`
+		Items []struct {
+			Name       string `json:"name"`
+			Path       string `json:"path"`
+			Type       string `json:"type"`
+			TrackCount *int   `json:"track_count"`
+		} `json:"items"`
+		TotalDirectories int `json:"total_directories"`
+		TotalFiles       int `json:"total_files"`
+	}
+
+	if err := json.NewDecoder(respRoot.Body).Decode(&rootListing); err != nil {
+		t.Fatalf("не удалось распарсить ответ корня медиатеки: %v", err)
+	}
+
+	if len(rootListing.Breadcrumbs) == 0 || rootListing.Breadcrumbs[0].Name != "Корень" {
+		t.Errorf("хлебные крошки должны начинаться с 'Корень', получено: %+v", rootListing.Breadcrumbs)
+	}
+
+	foundAlbumFolder := false
+	for _, item := range rootListing.Items {
+		if item.Name == "Daft Punk - Discovery" && item.Type == "directory" {
+			foundAlbumFolder = true
+			if item.TrackCount == nil || *item.TrackCount != 1 {
+				t.Errorf("ожидался track_count == 1 для каталога альбома, получено: %v", item.TrackCount)
+			}
+		}
+	}
+	if !foundAlbumFolder {
+		t.Errorf("каталог 'Daft Punk - Discovery' не найден в выдаче корня файлов: %+v", rootListing.Items)
+	}
+
+	// 3. Переход в подпапку: GET /files?path=Daft Punk - Discovery&recursive=false
+	reqSub, _ := http.NewRequest("GET", it.server.URL+"/files?path=Daft%20Punk%20-%20Discovery&recursive=false", nil)
+	reqSub.AddCookie(cookie)
+	respSub, err := client.Do(reqSub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respSub.Body.Close()
+
+	if respSub.StatusCode != http.StatusOK {
+		t.Fatalf("ошибка открытия подпапки: ожидался статус 200 OK, получен %d", respSub.StatusCode)
+	}
+
+	var subListing struct {
+		CurrentPath string `json:"current_path"`
+		Items       []struct {
+			Name     string `json:"name"`
+			Path     string `json:"path"`
+			Type     string `json:"type"`
+			Title    string `json:"title"`
+			Artist   string `json:"artist"`
+			Album    string `json:"album"`
+			HasCover bool   `json:"has_cover"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(respSub.Body).Decode(&subListing); err != nil {
+		t.Fatalf("не удалось распарсить ответ подпапки: %v", err)
+	}
+
+	if len(subListing.Items) != 1 || subListing.Items[0].Type != "file" || subListing.Items[0].Title != "One More Time" {
+		t.Errorf("некорректные элементы в подпапке альбома: %+v", subListing.Items)
+	}
+
+	// 4. Рекурсивный режим всей медиатеки: GET /files?recursive=true
+	reqRec, _ := http.NewRequest("GET", it.server.URL+"/files?recursive=true", nil)
+	reqRec.AddCookie(cookie)
+	respRec, err := client.Do(reqRec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respRec.Body.Close()
+
+	if respRec.StatusCode != http.StatusOK {
+		t.Fatalf("ошибка рекурсивного запроса: ожидался 200 OK, получен %d", respRec.StatusCode)
+	}
+}

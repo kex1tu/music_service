@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -103,8 +104,24 @@ func (r *SQLiteRepository) GetTrackByIDOrHash(ctx context.Context, idOrHash stri
 // GetTracksMetadataCache извлекает облегченный кэш метаданных всех треков для мгновенного построения дерева файлов.
 func (r *SQLiteRepository) GetTracksMetadataCache(ctx context.Context) (map[string]FileItem, error) {
 	query := `
-	SELECT t.id, COALESCE(t.file_hash, ''), t.file_path, t.title, ar.name AS artist, al.title AS album,
-	       t.duration, t.bitrate, (t.has_embedded_cover OR al.has_cover), COALESCE(t.lyrics_status, 'none')
+	SELECT 
+		t.file_path, 
+		COALESCE(t.id, 0),
+		COALESCE(t.file_hash, ''),
+		t.track_number, 
+		t.track_total,
+		t.disc_number,
+		t.disc_total,
+		t.title, 
+		COALESCE(ar.name, ''), 
+		COALESCE(al.title, ''), 
+		COALESCE(al.album_artist, ''),
+		COALESCE(al.year, 0),
+		COALESCE(t.duration, 0.0), 
+		COALESCE(t.bitrate, 320),
+		(t.has_embedded_cover OR al.has_cover), 
+		COALESCE(t.lyrics_status, 'none'),
+		COALESCE((SELECT GROUP_CONCAT(g.name, '\\') FROM track_genres tg JOIN genres g ON tg.genre_id = g.id WHERE tg.track_id = t.id), '')
 	FROM tracks t
 	LEFT JOIN albums al ON t.album_id = al.id
 	LEFT JOIN artists ar ON t.artist_id = ar.id;
@@ -118,30 +135,68 @@ func (r *SQLiteRepository) GetTracksMetadataCache(ctx context.Context) (map[stri
 	cache := make(map[string]FileItem)
 	for rows.Next() {
 		var it FileItem
+		var fPath sql.NullString
 		var id int64
-		var fHash, fPath, title, artist, album, lyrStatus sql.NullString
-		var dur sql.NullFloat64
+		var fHash sql.NullString
+		var trkNum, trkTot, discNum, discTot, yr sql.NullInt64
+		var title, artist, album, albArtist, lyrStatus, genre sql.NullString
+		var durVal sql.NullFloat64
 		var bit sql.NullInt64
 		var cov sql.NullBool
 
-		if err := rows.Scan(&id, &fHash, &fPath, &title, &artist, &album, &dur, &bit, &cov, &lyrStatus); err != nil {
+		if err := rows.Scan(
+			&fPath, &id, &fHash, &trkNum, &trkTot, &discNum, &discTot,
+			&title, &artist, &album, &albArtist, &yr,
+			&durVal, &bit, &cov, &lyrStatus, &genre,
+		); err != nil {
 			continue
 		}
 		if !fPath.Valid || fPath.String == "" {
 			continue
 		}
+		cleanPath := filepath.ToSlash(fPath.String)
+		it.Path = cleanPath
 		it.TrackID = id
 		it.TrackHash = fHash.String
+		if trkNum.Valid && trkNum.Int64 > 0 {
+			num := int(trkNum.Int64)
+			it.TrackNumber = &num
+		}
+		if trkTot.Valid && trkTot.Int64 > 0 {
+			num := int(trkTot.Int64)
+			it.TrackTotal = &num
+		}
+		if discNum.Valid && discNum.Int64 > 0 {
+			num := int(discNum.Int64)
+			it.DiscNumber = &num
+		}
+		if discTot.Valid && discTot.Int64 > 0 {
+			num := int(discTot.Int64)
+			it.DiscTotal = &num
+		}
+		if yr.Valid && yr.Int64 > 0 {
+			y := int(yr.Int64)
+			it.Year = &y
+		}
 		it.Title = title.String
 		it.Artist = artist.String
 		it.Album = album.String
-		it.Duration = dur.Float64
+		it.AlbumArtist = albArtist.String
+		it.Genre = genre.String
+		dur := int(durVal.Float64)
+		it.Duration = &dur
 		it.Bitrate = int(bit.Int64)
 		it.HasCover = cov.Bool
-		it.LyricsStatus = lyrStatus.String
-		it.HasLyrics = lyrStatus.String == "synced" || lyrStatus.String == "plain"
+		lyr := lyrStatus.String
+		if lyr == "synced" {
+			lyr = "lrc"
+		} else if lyr == "plain" {
+			lyr = "txt"
+		}
+		it.LyricsStatus = lyr
+		it.HasLyrics = lyr == "lrc" || lyr == "txt"
 
-		cache[fPath.String] = it
+		cache[cleanPath] = it
 	}
 
 	return cache, nil

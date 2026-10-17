@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
@@ -61,8 +62,15 @@ func NewService(cfg ServiceConfig) *Service {
 // ResolvePath безопасно разрешает путь сначала во временной песочнице, затем в основной.
 func (s *Service) ResolvePath(relPath string) (fullPath string, isTmp bool, err error) {
 	trimmed := strings.TrimSpace(relPath)
-	if trimmed == "" {
-		return "", false, ErrInvalidPath
+	if trimmed == "" || trimmed == "." {
+		if s.musicSandbox == nil {
+			return "", false, ErrSandboxViolation
+		}
+		full, err := s.musicSandbox.Resolve("", true)
+		if err != nil {
+			return "", false, fmt.Errorf("%w: %v", ErrSandboxViolation, err)
+		}
+		return full, false, nil
 	}
 
 	cleanRel := strings.TrimPrefix(trimmed, "tmp_downloads/")
@@ -136,7 +144,7 @@ func (s *Service) ResolveTrack(ctx context.Context, idOrHash string) (fullPath s
 }
 
 // ListFiles возвращает список файлов и директорий для навигатора медиатеки.
-func (s *Service) ListFiles(ctx context.Context, relPath string, recursive bool) ([]FileItem, error) {
+func (s *Service) ListFiles(ctx context.Context, relPath string, recursive bool) (*DirectoryListingResponse, error) {
 	fullPath, isTmp, err := s.ResolvePath(relPath)
 	if err != nil {
 		return nil, err
@@ -150,10 +158,45 @@ func (s *Service) ListFiles(ctx context.Context, relPath string, recursive bool)
 		return nil, err
 	}
 
+	cleanRel := filepath.Clean(relPath)
+	if cleanRel == "." {
+		cleanRel = ""
+	}
+
 	if !st.IsDir() {
 		// Одиночный файл
-		item := s.buildFileItem(fullPath, relPath, st, isTmp, nil)
-		return []FileItem{item}, nil
+		item := s.buildFileItem(fullPath, cleanRel, st, isTmp)
+		return &DirectoryListingResponse{
+			CurrentPath:      cleanRel,
+			Breadcrumbs:      []BreadcrumbItem{{Name: "Корень", Path: ""}},
+			Items:            []FileItem{item},
+			TotalDirectories: 0,
+			TotalFiles:       1,
+		}, nil
+	}
+
+	// Build breadcrumbs
+	var breadcrumbs []BreadcrumbItem
+	breadcrumbs = append(breadcrumbs, BreadcrumbItem{Name: "Корень", Path: ""})
+	if cleanRel != "" {
+		parts := strings.Split(cleanRel, string(filepath.Separator))
+		accum := ""
+		for _, p := range parts {
+			if p == "" || p == "." {
+				continue
+			}
+			accum = filepath.Join(accum, p)
+			breadcrumbs = append(breadcrumbs, BreadcrumbItem{Name: p, Path: filepath.ToSlash(accum)})
+		}
+	}
+
+	var parentPath *string
+	if cleanRel != "" {
+		parent := filepath.Dir(cleanRel)
+		if parent == "." {
+			parent = ""
+		}
+		parentPath = &parent
 	}
 
 	var metadataCache map[string]FileItem
@@ -162,110 +205,250 @@ func (s *Service) ListFiles(ctx context.Context, relPath string, recursive bool)
 	}
 
 	var items []FileItem
+	var totalDirs, totalFiles int
 
 	if recursive {
+		const maxDepth = 20
+		maxTracks := 100000
+
 		err = filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
-			if walkErr != nil || path == fullPath {
+			if walkErr != nil {
 				return nil
 			}
+
+			var relToSandbox string
+			if isTmp && s.tmpSandbox != nil {
+				relToSandbox, err = s.tmpSandbox.ToRelative(path)
+			} else if s.musicSandbox != nil {
+				relToSandbox, err = s.musicSandbox.ToRelative(path)
+			}
+			if err != nil {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			name := d.Name()
+			if d.IsDir() {
+				if path != fullPath {
+					if strings.HasPrefix(name, ".") || name == "tmp" || name == "tmp_downloads" {
+						return filepath.SkipDir
+					}
+					relFromStart, rErr := filepath.Rel(fullPath, path)
+					if rErr == nil {
+						parts := strings.Split(filepath.ToSlash(relFromStart), "/")
+						if len(parts) > maxDepth {
+							return filepath.SkipDir
+						}
+					}
+				}
+				return nil
+			}
+
+			if strings.HasPrefix(name, ".") || !strings.EqualFold(filepath.Ext(name), ".mp3") {
+				return nil
+			}
+
+			if len(items) >= maxTracks {
+				return filepath.SkipAll
+			}
+
 			info, iErr := d.Info()
 			if iErr != nil {
 				return nil
 			}
-			var rel string
-			if isTmp {
-				rel, _ = s.tmpSandbox.ToRelative(path)
-			} else {
-				rel, _ = s.musicSandbox.ToRelative(path)
+
+			cleanItemRel := filepath.ToSlash(relToSandbox)
+			if metadataCache != nil {
+				if cached, ok := metadataCache[cleanItemRel]; ok {
+					cached.Name = name
+					cached.Path = cleanItemRel
+					cached.Type = "file"
+					cached.IsDir = false
+					sz := info.Size()
+					cached.Size = &sz
+					cached.Extension = strings.ToLower(filepath.Ext(name))
+					cached.ModTime = info.ModTime().Format(time.RFC3339)
+					tHash := TrackHash(cleanItemRel)
+					cached.ID = &tHash
+					cached.TrackHash = tHash
+					sURL := "/api/tracks/" + tHash + "/stream"
+					cached.StreamURL = &sURL
+					items = append(items, cached)
+					return nil
+				}
 			}
-			items = append(items, s.buildFileItem(path, rel, info, isTmp, metadataCache))
+
+			items = append(items, s.buildFileItem(path, cleanItemRel, info, isTmp))
 			return nil
 		})
 		if err != nil {
 			return nil, err
 		}
+
+		totalFiles = len(items)
 	} else {
 		entries, rErr := os.ReadDir(fullPath)
 		if rErr != nil {
 			return nil, rErr
 		}
 		for _, entry := range entries {
-			info, iErr := entry.Info()
-			if iErr != nil {
+			name := entry.Name()
+			if strings.HasPrefix(name, ".") || name == "tmp" || name == "tmp_downloads" {
 				continue
 			}
-			itemPath := filepath.Join(fullPath, entry.Name())
-			var rel string
-			if isTmp {
-				rel, _ = s.tmpSandbox.ToRelative(itemPath)
+
+			itemPath := filepath.Join(fullPath, name)
+			var itemRel string
+			if cleanRel == "" {
+				itemRel = name
 			} else {
-				rel, _ = s.musicSandbox.ToRelative(itemPath)
+				itemRel = filepath.ToSlash(filepath.Join(cleanRel, name))
 			}
-			items = append(items, s.buildFileItem(itemPath, rel, info, isTmp, metadataCache))
+
+			if entry.IsDir() {
+				totalDirs++
+				subEntries, _ := os.ReadDir(itemPath)
+				tCount := 0
+				for _, sub := range subEntries {
+					if !sub.IsDir() && strings.EqualFold(filepath.Ext(sub.Name()), ".mp3") {
+						tCount++
+					}
+				}
+				items = append(items, FileItem{
+					Name:         name,
+					Path:         itemRel,
+					Type:         "directory",
+					IsDir:        true,
+					TrackCount:   &tCount,
+					LyricsStatus: "none",
+				})
+			} else {
+				totalFiles++
+				info, iErr := entry.Info()
+				if iErr != nil {
+					continue
+				}
+
+				if metadataCache != nil {
+					if cached, ok := metadataCache[itemRel]; ok {
+						cached.Name = name
+						cached.Path = itemRel
+						cached.Type = "file"
+						cached.IsDir = false
+						sz := info.Size()
+						cached.Size = &sz
+						cached.Extension = strings.ToLower(filepath.Ext(name))
+						cached.ModTime = info.ModTime().Format(time.RFC3339)
+						tHash := TrackHash(itemRel)
+						cached.ID = &tHash
+						cached.TrackHash = tHash
+						sURL := "/api/tracks/" + tHash + "/stream"
+						cached.StreamURL = &sURL
+						items = append(items, cached)
+						continue
+					}
+				}
+
+				items = append(items, s.buildFileItem(itemPath, itemRel, info, isTmp))
+			}
 		}
 	}
 
-	return items, nil
+	return &DirectoryListingResponse{
+		CurrentPath:      cleanRel,
+		ParentPath:       parentPath,
+		Breadcrumbs:      breadcrumbs,
+		Items:            items,
+		TotalDirectories: totalDirs,
+		TotalFiles:       totalFiles,
+	}, nil
 }
 
-func (s *Service) buildFileItem(absPath, relPath string, info os.FileInfo, isTmp bool, cache map[string]FileItem) FileItem {
+func (s *Service) buildFileItem(absPath, relPath string, info os.FileInfo, isTmp bool) FileItem {
+	sz := info.Size()
+	ext := strings.ToLower(filepath.Ext(absPath))
+	cleanRel := filepath.ToSlash(relPath)
+
 	item := FileItem{
-		Name:    info.Name(),
-		Path:    relPath,
-		IsDir:   info.IsDir(),
-		Size:    info.Size(),
-		ModTime: info.ModTime(),
+		Name:      info.Name(),
+		Path:      cleanRel,
+		Type:      "file",
+		IsDir:     info.IsDir(),
+		Size:      &sz,
+		ModTime:   info.ModTime().Format(time.RFC3339),
+		Extension: ext,
 	}
 
 	if item.IsDir {
+		item.Type = "directory"
 		return item
 	}
 
-	item.Extension = strings.ToLower(filepath.Ext(absPath))
-	if item.Extension != ".mp3" {
+	if ext != ".mp3" {
+		item.LyricsStatus = "none"
 		return item
 	}
 
-	// 1. Попытка взять из кэша базы данных
-	if cache != nil {
-		if cached, ok := cache[relPath]; ok {
-			item.TrackID = cached.TrackID
-			item.TrackHash = cached.TrackHash
-			item.Title = cached.Title
-			item.Artist = cached.Artist
-			item.Album = cached.Album
-			item.Duration = cached.Duration
-			item.Bitrate = cached.Bitrate
-			item.HasCover = cached.HasCover
-			item.HasLyrics = cached.HasLyrics
-			item.LyricsStatus = cached.LyricsStatus
-			return item
-		}
-	}
+	tHash := TrackHash(cleanRel)
+	item.ID = &tHash
+	item.TrackHash = tHash
+	sURL := "/api/tracks/" + tHash + "/stream"
+	item.StreamURL = &sURL
+	s.trackCache.Store(tHash, cleanRel)
 
-	// 2. Чтение ID3v2.4 на лету
-	tags, err := id3.ReadTags(absPath, relPath)
+	tags, err := id3.ReadTags(absPath, cleanRel)
 	if err == nil && tags != nil {
 		item.Title = tags.Title
 		item.Artist = tags.Artist
 		item.Album = tags.Album
-		item.Duration = tags.Duration
+		item.AlbumArtist = tags.AlbumArtist
+		if tags.Year > 0 {
+			y := tags.Year
+			item.Year = &y
+		}
+		item.Genre = tags.Genre
+		if tags.TrackNumber > 0 {
+			tn := tags.TrackNumber
+			item.TrackNumber = &tn
+		}
+		if tags.TrackTotal > 0 {
+			tt := tags.TrackTotal
+			item.TrackTotal = &tt
+		}
+		if tags.DiscNumber > 0 {
+			dn := tags.DiscNumber
+			item.DiscNumber = &dn
+		}
+		if tags.DiscTotal > 0 {
+			dt := tags.DiscTotal
+			item.DiscTotal = &dt
+		}
+		dur := int(tags.Duration)
+		item.Duration = &dur
 		item.Bitrate = tags.Bitrate
 		item.HasCover = tags.HasCover
+		lyr := tags.LyricsStatus
+		if lyr == "synced" {
+			lyr = "lrc"
+		} else if lyr == "plain" {
+			lyr = "txt"
+		}
+		item.LyricsStatus = lyr
 	} else {
-		item.Title = strings.TrimSuffix(info.Name(), item.Extension)
+		item.Title = strings.TrimSuffix(info.Name(), ext)
+		item.LyricsStatus = "none"
 	}
 
 	// Проверка наличия внешних текстов рядом с треком (.lrc или .txt)
-	base := strings.TrimSuffix(absPath, item.Extension)
+	base := strings.TrimSuffix(absPath, ext)
 	if fileExists(base + ".lrc") {
 		item.HasLyrics = true
-		item.LyricsStatus = "synced"
+		item.LyricsStatus = "lrc"
 	} else if fileExists(base + ".txt") {
 		item.HasLyrics = true
-		item.LyricsStatus = "plain"
-	} else {
-		item.LyricsStatus = "none"
+		item.LyricsStatus = "txt"
 	}
 
 	return item
@@ -273,6 +456,11 @@ func (s *Service) buildFileItem(absPath, relPath string, info os.FileInfo, isTmp
 
 // DeleteFile удаляет файл или каталог, очищая сопутствующие файлы и записи SQLite.
 func (s *Service) DeleteFile(ctx context.Context, relPath string) (*DeleteResponse, error) {
+	trimmed := strings.TrimSpace(relPath)
+	if trimmed == "" || trimmed == "." || trimmed == "/" {
+		return nil, ErrInvalidPath
+	}
+
 	fullPath, isTmp, err := s.ResolvePath(relPath)
 	if err != nil {
 		return nil, err

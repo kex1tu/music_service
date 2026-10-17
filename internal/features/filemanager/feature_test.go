@@ -61,22 +61,70 @@ func TestFileManager_ListFiles(t *testing.T) {
 	env.CreateDummyMP3("Album1/01. Track.mp3", "Track 1", "Artist 1", "Album 1")
 	env.CreateDummyMP3("Album1/02. Track.mp3", "Track 2", "Artist 1", "Album 1")
 
+	// 1. Проверяем открытие папки Album1
 	resp := env.Get("/files?path=Album1")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
 	}
 
-	var items []filemanager.FileItem
+	var res filemanager.DirectoryListingResponse
 	body := env.ReadBody(resp)
-	if err := json.Unmarshal(body, &items); err != nil {
+	if err := json.Unmarshal(body, &res); err != nil {
 		t.Fatalf("failed to decode json: %v", err)
 	}
 
-	if len(items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(items))
+	if len(res.Items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(res.Items))
 	}
-	if items[0].Title != "Track 1" || items[1].Title != "Track 2" {
-		t.Errorf("unexpected track titles: %+v", items)
+	if res.Items[0].Title != "Track 1" || res.Items[1].Title != "Track 2" {
+		t.Errorf("unexpected track titles: %+v", res.Items)
+	}
+	if res.Items[0].Type != "file" {
+		t.Errorf("expected item.Type == 'file', got %q", res.Items[0].Type)
+	}
+
+	// 2. Проверяем открытие корня (path="" и без параметров) - именно здесь был баг "invalid file path"
+	for _, rootURL := range []string{"/files?path=", "/files", "/api/files"} {
+		respRoot := env.Get(rootURL)
+		if respRoot.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK for root query %q, got %d: %s", rootURL, respRoot.StatusCode, env.ReadBody(respRoot))
+		}
+
+		var rootRes filemanager.DirectoryListingResponse
+		if err := json.Unmarshal(env.ReadBody(respRoot), &rootRes); err != nil {
+			t.Fatalf("failed to decode root json for %q: %v", rootURL, err)
+		}
+
+		if len(rootRes.Breadcrumbs) == 0 || rootRes.Breadcrumbs[0].Name != "Корень" {
+			t.Errorf("expected breadcrumbs[0].Name == 'Корень', got: %+v", rootRes.Breadcrumbs)
+		}
+		if len(rootRes.Items) != 1 {
+			t.Fatalf("expected 1 folder in root, got %d", len(rootRes.Items))
+		}
+		if rootRes.Items[0].Name != "Album1" || rootRes.Items[0].Type != "directory" {
+			t.Errorf("unexpected root item: %+v", rootRes.Items[0])
+		}
+		if rootRes.Items[0].TrackCount == nil || *rootRes.Items[0].TrackCount != 2 {
+			t.Errorf("expected TrackCount == 2 for Album1, got: %v", rootRes.Items[0].TrackCount)
+		}
+	}
+
+	// 3. Проверяем рекурсивный запрос корня (?recursive=true)
+	respRec := env.Get("/files?recursive=true")
+	if respRec.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for recursive root, got %d", respRec.StatusCode)
+	}
+	var recRes filemanager.DirectoryListingResponse
+	if err := json.Unmarshal(env.ReadBody(respRec), &recRes); err != nil {
+		t.Fatalf("failed to decode recursive json: %v", err)
+	}
+	if len(recRes.Items) != 2 {
+		t.Fatalf("expected 2 recursive items, got %d", len(recRes.Items))
+	}
+	for _, item := range recRes.Items {
+		if item.Type != "file" {
+			t.Errorf("expected all recursive items to have type 'file', got %q for %s", item.Type, item.Path)
+		}
 	}
 }
 

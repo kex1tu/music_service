@@ -1,25 +1,50 @@
 package filemanager
 
-import "time"
+// BreadcrumbItem представляет элемент навигационной цепочки (хлебных крошек).
+type BreadcrumbItem struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// DirectoryListingResponse представляет канонический ответ для файлового проводника и рабочей станции Puddletag.
+type DirectoryListingResponse struct {
+	CurrentPath      string           `json:"current_path"`
+	ParentPath       *string          `json:"parent_path"`
+	Breadcrumbs      []BreadcrumbItem `json:"breadcrumbs"`
+	Items            []FileItem       `json:"items"`
+	TotalDirectories int              `json:"total_directories"`
+	TotalFiles       int              `json:"total_files"`
+}
 
 // FileItem представляет отдельный элемент файловой системы (аудиофайл или директорию) для медиатеки.
 type FileItem struct {
-	Name         string    `json:"name"`
-	Path         string    `json:"path"`
-	IsDir        bool      `json:"is_dir"`
-	Size         int64     `json:"size"`
-	ModTime      time.Time `json:"mod_time"`
-	Extension    string    `json:"extension,omitempty"`
-	Title        string    `json:"title,omitempty"`
-	Artist       string    `json:"artist,omitempty"`
-	Album        string    `json:"album,omitempty"`
-	Duration     float64   `json:"duration,omitempty"`
-	Bitrate      int       `json:"bitrate,omitempty"`
-	HasLyrics    bool      `json:"has_lyrics,omitempty"`
-	LyricsStatus string    `json:"lyrics_status,omitempty"`
-	TrackID      int64     `json:"track_id,omitempty"`
-	TrackHash    string    `json:"track_hash,omitempty"`
-	HasCover     bool      `json:"has_cover,omitempty"`
+	Name         string   `json:"name"`
+	Path         string   `json:"path"`
+	Type         string   `json:"type"` // "directory" или "file"
+	IsDir        bool     `json:"is_dir"`
+	Size         *int64   `json:"size,omitempty"`
+	ModTime      string   `json:"mod_time,omitempty"`
+	Extension    string   `json:"extension,omitempty"`
+	TrackCount   *int     `json:"track_count,omitempty"` // Для каталогов: количество треков внутри
+	TrackNumber  *int     `json:"track_number,omitempty"`
+	TrackTotal   *int     `json:"track_total,omitempty"`
+	DiscNumber   *int     `json:"disc_number,omitempty"`
+	DiscTotal    *int     `json:"disc_total,omitempty"`
+	Title        string   `json:"title,omitempty"`
+	Artist       string   `json:"artist,omitempty"`
+	Album        string   `json:"album,omitempty"`
+	AlbumArtist  string   `json:"album_artist,omitempty"`
+	Year         *int     `json:"year,omitempty"`
+	Genre        string   `json:"genre,omitempty"`
+	Duration     *int     `json:"duration,omitempty"`
+	Bitrate      int      `json:"bitrate,omitempty"`
+	HasCover     bool     `json:"has_cover"`
+	HasLyrics    bool     `json:"has_lyrics,omitempty"`
+	LyricsStatus string   `json:"lyrics_status"`
+	ID           *string  `json:"id,omitempty"`
+	StreamURL    *string  `json:"stream_url,omitempty"`
+	TrackID      int64    `json:"track_id,omitempty"`
+	TrackHash    string   `json:"track_hash,omitempty"`
 }
 
 // RenameRequest задает параметры переименования или перемещения файла/каталога.

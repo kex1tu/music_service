@@ -61,7 +61,7 @@ document.addEventListener('alpine:init', () => {
                     const res = await fetch(`/files?path=${encodeURIComponent(item.path)}`, { method: 'DELETE' });
                     if (!res.ok) {
                         const err = await res.json().catch(() => ({}));
-                        throw new Error(err.message || 'Сбой при удалении');
+                        throw new Error(err.error || err.detail || err.message || 'Сбой при удалении');
                     }
                 }
                 this.toast(`Удалено: ${item.name}`, 'success');

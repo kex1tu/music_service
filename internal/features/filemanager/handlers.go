@@ -19,7 +19,7 @@ func (m *Module) ListFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	recursive := httputil.QueryBool(r, "recursive", false)
 
-	files, err := m.service.ListFiles(r.Context(), relPath, recursive)
+	resp, err := m.service.ListFiles(r.Context(), relPath, recursive)
 	if err != nil {
 		if errors.Is(err, sandbox.ErrPathTraversal) || errors.Is(err, ErrSandboxViolation) {
 			httputil.RespondError(w, http.StatusForbidden, "Доступ запрещен")
@@ -33,10 +33,13 @@ func (m *Module) ListFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if files == nil {
-		files = []FileItem{}
+	if resp == nil {
+		resp = &DirectoryListingResponse{
+			Breadcrumbs: []BreadcrumbItem{{Name: "Корень", Path: ""}},
+			Items:       []FileItem{},
+		}
 	}
-	httputil.RespondJSON(w, http.StatusOK, files)
+	httputil.RespondJSON(w, http.StatusOK, resp)
 }
 
 // DeleteFile обрабатывает DELETE /files, DELETE /api/files (удаление файла или директории).
