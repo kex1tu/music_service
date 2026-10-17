@@ -878,3 +878,11 @@ func (db *DB) UpdateMissingTrackPinnedURL(ctx context.Context, missingTrackID in
 	return err
 }
 
+// DeletePinnedSource удаляет ручную привязку аудио-источника по ключу.
+func (db *DB) DeletePinnedSource(ctx context.Context, cacheKey string) error {
+	query := `DELETE FROM pinned_track_sources WHERE cache_key = ?;`
+	_, err := db.conn.ExecContext(ctx, query, cacheKey)
+	return err
+}
+
+

@@ -945,6 +945,63 @@ func (s *Service) processSingleTrack(
 	rawAudioFile, err := s.downloadRawStream(ctx, streamURL, outTemplate, func(pct float64) {
 		job.UpdateTrackProgress(trackIdx-1, pct, fmt.Sprintf("Скачивание %d/%d: %.0f%%", trackIdx, total, pct))
 	})
+	if err != nil && s.matcher != nil {
+		errLower := strings.ToLower(err.Error())
+		isDRM := strings.Contains(errLower, "drm")
+		isSC := strings.Contains(streamURL, "soundcloud.com")
+		isYT := strings.Contains(streamURL, "youtube.com") || strings.Contains(streamURL, "youtu.be")
+
+		cacheKey := resolver.BuildCacheKey("", track.Artist, track.Title)
+
+		if isSC || isDRM {
+			log.Printf("[Downloader] Track '%s - %s' stream failed (%s, err: %v). Clearing broken pin and attempting fallback...", track.Artist, track.Title, streamURL, err)
+			if s.repo != nil {
+				_ = s.repo.DeletePinnedSource(ctx, cacheKey)
+				invEntry, _ := s.repo.InvalidateSoundCloudURL(ctx, cacheKey, streamURL)
+				if invEntry != nil && invEntry.SelectedURL != "" && invEntry.SelectedURL != streamURL {
+					log.Printf("[Downloader] Rotating to next SoundCloud candidate for '%s - %s': %s", track.Artist, track.Title, invEntry.SelectedURL)
+					streamURL = invEntry.SelectedURL
+					job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+						tr.AudioSourceURL = invEntry.SelectedURL
+						tr.VersionStatus = invEntry.Status
+					})
+					rawAudioFile, err = s.downloadRawStream(ctx, invEntry.SelectedURL, outTemplate, func(pct float64) {
+						job.UpdateTrackProgress(trackIdx-1, pct, fmt.Sprintf("Скачивание (SoundCloud) %d/%d: %.0f%%", trackIdx, total, pct))
+					})
+				}
+			}
+
+			// Если SoundCloud всё ещё возвращает ошибку — фоллбэк на YouTube
+			if err != nil {
+				job.SetStepAndStatus(fmt.Sprintf("Резервный поиск YouTube %d/%d: %s", trackIdx, total, track.Title), StatusDownloading)
+				if ytURL, ytErr := s.matcher.FindYouTubeMatch(ctx, track.Title, track.Artist, track.Duration); ytErr == nil && ytURL != "" && ytURL != streamURL {
+					log.Printf("[Downloader] Found YouTube fallback for '%s - %s': %s", track.Artist, track.Title, ytURL)
+					streamURL = ytURL
+					job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+						tr.AudioSourceURL = ytURL
+						tr.VersionStatus = ""
+					})
+					rawAudioFile, err = s.downloadRawStream(ctx, ytURL, outTemplate, func(pct float64) {
+						job.UpdateTrackProgress(trackIdx-1, pct, fmt.Sprintf("Скачивание (YouTube) %d/%d: %.0f%%", trackIdx, total, pct))
+					})
+				}
+			}
+		} else if isYT {
+			log.Printf("[Downloader] Track '%s - %s' YouTube stream failed (%s, err: %v). Attempting SoundCloud fallback...", track.Artist, track.Title, streamURL, err)
+			job.SetStepAndStatus(fmt.Sprintf("Резервный поиск SoundCloud %d/%d: %s", trackIdx, total, track.Title), StatusDownloading)
+			if scURL, scErr := s.matcher.FindSoundCloudMatch(ctx, track.Title, track.Artist, track.Duration); scErr == nil && scURL != "" && scURL != streamURL {
+				log.Printf("[Downloader] Found SoundCloud fallback for '%s - %s': %s", track.Artist, track.Title, scURL)
+				streamURL = scURL
+				job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+					tr.AudioSourceURL = scURL
+				})
+				rawAudioFile, err = s.downloadRawStream(ctx, scURL, outTemplate, func(pct float64) {
+					job.UpdateTrackProgress(trackIdx-1, pct, fmt.Sprintf("Скачивание (SoundCloud) %d/%d: %.0f%%", trackIdx, total, pct))
+				})
+			}
+		}
+	}
+
 	if err != nil {
 		errStr := err.Error()
 		job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {

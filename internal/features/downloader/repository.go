@@ -43,6 +43,7 @@ type JobRepository interface {
 
 	GetPinnedSource(ctx context.Context, cacheKey string) (*PinnedTrackSourceDTO, error)
 	SavePinnedSource(ctx context.Context, pin PinnedTrackSourceDTO) error
+	DeletePinnedSource(ctx context.Context, cacheKey string) error
 	UpdateTrackPinnedURL(ctx context.Context, trackID int64, pinnedURL string) error
 	GetSoundCloudCache(ctx context.Context, key string, ttlHours int) (*SoundCloudCacheDTO, error)
 	PinSoundCloudVersion(ctx context.Context, key, artist, title, url string, duration int) error
@@ -464,6 +465,13 @@ func (r *Repository) SavePinnedSource(ctx context.Context, pin PinnedTrackSource
 		pin.CacheKey, pin.ArtistName, pin.TrackTitle, isrcVal,
 		pin.PinnedURL, pin.SourceType, pin.Duration,
 	)
+	return err
+}
+
+// DeletePinnedSource удаляет ручную привязку аудио-источника по cache_key.
+func (r *Repository) DeletePinnedSource(ctx context.Context, cacheKey string) error {
+	query := `DELETE FROM pinned_track_sources WHERE cache_key = ?;`
+	_, err := r.db.ExecContext(ctx, query, cacheKey)
 	return err
 }
 

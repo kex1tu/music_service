@@ -433,10 +433,13 @@ trackLoop:
 					}
 					cacheKey := resolver.BuildCacheKey(trackISRC, track.Artist, track.Title)
 					if s.Database() != nil {
+						if strings.Contains(strings.ToLower(dErr.Error()), "drm") {
+							_ = s.Database().DeletePinnedSource(ctx, cacheKey)
+						}
 						invEntry, invErr := s.Database().InvalidateSoundCloudURL(ctx, cacheKey, track.AudioSourceURL)
 						if invErr == nil && invEntry != nil {
-							if invEntry.IsManual {
-								// Ручная ссылка: статус 'link_dead', НЕ подменять ссылку автоматически
+							if invEntry.IsManual && !strings.Contains(strings.ToLower(dErr.Error()), "drm") {
+								// Ручная ссылка: статус 'link_dead', НЕ подменять ссылку автоматически (если только это не фатальный DRM)
 								job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
 									tr.VersionStatus = "link_dead"
 								})

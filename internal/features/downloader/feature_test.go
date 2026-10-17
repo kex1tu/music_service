@@ -622,3 +622,41 @@ func TestDownloader_DebouncedSave_ConcurrentProgressAndStatusUpdates(t *testing.
 
 	wg.Wait()
 }
+
+func TestDownloader_DeletePinnedSource(t *testing.T) {
+	_, mod := setupTestModule(t)
+	svc := mod.Service()
+	ctx := context.Background()
+
+	cacheKey := "track:artist:title"
+	pin := downloader.PinnedTrackSourceDTO{
+		CacheKey:   cacheKey,
+		ArtistName: "Neverlove",
+		TrackTitle: "Test",
+		PinnedURL:  "https://soundcloud.com/neverlove-music/test",
+		SourceType: "manual",
+		UpdatedAt:  time.Now().UTC(),
+	}
+
+	if err := svc.Repo().SavePinnedSource(ctx, pin); err != nil {
+		t.Fatalf("failed to save pin: %v", err)
+	}
+
+	found, err := svc.Repo().GetPinnedSource(ctx, cacheKey)
+	if err != nil || found == nil {
+		t.Fatalf("expected pin to be found, err: %v", err)
+	}
+
+	if err := svc.Repo().DeletePinnedSource(ctx, cacheKey); err != nil {
+		t.Fatalf("failed to delete pin: %v", err)
+	}
+
+	after, err := svc.Repo().GetPinnedSource(ctx, cacheKey)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if after != nil {
+		t.Fatalf("expected nil after delete, got %+v", after)
+	}
+}
+

@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 81 блок задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js` и 100% тестов пройдены).
+- **Статус готовности:** **100% DONE** (Все 82 блока задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js` и 100% тестов пройдены).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **Vertical Feature Slices**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 24 пакета зеленые).
@@ -904,6 +904,23 @@
       - В `feature_test.go` добавлены юнит-тесты `TestFileManager_Redownload_Track`, `TestFileManager_Redownload_Album` и `TestFileManager_Redownload_PathTraversalSecurity`.
       - В `internal/api/e2e_user_journey_test.go` реализован сквозной тест `TestUserJourney_RedownloadTrackAndRelease`.
       - `./scripts/test_user_flows.sh` и `go test ./...` — 100% PASS.
+
+  - **Блок 82 (SoundCloud DRM Auto-Fallback, Pinned Invalidation and Resilience):**
+    - **82.1. Идентификация и сброс битых DRM-привязок:**
+      - Реализован метод `DeletePinnedSource(ctx, cacheKey)` в `internal/db/queries.go` и в `internal/features/downloader/repository.go` (`RepositoryInterface`).
+      - На боевом Сервере 2 очищены битые привязки `neverlove-music` с DRM Go+.
+    - **82.2. Защита загрузчика от ошибок DRM и авто-фоллбэк (`internal/features/downloader/service.go`):**
+      - В `processSingleTrack` добавлена многоступенчатая система восстановления при сбоях `downloadRawStream`:
+        1. Определение DRM/fatal ошибок (`This video is DRM protected`, 404, etc.).
+        2. Немедленная инвалидация нерабочего потока в `soundcloud_uncensored_cache` и удаление битого пина из `pinned_track_sources`.
+        3. Попытка ротации на следующего незалоченного SoundCloud-кандидата из кэша (если имеется).
+        4. При отсутствии/ошибке SoundCloud-кандидатов — прозрачный фоллбэк на YouTube Music/Topic студийный мастер через `matcher.FindYouTubeMatch`.
+        5. Аналогично: при ошибке YouTube-стрима (age-gate / ограничение) — прозрачный фоллбэк на SoundCloud через `matcher.FindSoundCloudMatch`.
+    - **82.3. Синхронизация монолитного пайплайна (`internal/services/downloader/pipeline.go`):**
+      - В `pipeline.go` разблокирован фоллбэк даже для ручных ссылок (`IsManual`), если они упали с DRM-ошибкой, с удалением битого пина из базы.
+    - **82.4. Тестирование и верификация:**
+      - Добавлены модульные тесты `TestDB_PinnedSources` (удаление пинов) и `TestDownloader_DeletePinnedSource`.
+      - `go test ./...` и `./scripts/test_user_flows.sh` — 100% PASS (0 data races во всех 24 пакетах).
 
 ---
 

@@ -578,6 +578,18 @@ func TestDB_PinnedSources(t *testing.T) {
 		t.Errorf("expected updated url %s, got %s", pin.PinnedURL, retrievedUpdated.PinnedURL)
 	}
 
+	// Удаление пина
+	if err := database.DeletePinnedSource(ctx, "artist_track_key"); err != nil {
+		t.Fatalf("failed to delete pinned source: %v", err)
+	}
+	deleted, err := database.GetPinnedSource(ctx, "artist_track_key")
+	if err != nil {
+		t.Fatalf("unexpected error getting deleted pin: %v", err)
+	}
+	if deleted != nil {
+		t.Fatalf("expected nil for deleted pinned source, got %+v", deleted)
+	}
+
 	// 2. Тест обновления pinned_source_url у tracks
 	_, err = database.conn.ExecContext(ctx, `
 		INSERT INTO artists (id, name, clean_name) VALUES (10, 'The Beatles', 'the beatles');
