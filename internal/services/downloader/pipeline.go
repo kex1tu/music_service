@@ -488,6 +488,43 @@ trackLoop:
 							job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
 						})
 					}
+				} else {
+					// Fallback from non-SC, non-YT (e.g. DRM or Deezer URL) to SoundCloud, then YouTube
+					trackISRC := ""
+					if track.ISRC != nil {
+						trackISRC = *track.ISRC
+					}
+					cacheKey := resolver.BuildCacheKey(trackISRC, track.Artist, track.Title)
+					if s.Database() != nil && strings.Contains(strings.ToLower(dErr.Error()), "drm") {
+						_ = s.Database().DeletePinnedSource(ctx, cacheKey)
+					}
+					job.SetCurrentStep(fmt.Sprintf("Резервный поиск SoundCloud %d/%d: %s", trackIdx, total, track.Title))
+					if scRes, scErr := s.resolver.Matcher().FindUncensoredSoundCloudMatch(ctx, track.Title, track.Artist, trackISRC, track.Duration); scErr == nil && scRes != nil && scRes.URL != "" {
+						job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+							tr.AudioSourceURL = scRes.URL
+							tr.VersionStatus = scRes.Status
+							tr.Candidates = scRes.Candidates
+						})
+						track.AudioSourceURL = scRes.URL
+						track.VersionStatus = scRes.Status
+						track.Candidates = scRes.Candidates
+						rawAudioFile, dErr = s.downloadRawStream(ctx, scRes.URL, rawOutTemplate, func(p float64) {
+							job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
+						})
+					}
+					if dErr != nil {
+						job.SetCurrentStep(fmt.Sprintf("Резервный поиск YouTube %d/%d: %s", trackIdx, total, track.Title))
+						if ytURL, ytErr := s.resolver.Matcher().FindYouTubeMatch(ctx, track.Title, track.Artist, track.Duration); ytErr == nil && ytURL != "" {
+							job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+								tr.AudioSourceURL = ytURL
+								tr.VersionStatus = ""
+							})
+							track.AudioSourceURL = ytURL
+							rawAudioFile, dErr = s.downloadRawStream(ctx, ytURL, rawOutTemplate, func(p float64) {
+								job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
+							})
+						}
+					}
 				}
 			}
 			if dErr != nil {

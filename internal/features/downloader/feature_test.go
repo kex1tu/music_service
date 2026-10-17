@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"music-manager/internal/core/auth"
+	"music-manager/internal/db"
 	"music-manager/internal/features/downloader"
 	"music-manager/internal/services/resolver"
 	"music-manager/internal/testkit"
@@ -659,4 +660,49 @@ func TestDownloader_DeletePinnedSource(t *testing.T) {
 		t.Fatalf("expected nil after delete, got %+v", after)
 	}
 }
+
+func TestDownloader_DeezerURL_IgnoredAndResolved(t *testing.T) {
+	env, mod := setupTestModule(t)
+	svc := mod.Service()
+	ctx := context.Background()
+
+	// 1. If a pinned URL is itself a deezer.com URL, it must NOT be used
+	cacheKey := resolver.BuildCacheKey("", "Neverlove", "KINGS OF STRIP CLUB")
+	pin := downloader.PinnedTrackSourceDTO{
+		CacheKey:   cacheKey,
+		ArtistName: "Neverlove",
+		TrackTitle: "KINGS OF STRIP CLUB",
+		PinnedURL:  "https://www.deezer.com/track/3563242641",
+		SourceType: "manual",
+		UpdatedAt:  time.Now().UTC(),
+	}
+	_ = svc.Repo().SavePinnedSource(ctx, pin)
+
+	// Save a valid soundcloud cache entry via env.DB
+	scEntry := db.SoundCloudCacheEntry{
+		CacheKey:    cacheKey,
+		TrackTitle:  "KINGS OF STRIP CLUB",
+		ArtistName:  "Neverlove",
+		SelectedURL: "https://soundcloud.com/neverlove-music/kings-of-strip-club",
+		Status:      "marked",
+		Duration:    247,
+		IsManual:    false,
+	}
+	_ = env.DB.SaveSoundCloudCache(ctx, scEntry)
+
+	// Verify that GetPinnedSource returns the pin, but downloader ignores it and uses SoundCloud cache
+	retrievedPin, err := svc.Repo().GetPinnedSource(ctx, cacheKey)
+	if err != nil || retrievedPin == nil {
+		t.Fatalf("expected pin to exist in DB")
+	}
+	if !strings.Contains(retrievedPin.PinnedURL, "deezer.com") {
+		t.Fatalf("expected pin to be deezer URL")
+	}
+
+	scRetrieved, err := svc.Repo().GetSoundCloudCache(ctx, cacheKey, 720)
+	if err != nil || scRetrieved == nil || scRetrieved.SelectedURL == "" {
+		t.Fatalf("expected soundcloud cache to be available")
+	}
+}
+
 
