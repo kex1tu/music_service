@@ -408,17 +408,21 @@ trackLoop:
 					tr.AudioSourceURL = matchRes.URL
 					tr.VersionStatus = matchRes.Status
 					tr.Candidates = matchRes.Candidates
+					tr.MatchScore = matchRes.MatchScore
+					tr.IsLowMatch = matchRes.MatchScore >= 50.0 && matchRes.MatchScore < 75.0
 				})
 				track.AudioSourceURL = matchRes.URL
 				track.VersionStatus = matchRes.Status
 				track.Candidates = matchRes.Candidates
+				track.MatchScore = matchRes.MatchScore
+				track.IsLowMatch = matchRes.MatchScore >= 50.0 && matchRes.MatchScore < 75.0
 			}
 
 			// Download stream with yt-dlp
 			rawOutTemplate := filepath.Join(rawDir, fmt.Sprintf("%02d.%%(ext)s", trackIdx))
 			job.SetStepAndStatus(fmt.Sprintf("Загрузка трека %d/%d: %s", trackIdx, total, track.Title), StatusDownloading)
 
-			rawAudioFile, dErr := s.downloadRawStream(ctx, track.AudioSourceURL, rawOutTemplate, func(p float64) {
+			rawAudioFile, dErr := s.downloadAndValidateRawStream(ctx, track.AudioSourceURL, rawOutTemplate, track.Duration, func(p float64) {
 				job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
 			})
 			if dErr != nil && s.resolver != nil && s.resolver.Matcher() != nil {
@@ -455,7 +459,7 @@ trackLoop:
 								track.AudioSourceURL = invEntry.SelectedURL
 								track.VersionStatus = invEntry.Status
 								track.Candidates = invEntry.Candidates
-								rawAudioFile, dErr = s.downloadRawStream(ctx, invEntry.SelectedURL, rawOutTemplate, func(p float64) {
+								rawAudioFile, dErr = s.downloadAndValidateRawStream(ctx, invEntry.SelectedURL, rawOutTemplate, track.Duration, func(p float64) {
 									job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
 								})
 							}
@@ -465,13 +469,17 @@ trackLoop:
 					// Если SoundCloud всё ещё выдаёт ошибку — прозрачный фоллбэк на YouTube
 					if dErr != nil {
 						job.SetCurrentStep(fmt.Sprintf("Резервный поиск YouTube %d/%d: %s", trackIdx, total, track.Title))
-						if ytURL, ytErr := s.resolver.Matcher().FindYouTubeMatch(ctx, track.Title, track.Artist, track.Duration); ytErr == nil && ytURL != "" {
+						if ytURL, ytScore, ytErr := s.resolver.Matcher().FindYouTubeMatchWithScore(ctx, track.Title, track.Artist, track.Duration); ytErr == nil && ytURL != "" {
 							job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
 								tr.AudioSourceURL = ytURL
 								tr.VersionStatus = ""
+								tr.MatchScore = ytScore
+								tr.IsLowMatch = ytScore >= 50.0 && ytScore < 75.0
 							})
 							track.AudioSourceURL = ytURL
-							rawAudioFile, dErr = s.downloadRawStream(ctx, ytURL, rawOutTemplate, func(p float64) {
+							track.MatchScore = ytScore
+							track.IsLowMatch = ytScore >= 50.0 && ytScore < 75.0
+							rawAudioFile, dErr = s.downloadAndValidateRawStream(ctx, ytURL, rawOutTemplate, track.Duration, func(p float64) {
 								job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
 							})
 						}
@@ -484,7 +492,7 @@ trackLoop:
 							tr.AudioSourceURL = scURL
 						})
 						track.AudioSourceURL = scURL
-						rawAudioFile, dErr = s.downloadRawStream(ctx, scURL, rawOutTemplate, func(p float64) {
+						rawAudioFile, dErr = s.downloadAndValidateRawStream(ctx, scURL, rawOutTemplate, track.Duration, func(p float64) {
 							job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
 						})
 					}
@@ -508,19 +516,23 @@ trackLoop:
 						track.AudioSourceURL = scRes.URL
 						track.VersionStatus = scRes.Status
 						track.Candidates = scRes.Candidates
-						rawAudioFile, dErr = s.downloadRawStream(ctx, scRes.URL, rawOutTemplate, func(p float64) {
+						rawAudioFile, dErr = s.downloadAndValidateRawStream(ctx, scRes.URL, rawOutTemplate, track.Duration, func(p float64) {
 							job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
 						})
 					}
 					if dErr != nil {
 						job.SetCurrentStep(fmt.Sprintf("Резервный поиск YouTube %d/%d: %s", trackIdx, total, track.Title))
-						if ytURL, ytErr := s.resolver.Matcher().FindYouTubeMatch(ctx, track.Title, track.Artist, track.Duration); ytErr == nil && ytURL != "" {
+						if ytURL, ytScore, ytErr := s.resolver.Matcher().FindYouTubeMatchWithScore(ctx, track.Title, track.Artist, track.Duration); ytErr == nil && ytURL != "" {
 							job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
 								tr.AudioSourceURL = ytURL
 								tr.VersionStatus = ""
+								tr.MatchScore = ytScore
+								tr.IsLowMatch = ytScore >= 50.0 && ytScore < 75.0
 							})
 							track.AudioSourceURL = ytURL
-							rawAudioFile, dErr = s.downloadRawStream(ctx, ytURL, rawOutTemplate, func(p float64) {
+							track.MatchScore = ytScore
+							track.IsLowMatch = ytScore >= 50.0 && ytScore < 75.0
+							rawAudioFile, dErr = s.downloadAndValidateRawStream(ctx, ytURL, rawOutTemplate, track.Duration, func(p float64) {
 								job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
 							})
 						}

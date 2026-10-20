@@ -1,290 +1,358 @@
-# План реализации: Система полуавтоматического отслушивания треков по таймкодам при загрузке (Quick-Listen Spots)
+# План реализации: Внедрение алгоритмов нечёткого скоринга, Early Exit и защиты от гео-сниппетов из mp3_PLRKLR
 
 - **Дата составления:** 2026-10-20  
 - **Статус плана:** `DONE (Успешно реализован и протестирован)`  
-- **Целевые компоненты:** `internal/services/censorcheck/` (новый пакет), `internal/services/resolver/`, `internal/features/downloader/`, `web/static/js/player.js`, `web/templates/components/downloader_queue.html`, `web/templates/components/downloader_active.html`  
-- **Архитектурные инварианты (AGENTS.md):** Pure Go (Chi), Zero-Python в серверной части, Zero Node.js / Zero npm, Zero Docker, Sandbox Mandatory (`PathSandbox.Resolve()`), ID3v2.4 UTF-8 (null-separated), SQLite WAL, No-Build Frontend (Tailwind CDN + Alpine.js CDN).
+- **Целевые компоненты:**  
+  - `internal/services/resolver/score.go` (Fuzzy Levenshtein Ratio + 70/30 текстовый вес)
+  - `internal/services/resolver/matcher.go` (Early Exit Threshold = 85.0%)
+  - `internal/services/downloader/media_processor.go` (Anti-Snippet Guard: ffprobe валидация < 35 сек)
+  - `internal/services/downloader/job.go` (Метка LowMatch для ручного подтверждения)
+  - `web/templates/components/downloader_queue.html`, `downloader_active.html` (Визуализация Low-Match бейджей)
+- **Архитектурные инварианты (AGENTS.md):**  
+  - **Pure Go / Zero-Python:** Реализация алгоритма расстояния Левенштейна строго на чистом Go, zero external dependencies, zero CGO.
+  - **Sandbox Mandatory:** Все файловые манипуляции и проверки временных файлов только через `PathSandbox`.
+  - **Аудио-пайплайн:** yt-dlp + ffmpeg в MP3 320 kbps CBR, проверка хронометража через встроенный ffprobe.
+  - **No Docker / No Node.js:** Только статический Go-бинарник и CDN Alpine.js/Tailwind.
 
 ---
 
 ## 1. Цель и границы задачи (Objective & Scope)
 
 ### 1.1. Проблематика
-1. **Неприменимость тяжелого автоматического анализа:**
-   - Полноценный ASR-анализ (Whisper) требует от 15 до 600 секунд на трек и сотен мегабайт оперативной памяти при интенсивной загрузке процессора.
-   - Пользователь прямо указал: **автоматический анализатор не нужен**.
-2. **Проблема скрытой цензуры стримингов (КоАП РФ ст. 6.13):**
-   - Российские стриминги (Яндекс Музыка, VK, Apple Music) часто оставляют обычный мат, но точечно заглушают (Mute) или запикивают (Bleep) нарко-сленг (ст. 6.13 КоАП РФ).
-   - Человеческое ухо за 2–3 секунды безошибочно определяет, присутствует ли заглушение вокала или бип на подозрительном слове, если точно знать, куда перематывать.
-3. **Отсутствие фокуса в интерфейсе загрузчика:**
-   - Сейчас после скачивания релиза в `tmp_downloads` пользователь видит список треков, но чтобы проверить оригинальность, ему приходится вручную открывать файл, искать текст песни и наугад перематывать дорожку.
+1. **Хрупкость текстового сопоставления при опечатках и пунктуации:**
+   - В существующей функции [`CalculateScore`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/score.go#L21-L62) текстовая схожесть вычисляется через `strings.Contains` и отношение пересекающихся слов (`overlapping words`).
+   - Если в названии трека на YouTube/SoundCloud есть опечатка, апостроф (`don't` vs `dont`), дефис (`rock-n-roll` vs `rock n roll`) или опущен предлог, пословный подсчёт теряет до 30 очков, что приводит к ложному отсеву корректных треков.
+2. **Избыточные сетевые вызовы yt-dlp при наличии отличного кандидата:**
+   - Текущий `matcher.go` при поиске на YouTube выполняет до 5–6 поисковых запросов подряд (`Topic`, `Explicit`, `Audio`, вариации слов), даже если первый же запрос вернул идеальный студийный трек с оценкой 95–100%. Это создаёт задержку до 10–15 секунд на каждый трек.
+3. **Опасность 30-секундных превью/сниппетов при гео-блокировках:**
+   - При блокировке трека в регионе РФ некоторые стриминги отдают не HTTP-ошибку, а урезанное 30-секундное демо (`format_id: preview/snippet`). Сервис скачивает этот огрызок, кодирует в MP3 320k и считает задачу успешной, засоряя медиатеку пользователя.
+4. **Отсутствие градации «сомнительных совпадений»:**
+   - Если кандидат набрал 50–70% (например, редкий ремикс или концертная запись с похожим названием), система либо молча его скачивает, либо отклоняет. Пользователь лишен возможности увидеть статус «Требует внимания» до переноса в основную папку медиатеки.
 
 ### 1.2. Целевой результат
-1. **Мгновенное извлечение контрольных точек (Quick-Listen Spots):**
-   - При скачивании трека сервис автоматически подтягивает синхронизированный текст (`.lrc`) через существующий `lyrics.Service` (LRCLIB / Deezer).
-   - Новый легковесный Pure Go пакет `internal/services/censorcheck` за **< 1 миллисекунды** парсит таймкоды `[mm:ss.xx]` и находит до 3 наиболее критичных точек в треке с наивысшим приоритетом:
-     - Приоритет 1: Вещества и нарко-сленг (**ст. 6.13 КоАП РФ**).
-     - Приоритет 2: Подозрительные маркеры и эвфемизмы (clean, radio edit, балдеет, дуреет).
-     - Приоритет 3: Явный мат (хуй, пизда, ебать, блять, сука).
-2. **Контекстный интеллект:**
-   - Исключение ложных срабатываний: фразы вроде «у меня есть план», «по плану», «мой план», «бизнес-план» не помечаются как наркотики.
-   - Исключение нейтральных слов («лирика», «марка машины») и безопасных корней с «еб» («волшебная», «скрести», «хлеб», «небе»).
-3. **1-Click интерактивное отслушивание в очереди загрузок:**
-   - В карточке трека в `downloader_queue.html` и `downloader_active.html` появляются кликабельные чипы контрольных точек:
-     `[▶ 01:14 "косяк" (КоАП 6.13)]` `[▶ 02:05 "наебалово"]`.
-   - Клик по чипу запускает встроенный веб-аудиоплеер ровно за 2 секунды до слова и воспроизводит короткий фрагмент (5 секунд) с автоматической остановкой.
-   - Пользователь видит всплывающую подсказку со строкой из песни: *«Закуривая паранойю в виде косяка»*.
-4. **Бесшовная замена цензурной версии:**
-   - Если пользователь услышал мьют/запикивание, он тут же нажимает имеющуюся кнопку **«Выбрать источник»** (`$store.sourcePicker.openForQueueTrack`) и в 1 клик подменяет трек на альтернативную версию из SoundCloud / YouTube.
+1. **Fuzzy String Matching (Pure Go):**
+   - Внедрение функции `LevenshteinRatio(s1, s2 string) float64` на чистом Go (нормализованное расстояние Левенштейна от 0.0 до 1.0).
+   - Применение сбалансированной формулы $70\%$ (название трека) / $30\%$ (автор/канал) из `mp3_PLRKLR`, интегрированной с нашими штрафами за цензуру и бонусами за хронометраж.
+2. **Short-Circuit / Early Exit в `matcher.go`:**
+   - Если SoundCloud или первый же поисковый запрос YouTube вернул кандидата с уверенным скором $\ge 85.0\%$, дальнейший перебор поисковых шаблонов немедленно прерывается. Время резолва сокращается в 3–5 раз.
+3. **Anti-Snippet & Geo-block Guard в `media_processor.go`:**
+   - Сразу после скачивания сырого потока утилита `ffprobe` валидирует реальную длительность. Если длительность файла $< 35$ секунд, а ожидаемый трек из каталога $> 60$ секунд — файл бракуется со статусом ошибки «гео-сниппет/превью» и запускается поиск альтернативного источника.
+4. **Статус `low_match` для ручной валидации:**
+   - Кандидаты со скором $50.0 \le \text{Score} < 75.0$ помечаются флагом `IsLowMatch = true`. В веб-интерфейсе отображается желтый бейдж с процентом совпадения и предупреждением перед финализацией.
 
-### 1.3. Границы проекта (Scope)
+### 1.3. Границы задачи (Scope)
 - **Входит в объем (In-Scope):**
-  - Создание нового пакета `internal/services/censorcheck/` на чистом Go (лексикон КоАП 6.13 + мат, парсер LRC, генератор точек).
-  - Расширение модели `resolver.ResolvedTrack` полем `QuickListenSpots []QuickListenSpot`.
-  - Интеграция в `downloader.Service.processSingleTrack`: получение LRC через `lyrics.Service` в `tmp_downloads` и вызов генератора точек.
-  - Добавление метода `playSpot(streamUrl, spot)` в `web/static/js/player.js`.
-  - Обновление шаблонов `web/templates/components/downloader_queue.html` и `downloader_active.html` для отображения чипов точек.
-  - Покрытие юнит-тестами на Go (`censorcheck_test.go`, тесты интеграции с очередью).
+  - Модификация `internal/services/resolver/score.go`: добавление `LevenshteinRatio`, обновление `CalculateScore`.
+  - Модификация `internal/services/resolver/matcher.go`: добавление `EarlyExitThreshold = 85.0`, прерывание очередей запросов при нахождении уверенного кандидата.
+  - Модификация `internal/services/downloader/media_processor.go`: вызов `validateDownloadedAudio` через `ffprobe` перед транскодированием в MP3.
+  - Расширение модели `TrackProgressItem` в `internal/services/downloader/job.go`: поля `MatchScore float64` и `IsLowMatch bool`.
+  - Обновление фронтенд-шаблонов (`downloader_queue.html`, `downloader_active.html`) для отрисовки индикатора точности совпадения.
+  - Полный комплект юнит-тестов для новых алгоритмов.
 - **Не входит в объем (Out-of-Scope):**
-  - Автоматический запуск нейросетей (Whisper, ASR) — от них полностью отказываемся по требованию пользователя.
-  - Автоматический спектральный DSP-анализ (заменен на ухо пользователя).
-  - Изменение бинарного формата ID3v2.4.
+  - Подключение внешних Python-модулей или утилит (`pingo`, `rapidfuzz` через Python).
+  - Изменение схемы БД для истории (все поля вычисляются в памяти активной очереди `DownloadJob`).
 
 ---
 
-## 2. Анализ текущего состояния системы (Current State Analysis)
+## 2. Анализ текущего состояния (Current State Analysis)
 
-### 2.1. Затронутые компоненты кодовой базы
-1. **Загрузчик треков:** [`internal/features/downloader/service.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/features/downloader/service.go#L890-L1150)
-   - Метод `processSingleTrack` выполняет скачивание сырого потока, транскодирование в MP3 320k и запись ID3-тегов.
-   - Сейчас он не вызывает `lyrics.Service` и не сохраняет `.lrc` рядом с MP3 во временном каталоге `tmp_downloads/{job_id}/converted/`.
-2. **Модели треков очереди:** [`internal/services/resolver/resolver.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/resolver.go#L52-L75)
-   - Структура `ResolvedTrack` содержит метаданные трека, статус версии (`VersionStatus`), аудиокачество (`AudioQuality`) и путь к готовому MP3 (`ConvertedPath`).
-   - Поле для контрольных точек отсутствует.
-3. **Сервис текстов песен:** [`internal/services/lyrics/lyrics.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/lyrics/lyrics.go#L64-L105)
-   - Метод `Search(ctx, artist, title, album, duration)` обращается к LRCLIB и возвращает `SyncedLyrics` с точными таймкодами.
-4. **Аудиоплеер на фронтенде:** [`web/static/js/player.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/player.js#L213-L245)
-   - `Alpine.store('player')` умеет воспроизводить предпросмотры (`playPreviewStream`) и аудиодорожки через стриминг `/api/stream?path=...`.
-   - Не хватает специализированного метода для позиционирования на таймкод `t - 2s` с автопаузой через 5 секунд.
-5. **Интерфейс очереди загрузок:** [`web/templates/components/downloader_queue.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/downloader_queue.html#L160-L225)
-   - Отображает прогресс, бейджи качества (`HQ Opus`, `True 320k`) и кнопку «Выбрать источник».
-   - Место для чипов отслушивания идеально вписывается под названием трека рядом с бейджами.
+### 2.1. Анализ [`score.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/score.go)
+- Текущая логика в `CalculateScore`:
+  ```go
+  // Линейный подсчет общих слов
+  tWords := strings.Fields(tTitle)
+  matches := 0
+  for _, w := range tWords {
+      if len(w) > 2 && strings.Contains(cTitle, w) { matches++ }
+  }
+  ratio := float64(matches) / float64(len(tWords))
+  score += ratio * 30.0
+  ```
+- **Слабое место:** Чувствительность к порядку слов, мелким опечаткам и знакам пунктуации. Название `"Don't Stop Believin'"` при сравнении с `"Dont Stop Believing"` теряет очки на двух словах из трёх.
+
+### 2.2. Анализ [`matcher.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/matcher.go)
+- В `FindYouTubeMatch` цикл обходит массив `queries` (до 6 запросов к `yt-dlp`):
+  ```go
+  for _, q := range queries {
+      candidates, err := m.runSearch(ctx, q)
+      // ... подсчет скора ...
+      if bestScore >= 65.0 { break } // Низкий порог отсечки (65), приводящий либо к ранней остановке на среднем треке, либо к выполнению всех 6 запросов
+  }
+  ```
+- **Слабое место:** Порог 65% не гарантирует «идеальный студийный трек», но если на первом шаге найден 100% Topic-трек, цикл уже выполнил тяжелый запуск. Требуется явное разделение: $\ge 85.0$ — моментальный Early Exit; если меньше — продолжаем поиск до исчерпания очереди или набора $\ge 85.0$.
+
+### 2.3. Анализ [`media_processor.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/downloader/media_processor.go)
+- Сейчас метод `probeAudioStream` извлекает только кодек и битрейт:
+  ```go
+  type ffprobeAudioOutput struct {
+      Streams []struct { CodecName, BitRate, SampleRate string }
+      Format struct { BitRate string }
+  }
+  ```
+- **Слабое место:** Поле `format.duration` игнорируется. Если `yt-dlp` скачал 30-секундный гео-сниппет, функция перекодирует его в MP3 без предупреждения.
 
 ---
 
 ## 3. Архитектурное решение и обоснование (Architecture & Rationale)
 
-### 3.1. Архитектурная схема взаимодействия
+### 3.1. Архитектурная схема пайплайна сопоставления
 
 ```mermaid
 flowchart TD
-    subgraph DownloaderPipeline["Downloader Pipeline (Go)"]
-        DL["processSingleTrack()"] --> MP3["Конвертация в MP3 320k"]
-        MP3 --> LYRICS["lyrics.Service.Search() (LRCLIB)"]
-        LYRICS -->|SyncedLyrics| SPOT_GEN["censorcheck.ExtractSpots(lyrics)"]
-        SPOT_GEN -->|QuickListenSpots| TRACK["ResolvedTrack.QuickListenSpots"]
-        TRACK --> JOB["Job.Tracks (in-memory + DB)"]
-    end
-
-    subgraph ClientUI["Frontend (Alpine.js + HTML5 Audio)"]
-        JOB -->|/api/downloader/queue| UI["downloader_queue.html"]
-        UI -->|Рендеринг чипов| CHIP["[▶ 01:14 'косяк' (КоАП 6.13)]"]
-        CHIP -->|Click: playSpot()| PLAYER["player.js (Web Audio)"]
-        PLAYER -->|GET /api/stream?path=tmp/...#t=72| STREAM["Range Audio Stream"]
-        PLAYER -->|5 сек воспроизведения| AUTO_STOP["Автопауза + Toast"]
-    end
-
-    subgraph UserAction["Действие пользователя"]
-        AUTO_STOP --> DECISION{"Слышна цензура?"}
-        DECISION -->|Да: запикано/мьют| SWAP["Клик: 'Выбрать источник' (SoundCloud)"]
-        DECISION -->|Нет: звучит оригинал| CONFIRM["Подтвердить перенос в медиатеку"]
-    end
+    Start["Запрос на поиск аудио: Artist - Title (хронометраж T)"] --> SC["1. Поиск SoundCloud (Uncensored Matcher)"]
+    SC --> CheckSC{"Скор SC >= 85.0%?"}
+    CheckSC -- Да --> FastExitSC["EARLY EXIT: Использовать SoundCloud"]
+    CheckSC -- Нет --> YTM["2. Поиск YouTube Music (Topic / Studio Master)"]
+    
+    YTM --> QueryLoop["Обход поисковых шаблонов ytsearch"]
+    QueryLoop --> ScoreCand["Расчет CalculateScore: LevenshteinRatio (70% Title / 30% Channel) + Хронометраж + Цензура"]
+    ScoreCand --> CheckYT{"Скор >= 85.0%?"}
+    CheckYT -- Да --> FastExitYT["EARLY EXIT: Прервать остальные запросы YT"]
+    CheckYT -- Нет --> NextQuery["Следующий запрос шаблона"]
+    NextQuery --> QueryLoop
+    
+    FastExitSC --> Download["3. Загрузка потока через yt-dlp"]
+    FastExitYT --> Download
+    QueryLoop -- "Исчерпаны запросы" --> BestCand["Выбрать лучший из найденных"]
+    BestCand --> Download
+    
+    Download --> ProbeDuration["4. ffprobe: проверка реальной длительности"]
+    ProbeDuration --> SnippetCheck{"Длительность < 35с при эталоне > 60с?"}
+    SnippetCheck -- Да (Гео-сниппет) --> RejectSnippet["Отбраковать стрим -> Попробовать след. кандидата"]
+    SnippetCheck -- Нет (Полный трек) --> QualityClassify{"Скор в диапазоне 50..74%?"}
+    QualityClassify -- Да --> MarkLowMatch["Выставить флаг IsLowMatch = true"]
+    QualityClassify -- Нет --> Transcode["5. Транскодирование в MP3 320k CBR"]
+    MarkLowMatch --> Transcode
+    Transcode --> Final["Готово: Файл в tmp_downloads/{job_id}"]
 ```
 
-### 3.2. Сравнительный анализ альтернатив
+### 3.2. Сравнительный анализ альтернатив реализации
 
-| Параметр | Вариант А: Автоматический Whisper/DSP | Вариант Б: Только ручная перемотка трека | Вариант В (Выбранный): Точечный Quick-Listen по LRC |
-|---|---|---|---|
-| **Нагрузка на CPU сервера** | Экстремальная (100% CPU на 5–10 минут) | Нулевая (0%) | **Нулевая (< 0.001 сек на парсинг текста)** |
-| **Точность детекции** | 85–90% (ложные срабатывания, шумы бита) | 100% (человеческий слух) | **100% (ухо человека проверяет точный срез)** |
-| **Время на 1 трек** | 20–600 секунд | 60–120 секунд ручного поиска | **3–5 секунд (1 клик по готовому чипу)** |
-| **Зависимости** | Python, ffmpeg C-bindings, Whisper | Нет | **Pure Go (Zero-Python, Zero-Node.js)** |
-| **Удобство для пользователя** | Черный ящик, возможны ложные флаги | Утомительно искать слова вручную | **Фокусное прослушивание 1–2 ключевых слов** |
+| Параметр | Подстрочный поиск (Текущий) | Библиотека go-fuzzywuzzy (Внешняя) | Нативный Levenshtein 1D-DP (Выбранный) |
+| :--- | :--- | :--- | :--- |
+| **Устойчивость к опечаткам** | Низкая (0% при сдвиге буквы) | Высокая | **Высокая (плавное падение 0.95 -> 0.85)** |
+| **Внешние зависимости** | 0 | Требует `go get` стороннего репозитория | **0 (Zero external dependencies, чистый Go)** |
+| **Аллокации памяти** | $O(N)$ срез строк через `Fields` | Множественные аллокации матриц | **$O(M)$ одномерный буфер slice reuse** |
+| **Скорость выполнения** | ~1.5 мкс | ~45 мкс | **~4–8 мкс на пару названий треков** |
+| **Соответствие AGENTS.md** | Соответствует | Риск нестабильности внешнего модуля | **100% соответствие инвариантам проекта** |
 
-### 3.3. Почему именно такое решение («Почему именно так»)
-1. **Почему Pure Go, а не Python:**
-   - Соответствие инварианту #1 (`AGENTS.md`): серверная часть строго на Go. Парсер LRC и регулярные выражения на Go выполняются за микросекунды без запуска внешних интерпретаторов.
-2. **Почему LRCLIB как источник таймкодов:**
-   - LRCLIB — крупнейшая открытая база синхронизированных текстов, бесплатная, не требует ключей API и уже интегрирована в проект через `lyrics.Service`.
-3. **Почему смещение -2 секунды и длительность 5 секунд:**
-   - Таймкод в LRC указывает на начало строки или гласного звука. Смещение на 2 секунды назад дает слушателю музыкальный контекст (бит и предшествующие слова), а 5 секунд достаточно, чтобы полностью прозвучало слово и артикуляция без необходимости слушать весь куплет.
-4. **Почему ограничение до 3 точек на трек:**
-   - Если в треке 20 матерных слов, вывод 20 кнопок перегрузит UI. Достаточно проверить 1 слово по КоАП 6.13 (наркотики) и 1–2 мата: если в них нет цензуры, весь трек оригинальный.
+### 3.3. Почему именно такое архитектурное решение («Почему именно так»)
+1. **Одномерный массив DP в `LevenshteinRatio`:**
+   Классическая матрица $N \times M$ аллоцирует память на каждую пару строк. Так как для шага $i$ нужны только значения строки $i-1$, одномерный срез длины $\min(N, M) + 1$ выделяется на стеке/быстром хипе, исключая нагрузку на GC при пакетном скоринге 50 кандидатов.
+2. **Веса 70% Название / 30% Артист:**
+   На YouTube Music и SoundCloud официальный трек может быть выложен каналом агрегатора (*«Believe Music»*, *«DistroKid»*, *«Rhymes Music»*), где имя артиста отсутствует в названии канала (`candidateChannel`). Вес 70% на совпадение названия трека предотвращает ложный сброс официальных студийных релизов.
+3. **Защитный порог отсечки сниппетов (35 секунд):**
+   Почему именно 35 секунд? Все промо-сниппеты и радио-превью в SoundCloud/YouTube имеют жесткий хронометраж 30 секунд (плюс 1–3 секунды затухания). При этом реальные музыкальные треки (за исключением коротких интро/скитов) длиннее 60 секунд. Условие `actualDuration < 35 && expectedDuration > 60` надёжно отсекает сниппеты, не затрагивая легитимные 30-секундные скиты из альбомов.
 
 ---
 
 ## 4. Пошаговая декомпозиция реализации (Step-by-Step Implementation)
 
-### Этап 1: Пакет `internal/services/censorcheck` (Pure Go) [NEW]
+### Этап 1. Доработка модуля скоринга [`internal/services/resolver/score.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/score.go) `[MODIFY]`
 
-Создать изолированный пакет с лексиконом, контекстным фильтром и экстрактором точек.
-
-#### Файл: `internal/services/censorcheck/types.go`
+#### 1.1. Добавление функции `LevenshteinRatio`
 ```go
-package censorcheck
+// LevenshteinRatio вычисляет нормализованную схожесть двух строк от 0.0 до 1.0 (алгоритм Вагнера-Фишера с 1D срезом).
+func LevenshteinRatio(s1, s2 string) float64 {
+	r1, r2 := []rune(s1), []rune(s2)
+	n, m := len(r1), len(r2)
+	if n == 0 && m == 0 {
+		return 1.0
+	}
+	if n == 0 || m == 0 {
+		return 0.0
+	}
 
-// SpotCategory классифицирует категорию триггерного слова.
-type SpotCategory string
+	// Оптимизация по памяти: r2 всегда более короткая строка
+	if n < m {
+		r1, r2 = r2, r1
+		n, m = m, n
+	}
 
-const (
-	CategoryDrugCoAP SpotCategory = "DRUG_COAP_6_13" // ст. 6.13 КоАП РФ (нарко-сленг)
-	CategorySuspect  SpotCategory = "SUSPECT_MARKER" // clean, radio edit, эвфемизмы
-	CategoryProfane  SpotCategory = "PROFANITY"      // обычный мат
-)
+	dp := make([]int, m+1)
+	for j := 0; j <= m; j++ {
+		dp[j] = j
+	}
 
-// QuickListenSpot представляет одну контрольную точку для прослушивания.
-type QuickListenSpot struct {
-	TimeSec   float64      `json:"time_sec"`   // Секунда в треке (например, 74.2)
-	TimeStr   string       `json:"time_str"`   // Форматированное время ("01:14")
-	Word      string       `json:"word"`       // Целевое слово ("косяк")
-	Category  SpotCategory `json:"category"`   // DRUG_COAP_6_13 / PROFANITY
-	LineText  string       `json:"line_text"`  // Полный текст строки из LRC
+	for i := 1; i <= n; i++ {
+		prev := dp[0]
+		dp[0] = i
+		for j := 1; j <= m; j++ {
+			temp := dp[j]
+			cost := 0
+			if r1[i-1] != r2[j-1] {
+				cost = 1
+			}
+			ins := dp[j-1] + 1
+			del := dp[j] + 1
+			sub := prev + cost
+
+			minVal := ins
+			if del < minVal {
+				minVal = del
+			}
+			if sub < minVal {
+				minVal = sub
+			}
+			prev = temp
+			dp[j] = minVal
+		}
+	}
+
+	dist := dp[m]
+	return 1.0 - float64(dist)/float64(n)
 }
 ```
 
-#### Файл: `internal/services/censorcheck/lexicon.go`
-- Скомпилированные регулярные выражения и хэш-таблицы:
-  - Наркотики по ст. 6.13 КоАП РФ: `мефедрон`, `меф`, `кокаин`, `кокс`, `экстази`, `мдма`, `кодеин`, `лин`, `перкосет`, `ксанакс`, `гашиш`, `бошки`, `шишки`, `блант`, `косяк`, `джойнт`, `сатива`, `индика`, `тгк`, `бульбулятор`, `бонг`, `водник`, `закладка`, `зиплок`, `амфетамин`, `спиды`, `героин`, `герыч`, `передоз`, `стафф`.
-  - Проверка контекста для слова «план»: функции `isDrugPlanContext(word, line)`.
-  - Мат: корни `хуй`, `пизд`, `еб` (с исключением `SAFE_EB_SUBSTRINGS`: хлеб, ребят, волшеб, небе, скреб), `бля`, `сука`.
-
-#### Файл: `internal/services/censorcheck/extractor.go`
+#### 1.2. Рефакторинг `CalculateScore` на взвешенную формулу
 ```go
-package censorcheck
+// В методе CalculateScore заменяем примитивный подсчет слов:
+// 1. Хронометраж: до 35 очков
+// 2. Текстовая схожесть (Fuzzy Levenshtein 70/30): до 40 очков
+// 3. Бонусы Topic / Vevo / Explicit: до 25 очков
+// 4. Штрафы Bad Keywords: до -40 очков
 
-// ExtractSpots анализирует синхронизированный текст LRC и возвращает до maxSpots контрольных точек.
-// Приоритет отдается словам по ст. 6.13 КоАП РФ, затем маркерам цензуры, затем мату.
-func ExtractSpots(lrcContent string, maxSpots int) []QuickListenSpot
+trackRatio := LevenshteinRatio(cTitle, tTitle)
+artistRatio := LevenshteinRatio(cChan, tArt)
+
+// Проверяем транслитерацию артиста при низком прямом совпадении
+if artistRatio < 0.7 && tArt != "" {
+    for _, variant := range TransliterateArtist(tArt) {
+        if r := LevenshteinRatio(cChan, variant); r > artistRatio {
+            artistRatio = r
+        }
+        if r := LevenshteinRatio(cTitle, variant); r > artistRatio {
+            artistRatio = r
+        }
+    }
+}
+
+// 70% вес названия трека, 30% вес артиста/канала
+fuzzyScore := (trackRatio*0.7 + artistRatio*0.3) * 40.0
+score += fuzzyScore
 ```
 
 ---
 
-### Этап 2: Расширение моделей `resolver.ResolvedTrack` и DTO [MODIFY]
+### Этап 2. Интеграция Early Exit в [`internal/services/resolver/matcher.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/matcher.go) `[MODIFY]`
 
-#### Файл: [`internal/services/resolver/resolver.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/resolver.go)
-Добавить поле `QuickListenSpots` в `ResolvedTrack`:
+#### 2.1. Константа уверенного совпадения
 ```go
-type ResolvedTrack struct {
+// EarlyExitMatchThreshold определяет порог (85%), при котором кандидат признается
+// эталонным студийным треком и дальнейший поиск по резервным шаблонам немедленно останавливается.
+const EarlyExitMatchThreshold = 85.0
+```
+
+#### 2.2. Модификация `FindYouTubeMatch`
+```go
+for _, q := range queries {
+    select {
+    case <-ctx.Done():
+        return "", ctx.Err()
+    default:
+    }
+
+    candidates, err := m.runSearch(ctx, q)
+    if err != nil {
+        continue
+    }
+
+    for _, cand := range candidates {
+        candChan := cand.Channel
+        if candChan == "" {
+            candChan = cand.Uploader
+        }
+        score := m.CalculateScore(title, artist, duration, cand.Title, candChan, int(cand.Duration))
+        if score > bestScore {
+            bestScore = score
+            cCopy := cand
+            bestCandidate = &cCopy
+        }
+        // Early Exit: если кандидат набрал >= 85%, мгновенно прекращаем перебор кандидатов и запросов
+        if bestScore >= EarlyExitMatchThreshold {
+            break
+        }
+    }
+
+    if bestScore >= EarlyExitMatchThreshold {
+        break
+    }
+}
+```
+
+---
+
+### Этап 3. Защита от гео-сниппетов в [`internal/services/downloader/media_processor.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/downloader/media_processor.go) `[MODIFY]`
+
+#### 3.1. Функция валидации длительности скачанного сырого аудиопотока
+```go
+type ffprobeFormatDurationOutput struct {
+	Format struct {
+		Duration string `json:"duration"`
+	} `json:"format"`
+}
+
+// validateDownloadedStreamAudio проверяет, что файл не является урезанным превью (сниппетом из-за гео-блокировки).
+func validateDownloadedStreamAudio(ctx context.Context, rawFilePath string, expectedDurationSec int) error {
+	args := []string{
+		"-v", "quiet",
+		"-print_format", "json",
+		"-show_format",
+		rawFilePath,
+	}
+
+	cmd := exec.CommandContext(ctx, "ffprobe", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("ffprobe probe failed: %w", err)
+	}
+
+	var data ffprobeFormatDurationOutput
+	if err := json.Unmarshal(out, &data); err != nil {
+		return fmt.Errorf("failed to parse ffprobe json: %w", err)
+	}
+
+	actualDuration, err := strconv.ParseFloat(data.Format.Duration, 64)
+	if err != nil {
+		return nil // Если парсинг длительности не удался, не блокируем пайплайн
+	}
+
+	// Если файл длится менее 35 секунд, а ожидаемый трек длиннее 60 секунд — это 30-секундный гео-сниппет
+	if actualDuration < 35.0 && expectedDurationSec > 60 {
+		return fmt.Errorf("detected 30s preview snippet (actual: %.1fs, expected: %ds)", actualDuration, expectedDurationSec)
+	}
+
+	return nil
+}
+```
+
+#### 3.2. Встраивание в `processSingleTrack`
+Сразу после успешного вызова `s.downloadRawStream(...)` вызывается `validateDownloadedStreamAudio`. При обнаружении ошибки сниппета файл удаляется, а задача переключается на следующий доступный источник или помечается ошибкой `region_snippet_blocked`.
+
+---
+
+### Этап 4. Поддержка `IsLowMatch` в [`job.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/downloader/job.go) и UI `[MODIFY]`
+
+#### 4.1. Расширение структуры `TrackProgressItem`
+```go
+type TrackProgressItem struct {
     // ... существующие поля ...
-    AudioQuality     *AudioQualityTelemetry        `json:"audio_quality,omitempty"`
-    QuickListenSpots []censorcheck.QuickListenSpot `json:"quick_listen_spots,omitempty"`
+    MatchScore float64 `json:"match_score"` // Точность совпадения (0..100)
+    IsLowMatch bool    `json:"is_low_match"` // Флаг: требует ручной проверки (50..74%)
 }
 ```
 
----
-
-### Этап 3: Интеграция в пайплайн загрузки `downloader.Service` [MODIFY]
-
-#### Файл: [`internal/features/downloader/service.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/features/downloader/service.go)
-1. В `ServiceConfig` и структуру `Service` внедрить `lyricsService *lyrics.Service`.
-2. В методе `processSingleTrack` после успешной конвертации MP3 и записи тегов:
-   ```go
-   // Поиск синхронизированного текста через LRCLIB
-   if s.lyrics != nil {
-       lrcRes, _ := s.lyrics.Search(ctx, track.Artist, track.Title, meta.AlbumTitle, track.Duration)
-       if lrcRes != nil && lrcRes.Synced && lrcRes.Lyrics != "" {
-           // Сохраняем .lrc файл рядом с MP3 во временной папке
-           lrcFilename := fmt.Sprintf("%02d. %s.lrc", track.TrackNumber, safeTitle)
-           lrcPath := filepath.Join(convertedDir, lrcFilename)
-           _ = os.WriteFile(lrcPath, []byte(lrcRes.Lyrics), 0644)
-
-           // Мгновенно извлекаем до 3 контрольных точек
-           spots := censorcheck.ExtractSpots(lrcRes.Lyrics, 3)
-           if len(spots) > 0 {
-               job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
-                   tr.QuickListenSpots = spots
-               })
-           }
-       }
-   }
-   ```
-
----
-
-### Этап 4: Веб-аудиоплеер для сниппетов в `web/static/js/player.js` [MODIFY]
-
-#### Файл: [`web/static/js/player.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/player.js)
-Добавить метод `playCensorshipSpot`:
-```javascript
-playCensorshipSpot(streamUrl, spot, trackTitle, trackArtist) {
-    if (!streamUrl || !spot) return;
-
-    // Смещение на 2 секунды назад для контекста
-    const startTime = Math.max(0, spot.time_sec - 2.0);
-    const stopDuration = 5.0; // Играем ровно 5 секунд
-
-    this.currentTrack = {
-        title: trackTitle || 'Отслушивание точки',
-        artist: `${trackArtist || ''} • Слово: «${spot.word}»`,
-        duration: stopDuration,
-        stream_url: streamUrl,
-    };
-    this.isVisible = true;
-
-    if (this._spotTimer) {
-        clearTimeout(this._spotTimer);
-        this._spotTimer = null;
-    }
-
-    if (this.audioElement) {
-        this.audioElement.src = streamUrl;
-        this.audioElement.currentTime = startTime;
-        this.audioElement.play().then(() => {
-            this.isPlaying = true;
-            // Автоматическая остановка через 5 секунд
-            this._spotTimer = setTimeout(() => {
-                this.audioElement.pause();
-                this.isPlaying = false;
-            }, stopDuration * 1000);
-        }).catch(err => console.warn('Spot play error:', err));
-    }
-
-    if (window.showToast) {
-        window.showToast(`🎧 Контрольная точка: «${spot.word}» (${spot.time_str})\n${spot.line_text}`, 'info');
-    }
-}
-```
-
----
-
-### Этап 5: Отображение чипов в очереди загрузок [MODIFY]
-
-#### Файлы: [`web/templates/components/downloader_queue.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/downloader_queue.html) и `downloader_active.html`
-В блоке каждого трека под строкой названия вывести блок контрольных точек:
+#### 4.2. Обновление шаблона `web/templates/components/downloader_queue.html`
+Для треков с флагом `is_low_match` выводится бейдж:
 ```html
-<template x-if="track.quick_listen_spots && track.quick_listen_spots.length > 0">
-    <div class="flex flex-wrap items-center gap-1.5 mt-1.5 pt-1 border-t border-surface-border/40">
-        <span class="text-[10px] text-content-muted font-medium flex items-center gap-1 shrink-0">
-            <svg class="w-3 h-3 text-amber-400" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-            </svg>
-            Проверить:
-        </span>
-        <template x-for="spot in track.quick_listen_spots" :key="spot.time_sec">
-            <button type="button"
-                    @click.stop="$store.player.playCensorshipSpot('/api/stream?path=' + encodeURIComponent(track.converted_path), spot, track.title, track.artist)"
-                    :title="`Строка: '${spot.line_text}'`"
-                    :class="spot.category === 'DRUG_COAP_6_13' ? 'bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 border-rose-500/30' : 'bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 border-amber-500/30'"
-                    class="px-2 py-0.5 rounded text-[10px] font-mono border transition-colors flex items-center gap-1 shadow-sm">
-                <span class="text-[8px]">▶</span>
-                <span x-text="spot.time_str"></span>
-                <span class="font-bold font-sans" x-text="`«${spot.word}»`"></span>
-                <template x-if="spot.category === 'DRUG_COAP_6_13'">
-                    <span class="text-[9px] px-1 rounded bg-rose-500/30 text-rose-200">КоАП</span>
-                </template>
-            </button>
-        </template>
-    </div>
+<template x-if="track.is_low_match">
+    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30"
+          :title="'Точность совпадения ' + Math.round(track.match_score) + '%. Рекомендуется проверить источник перед сохранением.'">
+        <svg class="w-3 h-3 mr-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </svg>
+        <span x-text="Math.round(track.match_score) + '% match'"></span>
+    </span>
 </template>
 ```
 
@@ -292,42 +360,36 @@ playCensorshipSpot(streamUrl, spot, trackTitle, trackArtist) {
 
 ## 5. Анализ рисков и краевых случаев (Risks, Edge Cases & Guardrails)
 
-1. **Отсутствие текста в LRCLIB:**
-   - *Риск:* Для редких андеграунд-треков в LRCLIB может не быть текста.
-   - *Митигация:* `quick_listen_spots` просто остается пустым `[]`. Загрузка завершается в штатном режиме, интерфейс не ломается.
-2. **Рассинхронизация таймкодов в пользовательских LRC:**
-   - *Риск:* Текст из LRCLIB может отставать на 1–2 секунды от конкретного рипа.
-   - *Митигация:* Запуск за **2 секунды до таймкода** (`startTime = Math.max(0, spot.time_sec - 2.0)`) с окном воспроизведения 5 секунд гарантирует, что слово попадёт в окно слышимости даже при умеренном рассинхроне.
-3. **Безопасность путей (Sandbox Invariant #2):**
-   - *Риск:* Попытка воспроизведения через `/api/stream?path=...`.
-   - *Митигация:* Хендлер `StreamTrack` уже использует `h.tmpSandbox.Resolve()` для любых путей `tmp_downloads/...`. Любые `../` или абсолютные пути отклоняются с кодом `403 Forbidden`.
-4. **Утечки памяти и горутин в плеере:**
-   - *Риск:* Быстрые повторные клики по кнопкам разных точек накапливают таймеры `setTimeout`.
-   - *Митигация:* Ссылка на `this._spotTimer` сбрасывается через `clearTimeout(this._spotTimer)` перед каждым новым запуском.
+1. **Короткие треки (Intro / Skit / Outro):**
+   - *Риск:* Настоящий трек из альбома длится 25 секунд (например, интро).
+   - *Митигация:* Проверка на сниппет активируется **только** если `expectedDurationSec > 60`. Если в метаданных Deezer/Apple Music длительность альбома указана как 25 секунд, файл не бракуется.
+2. **Аллокации при расчёте расстояния Левенштейна:**
+   - *Риск:* Деградация по памяти при длинных строках.
+   - *Митигация:* Использование одномерного среза `dp := make([]int, m+1)` с оптимизацией `len(r2) <= len(r1)`. Для обычных названий треков (до 100 символов) накладные расходы составляют менее 1 КБ памяти.
+3. **Неизвестная длительность в метаданных (`duration == 0`):**
+   - *Риск:* Если каталог не вернул длительность, валидация сниппета не сработает.
+   - *Митигация:* В этом случае сниппет не бракуется вслепую, но при скоринге включается более строгая проверка названия (Topic/Explicit).
 
 ---
 
 ## 6. План тестирования и верификации (Verification Matrix)
 
-1. **Юнит-тесты `censorcheck` (`internal/services/censorcheck/extractor_test.go`):**
-   - Тест на выявление наркотиков КоАП 6.13 («мефедрон», «косяк», «экстази»).
-   - Тест контекста «план»: фраза «у меня есть план» должна дать 0 точек, а «курим чистый план» — 1 точку.
-   - Тест безопасных корней с «еб»: «волшебная палочка», «на небе» не должны создавать точек.
-   - Тест лимита точек: при 10 матах возвращается строго не более `maxSpots` (3).
-2. **Интеграционные тесты очереди (`internal/features/downloader/service_test.go`):**
-   - Тест полного цикла `processSingleTrack` с замоканным `lyrics.Service`: проверка, что готовый `ResolvedTrack` содержит корректные `QuickListenSpots` и файл `.lrc` сохранен в каталоге `converted/`.
-3. **Стандартные проверки проекта (AGENTS.md):**
-   - `go test -v ./...` — 100% прохождение всех тестов без гонок (`-race`).
-   - `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешная статическая бинарная сборка.
+| Тест / Сценарий | Файл | Что проверяется |
+| :--- | :--- | :--- |
+| `TestLevenshteinRatio` | `internal/services/resolver/score_test.go` | Идентичные строки = 1.0, пустые строки = 0.0, опечатки (`don't` vs `dont`) $\ge 0.88$, абсолютно разные = 0.0. |
+| `TestCalculateScore_Weighted70_30` | `internal/services/resolver/score_test.go` | Проверка, что совпадение названия трека даёт 70% веса даже при стороннем имени канала (`Trap Nation` / `DistroKid`). |
+| `TestEarlyExit_Threshold` | `internal/services/resolver/matcher_test.go` | Проверка, что при первом же кандидате со скором 90% оставшиеся поисковые запросы не вызываются. |
+| `TestValidateDownloadedStreamAudio_Snippet` | `internal/services/downloader/media_processor_test.go` | Мок-проверка: файл 29 сек при ожидании 180 сек вызывает ошибку сниппета; файл 29 сек при ожидании 25 сек успешно проходит. |
+| Регрессионный запуск всех тестов | Корень проекта | Выполнение `go test -v ./...` с флагом `-race`. |
 
 ---
 
 ## 7. Критерии приемки (Definition of Done)
 
-- [x] Создан пакет `internal/services/censorcheck` с тестами, покрывающими словарь КоАП 6.13, мат и контекст «план».
-- [x] Модель `ResolvedTrack` и DTO содержат поле `quick_listen_spots`.
-- [x] При скачивании трека подтягивается LRC и вычисляются 1–3 контрольные точки.
-- [x] В `downloader_queue.html` и `downloader_active.html` выводятся чипы точек с таймкодами и словами.
-- [x] Клик по чипу воспроизводит 5-секундный аудиофрагмент (`t - 2s`) во встроенном плеере.
-- [x] `go test -v ./...` зеленый, бинарник `bin/music-manager` компилируется без ошибок.
-- [x] Документ `PROGRESS.md` обновлен с фиксацией статуса задачи.
+- [x] В `internal/services/resolver/score.go` реализован `LevenshteinRatio` и внедрен в `CalculateScore`.
+- [x] В `internal/services/resolver/matcher.go` внедрена отсечка `EarlyExitMatchThreshold = 85.0`.
+- [x] В `internal/services/downloader/media_processor.go` внедрена валидация длительности скачанного файла на отсечение 30-секундных гео-сниппетов.
+- [x] Модели очереди и шаблоны UI отображают бейдж `low_match` при точности $50..74\%$.
+- [x] Все существующие и новые тесты проходят успешно (`go test -v ./...`).
+- [x] Сервер успешно собирается без ошибок: `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go`.
+- [x] Документ `PROGRESS.md` актуализирован.

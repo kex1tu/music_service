@@ -1,6 +1,7 @@
 package resolver
 
 import (
+	"context"
 	"testing"
 )
 
@@ -238,5 +239,81 @@ func TestAreArtistsEquivalent(t *testing.T) {
 		}
 	}
 }
+
+func TestEarlyExit_Threshold(t *testing.T) {
+	m := NewAudioMatcher("")
+
+	queryCount := 0
+	m.SetSearchFn(func(ctx context.Context, query string) ([]YtCandidate, error) {
+		queryCount++
+		// First query returns an ideal Topic studio candidate with >= 85 score
+		return []YtCandidate{
+			{
+				ID:       "test_ideal_id",
+				Title:    "Rick Astley - Never Gonna Give You Up",
+				Channel:  "Rick Astley - Topic",
+				Duration: 213,
+			},
+		}, nil
+	})
+
+	url, score, err := m.FindYouTubeMatchWithScore(context.Background(), "Never Gonna Give You Up", "Rick Astley", 213)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if score < EarlyExitMatchThreshold {
+		t.Errorf("expected score >= %.1f, got %.1f", EarlyExitMatchThreshold, score)
+	}
+
+	if queryCount != 1 {
+		t.Errorf("expected Early Exit after 1 query, but executed %d queries", queryCount)
+	}
+
+	if url != "https://www.youtube.com/watch?v=test_ideal_id" {
+		t.Errorf("expected URL https://www.youtube.com/watch?v=test_ideal_id, got %q", url)
+	}
+
+	// Subtest: candidate score < 85 continues to subsequent queries
+	queryCount2 := 0
+	m.SetSearchFn(func(ctx context.Context, query string) ([]YtCandidate, error) {
+		queryCount2++
+		if queryCount2 == 1 {
+			// Sub-par candidate (score < 85)
+			return []YtCandidate{
+				{
+					ID:       "mediocre_id",
+					Title:    "Rick Astley - Never Gonna Give You Up (Live at Arena)",
+					Channel:  "Random User",
+					Duration: 220,
+				},
+			}, nil
+		}
+		// Second query returns the topic candidate
+		return []YtCandidate{
+			{
+				ID:       "second_topic_id",
+				Title:    "Rick Astley - Never Gonna Give You Up",
+				Channel:  "Rick Astley - Topic",
+				Duration: 213,
+			},
+		}, nil
+	})
+
+	url2, score2, err2 := m.FindYouTubeMatchWithScore(context.Background(), "Never Gonna Give You Up", "Rick Astley", 213)
+	if err2 != nil {
+		t.Fatalf("unexpected error: %v", err2)
+	}
+	if queryCount2 != 2 {
+		t.Errorf("expected 2 queries until >= 85 reached, got %d", queryCount2)
+	}
+	if score2 < EarlyExitMatchThreshold {
+		t.Errorf("expected score >= %.1f, got %.1f", EarlyExitMatchThreshold, score2)
+	}
+	if url2 != "https://www.youtube.com/watch?v=second_topic_id" {
+		t.Errorf("expected URL https://www.youtube.com/watch?v=second_topic_id, got %q", url2)
+	}
+}
+
 
 

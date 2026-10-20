@@ -942,10 +942,14 @@ func (s *Service) processSingleTrack(
 				track.AudioSourceURL = match.URL
 				track.VersionStatus = match.Status
 				track.Candidates = match.Candidates
+				track.MatchScore = match.MatchScore
+				track.IsLowMatch = match.MatchScore >= 50.0 && match.MatchScore < 75.0
 				job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
 					tr.AudioSourceURL = match.URL
 					tr.VersionStatus = match.Status
 					tr.Candidates = match.Candidates
+					tr.MatchScore = match.MatchScore
+					tr.IsLowMatch = match.MatchScore >= 50.0 && match.MatchScore < 75.0
 				})
 			}
 		}

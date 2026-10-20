@@ -73,6 +73,8 @@ type ResolvedTrack struct {
 	Candidates     []db.SoundCloudCandidateItem `json:"candidates,omitempty"`
 	AudioQuality   *AudioQualityTelemetry       `json:"audio_quality,omitempty"`
 	QuickListenSpots []censorcheck.QuickListenSpot `json:"quick_listen_spots,omitempty"`
+	MatchScore     float64                      `json:"match_score,omitempty"`
+	IsLowMatch     bool                         `json:"is_low_match,omitempty"`
 }
 
 // ReleaseMetadata holds album-level metadata.

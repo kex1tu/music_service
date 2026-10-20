@@ -287,4 +287,43 @@ func TestFindDownloadedFile(t *testing.T) {
 	}
 }
 
+func TestValidateDownloadedStreamAudio_Snippet(t *testing.T) {
+	tmpDir := t.TempDir()
+	shortWav := filepath.Join(tmpDir, "short_snippet.wav")
+
+	// Generate a 5.0s audio file with ffmpeg
+	cmd := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=1000:duration=5.0", shortWav)
+	if err := cmd.Run(); err != nil {
+		t.Skip("ffmpeg not available, skipping")
+	}
+
+	ctx := context.Background()
+
+	// 1. Snippet detected: actual 5s < 35s, but expected 180s (> 60s)
+	err := validateDownloadedStreamAudio(ctx, shortWav, 180)
+	if err == nil {
+		t.Fatalf("expected error for 5s snippet when expecting 180s track, got nil")
+	}
+	t.Logf("correctly caught snippet: %v", err)
+
+	// 2. Short skit/intro: actual 5s, expected 20s (<= 60s) -> allowed
+	err = validateDownloadedStreamAudio(ctx, shortWav, 20)
+	if err != nil {
+		t.Fatalf("expected nil for short intro/skit, got error: %v", err)
+	}
+
+	// 3. Normal track: generate a 36s audio file (>= 35s)
+	normalWav := filepath.Join(tmpDir, "normal_track.wav")
+	cmdNormal := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=1000:duration=36.0", normalWav)
+	if err := cmdNormal.Run(); err != nil {
+		t.Skip("ffmpeg not available, skipping")
+	}
+
+	err = validateDownloadedStreamAudio(ctx, normalWav, 180)
+	if err != nil {
+		t.Fatalf("expected nil for 36s track with 180s expectation, got: %v", err)
+	}
+}
+
+
 

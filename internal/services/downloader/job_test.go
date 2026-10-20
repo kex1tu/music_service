@@ -3,6 +3,7 @@ package downloader
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -215,4 +216,52 @@ func TestDownloadJob_SetPartialReady(t *testing.T) {
 		t.Errorf("expected summary.CompletedJobs to count PARTIAL_READY, got %d", summary.CompletedJobs)
 	}
 }
+
+func TestTrack_MatchScoreAndLowMatch(t *testing.T) {
+	job := &DownloadJob{
+		ID:          "job-low-match",
+		Status:      StatusDownloading,
+		TotalTracks: 2,
+		Tracks: []resolver.ResolvedTrack{
+			{
+				TrackNumber: 1,
+				Title:       "Track Low Match",
+				Status:      "downloading",
+				MatchScore:  62.5,
+				IsLowMatch:  true,
+			},
+			{
+				TrackNumber: 2,
+				Title:       "Track High Match",
+				Status:      "ready",
+				MatchScore:  95.0,
+				IsLowMatch:  false,
+			},
+		},
+	}
+
+	snap := job.Snapshot()
+	if len(snap.Tracks) != 2 {
+		t.Fatalf("expected 2 tracks, got %d", len(snap.Tracks))
+	}
+	if !snap.Tracks[0].IsLowMatch || snap.Tracks[0].MatchScore != 62.5 {
+		t.Errorf("expected track 0 low match with score 62.5, got low=%v, score=%f", snap.Tracks[0].IsLowMatch, snap.Tracks[0].MatchScore)
+	}
+	if snap.Tracks[1].IsLowMatch || snap.Tracks[1].MatchScore != 95.0 {
+		t.Errorf("expected track 1 high match with score 95.0, got low=%v, score=%f", snap.Tracks[1].IsLowMatch, snap.Tracks[1].MatchScore)
+	}
+
+	data, err := json.Marshal(job)
+	if err != nil {
+		t.Fatalf("failed to marshal job: %v", err)
+	}
+	jsonStr := string(data)
+	if !strings.Contains(jsonStr, `"is_low_match":true`) {
+		t.Errorf("expected json to contain is_low_match:true, got %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, `"match_score":62.5`) {
+		t.Errorf("expected json to contain match_score:62.5, got %s", jsonStr)
+	}
+}
+
 

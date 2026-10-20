@@ -140,7 +140,7 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 
 	// 5. Скачивание аудиопотока во временный каталог через yt-dlp
 	tmpOutTemplate := filepath.Join(s.tmpSandbox.Root(), fmt.Sprintf("switch_%d_%%(ext)s", time.Now().UnixNano()))
-	rawFile, dErr := s.downloadRawStream(ctx, targetURL, tmpOutTemplate, nil)
+	rawFile, dErr := s.downloadAndValidateRawStream(ctx, targetURL, tmpOutTemplate, candDuration, nil)
 	if dErr != nil {
 		return nil, fmt.Errorf("failed to download audio from target URL: %w", dErr)
 	}

@@ -26,14 +26,19 @@ type YtCandidate struct {
 	Timestamp  int64   `json:"timestamp,omitempty"`
 }
 
+// EarlyExitMatchThreshold определяет порог (85%), при котором кандидат признается
+// эталонным студийным треком и дальнейший поиск по резервным шаблонам немедленно останавливается.
+const EarlyExitMatchThreshold = 85.0
+
 // AudioMatcher matches Deezer track metadata to SoundCloud or YouTube audio streams.
 type AudioMatcher struct {
-	cookiesPath  string
-	db           *db.DB
-	cfg          *config.Config
+	cookiesPath   string
+	db            *db.DB
+	cfg           *config.Config
 	deezerClient  *DeezerClient
 	itunesClient  *ITunesClient
 	ytmusicClient *YouTubeMusicClient
+	searchFn      func(ctx context.Context, query string) ([]YtCandidate, error)
 }
 
 // MatchResult содержит детальные сведения о подобранном аудио-источнике.
@@ -42,6 +47,7 @@ type MatchResult struct {
 	Status     string // marked, likely, unverified, manual, or "" (for youtube)
 	Duration   int
 	Candidates []db.SoundCloudCandidateItem
+	MatchScore float64
 }
 
 // NewAudioMatcher creates a new AudioMatcher.
@@ -70,6 +76,11 @@ func (m *AudioMatcher) SetCatalogClients(deezer *DeezerClient, itunes *ITunesCli
 // SetYtMusicClient привязывает клиент YouTube Music для быстрого поиска кандидатов.
 func (m *AudioMatcher) SetYtMusicClient(ytmusic *YouTubeMusicClient) {
 	m.ytmusicClient = ytmusic
+}
+
+// SetSearchFn устанавливает кастомную функцию поиска кандидатов (для изоляции сети и тестирования).
+func (m *AudioMatcher) SetSearchFn(fn func(ctx context.Context, query string) ([]YtCandidate, error)) {
+	m.searchFn = fn
 }
 
 // FindBestMatch searches SoundCloud first (for uncut/explicit audio), falling back to YouTube.
@@ -116,17 +127,24 @@ func (m *AudioMatcher) FindBestMatchWithDetails(ctx context.Context, title, arti
 	// 2. Поиск на SoundCloud с ранжированием
 	scRes, scErr := m.FindUncensoredSoundCloudMatch(ctx, title, artist, isrc, duration)
 	if scErr == nil && scRes != nil && scRes.URL != "" {
+		if len(scRes.Candidates) > 0 {
+			firstCand := scRes.Candidates[0]
+			scRes.MatchScore = m.CalculateScore(title, artist, duration, firstCand.Title, firstCand.Uploader, firstCand.Duration)
+		} else {
+			scRes.MatchScore = 80.0
+		}
 		return scRes, nil
 	}
 
 	// 3. Фоллбэк на YouTube при отсутствии подходящих кандидатов на SoundCloud
-	ytURL, ytErr := m.FindYouTubeMatch(ctx, title, artist, duration)
+	ytURL, ytScore, ytErr := m.FindYouTubeMatchWithScore(ctx, title, artist, duration)
 	if ytErr == nil && ytURL != "" {
 		return &MatchResult{
 			URL:        ytURL,
 			Status:     "",
 			Duration:   duration,
 			Candidates: nil,
+			MatchScore: ytScore,
 		}, nil
 	}
 
@@ -245,6 +263,12 @@ func (m *AudioMatcher) FindSoundCloudMatch(ctx context.Context, title, artist st
 
 // FindYouTubeMatch specifically searches YouTube streams with scoring.
 func (m *AudioMatcher) FindYouTubeMatch(ctx context.Context, title, artist string, duration int) (string, error) {
+	url, _, err := m.FindYouTubeMatchWithScore(ctx, title, artist, duration)
+	return url, err
+}
+
+// FindYouTubeMatchWithScore searches YouTube streams and returns the best candidate URL and confidence score.
+func (m *AudioMatcher) FindYouTubeMatchWithScore(ctx context.Context, title, artist string, duration int) (string, float64, error) {
 	cleanArt := CleanQueryText(artist)
 	cleanTit := CleanQueryText(title)
 	cleanTitFull := CleanQueryTextFull(title)
@@ -284,7 +308,7 @@ func (m *AudioMatcher) FindYouTubeMatch(ctx context.Context, title, artist strin
 	for _, q := range queries {
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return "", 0, ctx.Err()
 		default:
 		}
 
@@ -304,26 +328,35 @@ func (m *AudioMatcher) FindYouTubeMatch(ctx context.Context, title, artist strin
 				cCopy := cand
 				bestCandidate = &cCopy
 			}
+			// Early Exit: если кандидат набрал >= 85.0%, моментально завершаем обход кандидатов
+			if bestScore >= EarlyExitMatchThreshold {
+				break
+			}
 		}
 
-		if bestScore >= 65.0 {
+		// Early Exit: прерываем обход оставшихся поисковых запросов
+		if bestScore >= EarlyExitMatchThreshold {
 			break
 		}
 	}
 
 	if bestCandidate != nil && bestScore >= 25.0 {
 		if bestCandidate.ID != "" {
-			return fmt.Sprintf("https://www.youtube.com/watch?v=%s", bestCandidate.ID), nil
+			return fmt.Sprintf("https://www.youtube.com/watch?v=%s", bestCandidate.ID), bestScore, nil
 		}
 		if bestCandidate.URL != "" {
-			return bestCandidate.URL, nil
+			return bestCandidate.URL, bestScore, nil
 		}
 	}
 
-	return "", fmt.Errorf("no suitable audio match found for '%s - %s' (best score: %.1f)", artist, title, bestScore)
+	return "", bestScore, fmt.Errorf("no suitable audio match found for '%s - %s' (best score: %.1f)", artist, title, bestScore)
 }
 
 func (m *AudioMatcher) runSearch(ctx context.Context, query string) ([]YtCandidate, error) {
+	if m.searchFn != nil {
+		return m.searchFn(ctx, query)
+	}
+
 	defaultSearch := "ytsearch"
 	if strings.HasPrefix(query, "scsearch") {
 		defaultSearch = "scsearch"

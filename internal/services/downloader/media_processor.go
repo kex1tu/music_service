@@ -110,6 +110,18 @@ func (s *Service) downloadRawStream(ctx context.Context, sourceURL, outputTempla
 	return s.findDownloadedFile(outputTemplate)
 }
 
+func (s *Service) downloadAndValidateRawStream(ctx context.Context, sourceURL, outputTemplate string, expectedDurationSec int, onProgress func(float64)) (string, error) {
+	rawFile, err := s.downloadRawStream(ctx, sourceURL, outputTemplate, onProgress)
+	if err != nil {
+		return "", err
+	}
+	if vErr := validateDownloadedStreamAudio(ctx, rawFile, expectedDurationSec); vErr != nil {
+		_ = os.Remove(rawFile)
+		return "", vErr
+	}
+	return rawFile, nil
+}
+
 func (s *Service) findDownloadedFile(outputTemplate string) (string, error) {
 	dir := filepath.Dir(outputTemplate)
 	pattern := filepath.Base(strings.Replace(outputTemplate, "%(ext)s", "*", 1))
@@ -174,6 +186,45 @@ func (s *Service) downloadCover(ctx context.Context, coverURL string) ([]byte, e
 }
 
 var rolloffRegex = regexp.MustCompile(`lavfi\.aspectralstats(?:\.\d+)?\.rolloff=([0-9.]+)`)
+
+type ffprobeFormatDurationOutput struct {
+	Format struct {
+		Duration string `json:"duration"`
+	} `json:"format"`
+}
+
+// validateDownloadedStreamAudio проверяет, что скачанный файл не является урезанным превью (сниппетом из-за гео-блокировки).
+func validateDownloadedStreamAudio(ctx context.Context, rawFilePath string, expectedDurationSec int) error {
+	args := []string{
+		"-v", "quiet",
+		"-print_format", "json",
+		"-show_format",
+		rawFilePath,
+	}
+
+	cmd := exec.CommandContext(ctx, "ffprobe", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("ffprobe probe failed: %w", err)
+	}
+
+	var data ffprobeFormatDurationOutput
+	if err := json.Unmarshal(out, &data); err != nil {
+		return fmt.Errorf("failed to parse ffprobe json: %w", err)
+	}
+
+	actualDuration, err := strconv.ParseFloat(data.Format.Duration, 64)
+	if err != nil {
+		return nil // Если парсинг длительности не удался, не блокируем пайплайн
+	}
+
+	// Если файл длится менее 35 секунд, а ожидаемый трек длиннее 60 секунд — это 30-секундный гео-сниппет
+	if actualDuration < 35.0 && expectedDurationSec > 60 {
+		return fmt.Errorf("detected 30s preview snippet (actual: %.1fs, expected: %ds)", actualDuration, expectedDurationSec)
+	}
+
+	return nil
+}
 
 type ffprobeAudioOutput struct {
 	Streams []struct {

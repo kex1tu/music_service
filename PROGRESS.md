@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 84 блока задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js` и 100% тестов пройдены).
+- **Статус готовности:** **100% DONE** (Все 85 блоков задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js` и 100% тестов пройдены).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **Vertical Feature Slices**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 24 пакета зеленые).
@@ -957,6 +957,27 @@
       - Добавлены тесты `extractor_test.go` (100% покрытие словаря, контекста, безопасных корней и лимитов).
       - Добавлен интеграционный тест `TestDownloader_QuickListenSpots_ExtractedOnLyricsFound`.
       - `go test -race ./...` и `./scripts/test_user_flows.sh` — 100% PASS (0 data races во всех пакетах).
+
+  - **Блок 85 (Fuzzy Levenshtein Scoring, Early Exit & Anti-Snippet Guard):**
+    - **85.1. Pure Go Fuzzy String Matching (`internal/services/resolver/score.go`):**
+      - Реализован алгоритм `LevenshteinRatio` (Wagner-Fischer с 1D срезом памяти и нулевыми внешними зависимостями).
+      - Внедрена взвешенная формула 70% Название трека / 30% Исполнитель-Канал из `mp3_PLRKLR`, устойчивая к опечаткам, знакам пунктуации и сторонним лейблам/агрегаторам.
+      - Добавлены юнит-тесты `TestLevenshteinRatio` и `TestCalculateScore_Weighted70_30` в `score_test.go`.
+    - **85.2. Early Exit в резолвере источников (`internal/services/resolver/matcher.go`):**
+      - Внедрена константа порога уверенного совпадения `EarlyExitMatchThreshold = 85.0`.
+      - Добавлен метод `FindYouTubeMatchWithScore`, прерывающий обход резервных запросов ytsearch при обнаружении студийного/topic-трека с оценкой $\ge 85\%$.
+      - Добавлен DI-хук `SetSearchFn` для изоляции сетевых вызовов в тестах и написан тест `TestEarlyExit_Threshold` в `matcher_test.go`.
+    - **85.3. Anti-Snippet & Geo-block Guard (`internal/services/downloader/media_processor.go`, `pipeline.go`):**
+      - Реализована функция `validateDownloadedStreamAudio` на базе `ffprobe`, отсекающая 30-секундные превью и гео-сниппеты (`actualDuration < 35s && expectedDuration > 60s`).
+      - Создан метод `downloadAndValidateRawStream`, интегрированный во все точки загрузки (`pipeline.go`, `switch_version.go`) с автоматическим переходом на резервные источники.
+      - Добавлен юнит-тест `TestValidateDownloadedStreamAudio_Snippet` в `media_processor_test.go`.
+    - **85.4. Статус LowMatch и индикация в UI (`resolver.go`, `job.go`, `downloader_queue.html`, `downloader_active.html`):**
+      - В модель `ResolvedTrack` добавлены поля `MatchScore float64` и `IsLowMatch bool` (для скоров $50..74\%$).
+      - В шаблонах очереди и активных задач выведен предупреждающий бейдж `[XX% match]` с всплывающей подсказкой.
+      - Добавлен тест `TestTrack_MatchScoreAndLowMatch` в `job_test.go`.
+    - **85.5. Тестирование и сборка:**
+      - `go test -race ./...` — 100% PASS (0 data races во всех 24 пакетах).
+      - `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешная сборка бинарника 16 МБ.
 
 ---
 
