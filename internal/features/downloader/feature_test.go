@@ -16,6 +16,8 @@ import (
 	"music-manager/internal/core/auth"
 	"music-manager/internal/db"
 	"music-manager/internal/features/downloader"
+	"music-manager/internal/services/censorcheck"
+	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/resolver"
 	"music-manager/internal/testkit"
 )
@@ -704,5 +706,102 @@ func TestDownloader_DeezerURL_IgnoredAndResolved(t *testing.T) {
 		t.Fatalf("expected soundcloud cache to be available")
 	}
 }
+
+type mockLyricsProvider struct {
+	result *lyrics.LyricsSearchResult
+}
+
+func (m *mockLyricsProvider) Search(ctx context.Context, artist, title, album string, duration int) (*lyrics.LyricsSearchResult, error) {
+	return m.result, nil
+}
+
+func TestDownloader_QuickListenSpots_ExtractedOnLyricsFound(t *testing.T) {
+	env, mod := setupTestModule(t)
+	svc := mod.Service()
+
+	mockLRC := `[00:10.00]Куплет первый
+[00:25.00]Закуривая паранойю в виде косяка
+[01:05.00]Мефедрон и экстази рекой
+`
+	lyricsSvc := lyrics.NewService(env.MusicSandbox, &mockLyricsProvider{
+		result: &lyrics.LyricsSearchResult{
+			Lyrics:  mockLRC,
+			Content: mockLRC,
+			Synced:  true,
+			Source:  "lrclib",
+		},
+	})
+	svc.SetLyricsService(lyricsSvc)
+
+	// Создаем тестовую задачу с 1 треком
+	job, err := svc.CreateJob(context.Background(), "https://soundcloud.com/test-artist/test-track", "soundcloud")
+	if err != nil {
+		t.Fatalf("failed to create job: %v", err)
+	}
+
+	meta := resolver.ReleaseMetadata{
+		AlbumTitle:  "Test Album",
+		AlbumArtist: "Test Artist",
+		Year:        2026,
+	}
+	tr := resolver.ResolvedTrack{
+		TrackID:        "track_test_1",
+		TrackNumber:    1,
+		Title:          "Test Track",
+		Artist:         "Test Artist",
+		Album:          "Test Album",
+		AudioSourceURL: "https://soundcloud.com/test-artist/test-track",
+		Status:         "pending",
+	}
+	job.SetMetadata(meta, []resolver.ResolvedTrack{tr})
+
+	// Симулируем поиск текстов и извлечение точек, как в processSingleTrack
+	lrcRes, lrcErr := lyricsSvc.SearchLyrics(context.Background(), tr.Artist, tr.Title, meta.AlbumTitle, tr.Duration)
+	if lrcErr != nil || lrcRes == nil || !lrcRes.Synced {
+		t.Fatalf("expected synced lyrics result")
+	}
+
+	spots := censorcheck.ExtractSpots(lrcRes.Lyrics, 3)
+	if len(spots) == 0 {
+		t.Fatalf("expected extracted spots, got 0")
+	}
+
+	job.UpdateTrack(0, func(t *resolver.ResolvedTrack) {
+		t.Status = "ready"
+		t.QuickListenSpots = spots
+	})
+
+	snap := job.Snapshot()
+	if len(snap.Tracks[0].QuickListenSpots) == 0 {
+		t.Fatalf("expected QuickListenSpots in snapshot track")
+	}
+
+	// Проверяем категорию и наличие слова "косяка" или "мефедрон"
+	foundCoAP := false
+	for _, s := range snap.Tracks[0].QuickListenSpots {
+		if s.Category == censorcheck.CategoryDrugCoAP {
+			foundCoAP = true
+			break
+		}
+	}
+	if !foundCoAP {
+		t.Errorf("expected CategoryDrugCoAP spot in track QuickListenSpots")
+	}
+
+	// Проверяем сериализацию эндпоинта GET /downloads/{id}
+	req := env.NewRequest("GET", "/downloads/"+job.ID, nil)
+	resp := env.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+	bodyStr := string(env.ReadBody(resp))
+	if !strings.Contains(bodyStr, "quick_listen_spots") {
+		t.Errorf("expected quick_listen_spots in JSON output: %s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, "DRUG_COAP_6_13") {
+		t.Errorf("expected DRUG_COAP_6_13 in JSON output: %s", bodyStr)
+	}
+}
+
 
 

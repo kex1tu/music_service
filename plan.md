@@ -1,451 +1,333 @@
-# Комплексный генеральный план архитектурного рефакторинга: Vertical Feature Slices, Core-каркас и Zero-Friction Testkit
+# План реализации: Система полуавтоматического отслушивания треков по таймкодам при загрузке (Quick-Listen Spots)
 
-- **Дата составления:** 2026-10-15  
-- **Статус плана:** `COMPLETED & VERIFIED (100% DONE)`  
-- **Целевые директории:** `internal/core/`, `internal/testkit/`, `internal/features/`, `internal/api/`, `cmd/server/`, `web/static/js/`  
+- **Дата составления:** 2026-10-20  
+- **Статус плана:** `DONE (Успешно реализован и протестирован)`  
+- **Целевые компоненты:** `internal/services/censorcheck/` (новый пакет), `internal/services/resolver/`, `internal/features/downloader/`, `web/static/js/player.js`, `web/templates/components/downloader_queue.html`, `web/templates/components/downloader_active.html`  
 - **Архитектурные инварианты (AGENTS.md):** Pure Go (Chi), Zero-Python в серверной части, Zero Node.js / Zero npm, Zero Docker, Sandbox Mandatory (`PathSandbox.Resolve()`), ID3v2.4 UTF-8 (null-separated), SQLite WAL, No-Build Frontend (Tailwind CDN + Alpine.js CDN).
 
 ---
 
-## 1. Цель и границы архитектурной трансформации (Objective & Scope)
+## 1. Цель и границы задачи (Objective & Scope)
 
-### 1.1. Проблематика кодовой базы
-1. **Эрозия слоев и разрастание монолитных пакетов:**
-   - Пакет `internal/api/handlers/` содержит **49 файлов**, собранных в единый неймспейс.
-   - `FileHandler` превратился в God-объект с **11 зависимостями** в конструкторе (`MusicSandbox`, `TmpSandbox`, `Database`, `Downloader`, `Organizer`, `Deezer`, `Lyrics`, `Scanner`, `Yandex`, `YTMusic`, `ITunes`).
-   - `TagHandler` конфигурируется через мутирующие сеттеры (`SetConfig`, `SetMusicBrainz`, `SetShazam`), что нарушает иммутабельность сервисного слоя и усложняет тестирование.
-   - Файл `internal/db/queries.go` содержит свыше **1500 строк** разнородных SQL-запросов (от очередей загрузки до аудита дубликатов и радиоволны).
-2. **Высокая когнитивная сложность для AI-вайбкодинга и разработчиков:**
-   - Любое изменение функционала (например, добавление поля в задачу загрузки) требует правок в 5–6 несвязанных местах: в DTO хендлера, в `Service`, в `JobManager`, в `queries.go`, в роутере и в JavaScript-шаблонах.
-   - Из-за большого числа затронутых файлов контекст агента перегружается, что повышает риск опечаток и скрытых регрессий.
-3. **Трудоемкость тестирования (Boilerplate Overhead):**
-   - Написание интеграционных тестов для каждого хендлера требует 50–100 строк подготовки: создание временных файлов, запуск локального `httptest.Server`, мокирование внешних HTTP-серверов и десятки проверок `if got != want` по каждому полю ответа.
-4. **Реактивные риски на фронтенде (No-Build Alpine.js):**
-   - Прямые вызовы `fetch()` с инлайн-парсингом ошибок разбросаны по 20+ шаблонам компонентов.
-   - Состояние частично дублируется между глобальным `Alpine.store('app')` и локальными скоупами компонентов.
+### 1.1. Проблематика
+1. **Неприменимость тяжелого автоматического анализа:**
+   - Полноценный ASR-анализ (Whisper) требует от 15 до 600 секунд на трек и сотен мегабайт оперативной памяти при интенсивной загрузке процессора.
+   - Пользователь прямо указал: **автоматический анализатор не нужен**.
+2. **Проблема скрытой цензуры стримингов (КоАП РФ ст. 6.13):**
+   - Российские стриминги (Яндекс Музыка, VK, Apple Music) часто оставляют обычный мат, но точечно заглушают (Mute) или запикивают (Bleep) нарко-сленг (ст. 6.13 КоАП РФ).
+   - Человеческое ухо за 2–3 секунды безошибочно определяет, присутствует ли заглушение вокала или бип на подозрительном слове, если точно знать, куда перематывать.
+3. **Отсутствие фокуса в интерфейсе загрузчика:**
+   - Сейчас после скачивания релиза в `tmp_downloads` пользователь видит список треков, но чтобы проверить оригинальность, ему приходится вручную открывать файл, искать текст песни и наугад перематывать дорожку.
 
 ### 1.2. Целевой результат
-1. **Переход к вертикальным слайсам (Vertical Feature Slices):**
-   - Разбиение функционала на 6 самодостаточных пакетов в `internal/features/`:
-     - `downloader`: пайплайн yt-dlp/ffmpeg, SoundCloud-First matcher, управление очередью задач.
-     - `tageditor`: Puddletag табличный редактор, пакетное тегирование, обложки APIC, MusicBrainz OAuth, Shazam.
-     - `filemanager`: файловое дерево, переименование, организация медиатеки, потоковое вещание (Audio Stream).
-     - `audit`: инспекция медиатеки, чекер неполных альбомов, бэкфилл Deezer, нормализация жанров, дедупликация.
-     - `radio`: «Моя Волна», генерация M3U, ICY стриминг с метаданными, интеграция с Navidrome/Subsonic.
-     - `radar`: сканирование дискографий любимых исполнителей, агрегация новых релизов.
-2. **Саморегистрирующиеся модули (`RegisterRoutes`):**
-   - Каждая фича реализует единый интерфейс модуля и регистрирует свои маршруты в переданном Chi-роутере. Роутер в `main.go` больше не знает о деталях отдельных хендлеров.
-3. **Изоляция зависимостей через локальные интерфейсы потребителей:**
-   - Никаких перекрестных импортов между фичами. Если фича `radar` инициирует загрузку, она объявляет локальный интерфейс `JobStarter`, реализуемый модулем `downloader`.
-4. **Инфраструктурный пакет `internal/core/httputil`:**
-   - Типобезопасный `DecodeJSON[T](r, &req)` с защитой от переполнения буфера (10 МБ лимит) и гарантированным закрытием `r.Body`.
-   - `RespondJSON(w, code, data)` и стандартизированный `RespondError(w, code, message)`.
-   - Хелперы для извлечения query-параметров (`QueryString`, `QueryInt`, `QueryBool`).
-5. **Zero-Friction Testkit (`internal/testkit`):**
-   - `testkit.NewEnv(t)`: создание изолированного окружения за 2 мс (in-memory SQLite, временная песочница с фикстурами MP3, автомокающий транспорт внешних каталогов).
-   - `testkit.AssertGoldenJSON(t, got, "fixtures/expected.golden.json")`: сокращение кода тестов с 50 до 5 строк.
-6. **Типизированный клиент API и модульные сторы Alpine.js:**
-   - Создание `web/static/js/api/client.js` со строгой структуризацией запросов (`api.downloader.*`, `api.tags.*`, `api.audit.*`).
-   - Изоляция реактивных сторов: `$store.queue`, `$store.puddletag`, `$store.audit`.
+1. **Мгновенное извлечение контрольных точек (Quick-Listen Spots):**
+   - При скачивании трека сервис автоматически подтягивает синхронизированный текст (`.lrc`) через существующий `lyrics.Service` (LRCLIB / Deezer).
+   - Новый легковесный Pure Go пакет `internal/services/censorcheck` за **< 1 миллисекунды** парсит таймкоды `[mm:ss.xx]` и находит до 3 наиболее критичных точек в треке с наивысшим приоритетом:
+     - Приоритет 1: Вещества и нарко-сленг (**ст. 6.13 КоАП РФ**).
+     - Приоритет 2: Подозрительные маркеры и эвфемизмы (clean, radio edit, балдеет, дуреет).
+     - Приоритет 3: Явный мат (хуй, пизда, ебать, блять, сука).
+2. **Контекстный интеллект:**
+   - Исключение ложных срабатываний: фразы вроде «у меня есть план», «по плану», «мой план», «бизнес-план» не помечаются как наркотики.
+   - Исключение нейтральных слов («лирика», «марка машины») и безопасных корней с «еб» («волшебная», «скрести», «хлеб», «небе»).
+3. **1-Click интерактивное отслушивание в очереди загрузок:**
+   - В карточке трека в `downloader_queue.html` и `downloader_active.html` появляются кликабельные чипы контрольных точек:
+     `[▶ 01:14 "косяк" (КоАП 6.13)]` `[▶ 02:05 "наебалово"]`.
+   - Клик по чипу запускает встроенный веб-аудиоплеер ровно за 2 секунды до слова и воспроизводит короткий фрагмент (5 секунд) с автоматической остановкой.
+   - Пользователь видит всплывающую подсказку со строкой из песни: *«Закуривая паранойю в виде косяка»*.
+4. **Бесшовная замена цензурной версии:**
+   - Если пользователь услышал мьют/запикивание, он тут же нажимает имеющуюся кнопку **«Выбрать источник»** (`$store.sourcePicker.openForQueueTrack`) и в 1 клик подменяет трек на альтернативную версию из SoundCloud / YouTube.
 
 ### 1.3. Границы проекта (Scope)
 - **Входит в объем (In-Scope):**
-  - Создание `internal/core/httputil` с полным набором unit-тестов.
-  - Создание `internal/testkit` (фабрика тестового окружения, автомокирование HTTP, Golden File snapshot engine).
-  - Поэтапный перенос 6 вертикальных слайсов (`downloader`, `tageditor`, `filemanager`, `audit`, `radio`, `radar`).
-  - Миграция SQL-запросов из `internal/db/queries.go` в локальные `repository.go` внутри соответствующих фич.
-  - Адаптация точки входа `cmd/server/main.go` и маршрутизатора `internal/api/router.go`.
-  - Создание `web/static/js/api/client.js` и переход шаблонов на вызовы сторов и клиента.
-  - Обеспечение 100% прохождения `go test -race ./...` и Playwright E2E проверок на каждом этапе.
+  - Создание нового пакета `internal/services/censorcheck/` на чистом Go (лексикон КоАП 6.13 + мат, парсер LRC, генератор точек).
+  - Расширение модели `resolver.ResolvedTrack` полем `QuickListenSpots []QuickListenSpot`.
+  - Интеграция в `downloader.Service.processSingleTrack`: получение LRC через `lyrics.Service` в `tmp_downloads` и вызов генератора точек.
+  - Добавление метода `playSpot(streamUrl, spot)` в `web/static/js/player.js`.
+  - Обновление шаблонов `web/templates/components/downloader_queue.html` и `downloader_active.html` для отображения чипов точек.
+  - Покрытие юнит-тестами на Go (`censorcheck_test.go`, тесты интеграции с очередью).
 - **Не входит в объем (Out-of-Scope):**
-  - Изменение бинарного парсера ID3v2.4 в `internal/id3` (пакет полностью отлажен и стабилен).
-  - Изменение схемы таблиц SQLite (структура БД остаётся неизменной).
-  - Добавление Node.js/npm зависимостей или Docker.
+  - Автоматический запуск нейросетей (Whisper, ASR) — от них полностью отказываемся по требованию пользователя.
+  - Автоматический спектральный DSP-анализ (заменен на ухо пользователя).
+  - Изменение бинарного формата ID3v2.4.
 
 ---
 
 ## 2. Анализ текущего состояния системы (Current State Analysis)
 
-### 2.1. Инвентаризация монолитных хендлеров
-В текущем пакете [`internal/api/handlers/`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/api/handlers/) сосредоточено 49 файлов:
-- **Загрузка и очереди:** `download_handlers.go`, `download_preview_handler.go`, `queue_handlers.go`, `torrent_handlers.go`.
-- **Теги и обложки:** `tag_handlers.go`, `tag_save_handlers.go`, `tag_cover_handlers.go`, `batch_covers_handlers.go`, `batch_lyrics_handlers.go`, `musicbrainz_oauth_handlers.go`, `recognize_handlers.go`.
-- **Аудит и целостность:** `audit_handlers.go`, `backfill_handlers.go`, `duplicate_handlers.go`, `tag_audit_handlers.go`, `tag_audit_analyzer.go`, `tag_audit_fix_handlers.go`, `tag_audit_album_handlers.go`, `path_fix_handlers.go`.
-- **Файловые операции:** `file_handlers.go`, `file_rename_handlers.go`, `reorganize_handlers.go`, `stream_handlers.go`, `stream_search_handlers.go`, `catalog_match_handlers.go`, `catalog_unified_handlers.go`, `deezer_search_handlers.go`, `discography_handlers.go`.
-- **Радио и радар:** `radio_handlers.go`, `radar_handlers.go`.
-
-### 2.2. Карта перекрестных зависимостей
-```
-cmd/server/main.go ──► FileHandler (11 зависимостей)
-                    ──► TagHandler (5 зависимостей + 3 сеттера)
-                    ──► DownloadHandler (2 зависимости)
-                    ──► RadioHandler (7 зависимостей)
-                    ──► RadarHandler (2 зависимости)
-```
-*Проблема:* `FileHandler` выполняет функции файлового менеджера, стримера аудио, каталожного поисковика, менеджера дубликатов и дискографий. Любое изменение сигнатуры в сервисе требует перекомпиляции и перенастройки огромного объекта.
+### 2.1. Затронутые компоненты кодовой базы
+1. **Загрузчик треков:** [`internal/features/downloader/service.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/features/downloader/service.go#L890-L1150)
+   - Метод `processSingleTrack` выполняет скачивание сырого потока, транскодирование в MP3 320k и запись ID3-тегов.
+   - Сейчас он не вызывает `lyrics.Service` и не сохраняет `.lrc` рядом с MP3 во временном каталоге `tmp_downloads/{job_id}/converted/`.
+2. **Модели треков очереди:** [`internal/services/resolver/resolver.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/resolver.go#L52-L75)
+   - Структура `ResolvedTrack` содержит метаданные трека, статус версии (`VersionStatus`), аудиокачество (`AudioQuality`) и путь к готовому MP3 (`ConvertedPath`).
+   - Поле для контрольных точек отсутствует.
+3. **Сервис текстов песен:** [`internal/services/lyrics/lyrics.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/lyrics/lyrics.go#L64-L105)
+   - Метод `Search(ctx, artist, title, album, duration)` обращается к LRCLIB и возвращает `SyncedLyrics` с точными таймкодами.
+4. **Аудиоплеер на фронтенде:** [`web/static/js/player.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/player.js#L213-L245)
+   - `Alpine.store('player')` умеет воспроизводить предпросмотры (`playPreviewStream`) и аудиодорожки через стриминг `/api/stream?path=...`.
+   - Не хватает специализированного метода для позиционирования на таймкод `t - 2s` с автопаузой через 5 секунд.
+5. **Интерфейс очереди загрузок:** [`web/templates/components/downloader_queue.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/downloader_queue.html#L160-L225)
+   - Отображает прогресс, бейджи качества (`HQ Opus`, `True 320k`) и кнопку «Выбрать источник».
+   - Место для чипов отслушивания идеально вписывается под названием трека рядом с бейджами.
 
 ---
 
-## 3. Архитектурный проект целевого состояния (Target Architecture Blueprint)
+## 3. Архитектурное решение и обоснование (Architecture & Rationale)
 
-### 3.1. Общая топология модулей
-```
-music-manager/
-├── cmd/
-│   └── server/
-│       └── main.go                 # Composition Root: инициализация Core, запуск Feature Modules
-├── internal/
-│   ├── config/                     # Настройки (.env)
-│   ├── core/                       # Платформенный базис (Shared Kernel)
-│   │   ├── auth/                   # Сессии HMAC-SHA256, bcrypt
-│   │   ├── sandbox/                # PathSandbox (изоляция путей)
-│   │   └── httputil/               # DecodeJSON, RespondJSON, RespondError, Query-хелперы
-│   ├── db/                         # Базовый пул SQLite WAL, schema.sql, RunInTx
-│   ├── id3/                        # ID3v2.4 Engine (парсер/генератор, genres, tags)
-│   ├── testkit/                    # Тестовый полигон (In-memory DB, Sandboxed TempDir, Golden Snapshots)
-│   └── features/                   # Вертикальные слайсы (Vertical Feature Slices)
-│       ├── downloader/             # Слайс 1: Загрузка и очередь
-│       ├── tageditor/              # Слайс 2: Редактор тегов Puddletag, обложки, MusicBrainz
-│       ├── filemanager/            # Слайс 3: Навигация, перемещение, стриминг
-│       ├── audit/                  # Слайс 4: Аудит целостности, бэкфилл, дубликаты
-│       ├── radio/                  # Слайс 5: «Моя Волна», M3U, ICY стриминг
-│       └── radar/                  # Слайс 6: Сканер дискографий и новых релизов
-├── web/
-│   ├── static/
-│   │   ├── js/
-│   │   │   ├── api/client.js       # Единый типизированный API-клиент
-│   │   │   └── store/              # Изолированные сторы ($store.queue, $store.puddletag, ...)
-│   │   └── css/
-│   └── templates/                  # Модульные HTML-шаблоны без сборки
+### 3.1. Архитектурная схема взаимодействия
+
+```mermaid
+flowchart TD
+    subgraph DownloaderPipeline["Downloader Pipeline (Go)"]
+        DL["processSingleTrack()"] --> MP3["Конвертация в MP3 320k"]
+        MP3 --> LYRICS["lyrics.Service.Search() (LRCLIB)"]
+        LYRICS -->|SyncedLyrics| SPOT_GEN["censorcheck.ExtractSpots(lyrics)"]
+        SPOT_GEN -->|QuickListenSpots| TRACK["ResolvedTrack.QuickListenSpots"]
+        TRACK --> JOB["Job.Tracks (in-memory + DB)"]
+    end
+
+    subgraph ClientUI["Frontend (Alpine.js + HTML5 Audio)"]
+        JOB -->|/api/downloader/queue| UI["downloader_queue.html"]
+        UI -->|Рендеринг чипов| CHIP["[▶ 01:14 'косяк' (КоАП 6.13)]"]
+        CHIP -->|Click: playSpot()| PLAYER["player.js (Web Audio)"]
+        PLAYER -->|GET /api/stream?path=tmp/...#t=72| STREAM["Range Audio Stream"]
+        PLAYER -->|5 сек воспроизведения| AUTO_STOP["Автопауза + Toast"]
+    end
+
+    subgraph UserAction["Действие пользователя"]
+        AUTO_STOP --> DECISION{"Слышна цензура?"}
+        DECISION -->|Да: запикано/мьют| SWAP["Клик: 'Выбрать источник' (SoundCloud)"]
+        DECISION -->|Нет: звучит оригинал| CONFIRM["Подтвердить перенос в медиатеку"]
+    end
 ```
 
-### 3.2. Спецификация контракта фиче-модуля
-Каждый вертикальный слайс обязан реализовать контракт:
+### 3.2. Сравнительный анализ альтернатив
+
+| Параметр | Вариант А: Автоматический Whisper/DSP | Вариант Б: Только ручная перемотка трека | Вариант В (Выбранный): Точечный Quick-Listen по LRC |
+|---|---|---|---|
+| **Нагрузка на CPU сервера** | Экстремальная (100% CPU на 5–10 минут) | Нулевая (0%) | **Нулевая (< 0.001 сек на парсинг текста)** |
+| **Точность детекции** | 85–90% (ложные срабатывания, шумы бита) | 100% (человеческий слух) | **100% (ухо человека проверяет точный срез)** |
+| **Время на 1 трек** | 20–600 секунд | 60–120 секунд ручного поиска | **3–5 секунд (1 клик по готовому чипу)** |
+| **Зависимости** | Python, ffmpeg C-bindings, Whisper | Нет | **Pure Go (Zero-Python, Zero-Node.js)** |
+| **Удобство для пользователя** | Черный ящик, возможны ложные флаги | Утомительно искать слова вручную | **Фокусное прослушивание 1–2 ключевых слов** |
+
+### 3.3. Почему именно такое решение («Почему именно так»)
+1. **Почему Pure Go, а не Python:**
+   - Соответствие инварианту #1 (`AGENTS.md`): серверная часть строго на Go. Парсер LRC и регулярные выражения на Go выполняются за микросекунды без запуска внешних интерпретаторов.
+2. **Почему LRCLIB как источник таймкодов:**
+   - LRCLIB — крупнейшая открытая база синхронизированных текстов, бесплатная, не требует ключей API и уже интегрирована в проект через `lyrics.Service`.
+3. **Почему смещение -2 секунды и длительность 5 секунд:**
+   - Таймкод в LRC указывает на начало строки или гласного звука. Смещение на 2 секунды назад дает слушателю музыкальный контекст (бит и предшествующие слова), а 5 секунд достаточно, чтобы полностью прозвучало слово и артикуляция без необходимости слушать весь куплет.
+4. **Почему ограничение до 3 точек на трек:**
+   - Если в треке 20 матерных слов, вывод 20 кнопок перегрузит UI. Достаточно проверить 1 слово по КоАП 6.13 (наркотики) и 1–2 мата: если в них нет цензуры, весь трек оригинальный.
+
+---
+
+## 4. Пошаговая декомпозиция реализации (Step-by-Step Implementation)
+
+### Этап 1: Пакет `internal/services/censorcheck` (Pure Go) [NEW]
+
+Создать изолированный пакет с лексиконом, контекстным фильтром и экстрактором точек.
+
+#### Файл: `internal/services/censorcheck/types.go`
 ```go
-package features
+package censorcheck
 
-import "github.com/go-chi/chi/v5"
+// SpotCategory классифицирует категорию триггерного слова.
+type SpotCategory string
 
-// Module представляет саморегистрирующийся вертикальный слайс системы.
-type Module interface {
-    Name() string
-    RegisterRoutes(r chi.Router)
+const (
+	CategoryDrugCoAP SpotCategory = "DRUG_COAP_6_13" // ст. 6.13 КоАП РФ (нарко-сленг)
+	CategorySuspect  SpotCategory = "SUSPECT_MARKER" // clean, radio edit, эвфемизмы
+	CategoryProfane  SpotCategory = "PROFANITY"      // обычный мат
+)
+
+// QuickListenSpot представляет одну контрольную точку для прослушивания.
+type QuickListenSpot struct {
+	TimeSec   float64      `json:"time_sec"`   // Секунда в треке (например, 74.2)
+	TimeStr   string       `json:"time_str"`   // Форматированное время ("01:14")
+	Word      string       `json:"word"`       // Целевое слово ("косяк")
+	Category  SpotCategory `json:"category"`   // DRUG_COAP_6_13 / PROFANITY
+	LineText  string       `json:"line_text"`  // Полный текст строки из LRC
+}
+```
+
+#### Файл: `internal/services/censorcheck/lexicon.go`
+- Скомпилированные регулярные выражения и хэш-таблицы:
+  - Наркотики по ст. 6.13 КоАП РФ: `мефедрон`, `меф`, `кокаин`, `кокс`, `экстази`, `мдма`, `кодеин`, `лин`, `перкосет`, `ксанакс`, `гашиш`, `бошки`, `шишки`, `блант`, `косяк`, `джойнт`, `сатива`, `индика`, `тгк`, `бульбулятор`, `бонг`, `водник`, `закладка`, `зиплок`, `амфетамин`, `спиды`, `героин`, `герыч`, `передоз`, `стафф`.
+  - Проверка контекста для слова «план»: функции `isDrugPlanContext(word, line)`.
+  - Мат: корни `хуй`, `пизд`, `еб` (с исключением `SAFE_EB_SUBSTRINGS`: хлеб, ребят, волшеб, небе, скреб), `бля`, `сука`.
+
+#### Файл: `internal/services/censorcheck/extractor.go`
+```go
+package censorcheck
+
+// ExtractSpots анализирует синхронизированный текст LRC и возвращает до maxSpots контрольных точек.
+// Приоритет отдается словам по ст. 6.13 КоАП РФ, затем маркерам цензуры, затем мату.
+func ExtractSpots(lrcContent string, maxSpots int) []QuickListenSpot
+```
+
+---
+
+### Этап 2: Расширение моделей `resolver.ResolvedTrack` и DTO [MODIFY]
+
+#### Файл: [`internal/services/resolver/resolver.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/resolver.go)
+Добавить поле `QuickListenSpots` в `ResolvedTrack`:
+```go
+type ResolvedTrack struct {
+    // ... существующие поля ...
+    AudioQuality     *AudioQualityTelemetry        `json:"audio_quality,omitempty"`
+    QuickListenSpots []censorcheck.QuickListenSpot `json:"quick_listen_spots,omitempty"`
 }
 ```
 
 ---
 
-## 4. Пошаговая декомпозиция реализации (Detailed Implementation Roadmap)
+### Этап 3: Интеграция в пайплайн загрузки `downloader.Service` [MODIFY]
 
-Реализация разделена на 6 последовательных фаз. На каждом шаге гарантируется непрерывная компиляция и зелёный статус всех тестов (`go test -race ./...`).
+#### Файл: [`internal/features/downloader/service.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/features/downloader/service.go)
+1. В `ServiceConfig` и структуру `Service` внедрить `lyricsService *lyrics.Service`.
+2. В методе `processSingleTrack` после успешной конвертации MP3 и записи тегов:
+   ```go
+   // Поиск синхронизированного текста через LRCLIB
+   if s.lyrics != nil {
+       lrcRes, _ := s.lyrics.Search(ctx, track.Artist, track.Title, meta.AlbumTitle, track.Duration)
+       if lrcRes != nil && lrcRes.Synced && lrcRes.Lyrics != "" {
+           // Сохраняем .lrc файл рядом с MP3 во временной папке
+           lrcFilename := fmt.Sprintf("%02d. %s.lrc", track.TrackNumber, safeTitle)
+           lrcPath := filepath.Join(convertedDir, lrcFilename)
+           _ = os.WriteFile(lrcPath, []byte(lrcRes.Lyrics), 0644)
 
----
-
-### Фаза 1: Инфраструктурный фундамент (Core & Testkit)
-
-#### 1.1. Пакет `internal/core/httputil`
-- **[NEW] `internal/core/httputil/httputil.go`**
-  - Константа `DefaultMaxBodyBytes = 10 << 20` (10 МБ).
-  - Структура `ErrorResponse { Error string, Code int }`.
-  - Дженерик-функция `DecodeJSON[T any](r *http.Request, target *T) error`:
-    - Проверка `r.Body != nil`.
-    - Ограничение чтения через `io.LimitReader`.
-    - Гарантированный `defer r.Body.Close()`.
-  - `RespondJSON(w http.ResponseWriter, status int, data any)`: установка заголовка `Content-Type: application/json`, запись статуса и сериализация.
-  - `RespondError(w http.ResponseWriter, status int, message string)`: формирование единого JSON-ответа об ошибке.
-  - Хелперы: `QueryString`, `QueryInt`, `QueryBool`.
-- **[NEW] `internal/core/httputil/httputil_test.go`**
-  - Тесты: валидный парсинг, битый JSON, превышение лимита, nil-body, извлечение query-параметров с fallback-значениями.
-
-#### 1.2. Пакет `internal/testkit`
-- **[NEW] `internal/testkit/testenv.go`**
-  - Структура `TestEnv`:
-    ```go
-    type TestEnv struct {
-        T            *testing.T
-        DB           *db.DB
-        MusicSandbox *sandbox.PathSandbox
-        TmpSandbox   *sandbox.PathSandbox
-        Server       *httptest.Server
-        Client       *http.Client
-        MockHTTP     *MockTransport
-    }
-    ```
-  - Метод `NewEnv(t *testing.T) *TestEnv`:
-    - Создание уникального `t.TempDir()`.
-    - Инициализация SQLite базы `db.Open(filepath.Join(tempDir, "test.db"))`.
-    - Инициализация песочниц `MusicDir` и `TmpDir`.
-    - Настройка мок-транспорта `http.RoundTripper` для перехвата сетевых запросов к Deezer, SoundCloud, iTunes.
-  - Хелперы для тестов:
-    - `env.CreateDummyMP3(relPath string, title, artist, album string) string`: генерация валидного MP3-файла с ID3v2.4 фреймами.
-    - `env.PostJSON(path string, body any) *http.Response`.
-    - `env.Get(path string) *http.Response`.
-- **[NEW] `internal/testkit/golden.go`**
-  - Функция `AssertGoldenJSON(t *testing.T, actual []byte, goldenPath string)`:
-    - Форматирование JSON с отступами (`json.Indent`).
-    - Сравнение с содержимым файла `goldenPath`.
-    - Если файл отсутствует или задана переменная `UPDATE_GOLDEN=true`, автоматическая запись эталона.
-- **[NEW] `internal/testkit/mock_transport.go`**
-  - Перехват внешних HTTP-запросов и возврат детерминированных заготовленных фикстур по шаблону URL.
-- **[NEW] `internal/testkit/testenv_test.go`**
-  - Верификация фабрики окружения, песочницы и механизма Golden Files.
+           // Мгновенно извлекаем до 3 контрольных точек
+           spots := censorcheck.ExtractSpots(lrcRes.Lyrics, 3)
+           if len(spots) > 0 {
+               job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+                   tr.QuickListenSpots = spots
+               })
+           }
+       }
+   }
+   ```
 
 ---
 
-### Фаза 2: Слайс 1 — `internal/features/downloader`
+### Этап 4: Веб-аудиоплеер для сниппетов в `web/static/js/player.js` [MODIFY]
 
-#### 2.1. Структура слайса
-```
-internal/features/downloader/
-├── feature.go          # Фабрика NewModule, RegisterRoutes
-├── handlers.go         # HTTP хендлеры
-├── service.go          # Воркер-пул, yt-dlp/ffmpeg пайплайн
-├── repository.go       # SQL-запросы к таблице download_jobs
-├── types.go            # Request/Response DTO
-└── feature_test.go     # Интеграционные тесты на testkit
-```
-
-#### 2.2. Детальная спецификация файлов
-- **[NEW] `internal/features/downloader/types.go`**
-  ```go
-  type CreateJobRequest struct {
-      URL    string `json:"url"`
-      Source string `json:"source"`
-  }
-  type BatchJobRequest struct {
-      URLs   []string `json:"urls"`
-      Source string   `json:"source"`
-  }
-  type JobResponse struct {
-      ID          int64   `json:"id"`
-      URL         string  `json:"url"`
-      Source      string  `json:"source"`
-      Status      string  `json:"status"`
-      Title       string  `json:"title"`
-      Artist      string  `json:"artist"`
-      Progress    float64 `json:"progress"`
-      Error       string  `json:"error,omitempty"`
-      CreatedAt   string  `json:"created_at"`
-  }
-  ```
-- **[NEW] `internal/features/downloader/repository.go`**
-  - Перенос SQL-запросов из `internal/db/queries.go`:
-    - `CreateJob(ctx context.Context, job *Job) (int64, error)`
-    - `GetJob(ctx context.Context, id int64) (*Job, error)`
-    - `ListJobs(ctx context.Context, limit, offset int) ([]*Job, error)`
-    - `UpdateJobProgress(ctx context.Context, id int64, progress float64, status string) error`
-    - `DeleteJob(ctx context.Context, id int64) error`
-    - `ResetInterruptedJobs(ctx context.Context) error`
-- **[NEW] `internal/features/downloader/service.go`**
-  - Перенос логики из `internal/services/downloader/`:
-    - Ограничение конкурентных загрузок через семафор `cfg.MaxConcurrentDownloads`.
-    - Асинхронный запуск `yt-dlp` и `ffmpeg` с контролем контекста.
-    - SoundCloud-First AudioMatcher и fallback на YouTube Music.
-    - Автоматическая очистка каталога `tmp_downloads/{job_id}/` после завершения или сбоя.
-- **[NEW] `internal/features/downloader/handlers.go`**
-  - Методы модуля:
-    - `CreateJob(w http.ResponseWriter, r *http.Request)`
-    - `CreateBatch(w http.ResponseWriter, r *http.Request)`
-    - `ListJobs(w http.ResponseWriter, r *http.Request)`
-    - `GetJob(w http.ResponseWriter, r *http.Request)`
-    - `RetryJob(w http.ResponseWriter, r *http.Request)`
-    - `DeleteJob(w http.ResponseWriter, r *http.Request)`
-    - `PreviewJob(w http.ResponseWriter, r *http.Request)`
-- **[NEW] `internal/features/downloader/feature.go`**
-  - Реализация `Module`:
-    ```go
-    func (m *Module) RegisterRoutes(r chi.Router) {
-        r.Route("/downloads", func(r chi.Router) {
-            r.Post("/", m.CreateJob)
-            r.Get("/", m.ListJobs)
-            r.Post("/batch", m.CreateBatch)
-            r.Get("/preview", m.PreviewJob)
-            r.Route("/{id}", func(r chi.Router) {
-                r.Get("/", m.GetJob)
-                r.Post("/retry", m.RetryJob)
-                r.Delete("/", m.DeleteJob)
-            })
-        })
-    }
-    ```
-- **[NEW] `internal/features/downloader/feature_test.go`**
-  - Тестирование всего жизненного цикла задачи через `testkit.NewEnv(t)`:
-    - Создание задачи -> проверка ответа -> повтор упавшей задачи -> удаление задачи -> Golden JSON снапшот.
-
----
-
-### Фаза 3: Слайс 2 — `internal/features/tageditor`
-
-#### 3.1. Структура слайса
-```
-internal/features/tageditor/
-├── feature.go          # Регистрация маршрутов /api/tags
-├── handlers.go         # ReadTags, SaveTags, BatchApply
-├── puddletag.go        # Логика табличного редактирования и валидации ID3
-├── covers.go           # Извлечение APIC, галерея, сжатие cover.jpg
-├── musicbrainz.go      # Авторизация OAuth и получение метаданных
-├── shazam.go           # Распознавание треков по сигнатуре
-├── types.go            # DTO тегов и альбомов
-└── feature_test.go     # Тестирование чтения и записи тегов
-```
-
-#### 3.2. Ключевые изменения и ликвидация God-объекта
-- Устранение сеттеров `TagHandler.SetConfig`, `TagHandler.SetMusicBrainz`.
-- Конструктор `NewModule` принимает неизменяемую конфигурацию через интерфейсы:
-  ```go
-  type MetadataProvider interface {
-      SearchReleases(ctx context.Context, query string) ([]Release, error)
-  }
-  type FingerprintProvider interface {
-      Recognize(ctx context.Context, audioPath string) (*TrackMetadata, error)
-  }
-  ```
-- Строгая валидация ID3v2.4 UTF-8 с null-разделителями (`\x00`) для полей `Artist` и `Genre`.
-- Запрет вшивания текстов в MP3 (инвариант сохранен).
-
----
-
-### Фаза 4: Слайс 3 — `internal/features/filemanager`
-
-#### 4.1. Структура слайса
-```
-internal/features/filemanager/
-├── feature.go          # Регистрация /api/files, /api/stream
-├── handlers.go         # ListFiles, RenameFile, DeleteFile, StreamTrack
-├── organizer.go        # Раскладка {Album} - {Artist}/01. {Title}.mp3
-├── companions.go       # Перемещение сопутствующих .lrc и .jpg
-├── streamer.go         # Поддержка HTTP 206 Partial Content (Seek)
-└── feature_test.go     # Тесты переименования, песочницы и стриминга
-```
-
-#### 4.2. Безопасность и Sandbox Guard
-- Каждая файловая операция проходит валидацию `PathSandbox.Resolve()`.
-- Потоковое воспроизведение (`StreamTrack`) использует `http.ServeContent` с проверкой расширения `.mp3` и заголовками `Content-Range`.
-
----
-
-### Фаза 5: Слайсы 4, 5, 6 — `audit`, `radio`, `radar`
-
-1. **`internal/features/audit`:**
-   - Инспекция медиатеки на соответствие стандартам (битрейт 320 kbps, наличие обложки, текстов `.lrc`).
-   - Сверка неполных альбомов с официальным каталогом Deezer.
-   - Механизм бэкфилла недостающих дорожек в один клик.
-   - Дедупликация файлов на основе сверки ISRC и аудио-отпечатков.
-2. **`internal/features/radio`:**
-   - Алгоритм формирования очереди «Моя Волна» на основе истории прослушиваний Navidrome.
-   - ICY-стриминг с трансляцией заголовков треков в Shoutcast/Icecast клиенты.
-   - Ежедневный генератор плейлиста `Моя Волна.m3u` в 05:00.
-3. **`internal/features/radar`:**
-   - Периодический мониторинг релизов артистов из медиатеки через Deezer и MusicBrainz.
-   - Управление списком отклоненных/скрытых карточек релизов.
-
----
-
-### Фаза 6: Фронтенд-архитектура и типизированный клиент
-
-#### 6.1. Модуль `web/static/js/api/client.js`
-Единый слой сетевых обращений с обработкой ошибок:
+#### Файл: [`web/static/js/player.js`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/js/player.js)
+Добавить метод `playCensorshipSpot`:
 ```javascript
-async function request(url, options = {}) {
-    const res = await fetch(url, {
-        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-        ...options,
-    });
-    if (!res.ok) {
-        const errorData = await res.json().catch(() => ({ error: res.statusText }));
-        throw new Error(errorData.error || `HTTP ${res.status}`);
+playCensorshipSpot(streamUrl, spot, trackTitle, trackArtist) {
+    if (!streamUrl || !spot) return;
+
+    // Смещение на 2 секунды назад для контекста
+    const startTime = Math.max(0, spot.time_sec - 2.0);
+    const stopDuration = 5.0; // Играем ровно 5 секунд
+
+    this.currentTrack = {
+        title: trackTitle || 'Отслушивание точки',
+        artist: `${trackArtist || ''} • Слово: «${spot.word}»`,
+        duration: stopDuration,
+        stream_url: streamUrl,
+    };
+    this.isVisible = true;
+
+    if (this._spotTimer) {
+        clearTimeout(this._spotTimer);
+        this._spotTimer = null;
     }
-    return res.json();
+
+    if (this.audioElement) {
+        this.audioElement.src = streamUrl;
+        this.audioElement.currentTime = startTime;
+        this.audioElement.play().then(() => {
+            this.isPlaying = true;
+            // Автоматическая остановка через 5 секунд
+            this._spotTimer = setTimeout(() => {
+                this.audioElement.pause();
+                this.isPlaying = false;
+            }, stopDuration * 1000);
+        }).catch(err => console.warn('Spot play error:', err));
+    }
+
+    if (window.showToast) {
+        window.showToast(`🎧 Контрольная точка: «${spot.word}» (${spot.time_str})\n${spot.line_text}`, 'info');
+    }
 }
-
-export const api = {
-    downloader: {
-        list: () => request('/downloads'),
-        create: (url, source) => request('/downloads', { method: 'POST', body: JSON.stringify({ url, source }) }),
-        retry: (id) => request(`/downloads/${id}/retry`, { method: 'POST' }),
-        delete: (id) => request(`/downloads/${id}`, { method: 'DELETE' }),
-    },
-    tags: {
-        get: (path) => request(`/api/tags?path=${encodeURIComponent(path)}`),
-        save: (payload) => request('/api/tags', { method: 'POST', body: JSON.stringify(payload) }),
-    },
-    files: {
-        tree: (dir) => request(`/api/files?dir=${encodeURIComponent(dir || '')}`),
-        rename: (oldPath, newPath) => request('/api/files/rename', { method: 'POST', body: JSON.stringify({ oldPath, newPath }) }),
-    },
-    audit: {
-        status: () => request('/api/audit/status'),
-        fix: (ruleId, payload) => request(`/api/audit/fix/${ruleId}`, { method: 'POST', body: JSON.stringify(payload) }),
-    }
-};
 ```
-
-#### 6.2. Рефакторинг сторов Alpine.js
-- Вынос очереди в выделенный модуль `web/static/js/store/queue.js`:
-  ```javascript
-  Alpine.store('queue', {
-      jobs: [],
-      loading: false,
-      async fetch() {
-          this.jobs = await api.downloader.list();
-      },
-      async retry(id) {
-          await api.downloader.retry(id);
-          await this.fetch();
-      }
-  });
-  ```
-- В HTML-шаблонах заменяются инлайн-скрипты: вместо `@click="fetch('/downloads/retry/' + job.id)"` строго `@click="$store.queue.retry(job.id)"`.
 
 ---
 
-## 5. Анализ рисков, краевых случаев и защитные меры (Risks & Guardrails)
+### Этап 5: Отображение чипов в очереди загрузок [MODIFY]
 
-| Риск | Уровень | Меры предотвращения и защиты |
-|---|---|---|
-| **Регрессия маршрутов API** | Высокий | Строгая проверка путей в `internal/api/e2e_user_journey_test.go`. URL эндпоинтов не меняются ни на один символ. |
-| **Утечки горутин и Data Races** | Высокий | Запуск всех тестов под флагом `go test -race ./...`. Проверка корректного закрытия контекстов воркеров загрузки. |
-| **Ошибки в No-Build шаблонах (опечатки)** | Средний | Валидатор `web/template_validator_test.go` проверяет совпадение всех вызовов `@click` с методами сторов и функций. |
-| **Нарушение изоляции песочницы** | Критический | Строгий аудит: любая операция с путями обязана начинаться с `PathSandbox.Resolve()`. Прямой вызов `os.*` с пользовательскими путями запрещен. |
-| **Блокировка базы SQLite WAL** | Средний | Использование пула с ограничением соединений и `busy_timeout(5000)`. Транзакции оборачиваются в `RunInTx`. |
+#### Файлы: [`web/templates/components/downloader_queue.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/downloader_queue.html) и `downloader_active.html`
+В блоке каждого трека под строкой названия вывести блок контрольных точек:
+```html
+<template x-if="track.quick_listen_spots && track.quick_listen_spots.length > 0">
+    <div class="flex flex-wrap items-center gap-1.5 mt-1.5 pt-1 border-t border-surface-border/40">
+        <span class="text-[10px] text-content-muted font-medium flex items-center gap-1 shrink-0">
+            <svg class="w-3 h-3 text-amber-400" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+            </svg>
+            Проверить:
+        </span>
+        <template x-for="spot in track.quick_listen_spots" :key="spot.time_sec">
+            <button type="button"
+                    @click.stop="$store.player.playCensorshipSpot('/api/stream?path=' + encodeURIComponent(track.converted_path), spot, track.title, track.artist)"
+                    :title="`Строка: '${spot.line_text}'`"
+                    :class="spot.category === 'DRUG_COAP_6_13' ? 'bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 border-rose-500/30' : 'bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 border-amber-500/30'"
+                    class="px-2 py-0.5 rounded text-[10px] font-mono border transition-colors flex items-center gap-1 shadow-sm">
+                <span class="text-[8px]">▶</span>
+                <span x-text="spot.time_str"></span>
+                <span class="font-bold font-sans" x-text="`«${spot.word}»`"></span>
+                <template x-if="spot.category === 'DRUG_COAP_6_13'">
+                    <span class="text-[9px] px-1 rounded bg-rose-500/30 text-rose-200">КоАП</span>
+                </template>
+            </button>
+        </template>
+    </div>
+</template>
+```
 
 ---
 
-## 6. Матрица верификации (Verification Matrix)
+## 5. Анализ рисков и краевых случаев (Risks, Edge Cases & Guardrails)
 
-Каждый шаг плана сопровождается набором проверок:
+1. **Отсутствие текста в LRCLIB:**
+   - *Риск:* Для редких андеграунд-треков в LRCLIB может не быть текста.
+   - *Митигация:* `quick_listen_spots` просто остается пустым `[]`. Загрузка завершается в штатном режиме, интерфейс не ломается.
+2. **Рассинхронизация таймкодов в пользовательских LRC:**
+   - *Риск:* Текст из LRCLIB может отставать на 1–2 секунды от конкретного рипа.
+   - *Митигация:* Запуск за **2 секунды до таймкода** (`startTime = Math.max(0, spot.time_sec - 2.0)`) с окном воспроизведения 5 секунд гарантирует, что слово попадёт в окно слышимости даже при умеренном рассинхроне.
+3. **Безопасность путей (Sandbox Invariant #2):**
+   - *Риск:* Попытка воспроизведения через `/api/stream?path=...`.
+   - *Митигация:* Хендлер `StreamTrack` уже использует `h.tmpSandbox.Resolve()` для любых путей `tmp_downloads/...`. Любые `../` или абсолютные пути отклоняются с кодом `403 Forbidden`.
+4. **Утечки памяти и горутин в плеере:**
+   - *Риск:* Быстрые повторные клики по кнопкам разных точек накапливают таймеры `setTimeout`.
+   - *Митигация:* Ссылка на `this._spotTimer` сбрасывается через `clearTimeout(this._spotTimer)` перед каждым новым запуском.
 
-```bash
-# 1. Быстрый прогон изолированных юнит-тестов (httputil и testkit)
-go test -v -race ./internal/core/httputil/...
-go test -v -race ./internal/testkit/...
+---
 
-# 2. Тестирование вертикальных слайсов
-go test -v -race ./internal/features/...
+## 6. План тестирования и верификации (Verification Matrix)
 
-# 3. Полный регрессионный прогон всего Go-бэкенда
-go test -v -race ./...
-
-# 4. Проверка целостности HTML-шаблонов Alpine.js (статический Go-линтер)
-go test -v ./web/...
-
-# 5. Сборка продакшен-бинарника (проверка компилятора и линковщика)
-go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go
-
-# 6. Комплексное тестирование пользовательских сценариев (E2E)
-./scripts/test_user_flows.sh
-```
+1. **Юнит-тесты `censorcheck` (`internal/services/censorcheck/extractor_test.go`):**
+   - Тест на выявление наркотиков КоАП 6.13 («мефедрон», «косяк», «экстази»).
+   - Тест контекста «план»: фраза «у меня есть план» должна дать 0 точек, а «курим чистый план» — 1 точку.
+   - Тест безопасных корней с «еб»: «волшебная палочка», «на небе» не должны создавать точек.
+   - Тест лимита точек: при 10 матах возвращается строго не более `maxSpots` (3).
+2. **Интеграционные тесты очереди (`internal/features/downloader/service_test.go`):**
+   - Тест полного цикла `processSingleTrack` с замоканным `lyrics.Service`: проверка, что готовый `ResolvedTrack` содержит корректные `QuickListenSpots` и файл `.lrc` сохранен в каталоге `converted/`.
+3. **Стандартные проверки проекта (AGENTS.md):**
+   - `go test -v ./...` — 100% прохождение всех тестов без гонок (`-race`).
+   - `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешная статическая бинарная сборка.
 
 ---
 
 ## 7. Критерии приемки (Definition of Done)
 
-- [x] Пакет `internal/core/httputil` реализован с полным тестовым покрытием.
-- [x] Пакет `internal/testkit` предоставляет in-memory окружение и Golden JSON снапшоты.
-- [x] Все 6 вертикальных слайсов (`downloader`, `tageditor`, `filemanager`, `audit`, `radio`, `radar`) выделены в `internal/features/` и саморегистрируются в Chi-роутере.
-- [x] Монолитный файл `internal/db/queries.go` разгружен: запросы перенесены в соответствующие `repository.go`.
-- [x] Создан типизированный API-клиент `web/static/js/api/client.js`, прямые вызовы `fetch()` удалены из шаблонов.
-- [x] Статический валидатор `template_validator_test.go` возвращает 0 ошибок.
-- [x] `go test -race ./...` отрабатывает с результатом 100% PASS и 0 data races.
-- [x] Бинарник `bin/music-manager` собирается и запускается без предупреждений.
-- [x] Файл трекинга `PROGRESS.md` актуализирован.
+- [x] Создан пакет `internal/services/censorcheck` с тестами, покрывающими словарь КоАП 6.13, мат и контекст «план».
+- [x] Модель `ResolvedTrack` и DTO содержат поле `quick_listen_spots`.
+- [x] При скачивании трека подтягивается LRC и вычисляются 1–3 контрольные точки.
+- [x] В `downloader_queue.html` и `downloader_active.html` выводятся чипы точек с таймкодами и словами.
+- [x] Клик по чипу воспроизводит 5-секундный аудиофрагмент (`t - 2s`) во встроенном плеере.
+- [x] `go test -v ./...` зеленый, бинарник `bin/music-manager` компилируется без ошибок.
+- [x] Документ `PROGRESS.md` обновлен с фиксацией статуса задачи.

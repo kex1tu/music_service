@@ -282,6 +282,11 @@ func NewRouter(p RouterParams) http.Handler {
 				})
 			}
 		})
+
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware)
+			r.Get("/api/stream", p.FileHandler.StreamAudio)
+		})
 	}
 
 	// Audit API - Audit Vertical Slice

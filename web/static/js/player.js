@@ -244,6 +244,80 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        playCensorshipSpot(streamUrl, spot, trackTitle, trackArtist) {
+            if (!streamUrl || !spot) return;
+
+            // Смещение на 2 секунды назад для контекста
+            const startTime = Math.max(0, (spot.time_sec || 0) - 2.0);
+            const stopDuration = 5.0; // Играем ровно 5 секунд
+
+            this.currentTrack = {
+                title: trackTitle || 'Отслушивание точки',
+                artist: `${trackArtist || ''} • «${spot.word}» (${spot.time_str || ''})`,
+                duration: stopDuration,
+                stream_url: streamUrl,
+            };
+            this.isVisible = true;
+
+            if (this._spotTimer) {
+                clearTimeout(this._spotTimer);
+                this._spotTimer = null;
+            }
+
+            this.ensureAudioContext();
+
+            if (this.audioElement) {
+                this.isLoading = true;
+                const audio = this.audioElement;
+                const applySeek = () => {
+                    try {
+                        audio.currentTime = startTime;
+                    } catch (e) {
+                        // Ignore seek exceptions
+                    }
+                };
+
+                const isSameSrc = audio.src && audio.src.includes(streamUrl);
+                if (!isSameSrc) {
+                    audio.src = streamUrl;
+                    audio.load();
+                    if (audio.readyState >= 1) {
+                        applySeek();
+                    } else {
+                        audio.addEventListener('loadedmetadata', applySeek, { once: true });
+                    }
+                } else {
+                    applySeek();
+                }
+
+                audio.play()
+                    .then(() => {
+                        applySeek();
+                        this.isPlaying = true;
+                        this.isLoading = false;
+                        this.startVisualizer();
+                        this._spotTimer = setTimeout(() => {
+                            if (this.audioElement) {
+                                this.audioElement.pause();
+                            }
+                            this.isPlaying = false;
+                        }, stopDuration * 1000);
+                    })
+                    .catch((err) => {
+                        console.warn('Spot play error:', err);
+                        this.isPlaying = false;
+                        this.isLoading = false;
+                    });
+            }
+
+            const toastMsg = `🎧 Точка: «${spot.word}» (${spot.time_str || ''})${spot.line_text ? '\n' + spot.line_text : ''}`;
+            if (window.showToast) {
+                window.showToast(toastMsg, 'info');
+            } else if (window.Alpine && window.Alpine.store('app') && window.Alpine.store('app').toast) {
+                window.Alpine.store('app').toast(toastMsg, 'info');
+            }
+        },
+
         playRadioStream(streamUrl, stationName) {
             if (!streamUrl) return;
             if (this.currentTrack && this.currentTrack.stream_url === streamUrl && this.isPlaying) {

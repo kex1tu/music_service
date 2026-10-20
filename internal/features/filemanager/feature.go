@@ -61,4 +61,7 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 		r.Get("/stream/{id}/chunks", m.StreamTrack)
 		r.Get("/stream/{id}/chunks/*", m.StreamTrack)
 	})
+
+	// 5. Прямой потоковый стриминг по относительному пути /api/stream
+	r.Get("/api/stream", m.StreamAudio)
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"music-manager/internal/db"
+	"music-manager/internal/services/censorcheck"
 )
 
 var allowedDomains = []string{
@@ -71,6 +72,7 @@ type ResolvedTrack struct {
 	VersionStatus  string                       `json:"version_status,omitempty"`
 	Candidates     []db.SoundCloudCandidateItem `json:"candidates,omitempty"`
 	AudioQuality   *AudioQualityTelemetry       `json:"audio_quality,omitempty"`
+	QuickListenSpots []censorcheck.QuickListenSpot `json:"quick_listen_spots,omitempty"`
 }
 
 // ReleaseMetadata holds album-level metadata.

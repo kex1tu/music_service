@@ -134,6 +134,12 @@ func (s *Service) ResolveTrack(ctx context.Context, idOrHash string) (fullPath s
 	if relPath == "" {
 		if testFull, testErr := s.musicSandbox.Resolve(idOrHash, false); testErr == nil && fileExists(testFull) {
 			relPath = idOrHash
+		} else if s.tmpSandbox != nil {
+			cleanRel := strings.TrimPrefix(idOrHash, "tmp_downloads/")
+			cleanRel = strings.TrimPrefix(cleanRel, "tmp/")
+			if testTmp, tmpErr := s.tmpSandbox.Resolve(cleanRel, false); tmpErr == nil && fileExists(testTmp) {
+				relPath = idOrHash
+			}
 		}
 	}
 

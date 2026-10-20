@@ -27,6 +27,8 @@ import (
 
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
+	"music-manager/internal/services/censorcheck"
+	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/resolver"
 )
 
@@ -48,6 +50,7 @@ type ServiceConfig struct {
 	Repo            *Repository
 	Resolver        *resolver.SourceResolver
 	Matcher         *resolver.AudioMatcher
+	Lyrics          *lyrics.Service
 	TmpSandbox      *sandbox.PathSandbox
 	MusicSandbox    *sandbox.PathSandbox
 	CookiesPath     string
@@ -61,6 +64,7 @@ type Service struct {
 	repo         *Repository
 	resolver     *resolver.SourceResolver
 	matcher      *resolver.AudioMatcher
+	lyrics       *lyrics.Service
 	tmpSandbox   *sandbox.PathSandbox
 	musicSandbox *sandbox.PathSandbox
 	cookiesPath  string
@@ -115,6 +119,7 @@ func NewService(cfg ServiceConfig) *Service {
 		repo:            cfg.Repo,
 		resolver:        cfg.Resolver,
 		matcher:         matcher,
+		lyrics:          cfg.Lyrics,
 		tmpSandbox:      cfg.TmpSandbox,
 		musicSandbox:    cfg.MusicSandbox,
 		cookiesPath:     cfg.CookiesPath,
@@ -128,6 +133,11 @@ func NewService(cfg ServiceConfig) *Service {
 	}
 	svc.pauseCond = sync.NewCond(&svc.pauseMu)
 	return svc
+}
+
+// SetLyricsService переопределяет сервис текстов песен (для тестирования или отложенного внедрения).
+func (s *Service) SetLyricsService(l *lyrics.Service) {
+	s.lyrics = l
 }
 
 // Start запускает воркер-пул, фоновую очистку и сбрасывает зависшие задачи в БД.
@@ -1140,10 +1150,26 @@ func (s *Service) processSingleTrack(
 
 	_ = id3.WriteTags(mp3Path, tagData, cover)
 
+	// Поиск синхронизированного текста через LRCLIB и извлечение контрольных точек отслушивания
+	var spots []censorcheck.QuickListenSpot
+	if s.lyrics != nil {
+		lrcRes, _ := s.lyrics.SearchLyrics(ctx, track.Artist, track.Title, meta.AlbumTitle, track.Duration)
+		if lrcRes != nil && lrcRes.Synced && lrcRes.Lyrics != "" {
+			lrcFilename := fmt.Sprintf("%02d. %s.lrc", track.TrackNumber, safeTitle)
+			lrcPath := filepath.Join(convertedDir, lrcFilename)
+			_ = os.WriteFile(lrcPath, []byte(lrcRes.Lyrics), 0644)
+
+			spots = censorcheck.ExtractSpots(lrcRes.Lyrics, 3)
+		}
+	}
+
 	job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
 		tr.Status = "ready"
 		convPath := filepath.Join(job.ID, "converted", mp3Filename)
 		tr.ConvertedPath = &convPath
+		if len(spots) > 0 {
+			tr.QuickListenSpots = spots
+		}
 	})
 
 	return true

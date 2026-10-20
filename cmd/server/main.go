@@ -94,12 +94,16 @@ func main() {
 	)
 	defer downloadService.Close()
 
+	organizerService := organizer.NewService(musicSandbox, tmpSandbox)
+	lyricsService := lyrics.NewService(musicSandbox)
+
 	// Initialize Downloader Vertical Feature Slice
 	downloaderRepo := featureDownloader.NewRepository(database.Conn())
 	downloaderFeatureSvc := featureDownloader.NewService(featureDownloader.ServiceConfig{
 		Repo:          downloaderRepo,
 		Resolver:      sourceResolver,
 		Matcher:       audioMatcher,
+		Lyrics:        lyricsService,
 		TmpSandbox:    tmpSandbox,
 		MusicSandbox:  musicSandbox,
 		CookiesPath:   cfg.CookiesFile,
@@ -111,8 +115,6 @@ func main() {
 	defer downloaderFeatureSvc.Close()
 	downloaderModule := featureDownloader.NewModule(downloaderFeatureSvc, deezerClient)
 
-	organizerService := organizer.NewService(musicSandbox, tmpSandbox)
-	lyricsService := lyrics.NewService(musicSandbox)
 	scannerService := scanner.NewScanner(musicSandbox, database, deezerClient)
 
 	// 5. Start background scanner and fsnotify watcher

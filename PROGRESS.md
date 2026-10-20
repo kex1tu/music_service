@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 82 блока задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js` и 100% тестов пройдены).
+- **Статус готовности:** **100% DONE** (Все 84 блока задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js` и 100% тестов пройдены).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **Vertical Feature Slices**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 24 пакета зеленые).
@@ -937,6 +937,26 @@
       - Добавлен юнит-тест `TestDownloader_DeezerURL_IgnoredAndResolved`.
       - Все тесты `go test ./...` и `./scripts/test_user_flows.sh` — 100% PASS.
       - Обновление развернуто на Сервере 2 (`13.143.193.207`), трек `Neverlove — KINGS OF STRIP CLUB` успешно дозагружен со статусом `READY` (100%).
+
+  - **Блок 84 (Quick-Listen Spots: Полуавтоматическое отслушивание треков по таймкодам при загрузке):**
+    - **84.1. Pure Go пакет детекции триггеров (`internal/services/censorcheck/`):**
+      - Созданы типы `QuickListenSpot` и `SpotCategory` (`DRUG_COAP_6_13`, `SUSPECT_MARKER`, `PROFANITY`).
+      - Реализован лексикон психоактивных веществ по ст. 6.13 КоАП РФ, маркеров цензуры/эвфемизмов и мата.
+      - Внедрен контекстный анализ слова «план» (`isDrugPlanContext`), отсекающий бытовые фразы («по плану», «бизнес-план», «мой план»).
+      - Внедрен фильтр безопасных корней с «еб» (`safeEbSubstrings`: «волшебная», «на небе», «свежий хлеб»).
+      - Реализован парсер таймкодов LRC и экстрактор точек `ExtractSpots` с приоритизацией (КоАП 6.13 > маркеры > мат), хронологической сортировкой и фильтрацией дистанции между фрагментами.
+    - **84.2. Расширение моделей и пайплайна (`internal/services/resolver/`, `internal/features/downloader/`):**
+      - В `resolver.ResolvedTrack` добавлено поле `QuickListenSpots []censorcheck.QuickListenSpot`.
+      - В `downloader.ServiceConfig` и `Service` внедрен `lyrics.Service`.
+      - В `processSingleTrack` после наложения ID3-тегов выполняется получение синхронизированного текста через LRCLIB, сохранение companion `.lrc` рядом с MP3 в `tmp_downloads` и мгновенное извлечение до 3 контрольных точек.
+    - **84.3. Веб-аудиоплеер и интерфейс очереди (`web/static/js/player.js`, `downloader_queue.html`, `downloader_active.html`):**
+      - В `player.js` добавлен метод `playCensorshipSpot(streamUrl, spot, title, artist)`: позиционирование на `t - 2s` с окном воспроизведения 5 секунд, автопаузой и информационным уведомлением.
+      - В карточках треков в `downloader_queue.html` и `downloader_active.html` выведены кликабельные чипы с бейджами («КоАП», «01:14 «косяк»»).
+      - В маршрутизатор добавлен потоковый эндпоинт `GET /api/stream?path=...` с валидацией через `PathSandbox`.
+    - **84.4. Тестирование и верификация:**
+      - Добавлены тесты `extractor_test.go` (100% покрытие словаря, контекста, безопасных корней и лимитов).
+      - Добавлен интеграционный тест `TestDownloader_QuickListenSpots_ExtractedOnLyricsFound`.
+      - `go test -race ./...` и `./scripts/test_user_flows.sh` — 100% PASS (0 data races во всех пакетах).
 
 ---
 
