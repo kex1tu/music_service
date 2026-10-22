@@ -237,6 +237,11 @@ func (m *MockTransport) defaultFallbackResponse(req *http.Request) (*http.Respon
 		return makeResponse(req, http.StatusOK, "application/json", []byte(`{"resultCount":0,"results":[]}`)), nil
 	}
 
+	// Yandex Music API
+	if strings.Contains(host, "yandex.net") || strings.Contains(host, "yandex.ru") {
+		return makeResponse(req, http.StatusOK, "application/json", []byte(`{"result":{"albums":{"results":[]},"tracks":{"results":[]}}}`)), nil
+	}
+
 	// SoundCloud API
 	if strings.Contains(host, "soundcloud.com") {
 		return makeResponse(req, http.StatusOK, "application/json", []byte(`{"collection":[],"total_results":0}`)), nil

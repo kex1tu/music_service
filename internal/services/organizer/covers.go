@@ -183,9 +183,6 @@ func saveBase64Cover(targetCoverPath string, base64Data string) error {
 	if strings.TrimSpace(base64Data) == "" {
 		return nil
 	}
-	if fileExists(targetCoverPath) {
-		return nil
-	}
 	parts := strings.SplitN(base64Data, ",", 2)
 	raw := base64Data
 	if len(parts) == 2 {

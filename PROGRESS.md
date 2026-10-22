@@ -1037,6 +1037,27 @@
       - Полный прогон `go test -v ./...` — **100% PASS** по всем 24 пакетам (включая проверку целостности шаблонов `web/template_validator_test.go` и баланса тегов `TestRouter_HealthAndIndex`).
       - Сформирован единый бинарный файл `bin/music-manager` (16 МБ).
 
+  - **Блок 90 (Мультисервисный выбор обложек и очистка тулбара редактора тегов Puddletag):**
+    - **90.1. Очистка тулбара Puddletag (`puddletag_toolbar.html`):**
+      - Удалены кнопки «Файл→Теги», «Регистр» и «Нумератор».
+      - Сохранена кнопка «Теги→Файл» (`openPatternModal('tag_to_filename')`).
+    - **90.2. Интеграция онлайн-поиска обложек в UI (`puddletag_tag_panel.html`, `puddletag_workstation.js`, `tag_editor_covers.html`):**
+      - В боковую панель обложки (Artwork Box) добавлена кнопка «Поиск» рядом с «Загрузить» и «Удалить», а также действие «🔍 Найти онлайн» при наведении на изображение.
+      - Включен шаблон `tag_editor_cover_gallery` в `tag_editor.html` и `file_manager.html`.
+      - В `tag_editor_covers.html` добавлена вкладка фильтрации «MusicBrainz (1000×1000)» и настроена цветовая схема бейджей источников.
+      - В `puddletag_workstation.js` реализованы методы `openCoverGallery()`, `closeCoverGallery()`, `searchCovers()`, `filteredCoverResults()`, `selectCover(item)` и `fetchCoverBase64(url)`.
+      - При пакетном сохранении передаются `cover_base64` и `cover_url`.
+    - **90.3. Бэкенд мультисервисного поиска обложек (`tageditor/service.go`, `tag_cover_handlers.go`, `organizer/covers.go`):**
+      - Параллельный сбор обложек из 4 источников: Apple Music (1400×1400), Deezer (1400×1400), Яндекс Музыка (1000×1000), MusicBrainz / Cover Art Archive (1000×1000).
+      - Дедупликация и round-robin перемежение результатов выдачи.
+      - Серверный фоллбэк скачивания по `cover_url` в `BatchSaveTags`, если `cover_base64` пустой.
+      - В `saveBase64Cover` снято блокирующее условие `fileExists`, обеспечивая перезапись обложки `cover.jpg` при явном выборе новой обложки пользователем.
+      - Добавлен юнит-тест `covers_search_test.go` на все 4 источника.
+    - **90.4. Верификация:**
+      - Шаблоны и JS-целостность `go test -v ./web` — 100% PASS.
+      - Полный тест-сьют `go test ./...` — 100% PASS по всем пакетам.
+      - Бинарник `bin/music-manager` успешно скомпилирован.
+
 ---
 
 ## 4. Верификация и Продакшен-Деплой

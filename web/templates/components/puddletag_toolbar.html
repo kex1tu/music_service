@@ -96,17 +96,6 @@
                 <span>Базы</span>
             </button>
 
-            <!-- Кнопка Filename to Tag -->
-            <button
-                type="button"
-                @click="openPatternModal('filename_to_tag')"
-                :disabled="tracks.length === 0"
-                class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs font-medium rounded-sm border border-surface-border transition flex items-center space-x-1 shrink-0 disabled:opacity-40"
-                title="Извлечь теги из имен файлов по шаблону">
-                <span class="font-mono text-xs text-zinc-300">Ф→Т</span>
-                <span class="hidden sm:inline">Файл→Теги</span>
-            </button>
-
             <!-- Кнопка Tag to Filename -->
             <button
                 type="button"
@@ -116,28 +105,6 @@
                 title="Переименовать файлы на диске на основе тегов">
                 <span class="font-mono text-xs text-zinc-300">Т→Ф</span>
                 <span class="hidden sm:inline">Теги→Файл</span>
-            </button>
-
-            <!-- Кнопка Смена регистра (Case) -->
-            <button
-                type="button"
-                @click="showCaseModal = true"
-                :disabled="tracks.length === 0"
-                class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs font-medium rounded-sm border border-surface-border transition flex items-center space-x-1 shrink-0 disabled:opacity-40"
-                title="Преобразование регистра (Title Case, UPPERCASE, lowercase)">
-                <span class="font-serif font-bold text-sky-400 text-xs">Aa</span>
-                <span class="hidden lg:inline">Регистр</span>
-            </button>
-
-            <!-- Кнопка Автонумератор (#) -->
-            <button
-                type="button"
-                @click="showAutoNumberModal = true"
-                :disabled="tracks.length === 0"
-                class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs font-medium rounded-sm border border-surface-border transition flex items-center space-x-1 shrink-0 disabled:opacity-40"
-                title="Мастер автонумерации треков">
-                <span class="font-mono font-bold text-emerald-400 text-xs">1..N</span>
-                <span class="hidden lg:inline">Нумератор</span>
             </button>
 
             <!-- Кнопка Очистить названия -->

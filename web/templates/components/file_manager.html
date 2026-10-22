@@ -46,9 +46,10 @@
         {{ template "puddletag_grid" . }}
     </div>
 
-    <!-- Модальные окна предпросмотра Diff, быстрых действий и баз тегов -->
+    <!-- Модальные окна предпросмотра Diff, быстрых действий, баз тегов и обложек -->
     {{ template "puddletag_diff_modal" . }}
     {{ template "puddletag_actions_modals" . }}
     {{ template "puddletag_source_modal" . }}
+    {{ template "tag_editor_cover_gallery" . }}
 </section>
 {{ end }}
