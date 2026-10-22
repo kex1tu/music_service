@@ -5,7 +5,7 @@
     {{ template "puddletag_toolbar" . }}
 
     <!-- Быстрая полоса подкаталогов текущей папки -->
-    <template x-if="directories && directories.length > 0 && !recursiveMode">
+    <template x-if="directories && directories.length > 0">
         <div class="flex items-center space-x-2 overflow-x-auto py-1 px-0.5 text-xs">
             <span class="text-content-muted font-mono text-[11px] shrink-0">Подпапки:</span>
             <template x-for="dir in directories" :key="dir.path">

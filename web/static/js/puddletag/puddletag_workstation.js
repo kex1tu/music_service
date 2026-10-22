@@ -27,7 +27,7 @@ function puddletagWorkstationComponent() {
         directories: [],
         dirFilter: '',
         isLoading: false,
-        recursiveMode: true,
+        recursiveMode: false,
         isDownloaderMode: false,
         jobId: null,
 
@@ -325,7 +325,7 @@ function puddletagWorkstationComponent() {
             this.currentPage = 1;
 
             try {
-                const url = `/files?path=${encodeURIComponent(path || '')}&recursive=${this.recursiveMode ? 'true' : 'false'}&_t=${Date.now()}`;
+                const url = `/files?path=${encodeURIComponent(path || '')}&recursive=false&_t=${Date.now()}`;
                 const res = await fetch(url);
                 if (!res.ok) {
                     const err = await res.json().catch(() => ({}));
