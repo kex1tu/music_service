@@ -3,6 +3,9 @@
     <div
         x-show="$store.app.activeModal === 'login'"
         x-cloak
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-login-title"
         @click.self="close()"
         @keydown.escape.window="if ($store.app.activeModal === 'login') close()"
         class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4"
@@ -11,12 +14,13 @@
             @click.stop
             class="bg-surface-panel border border-surface-border rounded-2xl max-w-sm w-full p-6 shadow-panel animate-scale-in space-y-4">
             <div class="flex items-center justify-between">
-                <h3 class="text-base font-bold text-content-primary">Авторизация</h3>
+                <h3 id="modal-login-title" class="text-base font-bold text-content-primary">Авторизация</h3>
                 <button
                     type="button"
                     @click="close()"
+                    aria-label="Закрыть окно входа"
                     class="text-content-muted hover:text-content-primary p-1 rounded-lg hover:bg-surface-hover transition">
-                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <path d="m12 13.4l2.9 2.9q.275.275.7.275t.7-.275t.275-.7t-.275-.7L13.4 12l2.9-2.9q.275-.275.275-.7t-.275-.7t-.7-.275t-.7.275L12 10.6L9.1 7.7q-.275-.275-.7-.275t-.7.275t-.275.7t.275.7l2.9 2.9l-2.9 2.9q-.275.275-.275.7t.275.7t.7.275t.7-.275zm0 8.6q-2.075 0-3.9-.788t-3.175-2.137T2.788 15.9T2 12t.788-3.9t2.137-3.175T8.1 2.788T12 2t3.9.788t3.175 2.137T21.213 8.1T22 12t-.788 3.9t-2.137 3.175t-3.175 2.138T12 22"/>
                     </svg>
                 </button>
@@ -24,16 +28,18 @@
 
             <form @submit.prevent="doLogin()" class="space-y-4">
                 <div>
-                    <label class="block text-xs text-content-secondary mb-1">Логин</label>
+                    <label for="login-username" class="block text-xs text-content-secondary mb-1">Логин</label>
                     <input
+                        id="login-username"
                         type="text"
                         x-model="loginUser"
                         required
                         class="w-full bg-surface-input border border-surface-border rounded-lg px-3 py-2 text-sm text-content-primary focus:outline-none focus:border-brand">
                 </div>
                 <div>
-                    <label class="block text-xs text-content-secondary mb-1">Пароль</label>
+                    <label for="login-password" class="block text-xs text-content-secondary mb-1">Пароль</label>
                     <input
+                        id="login-password"
                         type="password"
                         x-model="password"
                         required
@@ -49,12 +55,12 @@
                     :disabled="isLoggingIn"
                     class="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-bold text-xs rounded-lg transition shadow-lg shadow-brand/20 flex items-center justify-center space-x-2 active:scale-95">
                     <template x-if="isLoggingIn">
-                        <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
                         </svg>
                     </template>
                     <template x-if="!isLoggingIn">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M13 21q-.425 0-.712-.288T12 20t.288-.712T13 19h6V5h-6q-.425 0-.712-.288T12 4t.288-.712T13 3h6q.825 0 1.413.588T21 5v14q0 .825-.587 1.413T19 21zm-1.825-8H4q-.425 0-.712-.288T3 12t.288-.712T4 11h7.175L9.3 9.125q-.275-.275-.275-.675t.275-.7t.7-.313t.725.288L14.3 11.3q.3.3.3.7t-.3.7l-3.575 3.575q-.3.3-.712.288T9.3 16.25q-.275-.3-.262-.712t.287-.688z"/>
                         </svg>
                     </template>

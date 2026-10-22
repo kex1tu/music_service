@@ -5,7 +5,7 @@
         <!-- Верхняя строчка статуса и прогресса -->
         <div class="flex items-center justify-between gap-3">
             <div class="flex items-center space-x-2.5 min-w-0">
-                <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-sm uppercase tracking-wider shrink-0 border"
+                <span class="text-xs font-mono font-bold px-2 py-0.5 rounded-sm uppercase tracking-wider shrink-0 border"
                     :class="{
                         'bg-amber-500/10 text-amber-300 border-amber-500/25': job.status === 'QUEUED' || job.status === 'RESOLVING',
                         'bg-sky-500/10 text-sky-300 border-sky-500/25': job.status === 'DOWNLOADING',
@@ -20,16 +20,16 @@
             </div>
             <div class="flex items-center space-x-2 shrink-0">
                 <template x-if="job.total_tracks > 1">
-                    <span class="text-[11px] text-content-muted font-mono tabular-nums" x-text="`(${job.completed_tracks}/${job.total_tracks})`"></span>
+                    <span class="text-xs text-content-muted font-mono tabular-nums" x-text="`(${job.completed_tracks}/${job.total_tracks})`"></span>
                 </template>
                 <span class="text-xs text-white font-bold font-mono tabular-nums" x-text="`${Math.min(100, Math.max(0, Math.round(job.progress || 0)))}%`"></span>
             </div>
         </div>
 
         <!-- Прецизионный прогресс-бар -->
-        <div class="w-full bg-white/[0.04] rounded-full h-1 overflow-hidden border border-white/[0.05]">
+        <div class="w-full bg-white/[0.04] rounded-full h-1.5 overflow-hidden border border-white/[0.05]">
             <div
-                class="bg-white h-1 rounded-full transition-all duration-300 shadow-xs"
+                class="bg-white h-1.5 rounded-full transition-all duration-300 shadow-xs"
                 :style="`width: ${Math.min(100, Math.max(0, Math.round(job.progress || 0)))}%`"></div>
         </div>
 
@@ -45,12 +45,12 @@
             <div class="mt-3 pt-2.5 border-t border-surface-borderSubtle space-y-2">
                 <div class="flex items-center justify-between text-xs font-semibold text-content-secondary px-0.5">
                     <div class="flex items-center space-x-1.5">
-                        <svg class="w-3.5 h-3.5 text-zinc-400" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-3.5 h-3.5 text-zinc-400" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3z"/>
                         </svg>
                         <span>Треки релиза (<span x-text="job.tracks.length"></span>)</span>
                     </div>
-                    <span class="text-[10px] text-content-muted">Нажмите «Версии», чтобы сменить аудио</span>
+                    <span class="text-xs text-content-muted">Нажмите «Версии», чтобы сменить аудио</span>
                 </div>
 
                 <div class="space-y-1 max-h-72 overflow-y-auto pr-0.5">
@@ -63,14 +63,15 @@
                                     <template x-if="track.converted_path">
                                         <button type="button"
                                                 @click.stop="$store.player.playTrack({ title: track.title, artist: track.artist, duration: track.duration, stream_url: '/api/stream?path=' + encodeURIComponent(track.converted_path), path: track.converted_path })"
-                                                class="w-6 h-6 rounded-full flex items-center justify-center bg-white/10 hover:bg-brand hover:text-white text-content-primary transition shrink-0"
+                                                :aria-label="$store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path))) ? 'Приостановить воспроизведение' : 'Слушать скачанный трек целиком'"
+                                                class="w-6 h-6 rounded-full flex items-center justify-center bg-white/10 hover:bg-brand hover:text-white text-content-primary transition shrink-0 focus-visible:ring-2 focus-visible:ring-white/40"
                                                 :class="$store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path))) ? 'bg-brand text-white' : ''"
                                                 :title="$store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path))) ? 'Пауза' : 'Слушать скачанный трек целиком'">
                                             <template x-if="$store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path)))">
-                                                <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                                                <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                                             </template>
                                             <template x-if="!($store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path))))">
-                                                <svg class="w-3 h-3 translate-x-0.5" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                                                <svg class="w-3 h-3 translate-x-0.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
                                             </template>
                                         </button>
                                     </template>
@@ -79,16 +80,16 @@
                                     </template>
                                     <div class="min-w-0 flex-1">
                                         <div class="text-xs font-medium text-content-primary truncate" x-text="track.title"></div>
-                                        <div class="text-[10px] text-content-muted truncate" x-text="track.artist"></div>
+                                        <div class="text-xs text-content-muted truncate" x-text="track.artist"></div>
                                     </div>
                                 </div>
                                 <div class="flex items-center space-x-1.5 shrink-0">
-                                    <span class="text-[11px] font-mono tabular-nums text-content-muted" x-text="window.AppFormatters ? window.AppFormatters.formatDuration(track.duration) : track.duration + 'с'"></span>
+                                    <span class="text-xs font-mono tabular-nums text-content-muted" x-text="window.AppFormatters ? window.AppFormatters.formatDuration(track.duration) : track.duration + 'с'"></span>
 
                                     <!-- Бейдж оригинальности -->
                                     <template x-if="track.version_status">
                                         <span
-                                            class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-sm text-[9px] font-mono font-medium border shrink-0 transition"
+                                            class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-sm text-xs font-mono font-medium border shrink-0 transition"
                                             :class="getVersionBadge(track.version_status).badgeClass"
                                             :title="getVersionBadge(track.version_status).tooltip">
                                             <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="getVersionBadge(track.version_status).dotClass"></span>
@@ -98,9 +99,9 @@
 
                                     <!-- Бейдж точности совпадения (Low Match Warning) -->
                                     <template x-if="track.is_low_match">
-                                        <span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-sm text-[9px] font-mono font-medium bg-amber-500/15 text-amber-300 border border-amber-500/30 shrink-0 transition"
+                                        <span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-sm text-xs font-mono font-medium bg-amber-500/15 text-amber-300 border border-amber-500/30 shrink-0 transition"
                                               :title="'Точность совпадения ' + Math.round(track.match_score) + '%. Рекомендуется проверить источник.'">
-                                            <svg class="w-3 h-3 text-amber-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <svg class="w-3 h-3 text-amber-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
                                             </svg>
                                             <span x-text="Math.round(track.match_score) + '%'"></span>
@@ -112,11 +113,13 @@
                                         <button
                                             type="button"
                                             @click.stop="toggleVersions(track.track_id)"
-                                            class="px-2 py-0.5 rounded-sm text-[10px] font-medium transition flex items-center space-x-1 border shadow-xs"
+                                            :aria-expanded="isVersionsOpen(track.track_id)"
+                                            aria-label="Выбрать альтернативную версию аудиодорожки"
+                                            class="px-2 py-0.5 rounded-sm text-xs font-medium transition flex items-center space-x-1 border shadow-xs focus-visible:ring-2 focus-visible:ring-white/30"
                                             :class="isVersionsOpen(track.track_id) ? 'bg-white/10 text-white border-white/30' : 'bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
                                             title="Выбрать альтернативную версию аудио">
                                             <span>Версии (<span x-text="track.candidates.length"></span>)</span>
-                                            <svg class="w-3 h-3 transition-transform duration-200" :class="{ 'rotate-180': isVersionsOpen(track.track_id) }" viewBox="0 0 24 24" fill="currentColor">
+                                            <svg class="w-3 h-3 transition-transform duration-200" :class="{ 'rotate-180': isVersionsOpen(track.track_id) }" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                                 <path d="M12 15.375L6 9.375l1.4-1.4l4.6 4.6l4.6-4.6l1.4 1.4z"/>
                                             </svg>
                                         </button>
@@ -127,20 +130,21 @@
                             <!-- Контрольные точки отслушивания цензуры (Quick-Listen Spots) -->
                             <template x-if="track.quick_listen_spots && track.quick_listen_spots.length > 0">
                                 <div class="flex flex-wrap items-center gap-1 mt-1.5 pt-1 border-t border-surface-borderSubtle">
-                                    <span class="text-[9px] text-content-muted font-medium flex items-center gap-1 shrink-0">
+                                    <span class="text-xs text-content-muted font-medium flex items-center gap-1 shrink-0">
                                         Проверить:
                                     </span>
                                     <template x-for="spot in track.quick_listen_spots" :key="spot.time_sec">
                                         <button type="button"
                                                 @click.stop="$store.player.playCensorshipSpot('/api/stream?path=' + encodeURIComponent(track.converted_path || ''), spot, track.title, track.artist)"
+                                                :aria-label="`Прослушать отрывок: ${spot.word} на ${spot.time_str}`"
                                                 :title="`Строка: '${spot.line_text}'`"
                                                 :class="spot.category === 'DRUG_COAP_6_13' ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/30' : (spot.category === 'SUSPECT_MARKER' ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/30' : 'bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border-purple-500/30')"
-                                                class="px-1.5 py-0.5 rounded-sm text-[9px] font-mono border transition-colors flex items-center gap-1 shadow-xs">
-                                            <span class="text-[7px]">▶</span>
+                                                class="px-2 py-0.5 rounded-sm text-xs font-mono border transition-colors flex items-center gap-1 shadow-xs focus-visible:ring-2 focus-visible:ring-white/30">
+                                            <span class="text-xs">▶</span>
                                             <span x-text="spot.time_str"></span>
                                             <span class="font-sans" x-text="`«${spot.word}»`"></span>
                                             <template x-if="spot.category === 'DRUG_COAP_6_13'">
-                                                <span class="text-[8px] px-1 rounded-sm bg-rose-500/30 text-rose-200">КоАП</span>
+                                                <span class="text-xs px-1 rounded-sm bg-rose-500/30 text-rose-200">КоАП</span>
                                             </template>
                                         </button>
                                     </template>
@@ -150,7 +154,7 @@
                             <!-- Раскрывающийся список кандидатов версий -->
                             <template x-if="isVersionsOpen(track.track_id)">
                                 <div class="p-2 rounded-md bg-surface-panel border border-surface-borderSubtle space-y-1 mt-1.5 animate-fade-in">
-                                    <div class="flex items-center justify-between text-[10px] text-content-muted border-b border-surface-borderSubtle pb-1 px-0.5">
+                                    <div class="flex items-center justify-between text-xs text-content-muted border-b border-surface-borderSubtle pb-1 px-0.5">
                                         <span class="font-medium">Кандидаты с SoundCloud:</span>
                                         <span>Нажмите «Выбрать» для замены</span>
                                     </div>
@@ -162,13 +166,13 @@
                                                 <div class="min-w-0 flex-1 space-y-0.5">
                                                     <div class="flex items-center space-x-1.5">
                                                         <template x-if="cand.url === track.audio_source_url">
-                                                            <span class="text-[8px] font-mono font-bold px-1 py-0.2 rounded-sm bg-white/15 text-white border border-white/20 uppercase tracking-wider shrink-0">
+                                                            <span class="text-xs font-mono font-bold px-1.5 py-0.5 rounded-sm bg-white/15 text-white border border-white/20 uppercase tracking-wider shrink-0">
                                                                 Текущая
                                                             </span>
                                                         </template>
                                                         <span class="text-xs font-medium text-content-primary truncate" x-text="cand.title" :title="cand.title"></span>
                                                     </div>
-                                                    <div class="flex flex-wrap items-center gap-x-2 text-[10px] text-content-muted">
+                                                    <div class="flex flex-wrap items-center gap-x-2 text-xs text-content-muted">
                                                         <template x-if="cand.uploader">
                                                             <span class="truncate max-w-[160px]" x-text="`Автор: ${cand.uploader}`"></span>
                                                         </template>
@@ -188,7 +192,8 @@
                                                     <!-- Кнопка ▶ Preview для кандидата -->
                                                     <button type="button"
                                                             @click.stop="$store.player.playPreviewStream('/api/downloads/preview?url=' + encodeURIComponent(cand.url), cand.title, cand.uploader || '')"
-                                                            class="px-2 py-0.5 rounded-sm text-[10px] font-mono transition flex items-center space-x-1 border"
+                                                            aria-label="Предпрослушивание фрагмента дорожки"
+                                                            class="px-2 py-0.5 rounded-sm text-xs font-mono transition flex items-center space-x-1 border focus-visible:ring-2 focus-visible:ring-white/30"
                                                             :class="$store.player.currentTrack && $store.player.currentTrack.preview_url === ('/api/downloads/preview?url=' + encodeURIComponent(cand.url)) && $store.player.isPlaying ? 'bg-brand text-white border-brand shadow-xs animate-pulse' : 'bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
                                                             title="Предпрослушивание фрагмента 15 сек без скачивания">
                                                         <span>▶</span>
@@ -197,7 +202,7 @@
 
                                                     <template x-if="cand.url === track.audio_source_url">
                                                         <span class="text-xs text-white font-medium flex items-center space-x-1 px-2 py-0.5">
-                                                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                                                 <path d="m9.55 18l-5.7-5.7l1.425-1.425L9.55 15.15l9.175-9.175L20.15 7.4z"/>
                                                             </svg>
                                                             <span>Выбрана</span>
@@ -207,11 +212,12 @@
                                                         <button
                                                             type="button"
                                                             @click="switchTrackVersion(track, cand.url)"
+                                                            aria-label="Выбрать эту версию аудио"
                                                             :disabled="switchingTrackId === track.track_id"
-                                                            class="px-2 py-0.5 bg-surface-elevated hover:bg-white hover:text-zinc-950 text-content-secondary rounded-sm text-xs font-semibold border border-surface-border transition shadow-xs flex items-center space-x-1 disabled:opacity-50"
+                                                            class="px-2 py-0.5 bg-surface-elevated hover:bg-white hover:text-zinc-950 text-content-secondary rounded-sm text-xs font-semibold border border-surface-border transition shadow-xs flex items-center space-x-1 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-white/40"
                                                             title="Переключить трек на эту версию аудио">
                                                             <template x-if="switchingTrackId === track.track_id">
-                                                                <svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                                                                <svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                                                     <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
                                                                 </svg>
                                                             </template>
@@ -237,9 +243,10 @@
                     <button
                         type="button"
                         @click="acceptJobDirectly(job.id)"
-                        class="px-3.5 py-1.5 bg-white hover:bg-zinc-200 text-zinc-950 text-xs font-semibold rounded-md transition shadow-sm flex items-center space-x-1.5"
+                        aria-label="Принять релиз в медиатеку в один клик"
+                        class="px-3.5 py-1.5 bg-white hover:bg-zinc-200 text-zinc-950 text-xs font-semibold rounded-md transition shadow-sm flex items-center space-x-1.5 focus-visible:ring-2 focus-visible:ring-white/40"
                         title="Переместить релиз в медиатеку в один клик">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
                         </svg>
                         <span>Принять в медиатеку</span>
@@ -248,9 +255,10 @@
                         <button
                             type="button"
                             @click="$store.app.queue.openAllReadyJobsInTagEditor()"
-                            class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover border border-surface-border text-white text-xs font-medium rounded-md transition shadow-xs flex items-center space-x-1.5"
+                            aria-label="Открыть все готовые релизы в редакторе тегов"
+                            class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover border border-surface-border text-white text-xs font-medium rounded-md transition shadow-xs flex items-center space-x-1.5 focus-visible:ring-2 focus-visible:ring-white/30"
                             title="Открыть все завершенные релизы из очереди в редакторе тегов">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M4 18q-.825 0-1.412-.587T2 16V4q0-.825.588-1.412T4 2h12q.825 0 1.413.588T18 4v12q0 .825-.587 1.413T16 18zm16 4q-.825 0-1.412-.587T18 20V7q0-.425.288-.712T19 6t.713.288T20 7v13h-13q-.425 0-.712-.288T6 19t.288-.712T7 18h13z"/>
                             </svg>
                             <span>Редактировать всё (<span x-text="$store.app.queue.readyCount"></span>)</span>
@@ -259,8 +267,9 @@
                     <button
                         type="button"
                         @click="openTagEditorForJob(job.id)"
-                        class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover border border-surface-border text-content-primary hover:text-white text-xs font-medium rounded-md transition shadow-xs flex items-center space-x-1.5">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        aria-label="Открыть редактор тегов для релиза"
+                        class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover border border-surface-border text-content-primary hover:text-white text-xs font-medium rounded-md transition shadow-xs flex items-center space-x-1.5 focus-visible:ring-2 focus-visible:ring-white/30">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="m21.4 14.25l-7.15 7.15q-.3.3-.675.45t-.75.15t-.75-.15t-.675-.45l-8.825-8.825q-.275-.275-.425-.637T2 11.175V4q0-.825.588-1.412T4 2h7.175q.4 0 .775.163t.65.437l8.8 8.825q.3.3.438.675t.137.75t-.137.738t-.438.662M6.5 8q.625 0 1.063-.437T8 6.5t-.437-1.062T6.5 5t-1.062.438T5 6.5t.438 1.063T6.5 8"/>
                         </svg>
                         <span x-text="$store.app.queue.readyCount > 1 ? 'Открыть этот релиз' : 'Редактировать теги'"></span>
@@ -269,9 +278,11 @@
             </template>
             <template x-if="job.status !== 'READY' && job.status !== 'ERROR'">
                 <button
+                    type="button"
                     @click="cancelJob()"
-                    class="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-xs rounded-md border border-rose-500/30 transition flex items-center space-x-1">
-                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    aria-label="Отменить текущую загрузку"
+                    class="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-xs rounded-md border border-rose-500/30 transition flex items-center space-x-1 focus-visible:ring-2 focus-visible:ring-rose-400">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <path d="m12 13.4l2.9 2.9q.275.275.7.275t.7-.275t.275-.7t-.275-.7L13.4 12l2.9-2.9q.275-.275.275-.7t-.275-.7t-.7-.275t-.7.275L12 10.6L9.1 7.7q-.275-.275-.7-.275t-.7.275t-.275.7t.275.7l2.9 2.9l-2.9 2.9q-.275.275-.275.7t.275.7t.7.275t.7-.275zm0 8.6q-2.075 0-3.9-.788t-3.175-2.137T2.788 15.9T2 12t.788-3.9t2.137-3.175T8.1 2.788T12 2t3.9.788t3.175 2.137T21.213 8.1T22 12t-.788 3.9t-2.137 3.175t-3.175 2.138T12 22"/>
                     </svg>
                     <span>Отменить</span>
@@ -279,19 +290,23 @@
             </template>
             <template x-if="job.status === 'ERROR'">
                 <button
+                    type="button"
                     @click="retryJob(job.id)"
-                    class="px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs rounded-md transition flex items-center space-x-1 font-medium shadow-xs"
+                    aria-label="Повторить загрузку релиза"
+                    class="px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs rounded-md transition flex items-center space-x-1 font-medium shadow-xs focus-visible:ring-2 focus-visible:ring-amber-300"
                     title="Перезапустить загрузку">
-                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.05q-1.125-1.45-2.787-2.225T12 5q-2.9 0-4.95 2.05T5 12t2.05 4.95T12 19q2.425 0 4.3-1.463T18.65 14h2.075q-.45 3.025-2.688 5.013T12 20"/>
                     </svg>
                     <span>Повторить</span>
                 </button>
             </template>
             <button
+                type="button"
                 @click="resetForm()"
-                class="px-2.5 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border border-surface-border text-xs rounded-md transition flex items-center space-x-1">
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                aria-label="Сбросить форму и активную задачу"
+                class="px-2.5 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border border-surface-border text-xs rounded-md transition flex items-center space-x-1 focus-visible:ring-2 focus-visible:ring-white/30">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M9.825 20.7q-2.575-.725-4.2-2.837T4 13q0-1.425.475-2.713t1.35-2.362q.275-.3.675-.313t.725.313q.275.275.288.675t-.263.75q-.6.775-.925 1.7T6 13q0 2.025 1.188 3.613t3.062 2.162q.325.1.538.375t.212.6q0 .5-.35.788t-.825.162m4.35 0q-.475.125-.825-.175t-.35-.8q0-.3.213-.575t.537-.375q1.875-.6 3.063-2.175T18 13q0-2.5-1.75-4.25T12 7h-.075l.4.4q.275.275.275.7t-.275.7t-.7.275t-.7-.275l-2.1-2.1q-.15-.15-.212-.325T8.55 6t.063-.375t.212-.325l2.1-2.1q.275-.275.7-.275t.7.275t.275.7t-.275.7l-.4.4H12q3.35 0 5.675 2.325T20 13q0 2.725-1.625 4.85t-4.2 2.85"/>
                 </svg>
                 <span>Сбросить</span>

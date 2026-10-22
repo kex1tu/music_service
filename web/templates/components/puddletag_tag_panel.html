@@ -1,13 +1,13 @@
 {{ define "puddletag_tag_panel" }}
 <!-- ==================== БОКОВАЯ ПАНЕЛЬ ТЕГОВ (STUDIO TAG INSPECTOR) ==================== -->
-<aside class="w-full lg:w-72 xl:w-80 bg-surface-panel border border-surface-border rounded-lg p-3 sm:p-4 flex flex-col space-y-3 shadow-panel shrink-0 select-none">
+<aside aria-labelledby="tag-inspector-title" class="w-full lg:w-72 xl:w-80 bg-surface-panel border border-surface-border rounded-lg p-3 sm:p-4 flex flex-col space-y-3 shadow-panel shrink-0 select-none">
     <!-- Заголовок панели тегов и счетчик выбора -->
     <div class="flex items-center justify-between border-b border-surface-borderSubtle pb-2">
         <div class="flex items-center space-x-2">
             <span class="w-2 h-2 rounded-full bg-white" :class="hasDirtyChanges ? 'animate-pulse' : ''"></span>
-            <h3 class="text-xs font-semibold uppercase tracking-wider text-content-primary">Инспектор тегов</h3>
+            <h2 id="tag-inspector-title" class="text-xs font-semibold uppercase tracking-wider text-content-primary">Инспектор тегов</h2>
         </div>
-        <div class="text-[11px] font-mono tabular-nums text-content-muted">
+        <div class="text-xs font-mono tabular-nums text-content-muted">
             <span x-text="selectedTracksCount > 0 ? `Выбрано: ${selectedTracksCount}` : 'Нет выбора'"></span>
         </div>
     </div>
@@ -25,24 +25,25 @@
             x-ref="coverFileInput"
             @change="handleCoverFileInput($event)"
             accept="image/jpeg,image/png,image/webp"
+            aria-label="Выбрать файл обложки с диска"
             class="hidden">
 
         <div class="w-28 h-28 rounded-sm bg-surface-base border border-surface-border overflow-hidden relative shadow-xs flex items-center justify-center">
             <template x-if="tagPanel.cover_url">
-                <img :src="tagPanel.cover_url" class="w-full h-full object-cover">
+                <img :src="tagPanel.cover_url" alt="Обложка альбома" class="w-full h-full object-cover">
             </template>
             <template x-if="!tagPanel.cover_url">
                 <div class="flex flex-col items-center justify-center text-content-muted/50 space-y-1">
-                    <svg class="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-8 h-8" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3z"/>
                     </svg>
-                    <span class="text-[9px] uppercase font-mono">Нет обложки</span>
+                    <span class="text-xs uppercase font-mono">Нет обложки</span>
                 </div>
             </template>
 
             <!-- Оверлей при наведении -->
-            <div class="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition p-2 text-center text-[10px] text-white">
-                <svg class="w-4 h-4 mb-0.5 text-white" viewBox="0 0 24 24" fill="currentColor">
+            <div class="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition p-2 text-center text-xs text-white">
+                <svg class="w-4 h-4 mb-0.5 text-white" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/>
                 </svg>
                 <span>Загрузить / Drop</span>
@@ -54,14 +55,14 @@
             <button
                 type="button"
                 @click="$refs.coverFileInput.click()"
-                class="px-2 py-0.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white rounded-sm text-[10px] font-mono border border-surface-border transition">
+                class="px-2 py-0.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white rounded-sm text-xs font-mono border border-surface-border transition">
                 Загрузить
             </button>
             <template x-if="tagPanel.cover_url">
                 <button
                     type="button"
                     @click="removeCover()"
-                    class="px-2 py-0.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 rounded-sm text-[10px] font-mono border border-rose-500/25 transition">
+                    class="px-2 py-0.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 rounded-sm text-xs font-mono border border-rose-500/25 transition">
                     Удалить
                 </button>
             </template>
@@ -72,48 +73,56 @@
     <div class="space-y-2 overflow-y-auto flex-1 pr-0.5 text-xs">
         <!-- Название (Title) -->
         <div>
-            <label class="block text-[10px] font-mono uppercase tracking-wider text-content-muted mb-0.5">Название (Title)</label>
+            <label for="tag-panel-title" class="block text-xs font-mono uppercase tracking-wider text-content-muted mb-0.5">Название (Title)</label>
             <input
+                id="tag-panel-title"
                 type="text"
                 :value="tagPanel.title"
                 @input="onTagPanelInput('title', $event.target.value)"
                 :placeholder="tagPanelDiff.title ? '<Разные значения>' : 'Название композиции'"
+                aria-label="Название трека"
                 class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs"
                 :class="tagPanelDiff.title ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
         </div>
 
         <!-- Исполнитель (Artist) -->
         <div>
-            <label class="block text-[10px] font-mono uppercase tracking-wider text-content-muted mb-0.5">Исполнитель (Artist)</label>
+            <label for="tag-panel-artist" class="block text-xs font-mono uppercase tracking-wider text-content-muted mb-0.5">Исполнитель (Artist)</label>
             <input
+                id="tag-panel-artist"
                 type="text"
                 :value="tagPanel.artist"
                 @input="onTagPanelInput('artist', $event.target.value)"
                 :placeholder="tagPanelDiff.artist ? '<Разные значения>' : 'Исполнитель'"
+                aria-label="Исполнитель"
                 class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs"
                 :class="tagPanelDiff.artist ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
         </div>
 
         <!-- Альбомный артист (Album Artist) -->
         <div>
-            <label class="block text-[10px] font-mono uppercase tracking-wider text-content-muted mb-0.5">Альбомный артист</label>
+            <label for="tag-panel-album-artist" class="block text-xs font-mono uppercase tracking-wider text-content-muted mb-0.5">Альбомный артист</label>
             <input
+                id="tag-panel-album-artist"
                 type="text"
                 :value="tagPanel.album_artist"
                 @input="onTagPanelInput('album_artist', $event.target.value)"
                 :placeholder="tagPanelDiff.album_artist ? '<Разные значения>' : 'Основной автор релиза'"
+                aria-label="Альбомный артист"
                 class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs"
                 :class="tagPanelDiff.album_artist ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
         </div>
 
         <!-- Альбом (Album) -->
         <div>
-            <label class="block text-[10px] font-mono uppercase tracking-wider text-content-muted mb-0.5">Альбом (Album)</label>
+            <label for="tag-panel-album" class="block text-xs font-mono uppercase tracking-wider text-content-muted mb-0.5">Альбом (Album)</label>
             <input
+                id="tag-panel-album"
                 type="text"
                 :value="tagPanel.album"
                 @input="onTagPanelInput('album', $event.target.value)"
                 :placeholder="tagPanelDiff.album ? '<Разные значения>' : 'Название альбома'"
+                aria-label="Альбом"
                 class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs"
                 :class="tagPanelDiff.album ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
         </div>
@@ -121,22 +130,26 @@
         <!-- Год и Жанр в 2 колонки -->
         <div class="grid grid-cols-2 gap-1.5">
             <div>
-                <label class="block text-[10px] font-mono uppercase tracking-wider text-content-muted mb-0.5">Год</label>
+                <label for="tag-panel-year" class="block text-xs font-mono uppercase tracking-wider text-content-muted mb-0.5">Год</label>
                 <input
+                    id="tag-panel-year"
                     type="number"
                     :value="tagPanel.year"
                     @input="onTagPanelInput('year', $event.target.value)"
                     :placeholder="tagPanelDiff.year ? '<Разные>' : 'ГГГГ'"
+                    aria-label="Год выпуска"
                     class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs font-mono tabular-nums"
                     :class="tagPanelDiff.year ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
             </div>
             <div>
-                <label class="block text-[10px] font-mono uppercase tracking-wider text-content-muted mb-0.5">Жанр</label>
+                <label for="tag-panel-genre" class="block text-xs font-mono uppercase tracking-wider text-content-muted mb-0.5">Жанр</label>
                 <input
+                    id="tag-panel-genre"
                     type="text"
                     :value="tagPanel.genre"
                     @input="onTagPanelInput('genre', $event.target.value)"
                     :placeholder="tagPanelDiff.genre ? '<Разные>' : 'Жанр'"
+                    aria-label="Жанр"
                     class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs"
                     :class="tagPanelDiff.genre ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
             </div>
@@ -145,22 +158,26 @@
         <!-- Номер дорожки и Всего треков -->
         <div class="grid grid-cols-2 gap-1.5">
             <div>
-                <label class="block text-[10px] font-mono uppercase tracking-wider text-content-muted mb-0.5">Дорожка #</label>
+                <label for="tag-panel-track-number" class="block text-xs font-mono uppercase tracking-wider text-content-muted mb-0.5">Дорожка #</label>
                 <input
+                    id="tag-panel-track-number"
                     type="number"
                     :value="tagPanel.track_number"
                     @input="onTagPanelInput('track_number', $event.target.value)"
                     :placeholder="tagPanelDiff.track_number ? '<Разные>' : '1'"
+                    aria-label="Номер дорожки"
                     class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs font-mono tabular-nums"
                     :class="tagPanelDiff.track_number ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
             </div>
             <div>
-                <label class="block text-[10px] font-mono uppercase tracking-wider text-content-muted mb-0.5">Всего треков</label>
+                <label for="tag-panel-track-total" class="block text-xs font-mono uppercase tracking-wider text-content-muted mb-0.5">Всего треков</label>
                 <input
+                    id="tag-panel-track-total"
                     type="number"
                     :value="tagPanel.track_total"
                     @input="onTagPanelInput('track_total', $event.target.value)"
                     :placeholder="tagPanelDiff.track_total ? '<Разные>' : 'Всего'"
+                    aria-label="Всего треков"
                     class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs font-mono tabular-nums"
                     :class="tagPanelDiff.track_total ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
             </div>
@@ -169,22 +186,26 @@
         <!-- Диск # и Всего дисков -->
         <div class="grid grid-cols-2 gap-1.5">
             <div>
-                <label class="block text-[10px] font-mono uppercase tracking-wider text-content-muted mb-0.5">Диск #</label>
+                <label for="tag-panel-disc-number" class="block text-xs font-mono uppercase tracking-wider text-content-muted mb-0.5">Диск #</label>
                 <input
+                    id="tag-panel-disc-number"
                     type="number"
                     :value="tagPanel.disc_number"
                     @input="onTagPanelInput('disc_number', $event.target.value)"
                     :placeholder="tagPanelDiff.disc_number ? '<Разные>' : '1'"
+                    aria-label="Номер диска"
                     class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs font-mono tabular-nums"
                     :class="tagPanelDiff.disc_number ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
             </div>
             <div>
-                <label class="block text-[10px] font-mono uppercase tracking-wider text-content-muted mb-0.5">Всего дисков</label>
+                <label for="tag-panel-disc-total" class="block text-xs font-mono uppercase tracking-wider text-content-muted mb-0.5">Всего дисков</label>
                 <input
+                    id="tag-panel-disc-total"
                     type="number"
                     :value="tagPanel.disc_total"
                     @input="onTagPanelInput('disc_total', $event.target.value)"
                     :placeholder="tagPanelDiff.disc_total ? '<Разные>' : '1'"
+                    aria-label="Всего дисков"
                     class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs font-mono tabular-nums"
                     :class="tagPanelDiff.disc_total ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
             </div>

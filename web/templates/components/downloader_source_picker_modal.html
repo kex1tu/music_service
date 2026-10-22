@@ -3,6 +3,9 @@
 <div
     x-show="$store.sourcePicker && $store.sourcePicker.isOpen"
     x-cloak
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="source-picker-modal-title"
     class="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6"
     @keydown.escape.window="$store.sourcePicker.close()">
 
@@ -15,11 +18,11 @@
             <div class="min-w-0 flex-1 space-y-1">
                 <div class="flex items-center space-x-2">
                     <span class="p-1 rounded bg-brand/15 text-brand border border-brand/30">
-                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
                         </svg>
                     </span>
-                    <h3 class="text-base font-bold text-white tracking-tight">Выбор источника дорожки</h3>
+                    <h2 id="source-picker-modal-title" class="text-base font-bold text-white tracking-tight">Выбор источника дорожки</h2>
                 </div>
 
                 <!-- Метаданные текущего трека -->
@@ -32,7 +35,7 @@
                         <span class="text-content-muted" x-text="`[${$store.sourcePicker.context.album}]`"></span>
                     </template>
                     <template x-if="$store.sourcePicker.context.expectedDuration > 0">
-                        <span class="px-2 py-0.5 rounded bg-surface-base text-content-muted font-mono text-[11px] border border-surface-borderSubtle"
+                        <span class="px-2 py-0.5 rounded bg-surface-base text-content-muted font-mono text-xs border border-surface-borderSubtle"
                             x-text="`Эталон: ${window.AppFormatters ? window.AppFormatters.formatDuration($store.sourcePicker.context.expectedDuration) : $store.sourcePicker.context.expectedDuration + 'с'}`">
                         </span>
                     </template>
@@ -43,8 +46,10 @@
             <button
                 type="button"
                 @click="$store.sourcePicker.close()"
-                class="p-1.5 text-content-muted hover:text-white rounded-lg hover:bg-surface-hover transition">
-                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                class="p-1.5 text-content-muted hover:text-white rounded-lg hover:bg-surface-hover transition"
+                aria-label="Закрыть окно выбора источника"
+                title="Закрыть окно">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
                 </svg>
             </button>
@@ -57,7 +62,7 @@
                 @click="$store.sourcePicker.activeTab = 'search'"
                 class="px-4 py-3 text-xs font-semibold border-b-2 transition flex items-center space-x-2"
                 :class="$store.sourcePicker.activeTab === 'search' ? 'border-brand text-brand font-bold' : 'border-transparent text-content-secondary hover:text-white'">
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
                 </svg>
                 <span>Мульти-поиск кандидатов (SC + YTM + YT)</span>
@@ -68,7 +73,7 @@
                 @click="$store.sourcePicker.activeTab = 'direct'"
                 class="px-4 py-3 text-xs font-semibold border-b-2 transition flex items-center space-x-2"
                 :class="$store.sourcePicker.activeTab === 'direct' ? 'border-brand text-brand font-bold' : 'border-transparent text-content-secondary hover:text-white'">
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/>
                 </svg>
                 <span>Прямая ссылка</span>
@@ -81,13 +86,15 @@
             <!-- ВКЛАДКА 1: ПРЯМАЯ ССЫЛКА -->
             <div x-show="$store.sourcePicker.activeTab === 'direct'" class="space-y-4">
                 <div class="space-y-2">
-                    <label class="block text-xs font-semibold text-content-secondary">
+                    <label for="direct-url-input" class="block text-xs font-semibold text-content-secondary">
                         Вставьте прямую ссылку на трек:
                     </label>
                     <div class="flex items-center space-x-2">
                         <input
+                            id="direct-url-input"
                             type="text"
                             x-model="$store.sourcePicker.directUrl"
+                            aria-label="Прямая ссылка на аудиопоток"
                             placeholder="https://www.youtube.com/watch?v=... или SoundCloud / Bandcamp"
                             @keydown.enter.prevent="$store.sourcePicker.bindDirectUrl()"
                             class="flex-1 px-3 py-2.5 rounded-xl bg-surface-input border border-surface-border text-xs text-white placeholder-content-muted focus:border-brand focus:ring-1 focus:ring-brand outline-hidden transition"
@@ -97,7 +104,7 @@
                             @click="$store.sourcePicker.bindDirectUrl()"
                             :disabled="$store.sourcePicker.isSubmitting"
                             class="px-4 py-2.5 bg-brand hover:bg-brand-hover disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow-md shadow-brand/20">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
                             </svg>
                             <span>Привязать и скачать</span>
@@ -107,14 +114,14 @@
 
                 <!-- Поддерживаемые платформы -->
                 <div class="p-3 rounded-xl bg-surface-base border border-surface-borderSubtle text-xs space-y-2">
-                    <div class="font-medium text-content-muted text-[11px] uppercase tracking-wider">Поддерживаемые платформы:</div>
+                    <div class="font-medium text-content-muted text-xs uppercase tracking-wider">Поддерживаемые платформы:</div>
                     <div class="flex flex-wrap items-center gap-2">
-                        <span class="px-2 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/20 text-[11px] font-medium">YouTube Music</span>
-                        <span class="px-2 py-0.5 rounded bg-red-500/10 text-red-300 border border-red-500/20 text-[11px] font-medium">YouTube</span>
-                        <span class="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[11px] font-medium">SoundCloud</span>
-                        <span class="px-2 py-0.5 rounded bg-teal-500/10 text-teal-300 border border-teal-500/20 text-[11px] font-medium">Bandcamp</span>
+                        <span class="px-2 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/20 text-xs font-medium">YouTube Music</span>
+                        <span class="px-2 py-0.5 rounded bg-red-500/10 text-red-300 border border-red-500/20 text-xs font-medium">YouTube</span>
+                        <span class="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 text-xs font-medium">SoundCloud</span>
+                        <span class="px-2 py-0.5 rounded bg-teal-500/10 text-teal-300 border border-teal-500/20 text-xs font-medium">Bandcamp</span>
                     </div>
-                    <p class="text-[11px] text-content-muted leading-relaxed">
+                    <p class="text-xs text-content-muted leading-relaxed">
                         Аудиопоток будет скачан по указанному URL, перекодирован в MP3 320 kbps CBR, снабжен официальными ID3v2.4 тегами и оригинальной обложкой альбома.
                     </p>
                 </div>
@@ -128,11 +135,12 @@
                         <input
                             type="text"
                             x-model="$store.sourcePicker.searchQuery"
+                            aria-label="Поисковый запрос трека"
                             placeholder="Поисковый запрос {Artist} - {Title}..."
                             @keydown.enter.prevent="$store.sourcePicker.searchCandidates()"
                             class="w-full pl-9 pr-3 py-2 rounded-xl bg-surface-input border border-surface-border text-xs text-white placeholder-content-muted focus:border-brand focus:ring-1 focus:ring-brand outline-hidden transition"
                         />
-                        <svg class="w-4 h-4 text-content-muted absolute left-3 top-2.5" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-4 h-4 text-content-muted absolute left-3 top-2.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
                         </svg>
                     </div>
@@ -142,7 +150,7 @@
                         :disabled="$store.sourcePicker.isLoadingCandidates"
                         class="px-3.5 py-2 bg-surface-elevated hover:bg-surface-hover border border-surface-border text-content-secondary hover:text-white rounded-xl text-xs font-semibold transition flex items-center space-x-1.5">
                         <template x-if="$store.sourcePicker.isLoadingCandidates">
-                            <svg class="w-3.5 h-3.5 animate-spin text-brand" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-3.5 h-3.5 animate-spin text-brand" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
                             </svg>
                         </template>
@@ -153,7 +161,7 @@
                 <!-- Состояние загрузки -->
                 <template x-if="$store.sourcePicker.isLoadingCandidates">
                     <div class="py-12 text-center space-y-3">
-                        <svg class="w-8 h-8 mx-auto animate-spin text-brand" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-8 h-8 mx-auto animate-spin text-brand" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
                         </svg>
                         <p class="text-xs text-content-muted">Параллельный опрос YouTube Music, SoundCloud и YouTube...</p>
@@ -176,28 +184,28 @@
                                     <div class="flex items-center space-x-2">
                                         <!-- Бейдж сервиса -->
                                         <span
-                                            class="px-2 py-0.5 rounded text-[10px] font-bold border uppercase tracking-wider shrink-0"
+                                            class="px-2 py-0.5 rounded text-xs font-bold border uppercase tracking-wider shrink-0"
                                             :class="$store.sourcePicker.getSourceBadge(cand.source).bgClass"
                                             x-text="$store.sourcePicker.getSourceBadge(cand.source).label">
                                         </span>
 
                                         <template x-if="cand.is_topic">
-                                            <span class="px-1.5 py-0.5 rounded bg-brand/10 text-brand border border-brand/20 text-[9px] font-bold uppercase tracking-wider shrink-0">
+                                            <span class="px-1.5 py-0.5 rounded bg-brand/10 text-brand border border-brand/20 text-xs font-bold uppercase tracking-wider shrink-0">
                                                 Topic / HQ
                                             </span>
                                         </template>
 
-                                        <h4 class="text-xs font-semibold text-white truncate" x-text="cand.title" :title="cand.title"></h4>
+                                        <h3 class="text-xs font-semibold text-white truncate" x-text="cand.title" :title="cand.title"></h3>
                                     </div>
 
-                                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-content-muted">
+                                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-content-muted">
                                         <span class="truncate max-w-[180px]" x-text="`Автор: ${cand.uploader || 'Не указан'}`"></span>
                                         <span class="font-mono" x-text="`Длит: ${window.AppFormatters ? window.AppFormatters.formatDuration(cand.duration) : cand.duration + 'с'}`"></span>
 
                                         <!-- Дельта хронометража -->
                                         <template x-if="$store.sourcePicker.context.expectedDuration > 0">
                                             <span
-                                                class="px-1.5 py-0.2 rounded font-mono font-bold text-[10px] border"
+                                                class="px-1.5 py-0.2 rounded font-mono font-bold text-xs border"
                                                 :class="{
                                                     'bg-emerald-500/15 text-emerald-400 border-emerald-500/30': Math.abs(cand.delta_seconds) <= 3,
                                                     'bg-amber-500/15 text-amber-400 border-amber-500/30': Math.abs(cand.delta_seconds) > 3 && Math.abs(cand.delta_seconds) <= 30,
@@ -209,7 +217,7 @@
 
                                         <!-- Качество / битрейт -->
                                         <template x-if="cand.bitrate_info">
-                                            <span class="px-1.5 py-0.2 rounded bg-surface-elevated text-content-secondary border border-surface-border font-mono text-[10px]"
+                                            <span class="px-1.5 py-0.2 rounded bg-surface-elevated text-content-secondary border border-surface-border font-mono text-xs"
                                                 x-text="cand.bitrate_info">
                                             </span>
                                         </template>
@@ -224,14 +232,15 @@
                                         @click="$store.sourcePicker.togglePreview(cand)"
                                         class="px-2.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center space-x-1 border"
                                         :class="$store.sourcePicker.previewingUrl === cand.url ? 'bg-brand text-white border-brand shadow-sm shadow-brand/40 animate-pulse' : 'bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
+                                        :aria-label="($store.sourcePicker.previewingUrl === cand.url ? 'Остановить прослушивание трека ' : 'Предпрослушать трек ') + cand.title"
                                         title="Быстрое предпрослушивание 10-15 секунд без скачивания">
                                         <template x-if="$store.sourcePicker.previewingUrl !== cand.url">
-                                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                                 <path d="M8 5v14l11-7z"/>
                                             </svg>
                                         </template>
                                         <template x-if="$store.sourcePicker.previewingUrl === cand.url">
-                                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                                 <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
                                             </svg>
                                         </template>
@@ -243,8 +252,9 @@
                                         type="button"
                                         @click="$store.sourcePicker.selectCandidate(cand)"
                                         :disabled="$store.sourcePicker.isSubmitting"
+                                        :aria-label="'Выбрать источник ' + cand.title"
                                         class="px-3 py-1.5 bg-brand hover:bg-brand-hover disabled:opacity-50 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1 shadow-sm shadow-brand/20">
-                                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                             <path d="m9.55 18l-5.7-5.7l1.425-1.425L9.55 15.15l9.175-9.175L20.15 7.4z"/>
                                         </svg>
                                         <span>Выбрать</span>
@@ -259,7 +269,7 @@
             <!-- Инлайн-прогресс и уведомления об ошибках -->
             <template x-if="$store.sourcePicker.isSubmitting">
                 <div class="p-3.5 rounded-xl bg-surface-elevated border border-brand/30 flex items-center space-x-3 text-xs animate-pulse">
-                    <svg class="w-4 h-4 animate-spin text-brand shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-4 h-4 animate-spin text-brand shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
                     </svg>
                     <span class="text-white font-medium" x-text="$store.sourcePicker.submitStep"></span>
@@ -269,14 +279,14 @@
             <template x-if="$store.sourcePicker.submitError">
                 <div class="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center justify-between">
                     <span x-text="$store.sourcePicker.submitError"></span>
-                    <button type="button" @click="$store.sourcePicker.submitError = null" class="text-red-400 hover:text-white">✕</button>
+                    <button type="button" @click="$store.sourcePicker.submitError = null" class="text-red-400 hover:text-white" aria-label="Закрыть уведомление об ошибке">✕</button>
                 </div>
             </template>
         </div>
 
         <!-- Подвал модального окна -->
         <div class="p-4 border-t border-surface-border bg-surface-elevated/30 flex items-center justify-between">
-            <span class="text-[11px] text-content-muted">
+            <span class="text-xs text-content-muted">
                 Выбранный источник навсегда фиксируется в базе данных и накатывает оригинальные ID3v2.4 теги.
             </span>
             <button

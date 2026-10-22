@@ -8,7 +8,7 @@
                 <span class="w-2 h-2 rounded-full bg-yellow-400"></span>
                 <span>Релизы без обложек</span>
             </h3>
-            <p class="text-xs text-gray-400 mt-0.5">
+            <p class="text-xs text-content-secondary mt-0.5">
                 Автоматический поиск обложек высокого разрешения в iTunes (1400x1400), Deezer и Яндекс Музыке с сохранением cover.jpg и вшиванием в MP3.
             </p>
         </div>
@@ -17,15 +17,16 @@
             <button
                 @click="backfillAllCovers()"
                 :disabled="isBackfillingCovers || missingCovers.length === 0"
+                aria-label="Докачать обложки для всех релизов"
                 class="px-3.5 py-2 bg-brand hover:bg-brand-hover disabled:opacity-40 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 shadow-lg shadow-brand/20 active:scale-95"
                 title="Автопоиск и скачивание обложек для всех альбомов без обложек">
                 <template x-if="isBackfillingCovers">
-                    <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-3.5 h-3.5 animate-spin" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
                     </svg>
                 </template>
                 <template x-if="!isBackfillingCovers">
-                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-3.5 h-3.5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
                     </svg>
                 </template>
@@ -36,6 +37,7 @@
             <template x-if="isBackfillingCovers">
                 <button
                     @click="cancelCoversBackfill()"
+                    aria-label="Отменить загрузку обложек"
                     class="px-2.5 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg text-xs font-semibold transition border border-red-500/30">
                     Отмена
                 </button>
@@ -58,22 +60,22 @@
 
     <div class="bg-surface-panel border border-surface-border rounded-xl overflow-hidden shadow-panel">
         <template x-if="isLoading">
-            <div class="p-8 text-center text-gray-400 text-sm flex items-center justify-center space-x-2">
-                <svg class="w-4 h-4 animate-spin text-yellow-400" viewBox="0 0 24 24" fill="currentColor">
+            <div class="p-8 text-center text-content-muted text-sm flex items-center justify-center space-x-2">
+                <svg class="w-4 h-4 animate-spin text-yellow-400" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
                 </svg>
                 <span>Загрузка данных...</span>
             </div>
         </template>
         <template x-if="!isLoading && missingCovers.length === 0">
-            <div class="p-8 text-center text-gray-500 text-sm">
+            <div class="p-8 text-center text-content-muted text-sm">
                 Отлично! У всех альбомов и папок есть файлы обложек (`cover.jpg` / вшитые теги).
             </div>
         </template>
         <template x-if="!isLoading && missingCovers.length > 0">
             <div class="overflow-x-auto max-h-[600px]">
                 <table class="w-full text-left border-collapse text-xs">
-                    <thead class="bg-surface-base text-content-secondary uppercase tracking-wider font-semibold sticky top-0 z-10 border-b border-surface-border font-mono text-[11px]">
+                    <thead class="bg-surface-base text-content-secondary uppercase tracking-wider font-semibold sticky top-0 z-10 border-b border-surface-border font-mono text-xs">
                         <tr>
                             <th class="p-3">Альбом / Каталог</th>
                             <th class="p-3">Исполнитель</th>
@@ -88,22 +90,23 @@
                                 <td class="p-3 font-semibold text-content-primary max-w-xs truncate" x-text="item.album || item.path" :title="item.album || item.path"></td>
                                 <td class="p-3 text-content-secondary max-w-xs truncate" x-text="item.artist || '—'" :title="item.artist"></td>
                                 <td class="p-3 text-content-secondary font-mono" x-text="item.track_count"></td>
-                                <td class="p-3 text-content-muted font-mono text-[11px] max-w-xs truncate" x-text="item.path" :title="item.path"></td>
+                                <td class="p-3 text-content-muted font-mono text-xs max-w-xs truncate" x-text="item.path" :title="item.path"></td>
                                 <td class="p-3 text-right">
                                     <div class="flex items-center justify-end space-x-1.5">
                                         <!-- Кнопка: Найти обложку -->
                                         <button
                                             @click="backfillSingleCover(item)"
                                             :disabled="item._isFetchingCover"
-                                            class="px-2.5 py-1 bg-brand/10 hover:bg-brand/20 text-brand rounded-lg border border-brand/30 transition text-[11px] font-semibold flex items-center space-x-1 active:scale-95 disabled:opacity-50"
+                                            :aria-label="'Скачать обложку для альбома ' + (item.album || item.path)"
+                                            class="px-2.5 py-1 bg-brand/10 hover:bg-brand/20 text-brand rounded-lg border border-brand/30 transition text-xs font-semibold flex items-center space-x-1 active:scale-95 disabled:opacity-50"
                                             title="Автоматически найти и скачать обложку для этого альбома">
                                             <template x-if="item._isFetchingCover">
-                                                <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                                                <svg class="w-3.5 h-3.5 animate-spin" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                                     <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
                                                 </svg>
                                             </template>
                                             <template x-if="!item._isFetchingCover">
-                                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                                <svg class="w-3.5 h-3.5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                                     <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
                                                 </svg>
                                             </template>
@@ -113,8 +116,9 @@
                                         <!-- Кнопка: Открыть папку -->
                                         <button
                                             @click="openDirectory(item.path)"
-                                            class="px-2.5 py-1 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 rounded-lg border border-yellow-500/30 transition text-[11px] font-semibold flex items-center space-x-1 active:scale-95">
-                                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                            :aria-label="'Открыть папку ' + (item.album || item.path)"
+                                            class="px-2.5 py-1 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 rounded-lg border border-yellow-500/30 transition text-xs font-semibold flex items-center space-x-1 active:scale-95">
+                                            <svg class="w-3.5 h-3.5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                                 <path d="M4 20q-.825 0-1.412-.587T2 18V6q0-.825.588-1.412T4 4h5.175q.4 0 .763.15t.637.425L12 6h8q.825 0 1.413.588T22 8v10q0 .825-.587 1.413T20 20zm0-2h16V8h-8.825l-2-2H4zm0 0V6z"/>
                                             </svg>
                                             <span>Папка</span>

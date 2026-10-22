@@ -3,6 +3,9 @@
             <div
                 x-show="showCoverGalleryModal"
                 x-cloak
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="modal-cover-gallery-title"
                 @click.self="closeCoverGallery()"
                 @keydown.escape.window="closeCoverGallery()"
                 class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
@@ -12,21 +15,22 @@
                     <!-- Шапка модального окна -->
                     <div class="p-4 border-b border-surface-border flex items-center justify-between bg-surface-base/80">
                         <div class="flex items-center space-x-2.5">
-                            <div class="w-8 h-8 rounded-lg bg-brand-muted text-brand flex items-center justify-center">
-                                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                            <div class="w-8 h-8 rounded-lg bg-brand-muted text-brand flex items-center justify-center" aria-hidden="true">
+                                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                     <path d="M4 18q-.825 0-1.412-.587T2 16V4q0-.825.588-1.412T4 2h12q.825 0 1.413.588T18 4v12q0 .825-.587 1.413T16 18zm16 4q-.825 0-1.412-.587T18 20V7q0-.425.288-.712T19 6t.713.288T20 7v13h-13q-.425 0-.712-.288T6 19t.288-.712T7 18h13zM6 14h8l-2.6-3.5L9.5 13l-1.4-1.85z"/>
                                 </svg>
                             </div>
                             <div>
-                                <h3 class="text-sm font-bold text-content-primary">Поиск обложки высокого разрешения</h3>
-                                <p class="text-[11px] text-content-muted">Мультисервисный поиск: Apple Music (1400×1400), Deezer (1400×1400), Яндекс (1000×1000), Spotify</p>
+                                <h3 id="modal-cover-gallery-title" class="text-sm font-bold text-content-primary">Поиск обложки высокого разрешения</h3>
+                                <p class="text-xs text-content-muted">Мультисервисный поиск: Apple Music (1400×1400), Deezer (1400×1400), Яндекс (1000×1000), Spotify</p>
                             </div>
                         </div>
                         <button
                             type="button"
                             @click="closeCoverGallery()"
+                            aria-label="Закрыть окно выбора обложки"
                             class="text-content-muted hover:text-content-primary p-1.5 rounded-lg hover:bg-surface-hover transition">
-                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
                             </svg>
                         </button>
@@ -40,6 +44,7 @@
                                 x-model="coverSearchQuery"
                                 @keydown.enter="searchCovers()"
                                 placeholder="Поиск по исполнителю, альбому или названию релиза..."
+                                aria-label="Поиск по исполнителю, альбому или названию релиза"
                                 class="flex-1 bg-surface-input border border-surface-border rounded-lg px-3 py-2 text-xs text-content-primary placeholder-content-muted focus:outline-none focus:border-brand">
                             <button
                                 type="button"
@@ -47,12 +52,12 @@
                                 :disabled="isSearchingCovers || !coverSearchQuery.trim()"
                                 class="px-4 py-2 bg-brand hover:bg-brand-hover disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition flex items-center space-x-1.5 shrink-0 shadow-sm active:scale-95">
                                 <template x-if="isSearchingCovers">
-                                    <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                                    <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                         <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
                                     </svg>
                                 </template>
                                 <template x-if="!isSearchingCovers">
-                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                         <path d="M9.5 16q-2.725 0-4.612-1.888T3 9.5t1.888-4.612T9.5 3t4.613 1.888T16 9.5q0 1.1-.35 2.075T14.7 13.3l5.6 5.6q.275.275.275.7t-.275.7t-.7.275t-.7-.275l-5.6-5.6q-.75.6-1.725.95T9.5 16m0-2q1.875 0 3.188-1.312T14 9.5t-1.312-3.187T9.5 5T6.313 6.313T5 9.5t1.313 3.188T9.5 14"/>
                                     </svg>
                                 </template>
@@ -66,35 +71,35 @@
                                 type="button"
                                 @click="coverSourceFilter = 'all'"
                                 :class="coverSourceFilter === 'all' ? 'bg-brand text-white border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
-                                class="px-2.5 py-1 rounded-md text-[11px] font-medium border transition">
+                                class="px-2.5 py-1 rounded-md text-xs font-medium border transition">
                                 Все
                             </button>
                             <button
                                 type="button"
                                 @click="coverSourceFilter = 'apple'"
                                 :class="coverSourceFilter === 'apple' ? 'bg-brand text-white border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
-                                class="px-2.5 py-1 rounded-md text-[11px] font-medium border transition">
+                                class="px-2.5 py-1 rounded-md text-xs font-medium border transition">
                                 Apple Music (1400×1400)
                             </button>
                             <button
                                 type="button"
                                 @click="coverSourceFilter = 'deezer'"
                                 :class="coverSourceFilter === 'deezer' ? 'bg-brand text-white border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
-                                class="px-2.5 py-1 rounded-md text-[11px] font-medium border transition">
+                                class="px-2.5 py-1 rounded-md text-xs font-medium border transition">
                                 Deezer (1400×1400)
                             </button>
                             <button
                                 type="button"
                                 @click="coverSourceFilter = 'yandex'"
                                 :class="coverSourceFilter === 'yandex' ? 'bg-brand text-white border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
-                                class="px-2.5 py-1 rounded-md text-[11px] font-medium border transition">
+                                class="px-2.5 py-1 rounded-md text-xs font-medium border transition">
                                 Яндекс Музыка (1000×1000)
                             </button>
                             <button
                                 type="button"
                                 @click="coverSourceFilter = 'spotify'"
                                 :class="coverSourceFilter === 'spotify' ? 'bg-brand text-white border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
-                                class="px-2.5 py-1 rounded-md text-[11px] font-medium border transition">
+                                class="px-2.5 py-1 rounded-md text-xs font-medium border transition">
                                 Spotify (640×640)
                             </button>
                         </div>
@@ -114,7 +119,7 @@
                                         <!-- Бейджи сервиса и разрешения -->
                                         <div class="absolute top-2 left-2 flex flex-col gap-1">
                                             <span
-                                                class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider backdrop-blur-md shadow"
+                                                class="px-1.5 py-0.5 rounded text-xs font-bold uppercase tracking-wider backdrop-blur-md shadow"
                                                 :class="{
                                                     'bg-red-500/80 text-white': item.source === 'apple',
                                                     'bg-purple-600/80 text-white': item.source === 'deezer',
@@ -125,15 +130,15 @@
                                             </span>
                                         </div>
                                         <div class="absolute bottom-2 right-2">
-                                            <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-black/80 text-white backdrop-blur-sm" x-text="`${item.width}×${item.height}`"></span>
+                                            <span class="px-1.5 py-0.5 rounded text-xs font-mono font-medium bg-black/80 text-white backdrop-blur-sm" x-text="`${item.width}×${item.height}`"></span>
                                         </div>
                                     </div>
                                     <div class="p-3 flex-1 flex flex-col justify-between space-y-2">
                                         <div class="min-w-0">
                                             <h4 class="text-xs font-bold text-content-primary truncate" :title="item.title" x-text="item.title"></h4>
-                                            <p class="text-[11px] text-content-secondary truncate" :title="item.artist" x-text="item.artist"></p>
+                                            <p class="text-xs text-content-secondary truncate" :title="item.artist" x-text="item.artist"></p>
                                             <template x-if="item.year">
-                                                <p class="text-[10px] text-content-muted font-mono" x-text="`${item.year} г.`"></p>
+                                                <p class="text-xs text-content-muted font-mono" x-text="`${item.year} г.`"></p>
                                             </template>
                                         </div>
                                         <button

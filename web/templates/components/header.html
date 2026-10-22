@@ -5,17 +5,17 @@
         
         <!-- Логотип: Студийный звуковой знак -->
         <div class="flex items-center space-x-2.5 shrink-0">
-            <div class="w-8 h-8 rounded-md bg-white/[0.06] border border-white/[0.1] flex items-center justify-center text-white shadow-xs">
-                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+            <div class="w-8 h-8 rounded-md bg-white/[0.06] border border-white/[0.1] flex items-center justify-center text-white shadow-xs" aria-hidden="true">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
                 </svg>
             </div>
             <div class="hidden sm:block">
                 <div class="flex items-center space-x-1.5">
-                    <span class="text-xs font-semibold text-white tracking-tight">Music Manager</span>
-                    <span class="badge-studio text-[9px] px-1 py-0 uppercase">Studio</span>
+                    <h1 class="text-xs font-semibold text-white tracking-tight">Music Manager</h1>
+                    <span class="badge-studio text-xs px-1.5 py-0.5 uppercase">Studio</span>
                 </div>
-                <p class="text-[10px] text-content-muted leading-tight">Audio Engine</p>
+                <p class="text-xs text-content-muted leading-tight">Audio Engine</p>
             </div>
         </div>
 
@@ -26,8 +26,8 @@
             @keydown.escape="isOpen = false"
             @click.outside="isOpen = false">
             <div class="relative">
-                <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-content-muted">
-                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-content-muted" aria-hidden="true">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
                     </svg>
                 </div>
@@ -35,12 +35,13 @@
                     x-ref="globalSearchInput"
                     type="text"
                     x-model="searchQuery"
+                    aria-label="Поиск по медиатеке (исполнители, альбомы, треки)"
                     @input.debounce.250ms="performSearch()"
                     @focus="if (searchQuery.trim().length > 0) isOpen = true"
                     placeholder="Поиск по медиатеке... (Ctrl+K)"
-                    class="w-full bg-surface-input border border-surface-border rounded-md pl-8 pr-12 py-1.5 text-xs text-content-primary placeholder-content-muted focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition shadow-inner">
-                <div class="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none">
-                    <kbd class="px-1.5 py-0.5 text-[9px] font-mono text-content-muted bg-white/[0.04] border border-white/[0.08] rounded-sm">Ctrl+K</kbd>
+                    class="w-full bg-surface-input border border-surface-border rounded-md pl-8 pr-14 py-1.5 text-xs text-content-primary placeholder-content-muted focus:outline-none focus:border-white/30 focus-visible:ring-2 focus-visible:ring-white/30 transition shadow-inner">
+                <div class="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none" aria-hidden="true">
+                    <kbd class="px-1.5 py-0.5 text-xs font-mono text-content-muted bg-white/[0.04] border border-white/[0.08] rounded-sm">Ctrl+K</kbd>
                 </div>
             </div>
 
@@ -53,14 +54,14 @@
                 <!-- Секция: Артисты -->
                 <template x-if="results.artists && results.artists.length > 0">
                     <div class="py-1">
-                        <span class="text-[9px] font-mono font-bold text-content-muted uppercase tracking-wider px-2">Исполнители</span>
+                        <span class="text-xs font-mono font-bold text-content-muted uppercase tracking-wider px-2">Исполнители</span>
                         <div class="mt-0.5 space-y-0.5">
                             <template x-for="art in results.artists" :key="art.name || art.title">
                                 <button
                                     @click="navigateToDir(art.folder_path || art.first_path || '')"
-                                    class="w-full text-left px-2 py-1 rounded-sm hover:bg-surface-hover flex items-center justify-between transition text-content-secondary hover:text-white">
+                                    class="w-full text-left px-2 py-1 rounded-sm hover:bg-surface-hover flex items-center justify-between transition text-content-secondary hover:text-white focus-visible:ring-2 focus-visible:ring-white/30">
                                     <span class="font-medium truncate mr-2" x-text="art.name || art.title"></span>
-                                    <span class="text-[9px] font-mono text-content-muted shrink-0" x-text="`${art.track_count || 0} тр.`"></span>
+                                    <span class="text-xs font-mono text-content-muted shrink-0" x-text="`${art.track_count || 0} тр.`"></span>
                                 </button>
                             </template>
                         </div>
@@ -70,17 +71,17 @@
                 <!-- Секция: Альбомы -->
                 <template x-if="results.albums && results.albums.length > 0">
                     <div class="py-1">
-                        <span class="text-[9px] font-mono font-bold text-content-muted uppercase tracking-wider px-2">Альбомы</span>
+                        <span class="text-xs font-mono font-bold text-content-muted uppercase tracking-wider px-2">Альбомы</span>
                         <div class="mt-0.5 space-y-0.5">
                             <template x-for="alb in results.albums" :key="alb.path || alb.id">
                                 <button
                                     @click="navigateToDir(alb.path)"
-                                    class="w-full text-left px-2 py-1 rounded-sm hover:bg-surface-hover flex items-center justify-between transition text-content-secondary hover:text-white">
+                                    class="w-full text-left px-2 py-1 rounded-sm hover:bg-surface-hover flex items-center justify-between transition text-content-secondary hover:text-white focus-visible:ring-2 focus-visible:ring-white/30">
                                     <div class="truncate mr-2">
                                         <span class="font-medium text-white" x-text="alb.album || alb.title"></span>
-                                        <span class="text-content-muted text-[10px]" x-text="(alb.album_artist || alb.artist) ? ` — ${alb.album_artist || alb.artist}` : ''"></span>
+                                        <span class="text-content-muted text-xs" x-text="(alb.album_artist || alb.artist) ? ` — ${alb.album_artist || alb.artist}` : ''"></span>
                                     </div>
-                                    <span class="text-[9px] font-mono text-content-muted shrink-0" x-text="alb.year || ''"></span>
+                                    <span class="text-xs font-mono text-content-muted shrink-0" x-text="alb.year || ''"></span>
                                 </button>
                             </template>
                         </div>
@@ -90,30 +91,32 @@
                 <!-- Секция: Треки -->
                 <template x-if="results.tracks && results.tracks.length > 0">
                     <div class="py-1">
-                        <span class="text-[9px] font-mono font-bold text-content-muted uppercase tracking-wider px-2">Треки</span>
+                        <span class="text-xs font-mono font-bold text-content-muted uppercase tracking-wider px-2">Треки</span>
                         <div class="mt-0.5 space-y-0.5">
                             <template x-for="trk in results.tracks" :key="trk.path || trk.id">
                                 <button
                                     @click="navigateToDir(getTrackDir(trk.path))"
-                                    class="w-full text-left px-2 py-1 rounded-sm hover:bg-surface-hover flex items-center justify-between transition text-content-secondary hover:text-white">
+                                    class="w-full text-left px-2 py-1 rounded-sm hover:bg-surface-hover flex items-center justify-between transition text-content-secondary hover:text-white focus-visible:ring-2 focus-visible:ring-white/30">
                                     <div class="truncate mr-2">
                                         <span class="font-medium text-content-primary" x-text="trk.title"></span>
-                                        <span class="text-content-muted text-[10px]" x-text="trk.artist ? ` • ${trk.artist}` : ''"></span>
+                                        <span class="text-content-muted text-xs" x-text="trk.artist ? ` • ${trk.artist}` : ''"></span>
                                     </div>
                                     <div class="flex items-center space-x-1 shrink-0">
                                         <button
+                                            type="button"
                                             @click.stop="$store.player.playTrack(trk, results.tracks)"
-                                            title="Слушать"
-                                            class="p-0.5 hover:text-white text-content-muted transition rounded-sm">
-                                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                            aria-label="Слушать трек"
+                                            title="Слушать трек"
+                                            class="p-1 hover:text-white text-content-muted transition rounded-sm focus-visible:ring-2 focus-visible:ring-white/30">
+                                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                                 <path d="M8 5v14l11-7z"/>
                                             </svg>
                                         </button>
                                         <template x-if="trk.lyrics_status === 'lrc'">
-                                            <span class="badge-studio text-[8px] py-0 px-1 text-purple-300 border-purple-500/30">LRC</span>
+                                            <span class="badge-studio text-xs py-0.5 px-1.5 text-purple-300 border-purple-500/30">LRC</span>
                                         </template>
                                         <template x-if="trk.lyrics_status === 'txt'">
-                                            <span class="badge-studio text-[8px] py-0 px-1 text-sky-300 border-sky-500/30">TXT</span>
+                                            <span class="badge-studio text-xs py-0.5 px-1.5 text-sky-300 border-sky-500/30">TXT</span>
                                         </template>
                                     </div>
                                 </button>
@@ -132,60 +135,66 @@
         </div>
 
         <!-- Вкладки навигации (Studio Nav Strip) -->
-        <nav class="flex items-center space-x-0.5 overflow-x-auto no-scrollbar py-0.5 px-0.5 max-w-[calc(100vw-110px)] sm:max-w-none bg-surface-input border border-surface-border rounded-md shrink">
+        <nav aria-label="Основная навигация" class="flex items-center space-x-0.5 overflow-x-auto no-scrollbar py-0.5 px-0.5 max-w-[calc(100vw-110px)] sm:max-w-none bg-surface-input border border-surface-border rounded-md shrink">
             <button
                 @click="$store.app.activeTab = 'downloader'"
+                :aria-current="$store.app.activeTab === 'downloader' ? 'page' : false"
                 :class="$store.app.activeTab === 'downloader' ? 'bg-white text-zinc-950 font-semibold shadow-xs' : 'text-content-secondary hover:text-white hover:bg-white/[0.04]'"
-                class="h-8 px-2.5 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0">
-                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                class="h-8 px-2.5 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0 focus-visible:ring-2 focus-visible:ring-white/30">
+                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M11.625 15.513q-.175-.063-.325-.213l-3.6-3.6q-.3-.3-.288-.7t.288-.7q.3-.3.713-.312t.712.287L11 12.15V5q0-.425.288-.712T12 4t.713.288T13 5v7.15l1.875-1.875q.3-.3.713-.288t.712.313q.275.3.288.7t-.288.7l-3.6 3.6q-.15.15-.325.213t-.375.062t-.375-.062M6 20q-.825 0-1.412-.587T4 18v-2q0-.425.288-.712T5 15t.713.288T6 16v2h12v-2q0-.425.288-.712T19 15t.713.288T20 16v2q0 .825-.587 1.413T18 20z"/>
                 </svg>
                 <span>Загрузчик</span>
             </button>
             <button
                 @click="$store.app.activeTab = 'files'; $dispatch('refresh-file-manager', '')"
+                :aria-current="$store.app.activeTab === 'files' ? 'page' : false"
                 :class="$store.app.activeTab === 'files' ? 'bg-white text-zinc-950 font-semibold shadow-xs' : 'text-content-secondary hover:text-white hover:bg-white/[0.04]'"
-                class="h-8 px-2.5 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0">
-                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                class="h-8 px-2.5 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0 focus-visible:ring-2 focus-visible:ring-white/30">
+                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M4 20q-.825 0-1.412-.587T2 18V6q0-.825.588-1.412T4 4h5.175q.4 0 .763.15t.637.425L12 6h8q.825 0 1.413.588T22 8v10q0 .825-.587 1.413T20 20zm0-2h16V8h-8.825l-2-2H4zm0 0V6z"/>
                 </svg>
                 <span>Файлы</span>
             </button>
             <button
                 @click="$store.app.activeTab = 'audit'; $dispatch('refresh-audit')"
+                :aria-current="$store.app.activeTab === 'audit' ? 'page' : false"
                 :class="$store.app.activeTab === 'audit' ? 'bg-white text-zinc-950 font-semibold shadow-xs' : 'text-content-secondary hover:text-white hover:bg-white/[0.04]'"
-                class="h-8 px-2 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0">
-                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                class="h-8 px-2 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0 focus-visible:ring-2 focus-visible:ring-white/30">
+                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10H7v-2h10v2zm0-4H7V7h10v2z"/>
                 </svg>
                 <span>Аудит</span>
             </button>
             <button
                 @click="$store.app.activeTab = 'radar'; if ($store.radar) { $store.radar.fetchFeed(1); $store.radar.fetchUnreadCount(); }"
+                :aria-current="$store.app.activeTab === 'radar' ? 'page' : false"
                 :class="$store.app.activeTab === 'radar' ? 'bg-white text-zinc-950 font-semibold shadow-xs' : 'text-content-secondary hover:text-white hover:bg-white/[0.04]'"
-                class="h-8 px-2 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0 relative">
-                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                class="h-8 px-2 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0 relative focus-visible:ring-2 focus-visible:ring-white/30">
+                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm0-14c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z"/>
                 </svg>
                 <span class="hidden sm:inline">Радар</span>
                 <template x-if="$store.radar && $store.radar.unreadCount > 0">
-                    <span class="px-1 py-0.2 bg-white text-zinc-950 text-[9px] font-mono font-bold rounded-sm" x-text="$store.radar.unreadCount"></span>
+                    <span class="px-1.5 py-0.5 bg-white text-zinc-950 text-xs font-mono font-bold rounded-sm" x-text="$store.radar.unreadCount"></span>
                 </template>
             </button>
             <button
                 @click="$store.app.activeTab = 'radio'; if ($store.radio) { $store.radio.fetchStats(); $store.radio.fetchQueue(); }"
+                :aria-current="$store.app.activeTab === 'radio' ? 'page' : false"
                 :class="$store.app.activeTab === 'radio' ? 'bg-white text-zinc-950 font-semibold shadow-xs' : 'text-content-secondary hover:text-white hover:bg-white/[0.04]'"
-                class="h-8 px-2 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0 relative">
-                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                class="h-8 px-2 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0 relative focus-visible:ring-2 focus-visible:ring-white/30">
+                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M3.24 6.15C2.51 6.43 2 7.17 2 8v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-.83-.51-1.57-1.24-1.85L12 2.62 3.24 6.15zM12 4.47l6.38 2.53H5.62L12 4.47zM4 9h16v11H4V9zm8 3c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3zm0 4.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
                 </svg>
                 <span class="hidden sm:inline">Радио</span>
             </button>
             <button
                 @click="$store.app.activeTab = 'player'; $store.player.onTabOpened()"
+                :aria-current="$store.app.activeTab === 'player' ? 'page' : false"
                 :class="$store.app.activeTab === 'player' ? 'bg-white text-zinc-950 font-semibold shadow-xs' : 'text-content-secondary hover:text-white hover:bg-white/[0.04]'"
-                class="h-8 px-2 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0 relative">
-                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                class="h-8 px-2 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0 relative focus-visible:ring-2 focus-visible:ring-white/30">
+                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
                 </svg>
                 <span class="hidden sm:inline">Плеер</span>
@@ -198,16 +207,17 @@
             <template x-if="$store.app.user">
                 <div class="flex items-center space-x-1.5">
                     <div class="flex items-center space-x-1 text-xs text-content-secondary bg-surface-elevated px-2 py-1 rounded-md border border-surface-border">
-                        <svg class="w-3 h-3 text-content-muted" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-3.5 h-3.5 text-content-muted" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
                         </svg>
                         <span class="font-medium text-white max-w-[80px] sm:max-w-[120px] truncate" x-text="$store.app.user"></span>
                     </div>
                     <button
                         @click="$store.app.logout()"
+                        aria-label="Выйти из учетной записи"
                         title="Выйти из учетной записи"
-                        class="text-xs p-1.5 sm:px-2 sm:py-1 rounded-md bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white transition flex items-center space-x-1 border border-surface-border">
-                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                        class="text-xs p-1.5 sm:px-2 sm:py-1 rounded-md bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white transition flex items-center space-x-1 border border-surface-border focus-visible:ring-2 focus-visible:ring-white/30">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h6q.425 0 .713.288T12 4t-.288.713T11 5H5v14h6q.425 0 .713.288T12 20t-.288.713T11 21zm12.175-8H10q-.425 0-.712-.288T9 12t.288-.712T10 11h7.175L15.3 9.125q-.275-.275-.275-.675t.275-.7t.7-.313t.725.288L20.3 11.3q.3.3.3.7t-.3.7l-3.575 3.575q-.3.3-.712.288t-.713-.313q-.275-.3-.262-.712t.287-.688z"/>
                         </svg>
                         <span class="hidden sm:inline">Выйти</span>
@@ -217,8 +227,9 @@
             <template x-if="!$store.app.user">
                 <button
                     @click.stop="$store.app.openLoginModal()"
-                    class="h-8 px-3 rounded-md bg-white hover:bg-zinc-200 text-zinc-950 font-semibold text-xs transition flex items-center space-x-1.5 shadow-xs active:scale-95">
-                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    aria-label="Войти в систему"
+                    class="h-8 px-3 rounded-md bg-white hover:bg-zinc-200 text-zinc-950 font-semibold text-xs transition flex items-center space-x-1.5 shadow-xs active:scale-95 focus-visible:ring-2 focus-visible:ring-white/30">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <path d="M13 21q-.425 0-.712-.288T12 20t.288-.712T13 19h6V5h-6q-.425 0-.712-.288T12 4t.288-.712T13 3h6q.825 0 1.413.588T21 5v14q0 .825-.587 1.413T19 21zm-1.825-8H4q-.425 0-.712-.288T3 12t.288-.712T4 11h7.175L9.3 9.125q-.275-.275-.275-.675t.275-.7t.7-.313t.725.288L14.3 11.3q.3.3.3.7t-.3.7l-3.575 3.575q-.3.3-.712.288T9.3 16.25q-.275-.3-.262-.712t.287-.688z"/>
                     </svg>
                     <span>Войти</span>

@@ -13,8 +13,8 @@
         <!-- Левая часть: Индикатор модели и режима -->
         <div class="flex items-center space-x-3">
             <div class="flex items-center space-x-2 px-3 py-1.5 bg-surface-elevated border border-surface-border rounded-lg font-mono text-xs text-content-primary">
-                <span class="w-2 h-2 rounded-full" :class="$store.player.isPlaying ? 'bg-brand animate-pulse' : 'bg-amber-500/80'"></span>
-                <span class="tracking-widest uppercase font-semibold text-[11px]" x-text="$store.player.isPlaying ? 'STREAMING • 320 KBPS' : ($store.player.currentTrack ? 'PAUSED • READY' : 'STANDBY • NO TAPE')"></span>
+                <span class="w-2 h-2 rounded-full" :class="$store.player.isPlaying ? 'bg-brand animate-pulse' : 'bg-amber-500/80'" aria-hidden="true"></span>
+                <span class="tracking-widest uppercase font-semibold text-xs" x-text="$store.player.isPlaying ? 'STREAMING • 320 KBPS' : ($store.player.currentTrack ? 'PAUSED • READY' : 'STANDBY • NO TAPE')"></span>
             </div>
             <div class="hidden md:flex items-center space-x-2 text-xs font-mono text-content-muted">
                 <span>CONSOLE: <strong class="text-content-secondary">STUDIO // ID3v2.4 ENGINE</strong></span>
@@ -32,7 +32,7 @@
             <button
                 @click="$store.app.activeTab = 'files'; $dispatch('refresh-file-manager', '')"
                 class="px-3.5 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs font-medium rounded-lg border border-surface-border transition flex items-center space-x-1.5">
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M4 20q-.825 0-1.412-.587T2 18V6q0-.825.588-1.412T4 4h5.175q.4 0 .763.15t.637.425L12 6h8q.825 0 1.413.588T22 8v10q0 .825-.587 1.413T20 20zm0-2h16V8h-8.825l-2-2H4zm0 0V6z"/>
                 </svg>
                 <span>К медиатеке</span>
@@ -48,7 +48,7 @@
             
             <!-- Блок обложки и физического картриджа -->
             <div class="space-y-4">
-                <div class="flex items-center justify-between text-[11px] font-mono text-content-muted tracking-wider">
+                <div class="flex items-center justify-between text-xs font-mono text-content-muted tracking-wider">
                     <span>DECK-A // CASSETTE BAY</span>
                     <span class="text-brand font-semibold" x-text="$store.player.currentTrack ? 'LOADED' : 'EMPTY'"></span>
                 </div>
@@ -74,8 +74,8 @@
                         x-ref="deckFallback"
                         class="w-full h-full rounded-xl bg-surface-elevated border border-surface-border flex flex-col items-center justify-center text-content-muted space-y-3"
                         :style="($store.player.currentTrack && ($store.player.currentTrack.has_cover || $store.player.currentTrack.cover_url)) ? 'display: none;' : ''">
-                        <div class="w-16 h-16 rounded-full border-2 border-dashed border-surface-border flex items-center justify-center">
-                            <svg class="w-8 h-8 text-content-muted" viewBox="0 0 24 24" fill="currentColor">
+                        <div class="w-16 h-16 rounded-full border-2 border-dashed border-surface-border flex items-center justify-center" aria-hidden="true">
+                            <svg class="w-8 h-8 text-content-muted" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
                             </svg>
                         </div>
@@ -105,13 +105,13 @@
 
             <!-- Стерео VU-метр (Analog Peak LED Bar) -->
             <div class="bg-surface-input p-3.5 rounded-xl border border-surface-border space-y-2.5">
-                <div class="flex items-center justify-between text-[10px] font-mono text-content-muted">
+                <div class="flex items-center justify-between text-xs font-mono text-content-muted">
                     <span>ANALOG PEAK LEVEL</span>
                     <span>-48dB  -12dB  0dB  +3dB</span>
                 </div>
                 <!-- Левый канал -->
                 <div class="flex items-center space-x-2">
-                    <span class="text-[10px] font-mono text-content-muted w-3">L</span>
+                    <span class="text-xs font-mono text-content-muted w-3">L</span>
                     <div class="flex-1 h-2 bg-surface-elevated rounded-full overflow-hidden flex">
                         <div
                             id="vu-meter-bar-l"
@@ -119,11 +119,11 @@
                             style="width: 0%;">
                         </div>
                     </div>
-                    <span id="vu-meter-val-l" class="text-[10px] font-mono text-content-secondary w-7 text-right">0%</span>
+                    <span id="vu-meter-val-l" class="text-xs font-mono text-content-secondary w-7 text-right">0%</span>
                 </div>
                 <!-- Правый канал -->
                 <div class="flex items-center space-x-2">
-                    <span class="text-[10px] font-mono text-content-muted w-3">R</span>
+                    <span class="text-xs font-mono text-content-muted w-3">R</span>
                     <div class="flex-1 h-2 bg-surface-elevated rounded-full overflow-hidden flex">
                         <div
                             id="vu-meter-bar-r"
@@ -131,7 +131,7 @@
                             style="width: 0%;">
                         </div>
                     </div>
-                    <span id="vu-meter-val-r" class="text-[10px] font-mono text-content-secondary w-7 text-right">0%</span>
+                    <span id="vu-meter-val-r" class="text-xs font-mono text-content-secondary w-7 text-right">0%</span>
                 </div>
             </div>
 
@@ -148,6 +148,7 @@
                         min="0"
                         :max="$store.player.duration || 100"
                         step="0.1"
+                        aria-label="Позиция воспроизведения"
                         :value="$store.player.currentTime"
                         @input="$store.player.seek(parseFloat($event.target.value))"
                         class="w-full h-1.5 bg-surface-input rounded-full appearance-none cursor-pointer accent-brand focus:outline-none border border-surface-border"
@@ -161,21 +162,23 @@
                     <!-- Зацикливание (Loop) -->
                     <button
                         @click="$store.player.toggleLoop()"
+                        aria-label="Режим зацикливания"
                         :title="$store.player.loopMode === 'one' ? 'Зацикливание одного трека' : ($store.player.loopMode === 'all' ? 'Зацикливание очереди' : 'Без зацикливания')"
                         class="w-10 h-10 rounded-xl bg-surface-elevated hover:bg-surface-hover border border-surface-border flex flex-col items-center justify-center transition"
                         :class="$store.player.loopMode !== 'none' ? 'text-brand border-brand/50' : 'text-content-secondary'">
-                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>
                         </svg>
-                        <span class="text-[8px] font-mono leading-none mt-0.5" x-text="$store.player.loopMode === 'one' ? '1' : ($store.player.loopMode === 'all' ? 'ALL' : 'OFF')"></span>
+                        <span class="text-xs font-mono leading-none mt-0.5" x-text="$store.player.loopMode === 'one' ? '1' : ($store.player.loopMode === 'all' ? 'ALL' : 'OFF')"></span>
                     </button>
 
                     <!-- Предыдущий трек -->
                     <button
                         @click="$store.player.prev()"
+                        aria-label="Предыдущий трек"
                         title="Предыдущий трек (Стрелка влево)"
                         class="w-12 h-12 rounded-xl bg-surface-elevated hover:bg-surface-hover border border-surface-border text-content-primary hover:text-white flex items-center justify-center transition shadow active:scale-95">
-                        <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
                         </svg>
                     </button>
@@ -183,21 +186,22 @@
                     <!-- Play / Pause (Главная кнопка) -->
                     <button
                         @click="$store.player.togglePlay()"
+                        :aria-label="$store.player.isPlaying ? 'Приостановить воспроизведение' : 'Начать воспроизведение'"
                         :title="$store.player.isPlaying ? 'Пауза (Пробел)' : 'Воспроизведение (Пробел)'"
                         class="w-16 h-16 rounded-2xl bg-brand hover:bg-brand-hover text-white flex items-center justify-center transition shadow-lg shadow-brand/40 active:scale-95">
                         <template x-if="$store.player.isLoading">
-                            <svg class="w-8 h-8 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <svg class="w-8 h-8 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
                         </template>
                         <template x-if="!$store.player.isLoading && $store.player.isPlaying">
-                            <svg class="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-8 h-8" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
                             </svg>
                         </template>
                         <template x-if="!$store.player.isLoading && !$store.player.isPlaying">
-                            <svg class="w-8 h-8 translate-x-0.5" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-8 h-8 translate-x-0.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M8 5v14l11-7z"/>
                             </svg>
                         </template>
@@ -206,9 +210,10 @@
                     <!-- Следующий трек -->
                     <button
                         @click="$store.player.next()"
+                        aria-label="Следующий трек"
                         title="Следующий трек (Стрелка вправо)"
                         class="w-12 h-12 rounded-xl bg-surface-elevated hover:bg-surface-hover border border-surface-border text-content-primary hover:text-white flex items-center justify-center transition shadow active:scale-95">
-                        <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
                         </svg>
                     </button>
@@ -216,13 +221,14 @@
                     <!-- Случайный порядок (Shuffle) -->
                     <button
                         @click="$store.player.toggleShuffle()"
+                        aria-label="Случайный порядок воспроизведения"
                         :title="$store.player.isShuffle ? 'Перемешивание активно' : 'Случайный порядок выключен'"
                         class="w-10 h-10 rounded-xl bg-surface-elevated hover:bg-surface-hover border border-surface-border flex flex-col items-center justify-center transition"
                         :class="$store.player.isShuffle ? 'text-brand border-brand/50' : 'text-content-secondary'">
-                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/>
                         </svg>
-                        <span class="text-[8px] font-mono leading-none mt-0.5" x-text="$store.player.isShuffle ? 'ON' : 'OFF'"></span>
+                        <span class="text-xs font-mono leading-none mt-0.5" x-text="$store.player.isShuffle ? 'ON' : 'OFF'"></span>
                     </button>
                 </div>
 
@@ -230,15 +236,16 @@
                 <div class="flex items-center space-x-3 bg-surface-input px-3.5 py-2.5 rounded-xl border border-surface-border">
                     <button
                         @click="$store.player.toggleMute()"
+                        :aria-label="$store.player.isMuted ? 'Включить звук' : 'Выключить звук'"
                         :title="$store.player.isMuted ? 'Включить звук' : 'Без звука'"
                         class="text-content-secondary hover:text-white transition">
                         <template x-if="$store.player.isMuted || $store.player.volume === 0">
-                            <svg class="w-4 h-4 text-red-400" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-4 h-4 text-red-400" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M3.63 3.63a.996.996 0 000 1.41L7.29 8.7 7 9H4c-.55 0-1 .45-1 1v4c0 .55.45 1 1 1h3l3.29 3.29c.63.63 1.71.18 1.71-.71v-4.17l4.18 4.18c-.49.37-1.02.68-1.6.91-.36.15-.58.53-.58.92 0 .69.69 1.19 1.34.94.81-.31 1.56-.76 2.22-1.3l1.8 1.8c.39.39 1.02.39 1.41 0 .39-.39.39-1.02 0-1.41L5.05 3.63a.996.996 0 00-1.42 0zM19 12c0 .82-.15 1.61-.41 2.34l1.53 1.53c.56-1.17.88-2.48.88-3.87 0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zm-7-8l-1.88 1.88L12 7.76zm4.5 8A4.5 4.5 0 0014 7.97v1.79l2.48 2.48c.01-.08.02-.16.02-.24z"/>
                             </svg>
                         </template>
                         <template x-if="!$store.player.isMuted && $store.player.volume > 0">
-                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
                             </svg>
                         </template>
@@ -248,11 +255,12 @@
                         min="0"
                         max="1"
                         step="0.02"
+                        aria-label="Уровень громкости"
                         :value="$store.player.isMuted ? 0 : $store.player.volume"
                         @input="$store.player.setVolume(parseFloat($event.target.value))"
                         class="w-full h-1.5 bg-surface-elevated rounded-lg appearance-none cursor-pointer accent-brand focus:outline-none"
                     >
-                    <span class="text-[11px] font-mono text-content-secondary w-9 text-right" x-text="`${Math.round(($store.player.isMuted ? 0 : $store.player.volume) * 100)}%`"></span>
+                    <span class="text-xs font-mono text-content-secondary w-9 text-right" x-text="`${Math.round(($store.player.isMuted ? 0 : $store.player.volume) * 100)}%`"></span>
                 </div>
             </div>
 
@@ -264,32 +272,32 @@
             <!-- Переключатель режимов монитора -->
             <div class="flex items-center justify-between border-b border-surface-border pb-3">
                 <div class="flex items-center space-x-1.5 font-mono text-xs">
-                    <span class="text-content-muted mr-1.5 text-[10px] tracking-wider uppercase">MONITOR:</span>
+                    <span class="text-content-muted mr-1.5 text-xs tracking-wider uppercase">MONITOR:</span>
                     <button
                         @click="$store.player.setCenterDeckMode('spectrum')"
                         :class="$store.player.centerDeckMode === 'spectrum' ? 'bg-surface-elevated text-brand font-bold border-surface-border shadow-sm' : 'text-content-secondary hover:text-white border-transparent'"
-                        class="px-2.5 py-1 rounded-lg border text-[11px] transition">
+                        class="px-2.5 py-1 rounded-lg border text-xs transition">
                         SPECTRUM
                     </button>
                     <button
                         @click="$store.player.setCenterDeckMode('lyrics')"
                         :class="$store.player.centerDeckMode === 'lyrics' ? 'bg-surface-elevated text-brand font-bold border-surface-border shadow-sm' : 'text-content-secondary hover:text-white border-transparent'"
-                        class="px-2.5 py-1 rounded-lg border text-[11px] transition flex items-center space-x-1">
+                        class="px-2.5 py-1 rounded-lg border text-xs transition flex items-center space-x-1">
                         <span>LYRICS</span>
                         <template x-if="$store.player.lyricsKind === 'lrc'">
-                            <span class="w-1.5 h-1.5 rounded-full bg-brand"></span>
+                            <span class="w-1.5 h-1.5 rounded-full bg-brand" aria-hidden="true"></span>
                         </template>
                     </button>
                     <button
                         @click="$store.player.setCenterDeckMode('specs')"
                         :class="$store.player.centerDeckMode === 'specs' ? 'bg-surface-elevated text-brand font-bold border-surface-border shadow-sm' : 'text-content-secondary hover:text-white border-transparent'"
-                        class="px-2.5 py-1 rounded-lg border text-[11px] transition">
+                        class="px-2.5 py-1 rounded-lg border text-xs transition">
                         PASSPORT
                     </button>
                 </div>
 
                 <!-- Статус или кнопка текста -->
-                <div class="text-[11px] font-mono text-content-muted">
+                <div class="text-xs font-mono text-content-muted">
                     <template x-if="$store.player.centerDeckMode === 'lyrics' && $store.player.currentTrack">
                         <button
                             @click="$store.app.openLyricsModal($store.player.currentTrack)"
@@ -305,7 +313,7 @@
                 
                 <!-- РЕЖИМ 1: CANVAS СПЕКТРОАНАЛИЗАТОР -->
                 <div x-show="$store.player.centerDeckMode === 'spectrum'" class="w-full h-full flex flex-col justify-between">
-                    <div class="flex items-center justify-between text-[10px] font-mono text-content-muted mb-2">
+                    <div class="flex items-center justify-between text-xs font-mono text-content-muted mb-2">
                         <span>REAL-TIME FFT • 32 BINS</span>
                         <span class="text-brand font-semibold" x-text="$store.player.isPlaying ? 'SIGNAL LOCKED' : 'SIGNAL IDLE'"></span>
                     </div>
@@ -318,7 +326,7 @@
                         </canvas>
                     </div>
 
-                    <div class="mt-2 pt-2 border-t border-surface-borderSubtle flex items-center justify-between text-[10px] font-mono text-content-muted">
+                    <div class="mt-2 pt-2 border-t border-surface-borderSubtle flex items-center justify-between text-xs font-mono text-content-muted">
                         <span>GRAVITY PEAK-HOLD</span>
                         <span>LOGARITHMIC FREQUENCY SCALE</span>
                     </div>
@@ -329,7 +337,7 @@
                     <!-- Загрузка -->
                     <template x-if="$store.player.lyricsLoading">
                         <div class="flex-1 flex flex-col items-center justify-center text-content-muted space-y-2">
-                            <svg class="w-6 h-6 animate-spin text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <svg class="w-6 h-6 animate-spin text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
@@ -352,7 +360,7 @@
                                     class="transition-all duration-200 cursor-pointer flex items-baseline space-x-3 text-sm">
                                     <template x-if="line.time !== null">
                                         <span
-                                            class="text-[10px] font-mono shrink-0 select-none"
+                                            class="text-xs font-mono shrink-0 select-none"
                                             :class="$store.player.currentLyricIndex === idx ? 'text-brand font-bold' : 'text-content-muted'"
                                             x-text="$store.player.formatDuration(line.time)">
                                         </span>
@@ -366,8 +374,8 @@
                     <!-- Если текст отсутствует -->
                     <template x-if="!$store.player.lyricsLoading && (!$store.player.lyricsLines || $store.player.lyricsLines.length === 0)">
                         <div class="flex-1 flex flex-col items-center justify-center text-center p-4 space-y-3">
-                            <div class="w-12 h-12 rounded-full bg-surface-elevated border border-surface-border flex items-center justify-center text-content-muted">
-                                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                            <div class="w-12 h-12 rounded-full bg-surface-elevated border border-surface-border flex items-center justify-center text-content-muted" aria-hidden="true">
+                                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                     <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
                                 </svg>
                             </div>
@@ -386,11 +394,11 @@
                     </template>
 
                     <!-- Футер караоке: тумблер автопрокрутки -->
-                    <div class="pt-2 border-t border-surface-borderSubtle flex items-center justify-between text-[10px] font-mono text-content-muted">
+                    <div class="pt-2 border-t border-surface-borderSubtle flex items-center justify-between text-xs font-mono text-content-muted">
                         <button
                             @click="$store.player.autoScrollLyrics = !$store.player.autoScrollLyrics"
                             class="hover:text-content-primary transition flex items-center space-x-1.5">
-                            <span class="w-1.5 h-1.5 rounded-full" :class="$store.player.autoScrollLyrics ? 'bg-brand' : 'bg-surface-border'"></span>
+                            <span class="w-1.5 h-1.5 rounded-full" :class="$store.player.autoScrollLyrics ? 'bg-brand' : 'bg-surface-border'" aria-hidden="true"></span>
                             <span x-text="`АВТОПРОКРУТКА: ${$store.player.autoScrollLyrics ? 'ВКЛ' : 'ВЫКЛ'}`"></span>
                         </button>
                         <span>КЛИК ПО СТРОКЕ — ПЕРЕМОТКА</span>
@@ -436,7 +444,7 @@
                         </div>
                     </div>
 
-                    <div class="pt-2 border-t border-surface-borderSubtle text-[10px] font-mono text-content-muted flex items-center justify-between">
+                    <div class="pt-2 border-t border-surface-borderSubtle text-xs font-mono text-content-muted flex items-center justify-between">
                         <span>ZERO-PYTHON ARCHITECTURE</span>
                         <span>PURE GO STREAMING</span>
                     </div>
@@ -452,13 +460,14 @@
             <div class="flex items-center justify-between border-b border-surface-border pb-3">
                 <div>
                     <h3 class="text-xs font-mono font-bold text-content-primary tracking-wider">TAPE RACK (ОЧЕРЕДЬ)</h3>
-                    <p class="text-[10px] font-mono text-content-muted" x-text="`${$store.player.playlist?.length || 0} ТРЕКОВ • ${$store.player.formatDuration($store.player.queueTotalDuration)}`"></p>
+                    <p class="text-xs font-mono text-content-muted" x-text="`${$store.player.playlist?.length || 0} ТРЕКОВ • ${$store.player.formatDuration($store.player.queueTotalDuration)}`"></p>
                 </div>
                 <div class="flex items-center space-x-1">
                     <button
                         @click="$store.player.clearQueue()"
+                        aria-label="Очистить очередь воспроизведения"
                         title="Очистить очередь"
-                        class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-content-muted hover:text-red-400 rounded-lg text-[10px] font-mono border border-surface-border transition">
+                        class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-content-muted hover:text-red-400 rounded-lg text-xs font-mono border border-surface-border transition">
                         ОЧИСТИТЬ
                     </button>
                 </div>
@@ -468,13 +477,13 @@
             <div class="flex-1 overflow-y-auto max-h-[380px] space-y-1.5 pr-1 divide-y divide-surface-borderSubtle">
                 <template x-if="!$store.player.playlist || $store.player.playlist.length === 0">
                     <div class="h-48 flex flex-col items-center justify-center text-center text-content-muted font-mono text-xs space-y-2">
-                        <svg class="w-8 h-8 text-surface-border" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-8 h-8 text-surface-border" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/>
                         </svg>
                         <span>ОЧЕРЕДЬ ПУСТА</span>
                         <button
                             @click="$store.app.activeTab = 'files'; $dispatch('refresh-file-manager', '')"
-                            class="text-brand hover:underline text-[11px]">
+                            class="text-brand hover:underline text-xs">
                             Выбрать треки в Медиатеке
                         </button>
                     </div>
@@ -487,9 +496,9 @@
                         class="p-2.5 rounded-xl transition cursor-pointer flex items-center justify-between group space-x-2">
                         
                         <!-- Номер или анимированный эквалайзер -->
-                        <div class="w-5 text-center font-mono text-[11px] shrink-0">
+                        <div class="w-5 text-center font-mono text-xs shrink-0">
                             <template x-if="$store.player.currentTrack && ($store.player.currentTrack.path === trk.path || $store.player.currentTrack.id === trk.id) && $store.player.isPlaying">
-                                <div class="flex items-end justify-center space-x-0.5 h-3">
+                                <div class="flex items-end justify-center space-x-0.5 h-3" aria-hidden="true">
                                     <span class="w-1 bg-brand rounded-sm animate-pulse h-2"></span>
                                     <span class="w-1 bg-brand rounded-sm animate-pulse h-3" style="animation-delay: 150ms;"></span>
                                     <span class="w-1 bg-brand rounded-sm animate-pulse h-1.5" style="animation-delay: 300ms;"></span>
@@ -507,18 +516,19 @@
                                 :class="($store.player.currentTrack && ($store.player.currentTrack.path === trk.path || $store.player.currentTrack.id === trk.id)) ? 'text-brand' : 'text-content-primary group-hover:text-white'"
                                 x-text="trk.title || trk.name">
                             </div>
-                            <div class="text-[11px] text-content-muted truncate" x-text="trk.artist || '—'"></div>
+                            <div class="text-xs text-content-muted truncate" x-text="trk.artist || '—'"></div>
                         </div>
 
                         <!-- Длительность и быстрые кнопки -->
                         <div class="flex items-center space-x-1 shrink-0">
-                            <span class="text-[10px] font-mono text-content-muted group-hover:hidden" x-text="$store.player.formatDuration(trk.duration)"></span>
+                            <span class="text-xs font-mono text-content-muted group-hover:hidden" x-text="$store.player.formatDuration(trk.duration)"></span>
 
                             <!-- Кнопки управления порядком и удалением (появляются при наведении) -->
                             <div class="hidden group-hover:flex items-center space-x-1">
                                 <button
                                     @click.stop="$store.player.moveInQueue(idx, idx - 1)"
                                     :disabled="idx === 0"
+                                    aria-label="Переместить трек вверх"
                                     title="Вверх"
                                     class="p-1 hover:text-white text-content-muted disabled:opacity-20 transition">
                                     ▲
@@ -526,12 +536,14 @@
                                 <button
                                     @click.stop="$store.player.moveInQueue(idx, idx + 1)"
                                     :disabled="idx === $store.player.playlist.length - 1"
+                                    aria-label="Переместить трек вниз"
                                     title="Вниз"
                                     class="p-1 hover:text-white text-content-muted disabled:opacity-20 transition">
                                     ▼
                                 </button>
                                 <button
                                     @click.stop="$store.player.removeFromQueue(idx)"
+                                    aria-label="Удалить трек из очереди"
                                     title="Удалить из очереди"
                                     class="p-1 hover:text-red-400 text-content-muted transition">
                                     ✕
@@ -543,7 +555,7 @@
             </div>
 
             <!-- Нижняя подсказка -->
-            <div class="pt-2 border-t border-surface-borderSubtle text-[10px] font-mono text-content-muted flex items-center justify-between">
+            <div class="pt-2 border-t border-surface-borderSubtle text-xs font-mono text-content-muted flex items-center justify-between">
                 <span>DND OR ARROWS TO REORDER</span>
                 <span>FIFO STACK</span>
             </div>

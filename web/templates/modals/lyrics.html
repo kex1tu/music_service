@@ -3,6 +3,9 @@
     <div
         x-show="$store.app.activeModal === 'lyrics'"
         x-cloak
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-lyrics-title"
         @click.self="close()"
         @keydown.escape.window="close()"
         class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4"
@@ -14,13 +17,14 @@
             <!-- Заголовок -->
             <div class="px-6 py-4 border-b border-surface-border flex items-center justify-between bg-surface-base/80">
                 <div>
-                    <h2 class="text-sm font-bold text-content-primary">Текст песни</h2>
+                    <h2 id="modal-lyrics-title" class="text-sm font-bold text-content-primary">Текст песни</h2>
                     <p class="text-xs text-content-secondary" x-text="track ? `${track.artist} — ${track.title}` : ''"></p>
                 </div>
                 <button
                     @click="close()"
+                    aria-label="Закрыть окно текста песни"
                     class="text-content-muted hover:text-content-primary p-1.5 rounded-lg hover:bg-surface-hover transition">
-                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
                     </svg>
                 </button>
@@ -58,12 +62,12 @@
                         :disabled="isLoading"
                         class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-xs text-content-secondary hover:text-content-primary rounded-lg transition border border-surface-border flex items-center space-x-1.5 shadow-sm active:scale-95">
                         <template x-if="isLoading">
-                            <svg class="w-3.5 h-3.5 animate-spin text-brand" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-3.5 h-3.5 animate-spin text-brand" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
                             </svg>
                         </template>
                         <template x-if="!isLoading">
-                            <svg class="w-3.5 h-3.5 text-brand" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-3.5 h-3.5 text-brand" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M9.5 16q-2.725 0-4.612-1.888T3 9.5t1.888-4.612T9.5 3t4.613 1.888T16 9.5q0 1.1-.35 2.075T14.7 13.3l5.6 5.6q.275.275.275.7t-.275.7t-.7.275t-.7-.275l-5.6-5.6q-.75.6-1.725.95T9.5 16m0-2q1.875 0 3.188-1.312T14 9.5t-1.312-3.187T9.5 5T6.313 6.313T5 9.5t1.313 3.188T9.5 14"/>
                             </svg>
                         </template>
@@ -75,18 +79,18 @@
                         @click="pasteFromClipboard()"
                         class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-xs text-content-secondary hover:text-content-primary rounded-lg transition border border-surface-border flex items-center space-x-1.5 shadow-sm active:scale-95"
                         title="Вставить скопированный текст песни">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M19 3h-4.18C14.4 1.84 13.3 1 12 1c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2m-7 0c.55 0 1 .45 1 1s-.45 1-1 1s-1-.45-1-1s.45-1 1-1m7 16H5V5h2v3h10V5h2z"/>
                         </svg>
                         <span>Вставить</span>
                     </button>
 
                     <label class="px-3 py-1.5 bg-surface-elevated hover:bg-surface-hover text-xs text-content-secondary hover:text-content-primary rounded-lg cursor-pointer transition border border-surface-border flex items-center space-x-1.5 shadow-sm active:scale-95" title="Загрузить локальный файл .lrc или .txt">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M11 14.825V18q0 .425.288.713T12 19t.713-.288T13 18v-3.175l.9.9q.15.15.338.225t.375.063t.362-.088t.325-.225q.275-.3.288-.7t-.288-.7l-2.6-2.6q-.15-.15-.325-.212T12 11.425t-.375.063t-.325.212l-2.6 2.6q-.3.3-.287.7t.312.7q.3.275.7.288t.7-.288zM6 22q-.825 0-1.412-.587T4 20V4q0-.825.588-1.412T6 2h7.175q.4 0 .763.15t.637.425l4.85 4.85q.275.275.425.638t.15.762V20q0 .825-.587 1.413T18 22zm7-14q0 .425.288.713T14 9h4l-5-5z"/>
                         </svg>
                         <span>Загрузить</span>
-                        <input type="file" accept=".lrc,.txt" @change="handleFileUpload($event)" class="hidden">
+                        <input type="file" accept=".lrc,.txt" @change="handleFileUpload($event)" aria-label="Загрузить файл текста .lrc или .txt" class="hidden">
                     </label>
 
                     <template x-if="content">
@@ -95,7 +99,7 @@
                             @click="clearContent()"
                             class="px-2.5 py-1.5 bg-surface-elevated hover:bg-surface-hover text-xs text-content-muted hover:text-content-primary rounded-lg transition border border-surface-border flex items-center space-x-1"
                             title="Очистить поле ввода текста">
-                            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/>
                             </svg>
                             <span>Очистить</span>
@@ -110,6 +114,7 @@
                     x-model="content"
                     @input="handleContentInput()"
                     @paste="handleContentPaste($event)"
+                    aria-label="Текст песни"
                     placeholder="Вставьте текст песни (LRC с таймкодами или обычный текст) или загрузите файл .lrc / .txt..."
                     class="w-full flex-1 bg-surface-input border border-surface-border rounded-xl p-4 text-xs font-mono text-content-primary focus:outline-none focus:border-brand resize-none placeholder-content-muted leading-relaxed"></textarea>
             </div>
@@ -122,7 +127,7 @@
                             type="button"
                             @click="deleteLyrics()"
                             class="text-xs text-red-400 hover:text-red-300 transition flex items-center space-x-1.5">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zM17 6H7v13h10zm-6.287 10.713Q11 16.425 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288M7 6v13z"/>
                             </svg>
                             <span>Удалить файл текста</span>
@@ -142,12 +147,12 @@
                         :disabled="isSaving || !content"
                         class="px-5 py-2 bg-brand hover:bg-brand-hover disabled:opacity-50 text-white text-xs font-bold rounded-lg transition flex items-center space-x-1.5 shadow-lg shadow-brand/20 active:scale-95">
                         <template x-if="isSaving">
-                            <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
                             </svg>
                         </template>
                         <template x-if="!isSaving">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="m9.55 15.15l8.475-8.475q.3-.3.7-.3t.7.3t.3.713t-.3.712l-9.175 9.2q-.3.3-.7.3t-.7-.3L4.55 13q-.3-.3-.288-.712t.313-.713t.713-.3t.712.3z"/>
                             </svg>
                         </template>

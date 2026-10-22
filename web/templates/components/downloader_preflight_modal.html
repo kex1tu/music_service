@@ -3,6 +3,9 @@
 <div
     x-show="$store.preflight && $store.preflight.isOpen"
     x-cloak
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="preflight-modal-title"
     class="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 md:p-6"
     @keydown.escape.window="$store.preflight.close()">
 
@@ -14,16 +17,16 @@
         <div class="px-4 py-3.5 sm:px-5 sm:py-4 border-b border-surface-border bg-surface-elevated/60 flex items-center justify-between gap-3">
             <div class="min-w-0 flex items-center space-x-2.5">
                 <span class="p-1.5 rounded bg-brand/15 text-brand border border-brand/30 shrink-0">
-                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
                     </svg>
                 </span>
                 <div>
-                    <h3 class="text-sm sm:text-base font-bold text-white tracking-tight flex items-center gap-2">
+                    <h2 id="preflight-modal-title" class="text-sm sm:text-base font-bold text-white tracking-tight flex items-center gap-2">
                         <span>Предпросмотр релиза</span>
-                        <span class="font-mono text-[10px] text-content-muted uppercase tracking-wider bg-surface-input px-1.5 py-0.5 rounded border border-surface-border">Pre-Flight</span>
-                    </h3>
-                    <p class="text-[11px] text-content-secondary truncate max-w-xs sm:max-w-md" x-text="$store.preflight.url"></p>
+                        <span class="font-mono text-xs text-content-muted uppercase tracking-wider bg-surface-input px-1.5 py-0.5 rounded border border-surface-border">Pre-Flight</span>
+                    </h2>
+                    <p class="text-xs text-content-secondary truncate max-w-xs sm:max-w-md" x-text="$store.preflight.url"></p>
                 </div>
             </div>
 
@@ -32,8 +35,9 @@
                 type="button"
                 @click="$store.preflight.close()"
                 class="p-1.5 text-content-muted hover:text-white rounded-lg hover:bg-surface-hover transition shrink-0"
+                aria-label="Закрыть окно предпросмотра"
                 title="Закрыть окно">
-                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
                 </svg>
             </button>
@@ -42,7 +46,7 @@
         <!-- Состояние загрузки метаданных -->
         <template x-if="$store.preflight.isLoading">
             <div class="p-12 flex flex-col items-center justify-center space-y-3">
-                <svg class="w-8 h-8 text-brand animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                <svg class="w-8 h-8 text-brand animate-spin" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
                 </svg>
                 <span class="text-xs font-medium text-content-secondary">Анализ релиза и проверка базы данных...</span>
@@ -58,11 +62,11 @@
                     <!-- Обложка -->
                     <div class="w-14 h-14 sm:w-20 sm:h-20 md:w-36 md:h-36 rounded-lg bg-surface-input border border-surface-border overflow-hidden shrink-0 shadow-md">
                         <template x-if="$store.preflight.release.cover_url">
-                            <img :src="$store.preflight.release.cover_url" alt="Cover" class="w-full h-full object-cover">
+                            <img :src="$store.preflight.release.cover_url" alt="Обложка релиза" class="w-full h-full object-cover">
                         </template>
                         <template x-if="!$store.preflight.release.cover_url">
                             <div class="w-full h-full flex items-center justify-center text-content-muted">
-                                <svg class="w-8 h-8 opacity-40" viewBox="0 0 24 24" fill="currentColor">
+                                <svg class="w-8 h-8 opacity-40" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                     <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
                                 </svg>
                             </div>
@@ -71,9 +75,9 @@
 
                     <!-- Инфо релиза -->
                     <div class="min-w-0 flex-1 md:w-full space-y-1">
-                        <h4 class="text-xs sm:text-sm font-bold text-white truncate" x-text="$store.preflight.release.title || 'Неизвестный релиз'"></h4>
+                        <h3 class="text-xs sm:text-sm font-bold text-white truncate" x-text="$store.preflight.release.title || 'Неизвестный релиз'"></h3>
                         <p class="text-xs text-content-secondary truncate" x-text="$store.preflight.release.artist || 'Неизвестный артист'"></p>
-                        <div class="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px] text-content-muted">
+                        <div class="flex flex-wrap items-center gap-1.5 pt-0.5 text-xs text-content-muted">
                             <template x-if="$store.preflight.release.year > 0">
                                 <span class="font-mono" x-text="$store.preflight.release.year"></span>
                             </template>
@@ -83,7 +87,7 @@
                         </div>
 
                         <!-- Сводка статистики (на Desktop подробная, на мобилке скрыта для разгрузки) -->
-                        <div class="hidden md:block pt-3 border-t border-surface-borderSubtle w-full space-y-1.5 text-[11px]">
+                        <div class="hidden md:block pt-3 border-t border-surface-borderSubtle w-full space-y-1.5 text-xs">
                             <div class="flex items-center justify-between text-content-secondary">
                                 <span>Всего треков:</span>
                                 <span class="font-mono text-white font-semibold" x-text="$store.preflight.tracks.length"></span>
@@ -123,29 +127,30 @@
                             <button
                                 type="button"
                                 @click="$store.preflight.selectOnlyNewAndUpgrade()"
-                                class="px-2.5 py-1 rounded-sm text-[11px] font-medium border transition flex items-center gap-1.5 bg-surface-input hover:bg-surface-hover text-zinc-200 border-surface-border">
+                                class="px-2.5 py-1 rounded-sm text-xs font-medium border transition flex items-center gap-1.5 bg-surface-input hover:bg-surface-hover text-zinc-200 border-surface-border">
                                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                                 <span>Новые + Апгрейд</span>
-                                <span class="font-mono text-zinc-400 text-[10px]" x-text="$store.preflight.summary ? `(${$store.preflight.summary.new_tracks_count + $store.preflight.summary.upgrade_available_count})` : ''"></span>
+                                <span class="font-mono text-zinc-400 text-xs" x-text="$store.preflight.summary ? `(${$store.preflight.summary.new_tracks_count + $store.preflight.summary.upgrade_available_count})` : ''"></span>
                             </button>
 
                             <!-- Фильтр: Только новые -->
                             <button
                                 type="button"
                                 @click="$store.preflight.selectOnlyNew()"
-                                class="px-2.5 py-1 rounded-sm text-[11px] font-medium border transition flex items-center gap-1.5 bg-surface-input hover:bg-surface-hover text-zinc-200 border-surface-border">
+                                class="px-2.5 py-1 rounded-sm text-xs font-medium border transition flex items-center gap-1.5 bg-surface-input hover:bg-surface-hover text-zinc-200 border-surface-border">
                                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                                 <span>Только новые</span>
-                                <span class="font-mono text-zinc-400 text-[10px]" x-text="$store.preflight.summary ? `(${$store.preflight.summary.new_tracks_count})` : ''"></span>
+                                <span class="font-mono text-zinc-400 text-xs" x-text="$store.preflight.summary ? `(${$store.preflight.summary.new_tracks_count})` : ''"></span>
                             </button>
                         </div>
 
                         <!-- Переключатель: Скрыть имеющиеся 320k -->
                         <template x-if="$store.preflight.summary && $store.preflight.summary.existing_high_quality_count > 0">
-                            <label class="flex items-center gap-1.5 cursor-pointer px-2 py-0.5 rounded bg-surface-base border border-surface-borderSubtle text-content-secondary hover:text-white text-[11px] select-none">
+                            <label class="flex items-center gap-1.5 cursor-pointer px-2 py-0.5 rounded bg-surface-base border border-surface-borderSubtle text-content-secondary hover:text-white text-xs select-none">
                                 <input
                                     type="checkbox"
                                     x-model="$store.preflight.hideExisting320k"
+                                    aria-label="Скрыть треки 320 кбит/с, уже имеющиеся в медиатеке"
                                     class="accent-brand rounded w-3.5 h-3.5 cursor-pointer">
                                 <span>Скрыть треки 320k</span>
                                 <span class="font-mono text-zinc-400" x-text="`(${$store.preflight.summary.existing_high_quality_count})`"></span>
@@ -156,7 +161,7 @@
                     <!-- Таблица треклиста -->
                     <div class="flex-1 overflow-y-auto max-h-[50vh] sm:max-h-[55vh] divide-y divide-surface-borderSubtle">
                         <table class="w-full text-left text-xs border-collapse">
-                            <thead class="sticky top-0 z-10 bg-surface-elevated/95 backdrop-blur-xs border-b border-surface-border text-[11px] text-content-secondary font-semibold">
+                            <thead class="sticky top-0 z-10 bg-surface-elevated/95 backdrop-blur-xs border-b border-surface-border text-xs text-content-secondary font-semibold">
                                 <tr>
                                     <th class="py-2 px-3 w-10 text-center">
                                         <input
@@ -165,6 +170,7 @@
                                             :indeterminate="$store.preflight.isIndeterminate"
                                             @change="$store.preflight.toggleSelectAll($event.target.checked)"
                                             class="accent-brand rounded cursor-pointer w-3.5 h-3.5"
+                                            aria-label="Выбрать все треки"
                                             title="Выбрать все / Снять выбор">
                                     </th>
                                     <th class="py-2 px-2 w-10 font-mono text-content-muted text-center">#</th>
@@ -186,20 +192,21 @@
                                                 type="checkbox"
                                                 :checked="$store.preflight.isSelected(track.index)"
                                                 @change="$store.preflight.toggleTrack(track.index)"
+                                                :aria-label="'Выбрать трек ' + track.title"
                                                 class="accent-brand rounded cursor-pointer w-3.5 h-3.5">
                                         </td>
 
                                         <!-- Номер трека -->
-                                        <td class="py-2 px-2 font-mono text-content-muted text-[11px] text-center" x-text="track.track_number || (track.index + 1)"></td>
+                                        <td class="py-2 px-2 font-mono text-content-muted text-xs text-center" x-text="track.track_number || (track.index + 1)"></td>
 
                                         <!-- Название и артист -->
                                         <td class="py-2 px-3 min-w-0">
                                             <div class="font-medium text-white truncate" x-text="track.title"></div>
-                                            <div class="text-[11px] text-content-secondary truncate" x-text="track.artist"></div>
+                                            <div class="text-xs text-content-secondary truncate" x-text="track.artist"></div>
                                         </td>
 
                                         <!-- Длительность -->
-                                        <td class="py-2 px-3 hidden sm:table-cell text-right font-mono text-content-muted text-[11px] tabular-nums"
+                                        <td class="py-2 px-3 hidden sm:table-cell text-right font-mono text-content-muted text-xs tabular-nums"
                                             x-text="window.AppFormatters ? window.AppFormatters.formatDuration(track.duration) : track.duration + 'с'">
                                         </td>
 
@@ -207,7 +214,7 @@
                                         <td class="py-2 px-3 text-right">
                                             <!-- Статус: НОВЫЙ -->
                                             <template x-if="track.status === 'NEW'">
-                                                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm font-mono text-[10px] tabular-nums font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm font-mono text-xs tabular-nums font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                                                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
                                                     <span>НОВЫЙ</span>
                                                 </span>
@@ -215,7 +222,7 @@
 
                                             <!-- Статус: АПГРЕЙД -->
                                             <template x-if="track.status === 'EXISTS_UPGRADE_AVAILABLE'">
-                                                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm font-mono text-[10px] tabular-nums font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/20"
+                                                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm font-mono text-xs tabular-nums font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/20"
                                                     :title="track.existing_track ? `Текущий файл: ${track.existing_track.file_path}` : 'Низкий битрейт'">
                                                     <span class="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"></span>
                                                     <span x-text="`АПГРЕЙД (${track.existing_track && track.existing_track.bitrate > 0 ? (track.existing_track.bitrate >= 1000 ? Math.round(track.existing_track.bitrate / 1000) : track.existing_track.bitrate) : 128}k → 320k)`"></span>
@@ -224,7 +231,7 @@
 
                                             <!-- Статус: В БАЗЕ 320K -->
                                             <template x-if="track.status === 'EXISTS_HIGH_QUALITY'">
-                                                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm font-mono text-[10px] tabular-nums font-medium bg-zinc-800 text-zinc-400 border border-zinc-700/60"
+                                                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm font-mono text-xs tabular-nums font-medium bg-zinc-800 text-zinc-400 border border-zinc-700/60"
                                                     :title="track.existing_track ? `Уже в медиатеке: ${track.existing_track.file_path}` : 'Файл уже скачан'">
                                                     <span class="w-1.5 h-1.5 rounded-full bg-zinc-500 shrink-0"></span>
                                                     <span>В БАЗЕ (320k)</span>
@@ -245,7 +252,7 @@
             <div class="text-xs text-content-secondary flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-start">
                 <span x-text="`Выбрано: ${$store.preflight.selectedCount} из ${$store.preflight.tracks.length} треков`"></span>
                 <template x-if="$store.preflight.selectedCount === 0 && $store.preflight.tracks.length > 0">
-                    <span class="text-[11px] text-amber-400/90 hidden sm:inline">• Все треки уже есть в 320k. Отметьте нужные для перезаписи.</span>
+                    <span class="text-xs text-amber-400/90 hidden sm:inline">• Все треки уже есть в 320k. Отметьте нужные для перезаписи.</span>
                 </template>
             </div>
 
@@ -264,7 +271,7 @@
                     :title="$store.preflight.selectedCount === 0 ? 'Все треки уже есть в 320 kbps. Отметьте нужные для перезаписи' : 'Скачать выбранные'"
                     class="h-9 px-4 bg-white hover:bg-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed text-zinc-950 font-semibold rounded-md text-xs transition flex items-center justify-center space-x-1.5 shadow-sm active:scale-[0.98]">
                     <template x-if="$store.preflight.isStartingDownload">
-                        <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
                         </svg>
                     </template>

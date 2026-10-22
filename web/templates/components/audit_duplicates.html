@@ -11,8 +11,9 @@
         <button
             @click="fixAllDuplicates()"
             :disabled="isFixingDuplicates || !duplicatesData.groups || duplicatesData.groups.length === 0"
+            aria-label="Удалить все обнаруженные дубликаты"
             class="px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-2 shadow-lg shrink-0">
-            <svg class="w-4 h-4" :class="{'animate-spin': isFixingDuplicates}" viewBox="0 0 24 24" fill="currentColor">
+            <svg class="w-4 h-4" :class="{'animate-spin': isFixingDuplicates}" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
             </svg>
             <span x-text="isFixingDuplicates ? 'Удаление дубликатов...' : 'Удалить все дубликаты'"></span>
@@ -20,15 +21,15 @@
     </div>
 
     <template x-if="isLoading">
-        <div class="bg-surface-panel border border-surface-border rounded-xl p-8 text-center text-gray-400 text-sm flex items-center justify-center space-x-2">
-            <svg class="w-4 h-4 animate-spin text-red-400" viewBox="0 0 24 24" fill="currentColor">
+        <div class="bg-surface-panel border border-surface-border rounded-xl p-8 text-center text-content-muted text-sm flex items-center justify-center space-x-2">
+            <svg class="w-4 h-4 animate-spin text-red-400" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
             </svg>
             <span>Загрузка данных...</span>
         </div>
     </template>
     <template x-if="!isLoading && (!duplicatesData.groups || duplicatesData.groups.length === 0)">
-        <div class="bg-surface-panel border border-surface-border rounded-xl p-8 text-center text-gray-500 text-sm">
+        <div class="bg-surface-panel border border-surface-border rounded-xl p-8 text-center text-content-muted text-sm">
             Дубликатов не обнаружено — медиатека чиста!
         </div>
     </template>
@@ -47,19 +48,20 @@
                                         <span x-text="grp.artist"></span> — <span class="text-brand" x-text="grp.title"></span>
                                     </h4>
                                     <template x-if="grp.album || grp.album_dir">
-                                        <span class="text-[10px] bg-surface-elevated text-content-secondary px-2 py-0.5 rounded border border-surface-border font-mono"
+                                        <span class="text-xs bg-surface-elevated text-content-secondary px-2 py-0.5 rounded border border-surface-border font-mono"
                                               x-text="grp.album || grp.album_dir"></span>
                                     </template>
                                 </div>
-                                <p class="text-xs text-gray-400" x-text="`Обнаружено копий: ${grp.tracks.length}`"></p>
+                                <p class="text-xs text-content-muted" x-text="`Обнаружено копий: ${grp.tracks.length}`"></p>
                             </div>
                         </div>
                         <div class="flex items-center space-x-2">
                             <button
                                 @click="fixDuplicateGroup(grp)"
                                 :disabled="grp._isFixing"
-                                class="px-3 py-1.5 px-3 py-1.5 bg-brand/10 hover:bg-brand/20 text-brand hover:text-brand-hover border border-brand/30 rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 disabled:opacity-50 shadow-sm active:scale-95">
-                                <svg class="w-3.5 h-3.5" :class="{'animate-spin': grp._isFixing}" viewBox="0 0 24 24" fill="currentColor">
+                                :aria-label="'Оставить лучшую копию трека ' + grp.title"
+                                class="px-3 py-1.5 bg-brand/10 hover:bg-brand/20 text-brand hover:text-brand-hover border border-brand/30 rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 disabled:opacity-50 shadow-sm active:scale-95">
+                                <svg class="w-3.5 h-3.5" :class="{'animate-spin': grp._isFixing}" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
                                 </svg>
                                 <span x-text="grp._isFixing ? 'Исправление...' : 'Оставить лучшую копию'"></span>
@@ -73,8 +75,8 @@
                             <div class="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                                 <div class="min-w-0 flex-1">
                                     <div class="text-content-primary font-medium truncate" x-text="trk.filename" :title="trk.filename"></div>
-                                    <div class="text-content-muted font-mono text-[11px] truncate" x-text="trk.path" :title="trk.path"></div>
-                                    <div class="flex items-center space-x-3 text-[11px] text-content-muted font-mono mt-0.5">
+                                    <div class="text-content-muted font-mono text-xs truncate" x-text="trk.path" :title="trk.path"></div>
+                                    <div class="flex items-center space-x-3 text-xs text-content-muted font-mono mt-0.5">
                                         <template x-if="trk.duration">
                                             <span x-text="`${Math.floor(trk.duration / 60)}:${String(Math.floor(trk.duration % 60)).padStart(2, '0')}`"></span>
                                         </template>
@@ -91,15 +93,17 @@
                                     <button
                                         @click="openDirectory(trk.path.substring(0, trk.path.lastIndexOf('/')) || '')"
                                         class="p-1.5 hover:bg-surface-elevated text-content-muted hover:text-content-primary rounded transition"
+                                        aria-label="Открыть папку с треком"
                                         title="Открыть папку">
-                                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                        <svg class="w-4 h-4" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                             <path d="M4 20q-.825 0-1.412-.587T2 18V6q0-.825.588-1.412T4 4h5.175q.4 0 .763.15t.637.425L12 6h8q.825 0 1.413.588T22 8v10q0 .825-.587 1.413T20 20zm0-2h16V8h-8.825l-2-2H4zm0 0V6z"/>
                                         </svg>
                                     </button>
                                     <button
                                         @click="promptDeleteDuplicate(trk)"
-                                        class="px-2.5 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 rounded text-[11px] font-medium transition flex items-center space-x-1">
-                                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                        :aria-label="'Удалить копию ' + trk.filename"
+                                        class="px-2.5 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 rounded text-xs font-medium transition flex items-center space-x-1">
+                                        <svg class="w-3.5 h-3.5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                             <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zm10-15H7v13h10zM7 6v13z"/>
                                         </svg>
                                         <span>Удалить копию</span>

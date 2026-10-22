@@ -4,13 +4,14 @@
     <div class="flex-1 overflow-x-auto overflow-y-auto max-h-[calc(100vh-230px)] relative select-none">
         <table class="w-full text-left text-xs text-content-secondary border-collapse table-auto md:min-w-[900px]">
             <!-- Липкая шапка таблицы (Sticky Header) -->
-            <thead class="sticky top-0 z-20 bg-surface-panel/95 backdrop-blur-md text-[10px] font-mono uppercase tracking-wider text-content-muted border-b border-surface-border">
+            <thead class="sticky top-0 z-20 bg-surface-panel/95 backdrop-blur-md text-xs font-mono uppercase tracking-wider text-content-muted border-b border-surface-border">
                 <tr>
                     <th class="py-2 px-2 w-8 text-center">
                         <input
                             type="checkbox"
                             :checked="isAllSelected"
                             @click="toggleSelectAll()"
+                            aria-label="Выбрать все треки в таблице"
                             class="rounded-sm bg-surface-input border-surface-border text-white focus:ring-0 cursor-pointer w-3.5 h-3.5">
                     </th>
                     <th class="py-2 px-1 w-8 text-center" title="Воспроизвести">▶</th>
@@ -57,7 +58,7 @@
                                 <div class="space-y-3 max-w-3xl mx-auto py-2">
                                     <div class="flex flex-col items-center justify-center space-y-1">
                                         <div class="text-xs font-semibold text-white uppercase tracking-wider">Подкаталоги медиатеки:</div>
-                                        <div class="text-[11px] text-content-muted">Выберите папку для перехода к альбомам и трекам</div>
+                                        <div class="text-xs text-content-muted">Выберите папку для перехода к альбомам и трекам</div>
                                     </div>
 
                                     <!-- Поиск по каталогам, если их много -->
@@ -67,6 +68,7 @@
                                                 type="text"
                                                 x-model="dirFilter"
                                                 placeholder="Быстрый поиск папки..."
+                                                aria-label="Быстрый поиск папки"
                                                 class="w-full bg-surface-elevated text-content-primary text-xs rounded-md px-2.5 py-1 border border-surface-border focus:border-white/30 outline-none transition font-mono">
                                         </div>
                                     </template>
@@ -78,23 +80,25 @@
                                                 <button
                                                     type="button"
                                                     @click="navigateTo(dir.path)"
+                                                    :aria-label="'Открыть папку ' + dir.name"
                                                     class="flex items-center space-x-2.5 flex-1 min-w-0 text-left active:scale-95 transition">
                                                     <div class="w-7 h-7 rounded-sm bg-surface-input flex items-center justify-center text-zinc-400 group-hover:text-white transition shrink-0">
-                                                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                                        <svg class="w-4 h-4" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                                             <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
                                                         </svg>
                                                     </div>
                                                     <div class="min-w-0 flex-1">
                                                         <div class="font-medium text-white group-hover:text-white truncate text-xs" x-text="dir.name"></div>
-                                                        <div class="text-[10px] text-content-muted font-mono" x-text="dir.track_count !== undefined ? `${dir.track_count} тр.` : 'Папка'"></div>
+                                                        <div class="text-xs text-content-muted font-mono" x-text="dir.track_count !== undefined ? `${dir.track_count} тр.` : 'Папка'"></div>
                                                     </div>
                                                 </button>
                                                 <button
                                                     type="button"
                                                     @click.stop="promptRedownloadDirectory(dir)"
                                                     title="Скачать весь релиз/папку заново"
+                                                    :aria-label="'Скачать заново папку ' + dir.name"
                                                     class="w-6 h-6 rounded text-content-muted hover:text-white hover:bg-white/[0.08] flex items-center justify-center transition shrink-0">
-                                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                                    <svg class="w-3.5 h-3.5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                                         <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6c0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6c0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4l-4-4v3z"/>
                                                     </svg>
                                                 </button>
@@ -102,8 +106,9 @@
                                                     type="button"
                                                     @click.stop="promptDeleteDirectory(dir)"
                                                     title="Удалить папку"
+                                                    :aria-label="'Удалить папку ' + dir.name"
                                                     class="w-6 h-6 rounded text-content-muted hover:text-rose-300 hover:bg-rose-500/15 flex items-center justify-center transition shrink-0">
-                                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                                    <svg class="w-3.5 h-3.5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                                         <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zm3.713-4.288Q11 16.426 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288"/>
                                                     </svg>
                                                 </button>
@@ -116,7 +121,7 @@
                             <!-- Если действительно пустая папка -->
                             <template x-if="!(directories && directories.length > 0)">
                                 <div class="flex flex-col items-center justify-center space-y-1.5 py-6">
-                                    <svg class="w-8 h-8 text-content-muted/40" viewBox="0 0 24 24" fill="currentColor">
+                                    <svg class="w-8 h-8 text-content-muted/40" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                         <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3z"/>
                                     </svg>
                                     <span class="text-xs font-mono text-content-muted">В текущем каталоге нет аудиофайлов</span>
@@ -148,6 +153,7 @@
                                 type="checkbox"
                                 :checked="isTrackSelected(track._trackIndex)"
                                 @click="selectRow(track._trackIndex, $event)"
+                                :aria-label="'Выбрать трек ' + (track.title || track.name)"
                                 class="rounded-sm bg-surface-input border-surface-border text-white focus:ring-0 cursor-pointer w-3.5 h-3.5">
                         </td>
 
@@ -156,8 +162,9 @@
                             <button
                                 type="button"
                                 @click="$store.player.playTrack(track, tracks)"
+                                :aria-label="'Воспроизвести ' + (track.title || track.name)"
                                 class="w-6 h-6 rounded-full bg-surface-elevated hover:bg-white hover:text-zinc-950 text-content-secondary flex items-center justify-center transition border border-surface-border shadow-xs">
-                                <svg class="w-2.5 h-2.5 translate-x-0.5" viewBox="0 0 24 24" fill="currentColor">
+                                <svg class="w-2.5 h-2.5 translate-x-0.5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M8 5v14l11-7z"/>
                                 </svg>
                             </button>
@@ -167,10 +174,10 @@
                         <td class="py-1 px-1.5 text-center">
                             <div class="w-7 h-7 rounded-sm bg-surface-input border border-surface-border overflow-hidden mx-auto flex items-center justify-center shadow-xs">
                                 <template x-if="track.cover_preview_url">
-                                    <img :src="track.cover_preview_url" class="w-full h-full object-cover">
+                                    <img :src="track.cover_preview_url" alt="" class="w-full h-full object-cover">
                                 </template>
                                 <template x-if="!track.cover_preview_url">
-                                    <svg class="w-3.5 h-3.5 text-content-muted/40" viewBox="0 0 24 24" fill="currentColor">
+                                    <svg class="w-3.5 h-3.5 text-content-muted/40" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                         <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4V7h4V3z"/>
                                     </svg>
                                 </template>
@@ -179,7 +186,7 @@
 
                         <!-- Номер трека (Track #) -->
                         <td
-                            class="py-1.5 px-2 text-center font-mono tabular-nums text-[11px]"
+                            class="py-1.5 px-2 text-center font-mono tabular-nums text-xs"
                             :class="isCellDirty(track._trackIndex, 'track_number') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
                             @dblclick="startEdit(track._trackIndex, 'track_number', $event)">
                             <template x-if="editingCell && editingCell.index === track._trackIndex && editingCell.field === 'track_number'">
@@ -189,6 +196,7 @@
                                     x-model="editingCell.value"
                                     @blur="saveEdit()"
                                     @keydown="onCellKeyDown($event)"
+                                    aria-label="Редактировать номер трека"
                                     class="w-10 bg-surface-input text-white border border-white/40 rounded-sm px-1 py-0.5 text-center text-xs font-mono outline-none">
                             </template>
                             <template x-if="!(editingCell && editingCell.index === track._trackIndex && editingCell.field === 'track_number')">
@@ -198,7 +206,7 @@
 
                         <!-- Номер диска (Disc #) — скрыт на мобилке -->
                         <td
-                            class="hidden md:table-cell py-1.5 px-2 text-center font-mono tabular-nums text-[11px]"
+                            class="hidden md:table-cell py-1.5 px-2 text-center font-mono tabular-nums text-xs"
                             :class="isCellDirty(track._trackIndex, 'disc_number') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
                             @dblclick="startEdit(track._trackIndex, 'disc_number', $event)">
                             <template x-if="editingCell && editingCell.index === track._trackIndex && editingCell.field === 'disc_number'">
@@ -208,6 +216,7 @@
                                     x-model="editingCell.value"
                                     @blur="saveEdit()"
                                     @keydown="onCellKeyDown($event)"
+                                    aria-label="Редактировать номер диска"
                                     class="w-10 bg-surface-input text-white border border-white/40 rounded-sm px-1 py-0.5 text-center text-xs font-mono outline-none">
                             </template>
                             <template x-if="!(editingCell && editingCell.index === track._trackIndex && editingCell.field === 'disc_number')">
@@ -227,13 +236,14 @@
                                     x-model="editingCell.value"
                                     @blur="saveEdit()"
                                     @keydown="onCellKeyDown($event)"
+                                    aria-label="Редактировать название трека"
                                     class="w-full bg-surface-input text-white border border-white/40 rounded-sm px-1.5 py-0.5 text-xs outline-none">
                             </template>
                             <template x-if="!(editingCell && editingCell.index === track._trackIndex && editingCell.field === 'title')">
                                 <div>
                                     <span class="truncate block text-xs font-medium text-white" x-text="track.title || '—'"></span>
                                     <!-- Подстрочник метаданных для мобильных (< 768px) -->
-                                    <div class="md:hidden text-[10px] text-content-muted font-mono truncate">
+                                    <div class="md:hidden text-xs text-content-muted font-mono truncate">
                                         <span x-text="track.artist || '—'"></span>
                                         <template x-if="track.album">
                                             <span x-text="` • ${track.album}`"></span>
@@ -258,6 +268,7 @@
                                     x-model="editingCell.value"
                                     @blur="saveEdit()"
                                     @keydown="onCellKeyDown($event)"
+                                    aria-label="Редактировать исполнителя"
                                     class="w-full bg-surface-input text-white border border-white/40 rounded-sm px-1.5 py-0.5 text-xs outline-none">
                             </template>
                             <template x-if="!(editingCell && editingCell.index === track._trackIndex && editingCell.field === 'artist')">
@@ -277,6 +288,7 @@
                                     x-model="editingCell.value"
                                     @blur="saveEdit()"
                                     @keydown="onCellKeyDown($event)"
+                                    aria-label="Редактировать альбом"
                                     class="w-full bg-surface-input text-white border border-white/40 rounded-sm px-1.5 py-0.5 text-xs outline-none">
                             </template>
                             <template x-if="!(editingCell && editingCell.index === track._trackIndex && editingCell.field === 'album')">
@@ -286,7 +298,7 @@
 
                         <!-- Год (Year) — скрыт на мобилке -->
                         <td
-                            class="hidden md:table-cell py-1.5 px-2 text-center font-mono tabular-nums text-[11px]"
+                            class="hidden md:table-cell py-1.5 px-2 text-center font-mono tabular-nums text-xs"
                             :class="isCellDirty(track._trackIndex, 'year') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
                             @dblclick="startEdit(track._trackIndex, 'year', $event)">
                             <template x-if="editingCell && editingCell.index === track._trackIndex && editingCell.field === 'year'">
@@ -296,6 +308,7 @@
                                     x-model="editingCell.value"
                                     @blur="saveEdit()"
                                     @keydown="onCellKeyDown($event)"
+                                    aria-label="Редактировать год выпуска"
                                     class="w-14 bg-surface-input text-white border border-white/40 rounded-sm px-1 py-0.5 text-center text-xs font-mono outline-none">
                             </template>
                             <template x-if="!(editingCell && editingCell.index === track._trackIndex && editingCell.field === 'year')">
@@ -315,6 +328,7 @@
                                     x-model="editingCell.value"
                                     @blur="saveEdit()"
                                     @keydown="onCellKeyDown($event)"
+                                    aria-label="Редактировать жанр"
                                     class="w-full bg-surface-input text-white border border-white/40 rounded-sm px-1.5 py-0.5 text-xs outline-none">
                             </template>
                             <template x-if="!(editingCell && editingCell.index === track._trackIndex && editingCell.field === 'genre')">
@@ -323,28 +337,28 @@
                         </td>
 
                         <!-- Битрейт — скрыт на мобилке -->
-                        <td class="hidden md:table-cell py-1.5 px-2 text-right font-mono tabular-nums text-[11px] text-content-muted">
+                        <td class="hidden md:table-cell py-1.5 px-2 text-right font-mono tabular-nums text-xs text-content-muted">
                             <span x-text="track.bitrate ? `${track.bitrate}k` : '320k'"></span>
                         </td>
 
                         <!-- Время -->
-                        <td class="py-1.5 px-2 text-right font-mono tabular-nums text-[11px] text-content-secondary" x-text="formatDuration(track.duration)"></td>
+                        <td class="py-1.5 px-2 text-right font-mono tabular-nums text-xs text-content-secondary" x-text="formatDuration(track.duration)"></td>
 
                         <!-- Статус текста (Lyrics) — скрыт на самых узких экранах -->
                         <td class="hidden sm:table-cell py-1.5 px-2 text-center">
                             <span
-                                class="badge-studio text-[8px] py-0 px-1 border uppercase inline-block"
+                                class="badge-studio text-xs py-0.5 px-1.5 border uppercase inline-block font-mono"
                                 :class="{
                                     'text-white border-white/30': track.lyrics_status === 'lrc',
                                     'text-sky-300 border-sky-500/30': track.lyrics_status === 'txt',
-                                    'text-content-muted/30 border-transparent': track.lyrics_status === 'none' || !track.lyrics_status
+                                    'text-content-muted/50 border-transparent': track.lyrics_status === 'none' || !track.lyrics_status
                                 }"
                                 x-text="track.lyrics_status === 'lrc' ? 'LRC' : (track.lyrics_status === 'txt' ? 'TXT' : '—')">
                             </span>
                         </td>
 
                         <!-- Имя файла на диске -->
-                        <td class="hidden xl:table-cell py-1.5 px-3 font-mono text-[10px] text-content-muted truncate max-w-xs" x-text="track.name"></td>
+                        <td class="hidden xl:table-cell py-1.5 px-3 font-mono text-xs text-content-muted truncate max-w-xs" x-text="track.name"></td>
 
                         <!-- Действия над треком (Адаптивный ховер по Правилу 1) -->
                         <td class="py-1.5 px-2 text-center" @click.stop>
@@ -353,8 +367,9 @@
                                     type="button"
                                     @click="promptRedownloadTrack(track)"
                                     title="Скачать трек заново (поставить в загрузки)"
+                                    :aria-label="'Скачать заново ' + (track.title || track.name)"
                                     class="w-6 h-6 rounded-sm bg-surface-elevated hover:bg-white hover:text-zinc-950 text-content-muted flex items-center justify-center transition border border-surface-border shadow-xs">
-                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                    <svg class="w-3.5 h-3.5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                         <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6c0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6c0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4l-4-4v3z"/>
                                     </svg>
                                 </button>
@@ -362,8 +377,9 @@
                                     type="button"
                                     @click="promptDeleteTrack(track)"
                                     title="Удалить трек с диска"
+                                    :aria-label="'Удалить трек ' + (track.title || track.name)"
                                     class="w-6 h-6 rounded-sm bg-surface-elevated hover:bg-rose-500/20 text-content-muted hover:text-rose-300 flex items-center justify-center transition border border-surface-border hover:border-rose-500/40 shadow-xs">
-                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                    <svg class="w-3.5 h-3.5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                         <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zm3.713-4.288Q11 16.426 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288"/>
                                     </svg>
                                 </button>
@@ -397,7 +413,8 @@
                     @click="setPage(1)"
                     :disabled="currentPage === 1"
                     title="В начало"
-                    class="px-1.5 py-0.5 bg-surface-elevated hover:bg-surface-hover disabled:opacity-30 rounded-sm border border-surface-border text-white text-[11px] transition">
+                    aria-label="Перейти на первую страницу"
+                    class="px-2 py-0.5 bg-surface-elevated hover:bg-surface-hover disabled:opacity-30 rounded-sm border border-surface-border text-white text-xs transition">
                     «
                 </button>
                 <button
@@ -405,10 +422,11 @@
                     @click="prevPage()"
                     :disabled="currentPage === 1"
                     title="Назад"
-                    class="px-1.5 py-0.5 bg-surface-elevated hover:bg-surface-hover disabled:opacity-30 rounded-sm border border-surface-border text-white text-[11px] transition">
+                    aria-label="Перейти на предыдущую страницу"
+                    class="px-2 py-0.5 bg-surface-elevated hover:bg-surface-hover disabled:opacity-30 rounded-sm border border-surface-border text-white text-xs transition">
                     ‹
                 </button>
-                <span class="px-1 text-[11px] text-white font-semibold tabular-nums">
+                <span class="px-1 text-xs text-white font-semibold tabular-nums">
                     <span x-text="currentPage"></span> / <span x-text="totalPages"></span>
                 </span>
                 <button
@@ -416,7 +434,8 @@
                     @click="nextPage()"
                     :disabled="currentPage === totalPages"
                     title="Вперед"
-                    class="px-1.5 py-0.5 bg-surface-elevated hover:bg-surface-hover disabled:opacity-30 rounded-sm border border-surface-border text-white text-[11px] transition">
+                    aria-label="Перейти на следующую страницу"
+                    class="px-2 py-0.5 bg-surface-elevated hover:bg-surface-hover disabled:opacity-30 rounded-sm border border-surface-border text-white text-xs transition">
                     ›
                 </button>
                 <button
@@ -424,16 +443,18 @@
                     @click="setPage(totalPages)"
                     :disabled="currentPage === totalPages"
                     title="В конец"
-                    class="px-1.5 py-0.5 bg-surface-elevated hover:bg-surface-hover disabled:opacity-30 rounded-sm border border-surface-border text-white text-[11px] transition">
+                    aria-label="Перейти на последнюю страницу"
+                    class="px-2 py-0.5 bg-surface-elevated hover:bg-surface-hover disabled:opacity-30 rounded-sm border border-surface-border text-white text-xs transition">
                     »
                 </button>
             </div>
             <div class="flex items-center space-x-1 ml-1">
-                <span class="hidden md:inline text-[10px]">На стр:</span>
+                <span class="hidden md:inline text-xs">На стр:</span>
                 <select
                     x-model="pageSize"
                     @change="currentPage = 1"
-                    class="bg-surface-elevated text-content-primary text-[10px] rounded-sm px-1 py-0.5 border border-surface-border outline-none transition cursor-pointer">
+                    aria-label="Количество треков на странице"
+                    class="bg-surface-elevated text-content-primary text-xs rounded-sm px-1 py-0.5 border border-surface-border outline-none transition cursor-pointer">
                     <option value="50">50</option>
                     <option value="100">100</option>
                     <option value="200">200</option>
@@ -450,7 +471,7 @@
                     <span>Не сохранено: <strong x-text="dirtyIndices.size"></strong></span>
                 </span>
             </template>
-            <span class="hidden sm:inline text-[11px]">Ctrl+S</span>
+            <span class="hidden sm:inline text-xs">Ctrl+S</span>
         </div>
     </div>
 </div>

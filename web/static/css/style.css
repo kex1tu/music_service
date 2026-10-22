@@ -44,6 +44,24 @@ input[type="range"]:focus {
     outline: none;
 }
 
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+    outline: 2px solid #ffffff;
+    outline-offset: 3px;
+    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.35);
+}
+
+input[type="range"]:focus-visible::-moz-range-thumb {
+    outline: 2px solid #ffffff;
+    outline-offset: 3px;
+    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.35);
+}
+
+/* Глобальный видимый фокус клавиатурной навигации (WCAG 2.4.7) */
+:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.45) !important;
+    outline-offset: 2px !important;
+}
+
 input[type="range"]::-webkit-slider-runnable-track {
     height: 3px;
     border-radius: 9999px;

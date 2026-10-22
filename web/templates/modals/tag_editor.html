@@ -3,6 +3,9 @@
 <div
     x-show="$store.app.activeModal === 'tag_editor'"
     x-cloak
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="modal-puddletag-title"
     @click.self="$store.app.closeTagEditor()"
     @keydown.escape.window="$store.app.closeTagEditor()"
     class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-2 sm:p-4 overflow-y-auto"
@@ -16,18 +19,19 @@
         <!-- Заголовок модального окна -->
         <div class="px-6 py-3.5 border-b border-surface-border flex items-center justify-between bg-surface-base/90">
             <div class="flex items-center space-x-3">
-                <div class="w-8 h-8 rounded-lg bg-brand-muted text-brand flex items-center justify-center">
-                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                <div class="w-8 h-8 rounded-lg bg-brand-muted text-brand flex items-center justify-center" aria-hidden="true">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <path d="m21.4 14.25l-7.15 7.15q-.3.3-.675.45t-.75.15t-.75-.15t-.675-.45l-8.825-8.825q-.275-.275-.425-.637T2 11.175V4q0-.825.588-1.412T4 2h7.175q.4 0 .775.163t.65.437l8.8 8.825q.3.3.438.675t.137.75t-.137.738t-.438.662M6.5 8q.625 0 1.063-.437T8 6.5t-.437-1.062T6.5 5t-1.062.438T5 6.5t.438 1.063T6.5 8"/>
                     </svg>
                 </div>
                 <div>
-                    <h2 class="text-base font-bold text-content-primary">Редактор тегов ID3v2.4 (Puddletag Engine)</h2>
-                    <p class="text-[11px] text-content-muted" x-text="isDownloaderMode ? 'Проверка и подтверждение релиза перед перемещением в медиатеку' : 'Редактирование тегов аудиофайлов'"></p>
+                    <h2 id="modal-puddletag-title" class="text-base font-bold text-content-primary">Редактор тегов ID3v2.4 (Puddletag Engine)</h2>
+                    <p class="text-xs text-content-muted" x-text="isDownloaderMode ? 'Проверка и подтверждение релиза перед перемещением в медиатеку' : 'Редактирование тегов аудиофайлов'"></p>
                 </div>
             </div>
             <button
                 @click="$store.app.closeTagEditor()"
+                aria-label="Закрыть редактор тегов"
                 class="text-content-muted hover:text-content-primary p-1.5 rounded-lg hover:bg-surface-hover transition">
                 ✕
             </button>

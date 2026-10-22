@@ -3,6 +3,9 @@
 <div
     x-show="showSourceModal"
     x-cloak
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="source-modal-title"
     @click.self="showSourceModal = false"
     @keydown.escape.window="showSourceModal = false"
     class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-2 sm:p-4 overflow-y-auto">
@@ -15,19 +18,20 @@
         <div class="px-5 py-3.5 border-b border-surface-border flex flex-wrap items-center justify-between gap-3 bg-surface-base/90">
             <div class="flex items-center space-x-2.5">
                 <div class="w-8 h-8 rounded-lg bg-brand/15 text-brand flex items-center justify-center shrink-0">
-                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-5 h-5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
                     </svg>
                 </div>
                 <div>
-                    <h2 class="text-sm sm:text-base font-bold text-content-primary">Поиск релиза в базах метаданных</h2>
-                    <p class="text-[11px] text-content-muted">Параллельный опрос Deezer, MusicBrainz и Shazam для выделенных треков</p>
+                    <h2 id="source-modal-title" class="text-sm sm:text-base font-bold text-content-primary">Поиск релиза в базах метаданных</h2>
+                    <p class="text-xs text-content-muted">Параллельный опрос Deezer, MusicBrainz и Shazam для выделенных треков</p>
                 </div>
             </div>
 
             <!-- Правая часть: крестик закрытия -->
             <button
                 @click="showSourceModal = false"
+                aria-label="Закрыть окно поиска в базах"
                 class="text-content-muted hover:text-content-primary p-1.5 rounded-lg hover:bg-surface-hover transition">
                 ✕
             </button>
@@ -42,13 +46,15 @@
                     x-model="sourceSearchQuery"
                     @keydown.enter="searchSources()"
                     placeholder="Артист - Альбом или название релиза..."
+                    aria-label="Поиск альбома или исполнителя в базах метаданных"
                     class="w-full bg-surface-base text-content-primary text-xs rounded-xl pl-9 pr-7 py-2 border border-surface-border focus:border-brand outline-none transition placeholder:text-content-muted font-medium">
-                <svg class="w-4 h-4 text-content-muted absolute left-3 top-2.5 pointer-events-none" viewBox="0 0 24 24" fill="currentColor">
+                <svg class="w-4 h-4 text-content-muted absolute left-3 top-2.5 pointer-events-none" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                     <path d="m19.6 21l-6.3-6.3q-.75.6-1.725.95T9.5 16q-2.725 0-4.612-1.888T3 9.5t1.888-4.612T9.5 3t4.613 1.888T16 9.5q0 1.1-.35 2.075T14.7 13.3l6.3 6.3zM9.5 14q1.875 0 3.188-1.312T14 9.5t-1.312-3.187T9.5 5T6.313 6.313T5 9.5t1.313 3.188T9.5 14"/>
                 </svg>
                 <button
                     x-show="sourceSearchQuery"
                     @click="sourceSearchQuery = ''"
+                    aria-label="Очистить поисковый запрос"
                     class="absolute right-2 top-2 text-content-muted hover:text-content-primary p-0.5 text-xs">
                     ✕
                 </button>
@@ -61,12 +67,12 @@
                 :disabled="isSearchingSources"
                 class="px-4 py-2 bg-brand hover:bg-brand-hover text-white text-xs font-semibold rounded-xl shadow-md transition flex items-center space-x-1.5 active:scale-95 disabled:opacity-50">
                 <template x-if="isSearchingSources">
-                    <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-3.5 h-3.5 animate-spin" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 2v4c4.42 0 8 3.58 8 8s-3.58 8-8 8v4c6.63 0 12-5.37 12-12S18.63 2 12 2"/>
                     </svg>
                 </template>
                 <template x-if="!isSearchingSources">
-                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-3.5 h-3.5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                         <path d="m19.6 21l-6.3-6.3q-.75.6-1.725.95T9.5 16q-2.725 0-4.612-1.888T3 9.5t1.888-4.612T9.5 3t4.613 1.888T16 9.5q0 1.1-.35 2.075T14.7 13.3l6.3 6.3zM9.5 14q1.875 0 3.188-1.312T14 9.5t-1.312-3.187T9.5 5T6.313 6.313T5 9.5t1.313 3.188T9.5 14"/>
                     </svg>
                 </template>
@@ -80,7 +86,7 @@
                 :disabled="isSearchingSources"
                 class="px-3.5 py-2 bg-surface-elevated hover:bg-surface-hover text-sky-400 text-xs font-semibold rounded-xl border border-sky-500/30 shadow-sm transition flex items-center space-x-1.5 active:scale-95 disabled:opacity-50"
                 title="Снять акустический отпечаток первого выделенного MP3 файла через songrec">
-                <span>🎵</span>
+                <span aria-hidden="true">🎵</span>
                 <span class="hidden sm:inline">Распознать по аудио (Shazam)</span>
             </button>
         </div>
@@ -93,10 +99,10 @@
                     @click="activeSourceTab = 'deezer'"
                     :class="activeSourceTab === 'deezer' ? 'border-brand text-brand font-bold bg-brand/10' : 'border-transparent text-content-secondary hover:text-content-primary hover:bg-surface-hover'"
                     class="px-3 py-2 border-b-2 rounded-t-lg transition flex items-center space-x-2 shrink-0">
-                    <span class="text-purple-400">🟣</span>
+                    <span class="text-purple-400" aria-hidden="true">🟣</span>
                     <span>Deezer</span>
                     <span
-                        class="px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold"
+                        class="px-1.5 py-0.5 rounded-full text-xs font-mono font-bold"
                         :class="activeSourceTab === 'deezer' ? 'bg-brand text-white' : 'bg-surface-elevated text-content-muted'"
                         x-text="sourceResults.deezer ? sourceResults.deezer.count : 0">
                     </span>
@@ -107,10 +113,10 @@
                     @click="activeSourceTab = 'musicbrainz'"
                     :class="activeSourceTab === 'musicbrainz' ? 'border-amber-500 text-amber-400 font-bold bg-amber-500/10' : 'border-transparent text-content-secondary hover:text-content-primary hover:bg-surface-hover'"
                     class="px-3 py-2 border-b-2 rounded-t-lg transition flex items-center space-x-2 shrink-0">
-                    <span class="text-amber-500">🟠</span>
+                    <span class="text-amber-500" aria-hidden="true">🟠</span>
                     <span>MusicBrainz</span>
                     <span
-                        class="px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold"
+                        class="px-1.5 py-0.5 rounded-full text-xs font-mono font-bold"
                         :class="activeSourceTab === 'musicbrainz' ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-surface-elevated text-content-muted'"
                         x-text="sourceResults.musicbrainz ? sourceResults.musicbrainz.count : 0">
                     </span>
@@ -121,10 +127,10 @@
                     @click="activeSourceTab = 'shazam'"
                     :class="activeSourceTab === 'shazam' ? 'border-sky-500 text-sky-400 font-bold bg-sky-500/10' : 'border-transparent text-content-secondary hover:text-content-primary hover:bg-surface-hover'"
                     class="px-3 py-2 border-b-2 rounded-t-lg transition flex items-center space-x-2 shrink-0">
-                    <span class="text-sky-400">🔵</span>
+                    <span class="text-sky-400" aria-hidden="true">🔵</span>
                     <span>Shazam</span>
                     <span
-                        class="px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold"
+                        class="px-1.5 py-0.5 rounded-full text-xs font-mono font-bold"
                         :class="activeSourceTab === 'shazam' ? 'bg-sky-500 text-white' : 'bg-surface-elevated text-content-muted'"
                         x-text="sourceResults.shazam ? sourceResults.shazam.count : 0">
                     </span>
@@ -135,7 +141,7 @@
             <div x-show="activeSourceTab === 'musicbrainz'" class="pb-1.5 flex items-center space-x-2 shrink-0">
                 <!-- Состояние: Авторизован -->
                 <template x-if="mbOAuth && mbOAuth.connected">
-                    <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-medium shadow-sm">
+                    <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium shadow-sm">
                         <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                         <span>🟢 OAuth подключен (Повышенные лимиты)</span>
                         <span x-show="mbOAuth.username" x-text="`(${mbOAuth.username})`" class="text-emerald-300 font-mono"></span>
@@ -143,6 +149,7 @@
                             type="button"
                             @click="disconnectMusicBrainzOAuth()"
                             class="ml-1 text-content-muted hover:text-rose-400 transition"
+                            aria-label="Отключить аккаунт MusicBrainz"
                             title="Отключить аккаунт MusicBrainz">
                             ✕
                         </button>
@@ -154,9 +161,9 @@
                     <button
                         type="button"
                         @click="openMusicBrainzOAuth($event)"
-                        class="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-medium transition flex items-center space-x-1.5 text-[11px] shadow-sm hover:scale-[1.02] active:scale-95"
+                        class="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-medium transition flex items-center space-x-1.5 text-xs shadow-sm hover:scale-[1.02] active:scale-95"
                         title="Подключить официальный аккаунт MusicBrainz для повышенных лимитов">
-                        <span>🔗</span>
+                        <span aria-hidden="true">🔗</span>
                         <span>Подключить MusicBrainz (OAuth)</span>
                     </button>
                 </template>
@@ -170,14 +177,14 @@
             <div class="w-full md:w-5/12 flex flex-col border border-surface-border rounded-xl bg-surface-base overflow-hidden">
                 <div class="p-2.5 bg-surface-elevated/60 border-b border-surface-borderSubtle flex items-center justify-between text-xs font-semibold text-content-secondary">
                     <span>Найденные релизы</span>
-                    <span class="font-mono text-[11px] text-content-muted" x-text="`Всего: ${currentTabReleases.length}`"></span>
+                    <span class="font-mono text-xs text-content-muted" x-text="`Всего: ${currentTabReleases.length}`"></span>
                 </div>
 
                 <div class="flex-1 overflow-y-auto p-2 space-y-2">
                     <!-- Загрузка / Индикатор поиска -->
                     <template x-if="isSearchingSources">
                         <div class="py-12 flex flex-col items-center justify-center space-y-2 text-content-muted text-xs">
-                            <svg class="w-6 h-6 animate-spin text-brand" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-6 h-6 animate-spin text-brand" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M12 2v4c4.42 0 8 3.58 8 8s-3.58 8-8 8v4c6.63 0 12-5.37 12-12S18.63 2 12 2"/>
                             </svg>
                             <span>Поиск в базах данных...</span>
@@ -187,9 +194,9 @@
                     <!-- Пустое состояние -->
                     <template x-if="!isSearchingSources && currentTabReleases.length === 0">
                         <div class="py-12 flex flex-col items-center justify-center text-center space-y-2 text-content-muted text-xs p-4">
-                            <span class="text-2xl">🔍</span>
+                            <span class="text-2xl" aria-hidden="true">🔍</span>
                             <span class="font-medium text-content-secondary">Ничего не найдено в этой базе</span>
-                            <p class="text-[11px] max-w-xs">Попробуйте изменить поисковый запрос или переключиться на другую вкладку</p>
+                            <p class="text-xs max-w-xs">Попробуйте изменить поисковый запрос или переключиться на другую вкладку</p>
                         </div>
                     </template>
 
@@ -206,15 +213,15 @@
                                     <img :src="rel.cover_url" alt="" class="w-full h-full object-cover">
                                 </template>
                                 <template x-if="!rel.cover_url">
-                                    <span class="text-base text-content-muted">💿</span>
+                                    <span class="text-base text-content-muted" aria-hidden="true">💿</span>
                                 </template>
                             </div>
 
                             <!-- Описание релиза -->
                             <div class="flex-1 min-w-0">
                                 <h3 class="text-xs font-bold text-content-primary truncate" x-text="rel.title"></h3>
-                                <p class="text-[11px] text-content-secondary truncate" x-text="rel.artist"></p>
-                                <div class="flex items-center space-x-1.5 text-[10px] text-content-muted mt-0.5">
+                                <p class="text-xs text-content-secondary truncate" x-text="rel.artist"></p>
+                                <div class="flex items-center space-x-1.5 text-xs text-content-muted mt-0.5">
                                     <template x-if="rel.year">
                                         <span x-text="rel.year"></span>
                                     </template>
@@ -231,7 +238,7 @@
                             <template x-if="rel.score">
                                 <span
                                     :class="rel.score >= 90 ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-surface-input text-content-muted border-surface-border'"
-                                    class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border shrink-0"
+                                    class="text-xs font-mono font-bold px-1.5 py-0.5 rounded border shrink-0"
                                     x-text="`${rel.score}%`">
                                 </span>
                             </template>
@@ -245,26 +252,26 @@
                 
                 <!-- Панель чекбоксов выбора полей тегов -->
                 <div class="p-2.5 bg-surface-elevated/70 border-b border-surface-borderSubtle flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                    <span class="font-semibold text-content-secondary text-[11px]">Применить:</span>
+                    <span class="font-semibold text-content-secondary text-xs">Применить:</span>
                     <label class="flex items-center space-x-1 cursor-pointer select-none">
-                        <input type="checkbox" x-model="sourceOptions.titleArtist" class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 w-3.5 h-3.5">
-                        <span class="text-[11px] text-content-primary">Названия и авторы</span>
+                        <input type="checkbox" x-model="sourceOptions.titleArtist" aria-label="Применить названия и авторов" class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 w-3.5 h-3.5">
+                        <span class="text-xs text-content-primary">Названия и авторы</span>
                     </label>
                     <label class="flex items-center space-x-1 cursor-pointer select-none">
-                        <input type="checkbox" x-model="sourceOptions.trackDisc" class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 w-3.5 h-3.5">
-                        <span class="text-[11px] text-content-primary">№ треков и дисков</span>
+                        <input type="checkbox" x-model="sourceOptions.trackDisc" aria-label="Применить номера треков и дисков" class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 w-3.5 h-3.5">
+                        <span class="text-xs text-content-primary">№ треков и дисков</span>
                     </label>
                     <label class="flex items-center space-x-1 cursor-pointer select-none">
-                        <input type="checkbox" x-model="sourceOptions.albumYear" class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 w-3.5 h-3.5">
-                        <span class="text-[11px] text-content-primary">Альбом и год</span>
+                        <input type="checkbox" x-model="sourceOptions.albumYear" aria-label="Применить альбом и год" class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 w-3.5 h-3.5">
+                        <span class="text-xs text-content-primary">Альбом и год</span>
                     </label>
                     <label class="flex items-center space-x-1 cursor-pointer select-none">
-                        <input type="checkbox" x-model="sourceOptions.genres" class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 w-3.5 h-3.5">
-                        <span class="text-[11px] text-content-primary">Жанры</span>
+                        <input type="checkbox" x-model="sourceOptions.genres" aria-label="Применить жанры" class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 w-3.5 h-3.5">
+                        <span class="text-xs text-content-primary">Жанры</span>
                     </label>
                     <label class="flex items-center space-x-1 cursor-pointer select-none">
-                        <input type="checkbox" x-model="sourceOptions.cover" class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 w-3.5 h-3.5">
-                        <span class="text-[11px] text-content-primary">Обложка</span>
+                        <input type="checkbox" x-model="sourceOptions.cover" aria-label="Применить обложку" class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 w-3.5 h-3.5">
+                        <span class="text-xs text-content-primary">Обложка</span>
                     </label>
                 </div>
 
@@ -273,28 +280,28 @@
                     <div class="px-3 py-2 bg-surface-panel border-b border-surface-borderSubtle flex items-center justify-between gap-3">
                         <div class="flex items-center space-x-3 min-w-0">
                             <template x-if="selectedReleaseDetails.cover_url">
-                                <img :src="selectedReleaseDetails.cover_url" class="w-12 h-12 rounded-lg object-cover border border-surface-borderSubtle shrink-0">
+                                <img :src="selectedReleaseDetails.cover_url" alt="" class="w-12 h-12 rounded-lg object-cover border border-surface-borderSubtle shrink-0">
                             </template>
                             <div class="min-w-0 flex-1">
                                 <div class="flex items-center space-x-2">
-                                    <h4 class="text-xs font-bold text-content-primary truncate" x-text="selectedReleaseDetails.title"></h4>
-                                    <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-surface-elevated text-content-muted" x-text="selectedReleaseDetails.source.toUpperCase()"></span>
+                                    <h3 class="text-xs font-bold text-content-primary truncate" x-text="selectedReleaseDetails.title"></h3>
+                                    <span class="text-xs font-mono px-1.5 py-0.5 rounded bg-surface-elevated text-content-muted" x-text="selectedReleaseDetails.source.toUpperCase()"></span>
                                 </div>
-                                <p class="text-[11px] text-content-secondary truncate" x-text="selectedReleaseDetails.artist"></p>
-                                <p class="text-[10px] text-content-muted" x-text="`${selectedReleaseDetails.year || ''} • ${selectedReleaseDetails.genre || ''} • ${selectedReleaseDetails.track_count || 0} треков`"></p>
+                                <p class="text-xs text-content-secondary truncate" x-text="selectedReleaseDetails.artist"></p>
+                                <p class="text-xs text-content-muted" x-text="`${selectedReleaseDetails.year || ''} • ${selectedReleaseDetails.genre || ''} • ${selectedReleaseDetails.track_count || 0} треков`"></p>
                             </div>
                         </div>
 
                         <!-- Информационный бейдж и сброс сопоставления -->
                         <div class="flex items-center space-x-2 shrink-0">
-                            <span class="text-[11px] px-2 py-1 rounded bg-surface-base border border-surface-border text-content-secondary">
+                            <span class="text-xs px-2 py-1 rounded bg-surface-base border border-surface-border text-content-secondary">
                                 Сопоставлено: <b class="text-emerald-400 font-bold" x-text="matchedPairs.filter(p => p.isMatched).length"></b> из <span x-text="targetTrackOptions.length"></span> файлов
                             </span>
                             <button type="button"
                                 @click="reMatchTracks()"
                                 title="Сбросить ручные изменения и запустить нечеткое авто-сопоставление заново"
-                                class="px-2.5 py-1 text-[11px] rounded bg-surface-elevated border border-surface-border hover:bg-surface-hover text-content-primary transition flex items-center space-x-1 active:scale-95">
-                                <span>⚡</span>
+                                class="px-2.5 py-1 text-xs rounded bg-surface-elevated border border-surface-border hover:bg-surface-hover text-content-primary transition flex items-center space-x-1 active:scale-95">
+                                <span aria-hidden="true">⚡</span>
                                 <span>Авто-сопоставить</span>
                             </button>
                         </div>
@@ -306,7 +313,7 @@
                     <!-- Загрузка деталей -->
                     <template x-if="isLoadingReleaseDetails">
                         <div class="py-16 flex flex-col items-center justify-center space-y-2 text-content-muted text-xs">
-                            <svg class="w-6 h-6 animate-spin text-brand" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-6 h-6 animate-spin text-brand" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M12 2v4c4.42 0 8 3.58 8 8s-3.58 8-8 8v4c6.63 0 12-5.37 12-12S18.63 2 12 2"/>
                             </svg>
                             <span>Загрузка полного треклиста и соавторов...</span>
@@ -316,22 +323,23 @@
                     <!-- Релиз еще не выбран -->
                     <template x-if="!isLoadingReleaseDetails && !selectedReleaseDetails">
                         <div class="py-20 flex flex-col items-center justify-center text-center space-y-2 text-content-muted text-xs p-4">
-                            <span class="text-2xl">👈</span>
+                            <span class="text-2xl" aria-hidden="true">👈</span>
                             <span class="font-medium text-content-secondary">Выберите релиз из левой колонки</span>
-                            <p class="text-[11px] max-w-xs">Вы сможете сверить треклист и соавторов перед применением</p>
+                            <p class="text-xs max-w-xs">Вы сможете сверить треклист и соавторов перед применением</p>
                         </div>
                     </template>
 
                     <!-- Таблица треков -->
                     <template x-if="!isLoadingReleaseDetails && selectedReleaseDetails && matchedPairs.length > 0">
                         <table class="w-full text-left border-collapse text-xs">
-                            <thead class="bg-surface-elevated/90 sticky top-0 border-b border-surface-border text-[11px] text-content-muted">
+                            <thead class="bg-surface-elevated/90 sticky top-0 border-b border-surface-border text-xs text-content-muted">
                                 <tr>
                                     <th class="py-1.5 px-2 w-8 text-center">
                                         <input type="checkbox"
                                             :checked="isAllMatchedChecked()"
                                             @change="toggleAllMatched($event.target.checked)"
                                             title="Выбрать / Снять все сопоставленные"
+                                            aria-label="Выбрать или снять все сопоставленные треки"
                                             class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 w-3.5 h-3.5 cursor-pointer">
                                     </th>
                                     <th class="py-1.5 px-1.5 w-8 text-center">№</th>
@@ -341,7 +349,7 @@
                                     <th class="py-1.5 px-2.5 w-56">Файл таблицы</th>
                                 </tr>
                             </thead>
-                            <tbody class="divide-y divide-surface-borderSubtle font-mono text-[11px]">
+                            <tbody class="divide-y divide-surface-borderSubtle font-mono text-xs">
                                 <template x-for="pair in matchedPairs" :key="pair.index">
                                     <tr :class="pair.isMatched ? (pair.isChecked ? 'hover:bg-surface-hover/50' : 'opacity-60 bg-surface-panel/20 hover:bg-surface-hover/30') : 'bg-rose-500/5 hover:bg-rose-500/10'">
                                         <!-- Чекбокс включения/выключения трека -->
@@ -349,6 +357,7 @@
                                             <input type="checkbox"
                                                 x-model="pair.isChecked"
                                                 :disabled="!pair.isMatched"
+                                                :aria-label="'Включить трек ' + pair.releaseTrack.title"
                                                 class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 w-3.5 h-3.5 cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed">
                                         </td>
 
@@ -369,7 +378,8 @@
                                             <select
                                                 :value="pair.originalIndex !== null && pair.originalIndex !== undefined ? pair.originalIndex : ''"
                                                 @change="onMatchedFileChange(pair.index, $event.target.value)"
-                                                class="w-full text-[11px] font-sans py-1 px-2 rounded border transition focus:outline-none focus:ring-1 focus:ring-brand truncate"
+                                                :aria-label="'Сопоставить трек ' + pair.releaseTrack.title + ' с файлом'"
+                                                class="w-full text-xs font-sans py-1 px-2 rounded border transition focus:outline-none focus:ring-1 focus:ring-brand truncate"
                                                 :class="pair.isMatched ? (pair.isChecked ? 'bg-surface-panel border-emerald-500/50 text-emerald-300 font-medium' : 'bg-surface-panel border-surface-border text-content-muted') : 'bg-surface-panel border-surface-border text-amber-400/80'">
                                                 <option value="" class="text-amber-400 bg-surface-elevated">⚠️ Без файла (пропустить)</option>
                                                 <template x-for="opt in targetTrackOptions" :key="opt.originalIndex">
@@ -415,7 +425,7 @@
                     @click="applySourceTags()"
                     :disabled="!selectedReleaseDetails || matchedPairs.filter(p => p.isMatched && p.isChecked).length === 0"
                     class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold shadow-md transition flex items-center space-x-1.5 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed">
-                    <span>✓</span>
+                    <span aria-hidden="true">✓</span>
                     <span>Применить теги к выделенным трекам</span>
                 </button>
             </div>

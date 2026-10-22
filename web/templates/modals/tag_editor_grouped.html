@@ -41,7 +41,7 @@
                         <div class="flex items-center space-x-2 min-w-0 flex-wrap">
                             <span class="font-bold text-content-primary text-xs sm:text-sm tracking-wide truncate" x-text="group.title"></span>
                             <template x-if="group.isSingles">
-                                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">Синглы</span>
+                                <span class="px-2 py-0.5 rounded text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">Синглы</span>
                             </template>
                             <template x-if="!group.isSingles && group.albumArtist">
                                 <span class="text-xs text-content-secondary truncate" x-text="group.albumArtist"></span>
@@ -100,7 +100,7 @@
                                         x-model="group.albumArtist"
                                         placeholder="Daft Punk\\Pharrell Williams"
                                         class="w-full bg-surface-input border border-surface-border rounded-lg px-3 py-1.5 text-sm text-content-primary focus:outline-none focus:border-brand">
-                                    <p class="text-[10px] text-content-muted mt-0.5 font-mono">Разделитель множественных артистов: \\</p>
+                                    <p class="text-xs text-content-muted mt-0.5 font-mono">Разделитель множественных артистов: \\</p>
                                 </div>
                                 <div>
                                     <label class="block text-xs font-semibold text-content-secondary mb-1">Название альбома (Album Title)</label>

@@ -12,9 +12,9 @@
         <div class="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div class="space-y-3 max-w-xl">
                 <div class="flex items-center space-x-2">
-                    <span class="px-2.5 py-1 text-[10px] font-mono font-bold uppercase tracking-wider bg-brand text-white rounded-full shadow-md shadow-brand/20">ICY 320 kbps Zero-Transcoding</span>
+                    <span class="px-2.5 py-1 text-xs font-mono font-bold uppercase tracking-wider bg-brand text-white rounded-full shadow-md shadow-brand/20">ICY 320 kbps Zero-Transcoding</span>
                     <template x-if="$store.radio.stats.navidrome_available || $store.radio.stats.subsonic_configured">
-                        <span class="px-2.5 py-1 text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full"
+                        <span class="px-2.5 py-1 text-xs font-mono font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full"
                               x-text="$store.radio.stats.navidrome_available && $store.radio.stats.subsonic_configured ? 'Navidrome Connected' : ($store.radio.stats.navidrome_available ? 'Navidrome DB' : 'Subsonic Connected')">
                         </span>
                     </template>
@@ -31,7 +31,7 @@
                     <button
                         @click="$store.radio.playWave()"
                         class="px-6 py-3 bg-brand hover:bg-brand-hover text-white font-bold rounded-2xl transition flex items-center space-x-3 shadow-lg shadow-brand/30 hover:scale-[1.02] active:scale-[0.98]">
-                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M8 5v14l11-7z"/>
                         </svg>
                         <span>Слушать Волну</span>
@@ -40,8 +40,9 @@
                     <button
                         @click="$store.radio.copyStreamUrl('wave')"
                         title="Скопировать прямую ссылку на ICY поток для VLC / Navidrome"
+                        aria-label="Скопировать прямую ссылку на поток Моя Волна"
                         class="px-4 py-3 bg-surface-elevated hover:bg-surface-hover text-content-primary rounded-2xl border border-surface-border transition flex items-center space-x-2 text-xs font-semibold">
-                        <svg class="w-4 h-4 text-brand" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-4 h-4 text-brand" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
                         </svg>
                         <span>Ссылка на поток</span>
@@ -60,9 +61,9 @@
                         class="w-full px-3.5 py-2.5 rounded-xl bg-surface-elevated hover:bg-surface-hover border border-surface-border transition flex items-center justify-between text-xs text-left group">
                         <div>
                             <div class="font-bold text-white group-hover:text-brand transition">Моя Волна.m3u</div>
-                            <div class="text-[10px] text-content-muted">Ежедневный плейлист в Playlists/</div>
+                            <div class="text-xs text-content-muted">Ежедневный плейлист в Playlists/</div>
                         </div>
-                        <svg class="w-4 h-4 text-content-muted group-hover:text-brand transition" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-4 h-4 text-content-muted group-hover:text-brand transition" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
                         </svg>
                     </button>
@@ -73,9 +74,9 @@
                         class="w-full px-3.5 py-2.5 rounded-xl bg-surface-elevated hover:bg-surface-hover border border-surface-border transition flex items-center justify-between text-xs text-left group">
                         <div>
                             <div class="font-bold text-white group-hover:text-brand transition">Экспорт в Navidrome</div>
-                            <div class="text-[10px] text-content-muted">Регистрация интернет-радиостанции</div>
+                            <div class="text-xs text-content-muted">Регистрация интернет-радиостанции</div>
                         </div>
-                        <svg class="w-4 h-4 text-content-muted group-hover:text-brand transition" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-4 h-4 text-content-muted group-hover:text-brand transition" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
                         </svg>
                     </button>
@@ -101,13 +102,14 @@
                         @click="$store.radio.playGenre(g.name || g)"
                         @contextmenu.prevent="$store.radio.exportGenreToNavidrome(g.name || g)"
                         :title="'ЛКМ — слушать на сайте, ПКМ — экспорт в Navidrome'"
+                        :aria-label="'Включить радио по жанру ' + (g.name || g)"
                         class="px-3 py-1.5 rounded-xl bg-surface-elevated hover:bg-brand hover:text-white border border-surface-border text-content-secondary transition flex items-center space-x-1.5 text-xs group">
-                        <svg class="w-3.5 h-3.5 text-brand group-hover:text-white transition" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-3.5 h-3.5 text-brand group-hover:text-white transition" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M8 5v14l11-7z"/>
                         </svg>
                         <span class="font-medium" x-text="g.name || g"></span>
                         <template x-if="g.track_count">
-                            <span class="text-[10px] font-mono text-content-muted group-hover:text-white/70" x-text="g.track_count"></span>
+                            <span class="text-xs font-mono text-content-muted group-hover:text-white/70" x-text="g.track_count"></span>
                         </template>
                     </button>
                 </template>
@@ -128,6 +130,7 @@
                         x-model="$store.radio.artistSearch"
                         @keydown.enter="$store.radio.playArtist()"
                         placeholder="Имя артиста (напр. Daft Punk)..."
+                        aria-label="Имя артиста для радиопотока"
                         class="flex-1 bg-surface-input border border-surface-border rounded-xl px-3 py-2 text-xs text-white placeholder-content-muted focus:outline-none focus:border-brand">
                     <button
                         @click="$store.radio.playArtist()"
@@ -140,7 +143,7 @@
                         :disabled="$store.radio.isSyncingNavidrome"
                         class="px-3 py-2 bg-surface-elevated hover:bg-surface-hover border border-surface-border text-content-secondary hover:text-brand text-xs font-semibold rounded-xl transition shrink-0 flex items-center space-x-1"
                         title="Экспортировать радиостанцию этого артиста в Navidrome">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
                         </svg>
                         <span>В Navidrome</span>
@@ -148,13 +151,14 @@
                     <button
                         @click="$store.radio.copyStreamUrl('artist', $store.radio.artistSearch)"
                         class="p-2 bg-surface-elevated hover:bg-surface-hover border border-surface-border text-content-muted hover:text-white rounded-xl transition shrink-0"
+                        aria-label="Скопировать ссылку на поток артиста"
                         title="Скопировать прямую ссылку на поток">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
                         </svg>
                     </button>
                 </div>
-                <p class="text-[11px] text-content-muted">
+                <p class="text-xs text-content-muted">
                     Совет: Поток автоматически расширяется композициями похожих артистов из графа схожести. Нажмите «В Navidrome» для создания станции в вашей медиатеке.
                 </p>
             </div>
@@ -167,20 +171,20 @@
             <div class="flex items-center space-x-4 min-w-0">
                 <div class="relative w-14 h-14 rounded-2xl bg-surface-input border border-surface-border flex items-center justify-center shrink-0 overflow-hidden shadow-md">
                     <template x-if="$store.radio.nowPlaying.id">
-                        <img :src="`/api/tracks/${$store.radio.nowPlaying.id}/cover`" class="w-full h-full object-cover" onerror="this.style.display='none'">
+                        <img :src="`/api/tracks/${$store.radio.nowPlaying.id}/cover`" class="w-full h-full object-cover" alt="Обложка трека" onerror="this.style.display='none'">
                     </template>
-                    <svg class="w-7 h-7 text-brand" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-7 h-7 text-brand" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
                     </svg>
                 </div>
                 <div class="min-w-0">
                     <div class="flex items-center space-x-2 mb-1">
-                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
-                            <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse mr-1.5"></span>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+                            <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse mr-1.5" aria-hidden="true"></span>
                             СЕЙЧАС В ЭФИРЕ
                         </span>
                         <template x-if="$store.radio.nowPlaying.genre">
-                            <span class="px-2 py-0.5 text-[10px] font-mono bg-surface-input text-content-secondary rounded border border-surface-border" x-text="$store.radio.nowPlaying.genre"></span>
+                            <span class="px-2 py-0.5 text-xs font-mono bg-surface-input text-content-secondary rounded border border-surface-border" x-text="$store.radio.nowPlaying.genre"></span>
                         </template>
                     </div>
                     <div class="text-base font-extrabold text-white truncate" x-text="$store.radio.nowPlaying.title"></div>
@@ -191,7 +195,7 @@
                 <button
                     @click="$store.radio.playWave()"
                     class="px-5 py-2.5 bg-brand hover:bg-brand-hover text-white text-xs font-bold rounded-xl transition flex items-center space-x-2 shadow-md shadow-brand/20">
-                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
                     <span>Включить поток</span>
                 </button>
             </div>
@@ -214,14 +218,14 @@
                     class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5">
                     <span>История эфира</span>
                     <template x-if="$store.radio.recentHistory.length">
-                        <span class="px-1.5 py-0.2 text-[10px] bg-white/20 rounded-full font-mono" x-text="$store.radio.recentHistory.length"></span>
+                        <span class="px-1.5 py-0.2 text-xs bg-white/20 rounded-full font-mono" x-text="$store.radio.recentHistory.length"></span>
                     </template>
                 </button>
             </div>
             <button
                 @click="$store.radio.fetchQueue(); $store.radio.fetchNowPlaying()"
                 class="px-3 py-1.5 rounded-lg bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs transition flex items-center space-x-1.5 border border-surface-border self-start sm:self-auto">
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
                 </svg>
                 <span>Обновить</span>
@@ -239,19 +243,20 @@
                         <span class="font-mono text-content-muted w-6 text-center shrink-0" x-text="idx + 1"></span>
                         <div class="truncate">
                             <div class="font-bold text-white truncate" x-text="trk.title"></div>
-                            <div class="text-[11px] text-content-muted truncate" x-text="`${trk.artist} — ${trk.album}`"></div>
+                            <div class="text-xs text-content-muted truncate" x-text="`${trk.artist} — ${trk.album}`"></div>
                         </div>
                     </div>
                     <div class="flex items-center space-x-3 shrink-0">
                         <template x-if="trk.genre">
-                            <span class="px-2 py-0.5 text-[10px] font-mono bg-surface-input text-content-secondary rounded border border-surface-border" x-text="trk.genre"></span>
+                            <span class="px-2 py-0.5 text-xs font-mono bg-surface-input text-content-secondary rounded border border-surface-border" x-text="trk.genre"></span>
                         </template>
-                        <span class="font-mono text-content-muted text-[11px]" x-text="window.AppFormatters ? window.AppFormatters.formatDuration(trk.duration) : `${Math.floor(trk.duration/60)}:${('0'+Math.floor(trk.duration%60)).slice(-2)}`"></span>
+                        <span class="font-mono text-content-muted text-xs" x-text="window.AppFormatters ? window.AppFormatters.formatDuration(trk.duration) : `${Math.floor(trk.duration/60)}:${('0'+Math.floor(trk.duration%60)).slice(-2)}`"></span>
                         <button
                             @click="$store.player.playTrack(trk, $store.radio.waveQueue)"
+                            :aria-label="'Слушать этот трек: ' + trk.title"
                             title="Слушать этот трек"
                             class="p-1.5 rounded-lg bg-surface-elevated hover:bg-brand hover:text-white text-content-secondary transition">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M8 5v14l11-7z"/>
                             </svg>
                         </button>
@@ -271,19 +276,20 @@
                         <span class="font-mono text-content-muted w-6 text-center shrink-0" x-text="idx === 0 ? '▶' : idx + 1"></span>
                         <div class="truncate">
                             <div class="font-bold text-white truncate" :class="idx === 0 ? 'text-brand' : 'text-white'" x-text="trk.title"></div>
-                            <div class="text-[11px] text-content-muted truncate" x-text="`${trk.artist} — ${trk.album}`"></div>
+                            <div class="text-xs text-content-muted truncate" x-text="`${trk.artist} — ${trk.album}`"></div>
                         </div>
                     </div>
                     <div class="flex items-center space-x-3 shrink-0">
                         <template x-if="trk.genre">
-                            <span class="px-2 py-0.5 text-[10px] font-mono bg-surface-input text-content-secondary rounded border border-surface-border" x-text="trk.genre"></span>
+                            <span class="px-2 py-0.5 text-xs font-mono bg-surface-input text-content-secondary rounded border border-surface-border" x-text="trk.genre"></span>
                         </template>
-                        <span class="font-mono text-content-muted text-[11px]" x-text="window.AppFormatters ? window.AppFormatters.formatDuration(trk.duration) : `${Math.floor(trk.duration/60)}:${('0'+Math.floor(trk.duration%60)).slice(-2)}`"></span>
+                        <span class="font-mono text-content-muted text-xs" x-text="window.AppFormatters ? window.AppFormatters.formatDuration(trk.duration) : `${Math.floor(trk.duration/60)}:${('0'+Math.floor(trk.duration%60)).slice(-2)}`"></span>
                         <button
                             @click="$store.player.playTrack(trk, $store.radio.recentHistory)"
+                            :aria-label="'Слушать этот трек: ' + trk.title"
                             title="Слушать этот трек"
                             class="p-1.5 rounded-lg bg-surface-elevated hover:bg-brand hover:text-white text-content-secondary transition">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M8 5v14l11-7z"/>
                             </svg>
                         </button>

@@ -5,16 +5,19 @@
 <div
     x-show="showCaseModal"
     x-cloak
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="case-modal-title"
     @click.self="showCaseModal = false"
     @keydown.escape.window="showCaseModal = false"
     class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
     <div @click.stop class="bg-surface-panel border border-surface-border rounded-2xl max-w-md w-full p-6 space-y-4 shadow-panel animate-scale-in">
         <div class="flex items-center justify-between border-b border-surface-border pb-3">
-            <h3 class="text-sm font-bold text-content-primary flex items-center space-x-2">
-                <span class="text-sky-400 font-serif font-bold text-base">Aa</span>
+            <h2 id="case-modal-title" class="text-sm font-bold text-content-primary flex items-center space-x-2">
+                <span class="text-sky-400 font-serif font-bold text-base" aria-hidden="true">Aa</span>
                 <span>Преобразование регистра</span>
-            </h3>
-            <button @click="showCaseModal = false" class="text-content-muted hover:text-content-primary">✕</button>
+            </h2>
+            <button @click="showCaseModal = false" aria-label="Закрыть окно преобразования регистра" class="text-content-muted hover:text-content-primary p-1">✕</button>
         </div>
 
         <div class="space-y-3 text-xs">
@@ -68,22 +71,25 @@
 <div
     x-show="showAutoNumberModal"
     x-cloak
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="autonumber-modal-title"
     @click.self="showAutoNumberModal = false"
     @keydown.escape.window="showAutoNumberModal = false"
     class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
     <div @click.stop class="bg-surface-panel border border-surface-border rounded-2xl max-w-md w-full p-6 space-y-4 shadow-panel animate-scale-in">
         <div class="flex items-center justify-between border-b border-surface-border pb-3">
-            <h3 class="text-sm font-bold text-content-primary flex items-center space-x-2">
-                <span class="text-emerald-400 font-mono font-bold text-base">#</span>
+            <h2 id="autonumber-modal-title" class="text-sm font-bold text-content-primary flex items-center space-x-2">
+                <span class="text-emerald-400 font-mono font-bold text-base" aria-hidden="true">#</span>
                 <span>Мастер автонумерации треков</span>
-            </h3>
-            <button @click="showAutoNumberModal = false" class="text-content-muted hover:text-content-primary">✕</button>
+            </h2>
+            <button @click="showAutoNumberModal = false" aria-label="Закрыть окно автонумерации" class="text-content-muted hover:text-content-primary p-1">✕</button>
         </div>
 
         <div class="space-y-3 text-xs">
             <div class="flex items-center justify-between">
-                <label class="font-semibold text-content-secondary">Начальный номер:</label>
-                <input type="number" x-model="autoNumberStart" min="1" class="w-20 bg-surface-input border border-surface-border rounded-lg px-2 py-1 text-center font-mono text-content-primary">
+                <label for="autonumber-start-val" class="font-semibold text-content-secondary">Начальный номер:</label>
+                <input id="autonumber-start-val" type="number" x-model="autoNumberStart" min="1" aria-label="Начальный номер трека" class="w-20 bg-surface-input border border-surface-border rounded-lg px-2 py-1 text-center font-mono text-content-primary">
             </div>
 
             <div class="space-y-2 pt-1 border-t border-surface-borderSubtle">
@@ -113,27 +119,30 @@
 <div
     x-show="showSearchReplaceModal"
     x-cloak
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="search-replace-modal-title"
     @click.self="showSearchReplaceModal = false"
     @keydown.escape.window="showSearchReplaceModal = false"
     class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
     <div @click.stop class="bg-surface-panel border border-surface-border rounded-2xl max-w-md w-full p-6 space-y-4 shadow-panel animate-scale-in">
         <div class="flex items-center justify-between border-b border-surface-border pb-3">
-            <h3 class="text-sm font-bold text-content-primary flex items-center space-x-2">
-                <span class="text-amber-400">🔎</span>
+            <h2 id="search-replace-modal-title" class="text-sm font-bold text-content-primary flex items-center space-x-2">
+                <span class="text-amber-400" aria-hidden="true">🔎</span>
                 <span>Поиск и замена в тегах</span>
-            </h3>
-            <button @click="showSearchReplaceModal = false" class="text-content-muted hover:text-content-primary">✕</button>
+            </h2>
+            <button @click="showSearchReplaceModal = false" aria-label="Закрыть окно поиска и замены" class="text-content-muted hover:text-content-primary p-1">✕</button>
         </div>
 
         <div class="space-y-3 text-xs">
             <div>
-                <label class="block font-semibold text-content-secondary mb-1">Найти:</label>
-                <input type="text" x-model="searchQueryText" class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary font-mono outline-none focus:border-brand">
+                <label for="search-query-input-field" class="block font-semibold text-content-secondary mb-1">Найти:</label>
+                <input id="search-query-input-field" type="text" x-model="searchQueryText" aria-label="Искать текст в тегах" class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary font-mono outline-none focus:border-brand">
             </div>
 
             <div>
-                <label class="block font-semibold text-content-secondary mb-1">Заменить на:</label>
-                <input type="text" x-model="replaceWithText" class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary font-mono outline-none focus:border-brand">
+                <label for="replace-with-input-field" class="block font-semibold text-content-secondary mb-1">Заменить на:</label>
+                <input id="replace-with-input-field" type="text" x-model="replaceWithText" aria-label="Заменить найденный текст на" class="w-full bg-surface-input border border-surface-border rounded-lg px-2.5 py-1.5 text-content-primary font-mono outline-none focus:border-brand">
             </div>
 
             <div class="flex items-center space-x-4 pt-1">

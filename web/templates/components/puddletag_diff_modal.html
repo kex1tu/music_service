@@ -3,6 +3,9 @@
 <div
     x-show="showPatternModal"
     x-cloak
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="pattern-modal-title"
     @click.self="showPatternModal = false"
     @keydown.escape.window="showPatternModal = false"
     class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4 overflow-y-auto">
@@ -14,17 +17,18 @@
         <div class="px-6 py-4 border-b border-surface-border flex items-center justify-between bg-surface-base/90">
             <div class="flex items-center space-x-3">
                 <div class="w-8 h-8 rounded-lg bg-brand-muted text-brand flex items-center justify-center">
-                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-5 h-5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2m-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4z"/>
                     </svg>
                 </div>
                 <div>
-                    <h2 class="text-base font-bold text-content-primary" x-text="patternMode === 'filename_to_tag' ? 'Конвертер: Имя файла в теги' : 'Конвертер: Теги в имя файла'"></h2>
+                    <h2 id="pattern-modal-title" class="text-base font-bold text-content-primary" x-text="patternMode === 'filename_to_tag' ? 'Конвертер: Имя файла в теги' : 'Конвертер: Теги в имя файла'"></h2>
                     <p class="text-xs text-content-muted">Синтаксис шаблонов Puddletag / Mp3tag</p>
                 </div>
             </div>
             <button
                 @click="showPatternModal = false"
+                aria-label="Закрыть окно конвертера шаблонов"
                 class="text-content-muted hover:text-content-primary p-1.5 rounded-lg hover:bg-surface-hover transition">
                 ✕
             </button>
@@ -35,15 +39,15 @@
             <!-- Строка ввода шаблона и готовые пресеты -->
             <div class="space-y-2">
                 <div class="flex items-center justify-between">
-                    <label class="text-xs font-semibold text-content-secondary">Шаблон формата:</label>
+                    <label for="pattern-input-field" class="text-xs font-semibold text-content-secondary">Шаблон формата:</label>
                     <!-- Выпадающий список пресетов -->
                     <div class="flex items-center space-x-1.5 text-xs">
-                        <span class="text-content-muted text-[11px]">Пресеты:</span>
+                        <span class="text-content-muted text-xs">Пресеты:</span>
                         <template x-for="p in patternPresets" :key="p.pattern">
                             <button
                                 type="button"
                                 @click="patternInput = p.pattern; updatePatternDiff()"
-                                class="px-2 py-0.5 rounded bg-surface-elevated hover:bg-brand hover:text-white text-content-secondary border border-surface-border transition font-mono text-[10px]"
+                                class="px-2 py-0.5 rounded bg-surface-elevated hover:bg-brand hover:text-white text-content-secondary border border-surface-border transition font-mono text-xs"
                                 x-text="p.label">
                             </button>
                         </template>
@@ -52,16 +56,18 @@
 
                 <div class="relative">
                     <input
+                        id="pattern-input-field"
                         type="text"
                         x-model="patternInput"
                         @input="updatePatternDiff()"
+                        aria-label="Шаблон формата для конвертации"
                         class="w-full bg-surface-input border border-surface-border focus:border-brand rounded-xl px-3.5 py-2 text-content-primary font-mono text-sm outline-none transition"
                         placeholder="%artist% - %title%">
                 </div>
 
                 <!-- Кликабельные чипы доступных токенов -->
                 <div class="flex flex-wrap items-center gap-1.5 pt-1">
-                    <span class="text-[11px] text-content-muted mr-1">Доступные токены:</span>
+                    <span class="text-xs text-content-muted mr-1">Доступные токены:</span>
                     <button type="button" @click="patternInput += '%artist%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%artist%</button>
                     <button type="button" @click="patternInput += '%title%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%title%</button>
                     <button type="button" @click="patternInput += '%album%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%album%</button>
@@ -76,11 +82,11 @@
             <div class="border border-surface-border rounded-xl overflow-hidden shadow-inner">
                 <div class="bg-surface-base px-4 py-2 border-b border-surface-border text-xs font-semibold text-content-muted uppercase tracking-wider flex justify-between items-center">
                     <span>Предпросмотр сопоставления</span>
-                    <span class="font-mono text-[11px]" x-text="`Элементов: ${patternDiffResults.length}`"></span>
+                    <span class="font-mono text-xs" x-text="`Элементов: ${patternDiffResults.length}`"></span>
                 </div>
                 <div class="max-h-72 overflow-y-auto">
                     <table class="w-full text-left text-xs font-mono">
-                        <thead class="bg-surface-panel/90 text-content-muted border-b border-surface-borderSubtle text-[11px]">
+                        <thead class="bg-surface-panel/90 text-content-muted border-b border-surface-borderSubtle text-xs">
                             <tr>
                                 <th class="py-2 px-3 w-10 text-center">#</th>
                                 <th class="py-2 px-3 w-1/2">
@@ -108,7 +114,7 @@
                                             <div>
                                                 <span x-text="diff.new_filename"></span>
                                                 <template x-if="diff.has_conflict">
-                                                    <span class="ml-1 text-[10px] text-red-400 uppercase font-bold">[Конфликт имен!]</span>
+                                                    <span class="ml-1 text-xs text-red-400 uppercase font-bold">[Конфликт имен!]</span>
                                                 </template>
                                             </div>
                                         </template>
