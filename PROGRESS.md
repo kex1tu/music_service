@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 85 блоков задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js` и 100% тестов пройдены).
+- **Статус готовности:** **100% DONE** (Все 86 блоков задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js`, Studio Dark UI/UX редизайн и 100% тестов пройдены).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **Vertical Feature Slices**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 24 пакета зеленые).
@@ -958,26 +958,27 @@
       - Добавлен интеграционный тест `TestDownloader_QuickListenSpots_ExtractedOnLyricsFound`.
       - `go test -race ./...` и `./scripts/test_user_flows.sh` — 100% PASS (0 data races во всех пакетах).
 
-  - **Блок 85 (Fuzzy Levenshtein Scoring, Early Exit & Anti-Snippet Guard):**
-    - **85.1. Pure Go Fuzzy String Matching (`internal/services/resolver/score.go`):**
-      - Реализован алгоритм `LevenshteinRatio` (Wagner-Fischer с 1D срезом памяти и нулевыми внешними зависимостями).
-      - Внедрена взвешенная формула 70% Название трека / 30% Исполнитель-Канал из `mp3_PLRKLR`, устойчивая к опечаткам, знакам пунктуации и сторонним лейблам/агрегаторам.
-      - Добавлены юнит-тесты `TestLevenshteinRatio` и `TestCalculateScore_Weighted70_30` в `score_test.go`.
-    - **85.2. Early Exit в резолвере источников (`internal/services/resolver/matcher.go`):**
-      - Внедрена константа порога уверенного совпадения `EarlyExitMatchThreshold = 85.0`.
-      - Добавлен метод `FindYouTubeMatchWithScore`, прерывающий обход резервных запросов ytsearch при обнаружении студийного/topic-трека с оценкой $\ge 85\%$.
-      - Добавлен DI-хук `SetSearchFn` для изоляции сетевых вызовов в тестах и написан тест `TestEarlyExit_Threshold` в `matcher_test.go`.
-    - **85.3. Anti-Snippet & Geo-block Guard (`internal/services/downloader/media_processor.go`, `pipeline.go`):**
-      - Реализована функция `validateDownloadedStreamAudio` на базе `ffprobe`, отсекающая 30-секундные превью и гео-сниппеты (`actualDuration < 35s && expectedDuration > 60s`).
-      - Создан метод `downloadAndValidateRawStream`, интегрированный во все точки загрузки (`pipeline.go`, `switch_version.go`) с автоматическим переходом на резервные источники.
-      - Добавлен юнит-тест `TestValidateDownloadedStreamAudio_Snippet` в `media_processor_test.go`.
-    - **85.4. Статус LowMatch и индикация в UI (`resolver.go`, `job.go`, `downloader_queue.html`, `downloader_active.html`):**
-      - В модель `ResolvedTrack` добавлены поля `MatchScore float64` и `IsLowMatch bool` (для скоров $50..74\%$).
-      - В шаблонах очереди и активных задач выведен предупреждающий бейдж `[XX% match]` с всплывающей подсказкой.
-      - Добавлен тест `TestTrack_MatchScoreAndLowMatch` в `job_test.go`.
-    - **85.5. Тестирование и сборка:**
-      - `go test -race ./...` — 100% PASS (0 data races во всех 24 пакетах).
-      - `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешная сборка бинарника 16 МБ.
+  - **Блок 86 (Studio Dark UI/UX Redesign — Tidal + Linear Aesthetic & Anti-Clutter Optimization):**
+    - **86.1. Глобальная дизайн-система и палитра Studio Dark (`web/templates/index.html`, `web/static/css/style.css`):**
+      - Настроена строгая палитра матового темного интерфейса: базовый фон `surface-base: #09090b` (zinc-950), карточки и панели `surface-panel: #121215`, плавающие поверхности `surface-elevated: #18181c`, поля ввода `surface-input: #111114`, полупрозрачные микро-границы `border-white/[0.07]`, контрастный белый брендовый акцент (`#ffffff`), изумрудные и янтарные индикаторы активности.
+      - Внедрена кастомная стилизация скроллбаров Studio Dark, микро-бейджей `.badge-studio`, ползунков громкости и прогресс-баров с аппаратным ускорением.
+      - Скорректированы радиусы скругления (`rounded-sm: 4px`, `rounded-md: 6px`, `rounded-lg: 8px`) без громоздких bubble-эффектов.
+    - **86.2. Командная строка загрузки и шапка Raycast/Linear Style (`header.html`, `downloader_form.html`):**
+      - Хедер переработан в монохромный инсигния-бар со встроенным полем поиска `Ctrl+K` и горизонтальной мобильной лентой вкладок без полосы прокрутки.
+      - Форма загрузчика трансформирована в фокусный Command Bar: сегментированный селектор режима («Одна ссылка», «Список», «.torrent»), компактное поле ввода со встроенной кнопкой вставки из буфера и аккуратный селектор источника.
+    - **86.3. Плотные табличные списки треков и Anti-Clutter (`downloader_queue.html`, `downloader_active.html`, `puddletag_grid.html`):**
+      - Громоздкие карточки заменены на ультракомпактные табличные строки (48–56px) с тонкими разделителями `divide-surface-borderSubtle` и ховер-подсветкой `hover:bg-white/[0.03]`.
+      - Метаданные (битрейт `320 kbps`, длительность, размер) приведены к единому стандарту `font-mono text-xs tabular-nums` в минималистичных бейджах.
+      - Реализовано строгое адаптивное правило для кнопок действий: `opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100` (полная доступность на тачскринах мобильных устройств).
+      - Второстепенные колонки таблицы скрываются на мобилке (`hidden md:table-cell`), а важные атрибуты переносятся в подстрочник названия трека.
+    - **86.4. Мобильная адаптивность тулбара Puddletag и фиксация плеера (`puddletag_toolbar.html`, `audio_player.html`, `queue_drawer.html`):**
+      - 7 кнопок автоматизации Puddletag уложены в горизонтальную однострочную ленту с плавным скроллом без скроллбара (`overflow-x-auto no-scrollbar whitespace-nowrap`).
+      - Аудиоплеер и Drawer очереди зафиксированы в нижней части экрана (`fixed bottom-0 z-40 bg-zinc-950/90 backdrop-blur-md border-t border-white/[0.08]`), а главному контейнеру задан отступ `pb-28 sm:pb-32` для гарантированной защиты от перекрытия контента.
+    - **86.5. Верификация, сборка и Playwright скриншоты:**
+      - Шаблонные тесты (`template_validator_test.go`) — 100% PASS (все `:key` сохранены, JS-обработчики валидны, условия блокировки Puddletag соблюдены).
+      - `go test -v ./...` и `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешно пройдены.
+      - Playwright MCP: протестировано на десктопе 1280x800 и смартфоне 375x812 (Downloader + Files), подтверждено отсутствие горизонтального скролла (`document.documentElement.scrollWidth <= window.innerWidth`), скриншоты сохранены в артефактах.
+
 
 ---
 

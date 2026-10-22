@@ -246,7 +246,7 @@
                         <template x-if="trk.genre">
                             <span class="px-2 py-0.5 text-[10px] font-mono bg-surface-input text-content-secondary rounded border border-surface-border" x-text="trk.genre"></span>
                         </template>
-                        <span class="font-mono text-content-muted text-[11px]" x-text="formatDuration ? formatDuration(trk.duration) : `${Math.floor(trk.duration/60)}:${('0'+Math.floor(trk.duration%60)).slice(-2)}`"></span>
+                        <span class="font-mono text-content-muted text-[11px]" x-text="window.AppFormatters ? window.AppFormatters.formatDuration(trk.duration) : `${Math.floor(trk.duration/60)}:${('0'+Math.floor(trk.duration%60)).slice(-2)}`"></span>
                         <button
                             @click="$store.player.playTrack(trk, $store.radio.waveQueue)"
                             title="Слушать этот трек"
@@ -278,7 +278,7 @@
                         <template x-if="trk.genre">
                             <span class="px-2 py-0.5 text-[10px] font-mono bg-surface-input text-content-secondary rounded border border-surface-border" x-text="trk.genre"></span>
                         </template>
-                        <span class="font-mono text-content-muted text-[11px]" x-text="formatDuration ? formatDuration(trk.duration) : `${Math.floor(trk.duration/60)}:${('0'+Math.floor(trk.duration%60)).slice(-2)}`"></span>
+                        <span class="font-mono text-content-muted text-[11px]" x-text="window.AppFormatters ? window.AppFormatters.formatDuration(trk.duration) : `${Math.floor(trk.duration/60)}:${('0'+Math.floor(trk.duration%60)).slice(-2)}`"></span>
                         <button
                             @click="$store.player.playTrack(trk, $store.radio.recentHistory)"
                             title="Слушать этот трек"

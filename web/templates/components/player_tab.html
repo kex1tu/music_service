@@ -137,7 +137,7 @@
 
             <!-- Высокоточный таймлайн с миллисекундами -->
             <div class="space-y-2">
-                <div class="flex items-center justify-between font-mono text-xs text-content-secondary">
+                <div class="flex items-center justify-between font-mono tabular-nums text-xs text-content-secondary">
                     <span class="text-brand font-bold tracking-wider" x-text="$store.player.formatPreciseTime($store.player.currentTime)">00:00.00</span>
                     <span class="text-content-muted">/</span>
                     <span class="text-content-secondary tracking-wider" x-text="$store.player.formatPreciseTime($store.player.duration)">00:00.00</span>
@@ -399,7 +399,7 @@
 
                 <!-- РЕЖИМ 3: ТЕХНИЧЕСКИЙ ПАСПОРТ ТРЕКА (PASSPORT) -->
                 <div x-show="$store.player.centerDeckMode === 'specs'" class="w-full h-full flex flex-col justify-between overflow-y-auto space-y-4">
-                    <div class="space-y-3 text-xs font-mono">
+                    <div class="space-y-3 text-xs font-mono tabular-nums">
                         <div class="flex items-center justify-between border-b border-surface-borderSubtle pb-2">
                             <span class="text-content-muted">AUDIO FORMAT / CODEC:</span>
                             <span class="text-brand font-bold" x-text="$store.player.techSpecs.codec">MP3 CBR</span>

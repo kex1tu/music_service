@@ -1,22 +1,24 @@
 {{ define "puddletag_toolbar" }}
-<!-- ==================== ВЕРХНИЙ КОМАНДНЫЙ ТУЛБАР (PUDDLETAG ACTION BAR) ==================== -->
-<div class="bg-surface-panel/90 border border-surface-border rounded-xl p-3 flex flex-wrap items-center justify-between gap-2.5 shadow-md backdrop-blur-sm">
-    <!-- Левая секция: Хлебные крошки и тумблер рекурсии -->
-    <div class="flex items-center space-x-2 flex-wrap gap-y-1 min-w-0">
-        <nav class="flex items-center space-x-1 sm:space-x-1.5 text-xs overflow-x-auto py-0.5">
+<!-- ==================== ВЕРХНИЙ КОМАНДНЫЙ ТУЛБАР (PUDDLETAG STUDIO ACTION BAR) ==================== -->
+<div class="bg-surface-panel/95 border border-surface-border rounded-lg p-2.5 sm:p-3 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2 shadow-sm backdrop-blur-sm select-none">
+    
+    <!-- Левая секция: Хлебные крошки и тумблер подпапок -->
+    <div class="flex items-center space-x-2 overflow-x-auto no-scrollbar py-0.5 min-w-0 shrink">
+        <nav class="flex items-center space-x-1 text-xs shrink-0">
             <template x-for="(crumb, idx) in breadcrumbs" :key="crumb.path">
-                <div class="flex items-center space-x-1 flex-shrink-0">
+                <div class="flex items-center space-x-1 shrink-0">
                     <template x-if="idx > 0">
                         <svg class="w-3 h-3 text-content-muted" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/>
                         </svg>
                     </template>
                     <button
+                        type="button"
                         @click="loadDirectory(crumb.path)"
-                        :class="idx === breadcrumbs.length - 1 ? 'font-semibold text-brand' : 'text-content-secondary hover:text-content-primary'"
-                        class="transition text-xs flex items-center space-x-1 px-1.5 py-0.5 rounded hover:bg-surface-hover">
+                        :class="idx === breadcrumbs.length - 1 ? 'font-semibold text-white' : 'text-content-secondary hover:text-white'"
+                        class="transition text-xs flex items-center space-x-1 px-1.5 py-0.5 rounded-sm hover:bg-white/[0.04]">
                         <template x-if="idx === 0">
-                            <svg class="w-3.5 h-3.5 inline mr-0.5 text-brand" viewBox="0 0 24 24" fill="currentColor">
+                            <svg class="w-3.5 h-3.5 inline mr-0.5 text-zinc-300" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
                             </svg>
                         </template>
@@ -27,24 +29,24 @@
         </nav>
 
         <!-- Тумблер рекурсивного сканирования подпапок -->
-        <label class="flex items-center space-x-1.5 px-2 py-1 rounded-lg bg-surface-elevated/70 border border-surface-border hover:border-brand/40 text-[11px] font-mono text-content-secondary cursor-pointer select-none transition ml-1" title="Загрузить все аудиофайлы из всех вложенных каталогов">
+        <label class="flex items-center space-x-1.5 px-2 py-0.5 rounded-sm bg-surface-elevated border border-surface-border hover:border-white/20 text-[11px] font-mono text-content-secondary cursor-pointer select-none transition shrink-0" title="Загрузить все аудиофайлы из всех вложенных каталогов">
             <input
                 type="checkbox"
                 x-model="recursiveMode"
                 @change="loadDirectory(currentPath)"
-                class="rounded bg-surface-input border-surface-border text-brand focus:ring-0 cursor-pointer w-3.5 h-3.5">
-            <span :class="recursiveMode ? 'text-brand font-bold' : ''">Включая подпапки</span>
+                class="rounded-sm bg-surface-input border-surface-border text-white focus:ring-0 cursor-pointer w-3 h-3">
+            <span :class="recursiveMode ? 'text-white font-semibold' : ''">Подпапки</span>
         </label>
 
-        <!-- Кнопки управления текущей открытой папкой (если не в корне медиатеки) -->
+        <!-- Кнопки управления текущей папкой -->
         <template x-if="currentPath && currentPath.trim() !== ''">
-            <div class="flex items-center space-x-1">
+            <div class="flex items-center space-x-1 shrink-0">
                 <button
                     type="button"
                     @click="promptRedownloadCurrentFolder()"
-                    class="px-2 py-1 rounded-lg bg-surface-elevated/70 border border-surface-border hover:border-brand/40 hover:bg-brand/10 text-content-muted hover:text-brand text-[11px] font-mono transition flex items-center space-x-1"
+                    class="px-1.5 py-0.5 rounded-sm bg-surface-elevated border border-surface-border hover:border-white/20 text-content-muted hover:text-white text-[10px] font-mono transition flex items-center space-x-1"
                     title="Скачать текущий альбом/релиз заново">
-                    <svg class="w-3.5 h-3.5 text-brand" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-3 h-3 text-zinc-400" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6c0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6c0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4l-4-4v3z"/>
                     </svg>
                     <span>Перекачать</span>
@@ -52,153 +54,153 @@
                 <button
                     type="button"
                     @click="promptDeleteCurrentFolder()"
-                    class="px-2 py-1 rounded-lg bg-surface-elevated/70 border border-surface-border hover:border-red-500/40 hover:bg-red-500/10 text-content-muted hover:text-red-400 text-[11px] font-mono transition flex items-center space-x-1"
+                    class="px-1.5 py-0.5 rounded-sm bg-surface-elevated border border-surface-border hover:border-rose-500/40 text-content-muted hover:text-rose-300 text-[10px] font-mono transition flex items-center space-x-1"
                     title="Удалить текущую папку со всеми файлами">
-                    <svg class="w-3.5 h-3.5 text-red-400" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="w-3 h-3 text-rose-400" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zm3.713-4.288Q11 16.426 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288"/>
                     </svg>
-                    <span>Удалить папку</span>
+                    <span>Удалить</span>
                 </button>
             </div>
         </template>
     </div>
 
-    <!-- Правая секция: Кнопки автоматизаций, конвертеров и сохранения -->
-    <div class="flex items-center space-x-1.5 flex-wrap gap-y-1.5 justify-end">
+    <!-- Правая секция: Поиск, инструменты автоматизации в компактной ленте и Сохранить -->
+    <div class="flex items-center space-x-1.5 min-w-0 shrink">
+        
         <!-- Быстрый фильтр в таблице -->
-        <div class="relative w-44 sm:w-52">
+        <div class="relative w-36 sm:w-44 shrink-0">
             <input
                 type="text"
                 x-model="searchFilter"
                 placeholder="Фильтр таблицы..."
-                class="w-full bg-surface-elevated text-content-primary text-xs rounded-lg pl-7 pr-6 py-1.5 border border-surface-border focus:border-brand outline-none transition placeholder:text-content-muted font-mono">
-            <svg class="w-3 h-3 text-content-muted absolute left-2 top-2 pointer-events-none" viewBox="0 0 24 24" fill="currentColor">
+                class="w-full bg-surface-input text-content-primary text-xs rounded-sm pl-6 pr-5 py-1 border border-surface-border focus:border-white/30 outline-none transition placeholder:text-content-muted font-mono">
+            <svg class="w-3 h-3 text-content-muted absolute left-1.5 top-2 pointer-events-none" viewBox="0 0 24 24" fill="currentColor">
                 <path d="m19.6 21l-6.3-6.3q-.75.6-1.725.95T9.5 16q-2.725 0-4.612-1.888T3 9.5t1.888-4.612T9.5 3t4.613 1.888T16 9.5q0 1.1-.35 2.075T14.7 13.3l6.3 6.3zM9.5 14q1.875 0 3.188-1.312T14 9.5t-1.312-3.187T9.5 5T6.313 6.313T5 9.5t1.313 3.188T9.5 14"/>
             </svg>
             <button
                 x-show="searchFilter"
                 @click="searchFilter = ''"
-                class="absolute right-1.5 top-1.5 text-content-muted hover:text-content-primary p-0.5">
+                class="absolute right-1 top-1.5 text-content-muted hover:text-content-primary p-0.5">
                 ✕
             </button>
         </div>
 
-        <!-- Кнопка Поиск в базах метаданных (🌐 Базы тегов) -->
-        <button
-            type="button"
-            @click="openSourceModal()"
-            :disabled="tracks.length === 0"
-            class="px-2.5 py-1.5 bg-brand/15 hover:bg-brand/25 text-brand hover:text-brand-light text-xs font-semibold rounded-lg border border-brand/30 transition flex items-center space-x-1 shadow-sm disabled:opacity-40"
-            title="Найти метаданные релиза в Deezer, MusicBrainz и Shazam для выделенных треков">
-            <svg class="w-3.5 h-3.5 text-brand" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
-            </svg>
-            <span>Базы тегов</span>
-        </button>
+        <!-- Однострочная компактная лента кнопок автоматизации с горизонтальным скроллом (Правило 2) -->
+        <div class="flex items-center gap-1 overflow-x-auto no-scrollbar whitespace-nowrap py-0.5">
+            <!-- Кнопка Базы тегов -->
+            <button
+                type="button"
+                @click="openSourceModal()"
+                :disabled="tracks.length === 0"
+                class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs font-medium rounded-sm border border-surface-border transition flex items-center space-x-1 shrink-0 disabled:opacity-40"
+                title="Найти метаданные релиза в Deezer, MusicBrainz и Shazam">
+                <svg class="w-3.5 h-3.5 text-zinc-300" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+                </svg>
+                <span>Базы</span>
+            </button>
 
-        <!-- Кнопка Filename to Tag -->
-        <button
-            type="button"
-            @click="openPatternModal('filename_to_tag')"
-            :disabled="tracks.length === 0"
-            class="px-2.5 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-content-primary text-xs font-semibold rounded-lg border border-surface-border transition flex items-center space-x-1 shadow-sm disabled:opacity-40"
-            title="Извлечь теги из имен файлов по шаблону (%artist% - %title%)">
-            <svg class="w-3.5 h-3.5 text-brand" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2m-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4z"/>
-            </svg>
-            <span class="hidden md:inline">Файл → Теги</span>
-        </button>
+            <!-- Кнопка Filename to Tag -->
+            <button
+                type="button"
+                @click="openPatternModal('filename_to_tag')"
+                :disabled="tracks.length === 0"
+                class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs font-medium rounded-sm border border-surface-border transition flex items-center space-x-1 shrink-0 disabled:opacity-40"
+                title="Извлечь теги из имен файлов по шаблону">
+                <span class="font-mono text-[11px] text-zinc-300">Ф→Т</span>
+                <span class="hidden sm:inline">Файл→Теги</span>
+            </button>
 
-        <!-- Кнопка Tag to Filename -->
-        <button
-            type="button"
-            @click="openPatternModal('tag_to_filename')"
-            :disabled="tracks.length === 0"
-            class="px-2.5 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-content-primary text-xs font-semibold rounded-lg border border-surface-border transition flex items-center space-x-1 shadow-sm disabled:opacity-40"
-            title="Переименовать файлы на диске на основе тегов">
-            <svg class="w-3.5 h-3.5 text-amber-400" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M4 21q-.425 0-.712-.288T3 20v-2.425q0-.4.15-.763t.425-.637L16.2 3.575q.3-.275.663-.425t.762-.15t.775.15t.65.45L20.425 5q.3.275.437.65T21 6.4q0 .4-.138.763t-.437.662l-12.6 12.6q-.275.275-.638.425t-.762.15zM17.6 7.8L19 6.4L17.6 5l-1.4 1.4z"/>
-            </svg>
-            <span class="hidden md:inline">Теги → Файл</span>
-        </button>
+            <!-- Кнопка Tag to Filename -->
+            <button
+                type="button"
+                @click="openPatternModal('tag_to_filename')"
+                :disabled="tracks.length === 0"
+                class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs font-medium rounded-sm border border-surface-border transition flex items-center space-x-1 shrink-0 disabled:opacity-40"
+                title="Переименовать файлы на диске на основе тегов">
+                <span class="font-mono text-[11px] text-zinc-300">Т→Ф</span>
+                <span class="hidden sm:inline">Теги→Файл</span>
+            </button>
 
-        <!-- Кнопка Смена регистра (Case) -->
-        <button
-            type="button"
-            @click="showCaseModal = true"
-            :disabled="tracks.length === 0"
-            class="px-2.5 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-content-primary text-xs font-semibold rounded-lg border border-surface-border transition flex items-center space-x-1 shadow-sm disabled:opacity-40"
-            title="Преобразование регистра (Title Case, UPPERCASE, lowercase)">
-            <span class="font-serif font-bold text-sky-400 text-xs">Aa</span>
-            <span class="hidden lg:inline">Регистр</span>
-        </button>
+            <!-- Кнопка Смена регистра (Case) -->
+            <button
+                type="button"
+                @click="showCaseModal = true"
+                :disabled="tracks.length === 0"
+                class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs font-medium rounded-sm border border-surface-border transition flex items-center space-x-1 shrink-0 disabled:opacity-40"
+                title="Преобразование регистра (Title Case, UPPERCASE, lowercase)">
+                <span class="font-serif font-bold text-sky-400 text-xs">Aa</span>
+                <span class="hidden lg:inline">Регистр</span>
+            </button>
 
-        <!-- Кнопка Автонумератор (#) -->
-        <button
-            type="button"
-            @click="showAutoNumberModal = true"
-            :disabled="tracks.length === 0"
-            class="px-2.5 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-content-primary text-xs font-semibold rounded-lg border border-surface-border transition flex items-center space-x-1 shadow-sm disabled:opacity-40"
-            title="Мастер автонумерации треков (01..N, сброс по дискам)">
-            <span class="font-mono font-bold text-emerald-400 text-xs">1..N</span>
-            <span class="hidden lg:inline">Нумератор</span>
-        </button>
+            <!-- Кнопка Автонумератор (#) -->
+            <button
+                type="button"
+                @click="showAutoNumberModal = true"
+                :disabled="tracks.length === 0"
+                class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs font-medium rounded-sm border border-surface-border transition flex items-center space-x-1 shrink-0 disabled:opacity-40"
+                title="Мастер автонумерации треков">
+                <span class="font-mono font-bold text-emerald-400 text-xs">1..N</span>
+                <span class="hidden lg:inline">Нумератор</span>
+            </button>
 
-        <!-- Кнопка Очистить названия -->
-        <button
-            type="button"
-            @click="cleanTitlesAction()"
-            :disabled="tracks.length === 0"
-            class="px-2.5 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-content-primary text-xs font-semibold rounded-lg border border-surface-border transition flex items-center space-x-1 shadow-sm disabled:opacity-40"
-            title="Очистить названия от мусора и извлечь фиты в исполнители">
-            <span class="text-amber-400">✨</span>
-            <span class="hidden xl:inline">Очистка</span>
-        </button>
+            <!-- Кнопка Очистить названия -->
+            <button
+                type="button"
+                @click="cleanTitlesAction()"
+                :disabled="tracks.length === 0"
+                class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs font-medium rounded-sm border border-surface-border transition flex items-center space-x-1 shrink-0 disabled:opacity-40"
+                title="Очистить названия от мусора и извлечь фиты">
+                <span class="text-amber-300 text-xs">✨</span>
+                <span class="hidden xl:inline">Очистка</span>
+            </button>
 
-        <!-- Кнопка Поиск и Замена -->
-        <button
-            type="button"
-            @click="showSearchReplaceModal = true"
-            :disabled="tracks.length === 0"
-            class="px-2.5 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-content-primary text-xs font-semibold rounded-lg border border-surface-border transition flex items-center space-x-1 shadow-sm disabled:opacity-40"
-            title="Поиск и замена текста в полях тегов">
-            <svg class="w-3.5 h-3.5 text-content-muted" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14"/>
-            </svg>
-            <span class="hidden xl:inline">Замена</span>
-        </button>
+            <!-- Кнопка Поиск и Замена -->
+            <button
+                type="button"
+                @click="showSearchReplaceModal = true"
+                :disabled="tracks.length === 0"
+                class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs font-medium rounded-sm border border-surface-border transition flex items-center space-x-1 shrink-0 disabled:opacity-40"
+                title="Поиск и замена текста в полях тегов">
+                <svg class="w-3 h-3 text-content-muted" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                </svg>
+                <span class="hidden xl:inline">Замена</span>
+            </button>
 
-        <!-- Кнопка Удалить выбранные треки -->
-        <button
-            type="button"
-            x-show="selectedTracksCount > 0"
-            @click="promptDeleteSelected()"
-            class="px-2.5 py-1.5 bg-red-600/15 hover:bg-red-600/25 text-red-400 hover:text-red-300 text-xs font-semibold rounded-lg border border-red-500/30 transition flex items-center space-x-1 shadow-sm animate-fade-in"
-            title="Удалить выбранные треки с диска (Del)">
-            <svg class="w-3.5 h-3.5 text-red-400" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zm3.713-4.288Q11 16.426 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288"/>
-            </svg>
-            <span x-text="`Удалить (${selectedTracksCount})`"></span>
-        </button>
+            <!-- Кнопка Удалить выбранные треки -->
+            <button
+                type="button"
+                x-show="selectedTracksCount > 0"
+                @click="promptDeleteSelected()"
+                class="px-2 py-1 bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 text-xs font-medium rounded-sm border border-rose-500/30 transition flex items-center space-x-1 shrink-0 animate-fade-in"
+                title="Удалить выбранные треки с диска">
+                <svg class="w-3 h-3 text-rose-400" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M7 21q-.825 0-1.412-.587T5 19V6q-.425 0-.712-.288T4 5t.288-.712T5 4h4q0-.425.288-.712T10 3h4q.425 0 .713.288T15 4h4q.425 0 .713.288T20 5t-.288.713T19 6v13q0 .825-.587 1.413T17 21zm3.713-4.288Q11 16.426 11 16V9q0-.425-.288-.712T10 8t-.712.288T9 9v7q0 .425.288.713T10 17t.713-.288m4 0Q15 16.426 15 16V9q0-.425-.288-.712T14 8t-.712.288T13 9v7q0 .425.288.713T14 17t.713-.288"/>
+                </svg>
+                <span x-text="`Удалить (${selectedTracksCount})`"></span>
+            </button>
 
-        <!-- Кнопка Откатить изменения -->
-        <button
-            type="button"
-            @click="revertAllChanges()"
-            x-show="hasDirtyChanges"
-            class="px-2.5 py-1.5 bg-surface-elevated hover:bg-surface-hover text-amber-400 text-xs font-semibold rounded-lg border border-amber-500/30 transition flex items-center space-x-1 shadow-sm animate-fade-in"
-            title="Сбросить все несохраненные изменения">
-            <span>↺</span>
-            <span class="hidden sm:inline">Сброс</span>
-        </button>
+            <!-- Кнопка Откатить изменения -->
+            <button
+                type="button"
+                @click="revertAllChanges()"
+                x-show="hasDirtyChanges"
+                class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-amber-300 text-xs font-medium rounded-sm border border-amber-500/30 transition flex items-center space-x-1 shrink-0 animate-fade-in"
+                title="Сбросить все несохраненные изменения">
+                <span>↺</span>
+                <span>Сброс</span>
+            </button>
+        </div>
 
         <!-- ГЛАВНАЯ КНОПКА СОХРАНЕНИЯ (SAVE CTRL+S) -->
         <button
             type="button"
             @click="saveAllChanges()"
             :disabled="isSaving || (!isDownloaderMode && !hasDirtyChanges)"
-            :class="(isDownloaderMode || hasDirtyChanges) ? 'bg-brand hover:bg-brand-hover text-white shadow-brand-glow animate-pulse' : 'bg-surface-elevated text-content-muted border border-surface-border opacity-50 cursor-not-allowed'"
-            class="px-3.5 py-1.5 text-xs font-bold rounded-lg transition flex items-center space-x-1.5 shadow-md active:scale-95 shrink-0"
+            :class="(isDownloaderMode || hasDirtyChanges) ? 'bg-white hover:bg-zinc-200 text-zinc-950 font-semibold shadow-xs' : 'bg-surface-elevated text-content-muted border border-surface-border opacity-40 cursor-not-allowed'"
+            class="h-8 px-3 text-xs rounded-sm transition flex items-center space-x-1.5 active:scale-95 shrink-0"
             :title="isDownloaderMode ? 'Принять релиз в медиатеку (Ctrl+S)' : 'Записать ID3v2.4 теги в файлы (Ctrl+S)'">
             <template x-if="isSaving">
                 <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor">
@@ -210,8 +212,9 @@
                     <path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3m3-10H5V5h10z"/>
                 </svg>
             </template>
-            <span x-text="isDownloaderMode ? 'Принять в медиатеку' : (hasDirtyChanges ? `Сохранить (${dirtyIndices.size})` : 'Сохранить (Ctrl+S)')"></span>
+            <span x-text="isDownloaderMode ? 'Принять' : (hasDirtyChanges ? `Сохранить (${dirtyIndices.size})` : 'Сохранить')"></span>
         </button>
+
     </div>
 </div>
 {{ end }}
