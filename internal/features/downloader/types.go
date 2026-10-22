@@ -62,10 +62,11 @@ type Job struct {
 	ArtistName        *string                  `json:"artist_name,omitempty"`
 	CreatedAt         string                   `json:"created_at"` // RFC3339 / RFC3339Nano формат для совместимости с фронтендом
 	UpdatedAt         time.Time                `json:"updated_at,omitempty"`
-	CoverRelativePath string                   `json:"-"`
-	AlbumMetadata     resolver.ReleaseMetadata `json:"-"`
-	Tracks            []resolver.ResolvedTrack `json:"tracks,omitempty"`
-	trackProgress     []float64                `json:"-"`
+	CoverRelativePath    string                   `json:"-"`
+	AlbumMetadata        resolver.ReleaseMetadata `json:"-"`
+	SelectedTrackIndices []int                    `json:"selected_track_indices,omitempty"`
+	Tracks               []resolver.ResolvedTrack `json:"tracks,omitempty"`
+	trackProgress        []float64                `json:"-"`
 	cancelFunc        func()                   `json:"-"`
 	onUpdate          func()                   `json:"-"`
 }
@@ -136,6 +137,10 @@ func (j *Job) Snapshot() *Job {
 	if len(j.Tracks) > 0 {
 		snap.Tracks = make([]resolver.ResolvedTrack, len(j.Tracks))
 		copy(snap.Tracks, j.Tracks)
+	}
+	if len(j.SelectedTrackIndices) > 0 {
+		snap.SelectedTrackIndices = make([]int, len(j.SelectedTrackIndices))
+		copy(snap.SelectedTrackIndices, j.SelectedTrackIndices)
 	}
 	return snap
 }
@@ -343,12 +348,99 @@ func (j *Job) UpdateTrack(index int, updateFn func(t *resolver.ResolvedTrack)) {
 	}
 }
 
+// SetSelectedTrackIndices сохраняет список выбранных индексов треков для выборочного скачивания.
+func (j *Job) SetSelectedTrackIndices(indices []int) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.SelectedTrackIndices = make([]int, len(indices))
+	copy(j.SelectedTrackIndices, indices)
+	j.UpdatedAt = time.Now().UTC()
+}
+
+// GetSelectedTrackIndices возвращает копию списка выбранных индексов треков.
+func (j *Job) GetSelectedTrackIndices() []int {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	if len(j.SelectedTrackIndices) == 0 {
+		return nil
+	}
+	res := make([]int, len(j.SelectedTrackIndices))
+	copy(res, j.SelectedTrackIndices)
+	return res
+}
+
 // --- Request DTOs ---
 
 // CreateJobRequest — тело запроса для постановки одиночной ссылки в очередь.
 type CreateJobRequest struct {
+	URL                  string `json:"url"`
+	Source               string `json:"source"`
+	SelectedTrackIndices []int  `json:"selected_track_indices,omitempty"`
+	SkipExisting         bool   `json:"skip_existing,omitempty"`
+}
+
+// PreflightRequest — запрос предполетной проверки релиза.
+type PreflightRequest struct {
 	URL    string `json:"url"`
 	Source string `json:"source"`
+}
+
+// PreflightTrackStatus определяет статус трека относительно локальной медиатеки.
+type PreflightTrackStatus string
+
+const (
+	TrackStatusNew              PreflightTrackStatus = "NEW"
+	TrackStatusExistsHighQuality PreflightTrackStatus = "EXISTS_HIGH_QUALITY"
+	TrackStatusExistsUpgrade     PreflightTrackStatus = "EXISTS_UPGRADE_AVAILABLE"
+)
+
+// ExistingTrackInfo содержит сведения о треке, уже найденном в медиатеке.
+type ExistingTrackInfo struct {
+	TrackID      int64  `json:"track_id"`
+	Title        string `json:"title"`
+	Artist       string `json:"artist"`
+	Album        string `json:"album"`
+	FilePath     string `json:"file_path"`
+	Bitrate      int    `json:"bitrate"`
+	QualityTier  string `json:"quality_tier"` // "true_320k" или "upscaled_128k"
+}
+
+// PreflightTrackItem представляет трек в предпросмотре релиза.
+type PreflightTrackItem struct {
+	Index         int                  `json:"index"`
+	TrackNumber   int                  `json:"track_number"`
+	DiscNumber    int                  `json:"disc_number"`
+	Title         string               `json:"title"`
+	Artist        string               `json:"artist"`
+	Duration      int                  `json:"duration"`
+	Status        PreflightTrackStatus `json:"status"`
+	ExistingTrack *ExistingTrackInfo   `json:"existing_track,omitempty"`
+	DefaultSelect bool                 `json:"default_selected"`
+}
+
+// PreflightReleaseInfo содержит сводные метаданные релиза для предполетного окна.
+type PreflightReleaseInfo struct {
+	Title       string `json:"title"`
+	Artist      string `json:"artist"`
+	Year        int    `json:"year"`
+	Genre       string `json:"genre"`
+	CoverURL    string `json:"cover_url"`
+	TotalTracks int    `json:"total_tracks"`
+}
+
+// PreflightSummary содержит статистику релиза для быстрых фильтров.
+type PreflightSummary struct {
+	TotalTracks              int `json:"total_tracks"`
+	NewTracksCount           int `json:"new_tracks_count"`
+	ExistingHighQualityCount int `json:"existing_high_quality_count"`
+	UpgradeAvailableCount    int `json:"upgrade_available_count"`
+}
+
+// PreflightResponse — ответ эндпоинта POST /api/downloads/preflight.
+type PreflightResponse struct {
+	Release PreflightReleaseInfo `json:"release"`
+	Tracks  []PreflightTrackItem `json:"tracks"`
+	Summary PreflightSummary     `json:"summary"`
 }
 
 // CreateBatchJobRequest — тело запроса для пакетного добавления ссылок.

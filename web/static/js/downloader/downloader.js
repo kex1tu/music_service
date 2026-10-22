@@ -26,6 +26,18 @@ function downloaderComponent() {
         ...(window.DownloaderDiscography || {}),
         ...(window.DownloaderVersions || {}),
 
+        init() {
+            window.addEventListener('job-created', (e) => {
+                if (e.detail && e.detail.job) {
+                    this.job = e.detail.job;
+                    if (this.url === e.detail.url) {
+                        this.url = '';
+                    }
+                    this.startPolling(e.detail.job.id);
+                }
+            });
+        },
+
         setMode(mode) {
             this.inputMode = mode;
         },
@@ -101,6 +113,43 @@ function downloaderComponent() {
             if (this.pollInterval) {
                 clearInterval(this.pollInterval);
                 this.pollInterval = null;
+            }
+
+            // Pre-flight check:
+            // Для альбомов и плейлистов (>1 трека) открываем предпросмотр треклиста автоматически.
+            // Для синглов проверяем наличие дубликата в 320 kbps.
+            if (!cleanUrl.startsWith('magnet:') && this.source !== 'torrent') {
+                try {
+                    const preResp = await fetch('/downloads/preflight', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            url: cleanUrl,
+                            source: this.source,
+                        }),
+                    });
+
+                    if (preResp.ok) {
+                        const preData = await preResp.json();
+                        const tracks = preData.tracks || [];
+                        const preStore = Alpine.store('preflight');
+
+                        if (tracks.length > 1 && preStore) {
+                            // Альбом или плейлист: открываем модалку предпросмотра
+                            this.isSubmitting = false;
+                            preStore.setPreflightData(cleanUrl, this.source, preData);
+                            return;
+                        } else if (tracks.length === 1 && tracks[0].status === 'EXISTS_HIGH_QUALITY' && preStore) {
+                            // Сингл уже есть в медиатеке в 320k: предупреждаем и открываем окно подтверждения
+                            this.isSubmitting = false;
+                            Alpine.store('app').toast('Этот трек уже есть в медиатеке в 320 kbps. Открыт предпросмотр для подтверждения.', 'warning');
+                            preStore.setPreflightData(cleanUrl, this.source, preData);
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[Downloader] Preflight check error, falling back to direct download:', e);
+                }
             }
 
             try {

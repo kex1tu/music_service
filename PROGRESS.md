@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 86 блоков задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js`, Studio Dark UI/UX редизайн и 100% тестов пройдены).
+- **Статус готовности:** **100% DONE** (Все 88 блоков задач полностью реализованы, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js`, Studio Dark UI/UX редизайн и 100% тестов пройдены).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **Vertical Feature Slices**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 24 пакета зеленые).
@@ -991,6 +991,26 @@
       - Статические тесты шаблонов `go test ./web/...` — 100% PASS.
       - Все тесты проекта `go test ./...` — 100% PASS.
       - Бинарник `bin/music-manager` пересобран.
+
+  - **Блок 88 (Pre-Flight Check, Deduplication & Track Selection):**
+    - **88.1. Бэкенд проверки дубликатов и предпросмотра релиза (`internal/features/downloader/`):**
+      - Эндпоинт `POST /downloads/preflight` и `POST /api/downloads/preflight`.
+      - Репозиторий `CheckTrackInLibrary(ctx, title, artist)`: поиск по `clean_title` с поддержкой битрейтов в kbps и bps (`isHighQualityBitrate`: `>=310000 || (bitrate >= 310 && bitrate <= 10000)`).
+      - Три статуса трека: `NEW` (default: true), `EXISTS_UPGRADE_AVAILABLE` (default: true), `EXISTS_HIGH_QUALITY` (default: false).
+      - In-memory кэш разрешения источников `resolveURL` с 5-минутным TTL для предотвращения повторных внешних запросов при переходе от Preflight к загрузке.
+      - Фильтрация треков `SelectedTrackIndices` в `CreateJobWithOptions` и `executeRegular`.
+      - Юнит- и интеграционные тесты `preflight_test.go` — 100% PASS (включая проверку гонок `-race`).
+    - **88.2. Studio Dark UI/UX модальное окно Pre-Flight (`web/templates/components/downloader_preflight_modal.html`):**
+      - Строгие моноширинные бейджи без эмодзи (`NEW`: изумрудная точка + `НОВЫЙ`; `EXISTS_UPGRADE_AVAILABLE`: янтарная точка + `АПГРЕЙД (Xk → 320k)`; `EXISTS_HIGH_QUALITY`: цинковый бейдж + серая точка + `В БАЗЕ (320k)`).
+      - Полупрозрачное приглушение невыбранных строк (`opacity-55`).
+      - Разгруженная шапка (Anti-Clutter): мастер-чекбокс в `<th>`, кнопки-пилюли `Новые + Апгрейд`, `Только новые` и свитч `Скрыть треки 320k`.
+      - Адаптивность: Desktop `1280x800` (панель релиза слева, скроллируемая таблица справа); Mobile `375x812` (Bottom Sheet / Fullscreen Drawer с фиксированной нижней панелью действий).
+      - Обработка крайнего случая: кнопка «Скачать выбранные (0)» `disabled` с поясняющей подсказкой при отсутствии отмеченных треков.
+    - **88.3. Интеграция с формой загрузки (`downloader.js`, `downloader_form.html`, `preflight.js`):**
+      - Выделенная кнопка «Предпросмотр» рядом с кнопкой «Скачать» (всегда открывает модалку, даже для сингла).
+      - Автоматическое открытие Pre-Flight для альбомов/плейлистов (>1 трека) при нажатии «Скачать» / Enter.
+      - Предупреждающий тост и открытие предпросмотра для синглов при наличии дубликата в 320 kbps.
+      - Верификация в Playwright: протестировано на десктопе 1280x800 и смартфоне 375x812, скриншоты проверены.
 
 ---
 

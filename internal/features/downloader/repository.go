@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"music-manager/internal/db"
+	"music-manager/internal/id3"
 )
 
 var (
@@ -40,6 +41,7 @@ type JobRepository interface {
 	ClearFinishedJobs(ctx context.Context, age time.Duration) (int64, error)
 	ClearCompletedJobs(ctx context.Context, age time.Duration) (int64, error)
 	GetMissingTracksForAlbum(ctx context.Context, folderPath string) ([]MissingTrackInfo, error)
+	CheckTrackInLibrary(ctx context.Context, title, artist string) (*ExistingTrackInfo, error)
 
 	GetPinnedSource(ctx context.Context, cacheKey string) (*PinnedTrackSourceDTO, error)
 	SavePinnedSource(ctx context.Context, pin PinnedTrackSourceDTO) error
@@ -622,4 +624,86 @@ func (r *Repository) InvalidateSoundCloudURL(ctx context.Context, key string, fa
 	}
 
 	return &entry, err
+}
+
+// isHighQualityBitrate проверяет, является ли битрейт высоким (>= 310k),
+// учитывая варианты хранения в kbps (320) и bps (320000).
+func isHighQualityBitrate(bitrate int) bool {
+	if bitrate >= 310000 {
+		return true
+	}
+	if bitrate >= 310 && bitrate <= 10000 {
+		return true
+	}
+	return false
+}
+
+// CheckTrackInLibrary ищет трек в медиатеке по названию и исполнителю.
+func (r *Repository) CheckTrackInLibrary(ctx context.Context, title, artist string) (*ExistingTrackInfo, error) {
+	if r.db == nil {
+		return nil, nil
+	}
+
+	cleanTitle := strings.ToLower(strings.TrimSpace(id3.CleanTitle(title, "")))
+	if cleanTitle == "" {
+		return nil, nil
+	}
+
+	cleanArtist := strings.ToLower(strings.TrimSpace(artist))
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT t.id, t.title, a.name, COALESCE(al.title, ''), t.file_path, COALESCE(t.bitrate, 0)
+		FROM tracks t
+		JOIN artists a ON a.id = t.artist_id
+		LEFT JOIN albums al ON al.id = t.album_id
+		WHERE t.clean_title = ?
+		LIMIT 10
+	`, cleanTitle)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		id       int64
+		title    string
+		artist   string
+		album    string
+		filePath string
+		bitrate  int
+	}
+
+	var candidates []candidate
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.id, &c.title, &c.artist, &c.album, &c.filePath, &c.bitrate); err == nil {
+			candidates = append(candidates, c)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	for _, c := range candidates {
+		dbArtistClean := strings.ToLower(strings.TrimSpace(c.artist))
+		if cleanArtist == "" || dbArtistClean == cleanArtist ||
+			strings.Contains(cleanArtist, dbArtistClean) || strings.Contains(dbArtistClean, cleanArtist) {
+			tier := "upscaled_128k"
+			if isHighQualityBitrate(c.bitrate) {
+				tier = "true_320k"
+			}
+			return &ExistingTrackInfo{
+				TrackID:     c.id,
+				Title:       c.title,
+				Artist:      c.artist,
+				Album:       c.album,
+				FilePath:    c.filePath,
+				Bitrate:     c.bitrate,
+				QualityTier: tier,
+			}, nil
+		}
+	}
+
+	return nil, nil
 }

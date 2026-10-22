@@ -90,6 +90,10 @@ type Service struct {
 	timersMu   sync.Mutex
 	syncTimers map[string]*time.Timer
 
+	// In-memory кэш разрешения источников (5-минутный TTL)
+	resolveCacheMu sync.RWMutex
+	resolveCache   map[string]*cachedResolveResult
+
 	client          *http.Client
 	cleanerMaxAge   time.Duration
 	cleanerInterval time.Duration
@@ -127,6 +131,7 @@ func NewService(cfg ServiceConfig) *Service {
 		workQueue:       make(chan string, 1024),
 		jobs:            make(map[string]*Job),
 		syncTimers:      make(map[string]*time.Timer),
+		resolveCache:    make(map[string]*cachedResolveResult),
 		client:          &http.Client{Timeout: 30 * time.Second},
 		cleanerMaxAge:   cleanerAge,
 		cleanerInterval: cleanerInt,
@@ -304,8 +309,164 @@ func generateUUID() string {
 	return hex.EncodeToString(b)
 }
 
-// CreateJob создает и ставит в очередь новую задачу загрузки.
-func (s *Service) CreateJob(ctx context.Context, rawURL, source string) (*Job, error) {
+// JobOptions содержит дополнительные параметры постановки задачи на загрузку.
+type JobOptions struct {
+	SelectedTrackIndices []int
+	SkipExisting         bool
+}
+
+type cachedResolveResult struct {
+	meta      *resolver.ReleaseMetadata
+	tracks    []resolver.ResolvedTrack
+	expiresAt time.Time
+}
+
+func (s *Service) resolveURL(ctx context.Context, rawURL, source string) (*resolver.ReleaseMetadata, []resolver.ResolvedTrack, error) {
+	if s.resolver == nil {
+		return &resolver.ReleaseMetadata{}, nil, nil
+	}
+	cacheKey := source + ":" + strings.TrimSpace(rawURL)
+
+	s.resolveCacheMu.RLock()
+	cached, ok := s.resolveCache[cacheKey]
+	s.resolveCacheMu.RUnlock()
+
+	if ok && time.Now().Before(cached.expiresAt) {
+		tracksCopy := make([]resolver.ResolvedTrack, len(cached.tracks))
+		copy(tracksCopy, cached.tracks)
+		metaCopy := *cached.meta
+		return &metaCopy, tracksCopy, nil
+	}
+
+	meta, tracks, err := s.resolver.Resolve(ctx, rawURL, source)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if meta == nil {
+		meta = &resolver.ReleaseMetadata{}
+	}
+
+	s.resolveCacheMu.Lock()
+	now := time.Now()
+	if len(s.resolveCache) > 100 {
+		for k, v := range s.resolveCache {
+			if now.After(v.expiresAt) {
+				delete(s.resolveCache, k)
+			}
+		}
+	}
+	tracksCopy := make([]resolver.ResolvedTrack, len(tracks))
+	copy(tracksCopy, tracks)
+	metaCopy := *meta
+	s.resolveCache[cacheKey] = &cachedResolveResult{
+		meta:      &metaCopy,
+		tracks:    tracksCopy,
+		expiresAt: now.Add(5 * time.Minute),
+	}
+	s.resolveCacheMu.Unlock()
+
+	return meta, tracks, nil
+}
+
+// PreflightRelease выполняет предварительное разрешение релиза и проверку наличия каждого трека в медиатеке.
+func (s *Service) PreflightRelease(ctx context.Context, rawURL, source string) (*PreflightResponse, error) {
+	cleanURL := strings.TrimSpace(rawURL)
+	if cleanURL == "" {
+		return nil, errors.New("URL cannot be empty")
+	}
+
+	if !resolver.IsAllowedURL(cleanURL) {
+		return nil, fmt.Errorf("domain is not in allowed sources whitelist: %s", cleanURL)
+	}
+
+	var detectedSource string
+	if s.resolver != nil {
+		det, err := s.resolver.DetectSource(cleanURL)
+		if err != nil {
+			return nil, err
+		}
+		detectedSource = det
+	} else {
+		detectedSource = "auto"
+	}
+
+	if source == "" || source == "auto" || source == "radar" {
+		source = detectedSource
+	}
+
+	meta, tracks, err := s.resolveURL(ctx, cleanURL, source)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка разрешения источника: %w", err)
+	}
+
+	if meta == nil {
+		meta = &resolver.ReleaseMetadata{}
+	}
+
+	var preflightTracks []PreflightTrackItem
+	var newCount, highQualityCount, upgradeCount int
+
+	for i, tr := range tracks {
+		item := PreflightTrackItem{
+			Index:         i,
+			TrackNumber:   tr.TrackNumber,
+			DiscNumber:    tr.DiscNumber,
+			Title:         tr.Title,
+			Artist:        tr.Artist,
+			Duration:      tr.Duration,
+			Status:        TrackStatusNew,
+			DefaultSelect: true,
+		}
+
+		if s.repo != nil {
+			existing, err := s.repo.CheckTrackInLibrary(ctx, tr.Title, tr.Artist)
+			if err == nil && existing != nil {
+				item.ExistingTrack = existing
+				if existing.QualityTier == "true_320k" {
+					item.Status = TrackStatusExistsHighQuality
+					item.DefaultSelect = false
+					highQualityCount++
+				} else {
+					item.Status = TrackStatusExistsUpgrade
+					item.DefaultSelect = true
+					upgradeCount++
+				}
+			} else {
+				newCount++
+			}
+		} else {
+			newCount++
+		}
+
+		preflightTracks = append(preflightTracks, item)
+	}
+
+	total := len(preflightTracks)
+	genre := meta.Genre
+	coverURL := meta.CoverURL
+
+	return &PreflightResponse{
+		Release: PreflightReleaseInfo{
+			Title:       meta.AlbumTitle,
+			Artist:      meta.AlbumArtist,
+			Year:        meta.Year,
+			Genre:       genre,
+			CoverURL:    coverURL,
+			TotalTracks: total,
+		},
+		Tracks: preflightTracks,
+		Summary: PreflightSummary{
+			TotalTracks:              total,
+			NewTracksCount:           newCount,
+			ExistingHighQualityCount: highQualityCount,
+			UpgradeAvailableCount:    upgradeCount,
+		},
+	}, nil
+}
+
+// CreateJobWithOptions создает и ставит в очередь новую задачу загрузки с дополнительными опциями.
+func (s *Service) CreateJobWithOptions(ctx context.Context, rawURL, source string, opts JobOptions) (*Job, error) {
 	cleanURL := strings.TrimSpace(rawURL)
 	if cleanURL == "" {
 		return nil, errors.New("URL cannot be empty")
@@ -332,14 +493,15 @@ func (s *Service) CreateJob(ctx context.Context, rawURL, source string) (*Job, e
 
 	jobID := generateUUID()
 	job := &Job{
-		ID:          jobID,
-		Status:      StatusQueued,
-		Source:      source,
-		URL:         cleanURL,
-		Progress:    0.0,
-		CurrentStep: "Задача ожидает очереди",
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
-		UpdatedAt:   time.Now().UTC(),
+		ID:                   jobID,
+		Status:               StatusQueued,
+		Source:               source,
+		URL:                  cleanURL,
+		Progress:             0.0,
+		CurrentStep:          "Задача ожидает очереди",
+		CreatedAt:            time.Now().UTC().Format(time.RFC3339Nano),
+		UpdatedAt:            time.Now().UTC(),
+		SelectedTrackIndices: opts.SelectedTrackIndices,
 	}
 
 	if s.repo != nil {
@@ -354,6 +516,11 @@ func (s *Service) CreateJob(ctx context.Context, rawURL, source string) (*Job, e
 	}
 
 	return job, nil
+}
+
+// CreateJob создает и ставит в очередь новую задачу загрузки.
+func (s *Service) CreateJob(ctx context.Context, rawURL, source string) (*Job, error) {
+	return s.CreateJobWithOptions(ctx, rawURL, source, JobOptions{})
 }
 
 // CreateBatchJobs создает пачку задач загрузки.
@@ -710,7 +877,7 @@ func (s *Service) executeRegular(ctx context.Context, job *Job) {
 		return
 	}
 
-	meta, tracks, err := s.resolver.Resolve(ctx, job.URL, job.Source)
+	meta, tracks, err := s.resolveURL(ctx, job.URL, job.Source)
 	if err != nil {
 		job.SetError(fmt.Sprintf("Ошибка разрешения: %v", err))
 		return
@@ -719,13 +886,25 @@ func (s *Service) executeRegular(ctx context.Context, job *Job) {
 	if meta == nil {
 		meta = &resolver.ReleaseMetadata{}
 	}
-	job.SetMetadata(*meta, tracks)
-	job.UpdateProgress(10.0, "Метаданные получены, запуск загрузки")
+
+	selectedIndices := job.GetSelectedTrackIndices()
+	if len(selectedIndices) > 0 {
+		var filteredTracks []resolver.ResolvedTrack
+		for _, idx := range selectedIndices {
+			if idx >= 0 && idx < len(tracks) {
+				filteredTracks = append(filteredTracks, tracks[idx])
+			}
+		}
+		tracks = filteredTracks
+	}
 
 	if len(tracks) == 0 {
-		job.SetError("Релиз не содержит доступных треков")
+		job.SetError("Не выбрано ни одного трека для загрузки")
 		return
 	}
+
+	job.SetMetadata(*meta, tracks)
+	job.UpdateProgress(10.0, "Метаданные получены, запуск загрузки")
 
 	rawDir := ""
 	convertedDir := ""

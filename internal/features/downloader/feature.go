@@ -75,11 +75,12 @@ func (m *Module) Service() *Service {
 	return m.service
 }
 
-// RegisterRoutes регистрирует все 26 HTTP-маршрутов модуля в Chi-роутере.
+// RegisterRoutes регистрирует все HTTP-маршруты модуля в Chi-роутере.
 func (m *Module) RegisterRoutes(r chi.Router) {
-	// Основная группа маршрутов /downloads (21 маршрут)
+	// Основная группа маршрутов /downloads
 	r.Route("/downloads", func(r chi.Router) {
 		r.Post("/", m.CreateJob)
+		r.Post("/preflight", m.Preflight)
 		r.Post("/batch", m.CreateBatch)
 		r.Get("/discography", m.GetDiscography)
 		r.Post("/torrent", m.UploadTorrent)
@@ -102,8 +103,9 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 		r.Post("/backfill/bind-source", m.BindBackfillSource)
 	})
 
-	// Совместимые алиасы под префиксом /api/downloads (5 маршрутов)
+	// Совместимые алиасы под префиксом /api/downloads
 	r.Route("/api/downloads", func(r chi.Router) {
+		r.Post("/preflight", m.Preflight)
 		r.Post("/tracks/{trackId}/switch-version", m.SwitchTrackVersion)
 		r.Post("/tracks/{trackId}/bind-source", m.SwitchTrackVersion)
 		r.Get("/candidates", m.GetCandidates)

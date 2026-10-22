@@ -21,6 +21,24 @@ import (
 	"music-manager/internal/services/resolver"
 )
 
+// Preflight выполняет предполетную проверку релиза перед загрузкой (список треков, статусы в медиатеке).
+// POST /downloads/preflight, POST /api/downloads/preflight
+func (m *Module) Preflight(w http.ResponseWriter, r *http.Request) {
+	var req PreflightRequest
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.RespondError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+
+	resp, err := m.service.PreflightRelease(r.Context(), req.URL, req.Source)
+	if err != nil {
+		httputil.RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	httputil.RespondJSON(w, http.StatusOK, resp)
+}
+
 // CreateJob ставит задачу на загрузку одиночного трека или альбома.
 // POST /downloads
 func (m *Module) CreateJob(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +48,10 @@ func (m *Module) CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := m.service.CreateJob(r.Context(), req.URL, req.Source)
+	job, err := m.service.CreateJobWithOptions(r.Context(), req.URL, req.Source, JobOptions{
+		SelectedTrackIndices: req.SelectedTrackIndices,
+		SkipExisting:         req.SkipExisting,
+	})
 	if err != nil {
 		httputil.RespondError(w, http.StatusBadRequest, err.Error())
 		return
