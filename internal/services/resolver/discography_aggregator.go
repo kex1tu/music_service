@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,19 +13,14 @@ import (
 	"music-manager/internal/id3"
 )
 
-var deluxeRemasterRegex = regexp.MustCompile(`(?i)\s*[\(\[](?:[^\)\]]*\b)?(?:deluxe|expanded|remaster(?:ed)?|special|bonus|anniversary|reissue|collectors?|edition|version)[^\)\]]*[\)\]]`)
-var cleanupPunctRegex = regexp.MustCompile(`[^\p{L}\p{N}\s]`)
-
 // CleanReleaseTitle нормализует название релиза, отсекая суффиксы Deluxe, Remastered и спецсимволы.
 func CleanReleaseTitle(title string) string {
-	cleaned := deluxeRemasterRegex.ReplaceAllString(title, "")
-	cleaned = cleanupPunctRegex.ReplaceAllString(cleaned, " ")
-	return strings.ToLower(strings.Join(strings.Fields(cleaned), " "))
+	return id3.CleanReleaseTitle(title)
 }
 
 // IsDeluxeOrRemaster проверяет, содержит ли название маркеры расширенного издания или ремастера.
 func IsDeluxeOrRemaster(title string) bool {
-	return deluxeRemasterRegex.MatchString(title)
+	return id3.IsDeluxeOrRemaster(title)
 }
 
 // AggregatedRelease представляет объединенную информацию о релизе из нескольких каталогов.
@@ -232,6 +226,12 @@ func (a *DiscographyAggregator) Aggregate(ctx context.Context, artistName, alias
 						if len(alb.ReleaseDate) >= 4 {
 							year, _ = strconv.Atoi(alb.ReleaseDate[:4])
 						}
+						relDate := alb.ReleaseDate
+						if len(relDate) == 4 {
+							relDate = relDate + "-01-01"
+						} else if relDate == "" && year > 0 {
+							relDate = fmt.Sprintf("%04d-01-01", year)
+						}
 
 						cover := alb.CoverXL
 						if cover == "" {
@@ -254,7 +254,7 @@ func (a *DiscographyAggregator) Aggregate(ctx context.Context, artistName, alias
 							Title:       alb.Title,
 							CleanTitle:  CleanReleaseTitle(alb.Title),
 							ReleaseType: relType,
-							ReleaseDate: alb.ReleaseDate,
+							ReleaseDate: relDate,
 							Year:        year,
 							CoverURL:    cover,
 							TrackCount:  alb.NbTracks,
@@ -289,13 +289,20 @@ func (a *DiscographyAggregator) Aggregate(ctx context.Context, artistName, alias
 							formattedArtist = artistName
 						}
 
+						rgDate := rg.Date
+						if len(rgDate) == 4 {
+							rgDate = rgDate + "-01-01"
+						} else if rgDate == "" && rg.Year > 0 {
+							rgDate = fmt.Sprintf("%04d-01-01", rg.Year)
+						}
+
 						collected = append(collected, AggregatedRelease{
 							ArtistName:    formattedArtist,
 							CleanArtist:   CleanArtistKey(artistName),
 							Title:         rg.Title,
 							CleanTitle:    CleanReleaseTitle(rg.Title),
 							ReleaseType:   "album",
-							ReleaseDate:   rg.Date,
+							ReleaseDate:   rgDate,
 							Year:          rg.Year,
 							MusicBrainzID: rg.ID,
 							SourceURL:     fmt.Sprintf("https://musicbrainz.org/release-group/%s", rg.ID),
@@ -496,7 +503,20 @@ func (a *DiscographyAggregator) reconcileWithLibrary(ctx context.Context, artist
 				containsAnyToken(local.folderPath, relArtists) ||
 				containsAnyToken(local.folderPath, []string{artistName})
 
-			if local.cleanTitle == rel.CleanTitle && artistMatches {
+			cleanLocal := CleanReleaseTitle(local.rawTitle)
+			if cleanLocal == "" {
+				cleanLocal = local.cleanTitle
+			}
+			cleanRel := CleanReleaseTitle(rel.Title)
+			if cleanRel == "" {
+				cleanRel = rel.CleanTitle
+			}
+
+			exactMatch := (local.cleanTitle == rel.CleanTitle) || (cleanLocal == cleanRel)
+			substrMatch := (len(cleanLocal) >= 4 && strings.Contains(cleanRel, cleanLocal)) ||
+				(len(cleanRel) >= 4 && strings.Contains(cleanLocal, cleanRel))
+
+			if (exactMatch || substrMatch) && artistMatches {
 				inLibrary = true
 				break
 			}
@@ -513,7 +533,20 @@ func (a *DiscographyAggregator) reconcileWithLibrary(ctx context.Context, artist
 					containsAnyToken(tr.folderPath, relArtists) ||
 					containsAnyToken(tr.folderPath, []string{artistName})
 
-				if tr.cleanTitle == rel.CleanTitle && artistMatches {
+				cleanTr := CleanReleaseTitle(tr.rawTitle)
+				if cleanTr == "" {
+					cleanTr = tr.cleanTitle
+				}
+				cleanRel := CleanReleaseTitle(rel.Title)
+				if cleanRel == "" {
+					cleanRel = rel.CleanTitle
+				}
+
+				exactMatch := (tr.cleanTitle == rel.CleanTitle) || (cleanTr == cleanRel)
+				substrMatch := (len(cleanTr) >= 4 && strings.Contains(cleanRel, cleanTr)) ||
+					(len(cleanRel) >= 4 && strings.Contains(cleanTr, cleanRel))
+
+				if (exactMatch || substrMatch) && artistMatches {
 					inLibrary = true
 					break
 				}
@@ -527,8 +560,8 @@ func (a *DiscographyAggregator) reconcileWithLibrary(ctx context.Context, artist
 				SELECT a.title, COALESCE(NULLIF(a.album_artist, ''), ar.name), a.folder_path
 				FROM albums a
 				JOIN artists ar ON ar.id = a.artist_id
-				WHERE a.clean_title = ? LIMIT 1
-			`, rel.CleanTitle).Scan(&albTitle, &albArtist, &albFp); err == nil {
+				WHERE a.clean_title = ? OR a.clean_title = ? LIMIT 1
+			`, rel.CleanTitle, CleanReleaseTitle(rel.Title)).Scan(&albTitle, &albArtist, &albFp); err == nil {
 				if matchesAnyArtist(relArtists, albArtist) || containsAnyToken(albFp, relArtists) || containsAnyToken(albFp, []string{artistName}) {
 					inLibrary = true
 				}
@@ -541,8 +574,8 @@ func (a *DiscographyAggregator) reconcileWithLibrary(ctx context.Context, artist
 					FROM tracks t
 					JOIN artists ar ON ar.id = t.artist_id
 					JOIN albums al ON al.id = t.album_id
-					WHERE t.clean_title = ? LIMIT 1
-				`, rel.CleanTitle).Scan(&trTitle, &trArtist, &trFp); err == nil {
+					WHERE t.clean_title = ? OR t.clean_title = ? LIMIT 1
+				`, rel.CleanTitle, CleanReleaseTitle(rel.Title)).Scan(&trTitle, &trArtist, &trFp); err == nil {
 					if matchesAnyArtist(relArtists, trArtist) || containsAnyToken(trFp, relArtists) || containsAnyToken(trFp, []string{artistName}) {
 						inLibrary = true
 					}
@@ -557,8 +590,25 @@ func (a *DiscographyAggregator) reconcileWithLibrary(ctx context.Context, artist
 			rel.Status = "version_exists"
 			rel.IsRadar = false
 		} else {
-			// Релиза нет в медиатеке. Проверяем свежесть: релиз за последние 2 года попадает в Радар
-			if rel.Year > 0 && currentYear-rel.Year <= 2 {
+			// Релиза нет в медиатеке. Проверяем свежесть:
+			// В раздел «Новые релизы» попадают только релизы за последний разумный период:
+			// Релизы, вышедшие за последние 365 дней или текущий/прошлый год.
+			// Старый дискографический бэк-каталог помечается как 'missing' (не засоряя радар новинок).
+			isRecent := false
+			if rel.ReleaseDate != "" {
+				if parsedDate, pErr := time.Parse("2006-01-02", rel.ReleaseDate); pErr == nil {
+					if time.Since(parsedDate) <= 365*24*time.Hour && time.Since(parsedDate) >= -7*24*time.Hour {
+						isRecent = true
+					}
+				}
+			}
+			if !isRecent && rel.Year > 0 {
+				if currentYear-rel.Year <= 1 {
+					isRecent = true
+				}
+			}
+
+			if isRecent {
 				rel.Status = "new"
 				rel.IsRadar = true
 			} else {

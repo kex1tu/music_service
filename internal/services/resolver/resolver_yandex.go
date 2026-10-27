@@ -26,7 +26,7 @@ func (r *SourceResolver) resolveYandex(ctx context.Context, rawURL string) (*Rel
 			return nil, nil, fmt.Errorf("failed to get yandex album: %w", err)
 		}
 
-		genre := albumWithTracks.Genre
+		genre := id3.CanonicalizeGenre(albumWithTracks.Genre)
 		year := albumWithTracks.Year
 		coverURL := albumWithTracks.BestCoverURL()
 		albumArtist := albumWithTracks.PrimaryArtistName()
@@ -130,6 +130,7 @@ func (r *SourceResolver) resolveYandex(ctx context.Context, rawURL string) (*Rel
 			}
 		}
 		formattedArtist := id3.FormatMultiValue(allArt)
+		genre = id3.CanonicalizeGenre(genre)
 
 		tot := 1
 		meta := &ReleaseMetadata{

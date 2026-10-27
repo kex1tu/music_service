@@ -239,3 +239,13 @@ func AnalyzeAndNormalizeGenre(rawGenre string) GenreCheckResult {
 		CanonicalGenre: canonical,
 	}
 }
+
+// CanonicalizeGenre возвращает канонический жанр (Title Case, латиница, без дубликатов).
+// Если жанр пустой или неизвестный не-кириллический, возвращает очищенное исходное значение.
+func CanonicalizeGenre(raw string) string {
+	res := AnalyzeAndNormalizeGenre(raw)
+	if res.CanonicalGenre != "" {
+		return res.CanonicalGenre
+	}
+	return strings.TrimSpace(raw)
+}

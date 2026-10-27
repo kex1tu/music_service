@@ -143,6 +143,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(cfg)
 	downloadHandler := handlers.NewDownloadHandler(downloadService, deezerClient)
 	tagHandler := handlers.NewTagHandler(musicSandbox, tmpSandbox, organizerService, deezerClient, sourceResolver.Enricher())
+	tagHandler.SetDB(database)
 
 	yandexClient := resolver.NewYandexMusicClient(cfg.YandexMusicToken, cfg.YandexMusicProxy)
 	ytmusicClient := resolver.NewYouTubeMusicClient("")

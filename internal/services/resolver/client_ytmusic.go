@@ -138,7 +138,12 @@ func (c *YouTubeMusicClient) Search(ctx context.Context, query string) ([]YtMusi
 			MusicCardShelfRenderer struct {
 				Title struct {
 					Runs []struct {
-						Text string `json:"text"`
+						Text               string `json:"text"`
+						NavigationEndpoint *struct {
+							WatchEndpoint *struct {
+								VideoID string `json:"videoId"`
+							} `json:"watchEndpoint"`
+						} `json:"navigationEndpoint"`
 					} `json:"runs"`
 				} `json:"title"`
 				Subtitle struct {
@@ -170,9 +175,15 @@ func (c *YouTubeMusicClient) Search(ctx context.Context, query string) ([]YtMusi
 		}
 
 		if err := json.Unmarshal(secRaw, &cardContainer); err == nil && len(cardContainer.MusicCardShelfRenderer.Title.Runs) > 0 {
-			rawTitle := cardContainer.MusicCardShelfRenderer.Title.Runs[0].Text
+			r0 := cardContainer.MusicCardShelfRenderer.Title.Runs[0]
+			rawTitle := r0.Text
 			cleanTit, titleFeats := ExtractFeatFromText(rawTitle)
 			cleanTit = CleanYouTubeVideoTitle(cleanTit)
+
+			videoID := ""
+			if r0.NavigationEndpoint != nil && r0.NavigationEndpoint.WatchEndpoint != nil {
+				videoID = r0.NavigationEndpoint.WatchEndpoint.VideoID
+			}
 
 			var artists []string
 			for _, r := range cardContainer.MusicCardShelfRenderer.Subtitle.Runs {
@@ -199,6 +210,7 @@ func (c *YouTubeMusicClient) Search(ctx context.Context, query string) ([]YtMusi
 					Artists:  artists,
 					Artist:   id3.FormatMultiValue(artists),
 					CoverURL: bestThumb,
+					VideoID:  videoID,
 				})
 			}
 		}
@@ -242,6 +254,9 @@ type ytResponsiveListItem struct {
 				Runs []struct {
 					Text               string `json:"text"`
 					NavigationEndpoint *struct {
+						WatchEndpoint *struct {
+							VideoID string `json:"videoId"`
+						} `json:"watchEndpoint"`
 						BrowseEndpoint *struct {
 							BrowseEndpointContextSupportedConfigs *struct {
 								BrowseEndpointContextMusicConfig *struct {
@@ -254,6 +269,22 @@ type ytResponsiveListItem struct {
 			} `json:"text"`
 		} `json:"musicResponsiveListItemFlexColumnRenderer"`
 	} `json:"flexColumns"`
+	PlaylistItemData *struct {
+		VideoID string `json:"videoId"`
+	} `json:"playlistItemData"`
+	Overlay *struct {
+		MusicItemThumbnailOverlayRenderer *struct {
+			Content *struct {
+				MusicPlayButtonRenderer *struct {
+					PlayNavigationEndpoint *struct {
+						WatchEndpoint *struct {
+							VideoID string `json:"videoId"`
+						} `json:"watchEndpoint"`
+					} `json:"playNavigationEndpoint"`
+				} `json:"musicPlayButtonRenderer"`
+			} `json:"content"`
+		} `json:"musicItemThumbnailOverlayRenderer"`
+	} `json:"overlay"`
 	Thumbnail struct {
 		MusicThumbnailRenderer struct {
 			Thumbnail struct {
@@ -276,6 +307,24 @@ func parseYtResponsiveListItem(r ytResponsiveListItem, addTrack func(YtMusicTrac
 		return
 	}
 	rawTitle := runs0[0].Text
+
+	// Извлечение VideoID
+	videoID := ""
+	if r.PlaylistItemData != nil && r.PlaylistItemData.VideoID != "" {
+		videoID = r.PlaylistItemData.VideoID
+	}
+	if videoID == "" && len(runs0) > 0 && runs0[0].NavigationEndpoint != nil && runs0[0].NavigationEndpoint.WatchEndpoint != nil {
+		videoID = runs0[0].NavigationEndpoint.WatchEndpoint.VideoID
+	}
+	if videoID == "" && r.Overlay != nil && r.Overlay.MusicItemThumbnailOverlayRenderer != nil {
+		if content := r.Overlay.MusicItemThumbnailOverlayRenderer.Content; content != nil {
+			if btn := content.MusicPlayButtonRenderer; btn != nil {
+				if playEp := btn.PlayNavigationEndpoint; playEp != nil && playEp.WatchEndpoint != nil {
+					videoID = playEp.WatchEndpoint.VideoID
+				}
+			}
+		}
+	}
 
 	// Второй столбец - метаданные (тип, артисты, альбом, время)
 	var artists []string
@@ -342,6 +391,7 @@ func parseYtResponsiveListItem(r ytResponsiveListItem, addTrack func(YtMusicTrac
 			Album:    album,
 			Year:     year,
 			CoverURL: bestThumb,
+			VideoID:  videoID,
 		})
 	}
 }

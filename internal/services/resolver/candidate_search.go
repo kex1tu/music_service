@@ -35,7 +35,7 @@ func (m *AudioMatcher) SearchMultiCandidates(ctx context.Context, artist, title 
 		return nil, fmt.Errorf("empty query for candidate search")
 	}
 
-	searchCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	searchCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
 
 	var wg sync.WaitGroup

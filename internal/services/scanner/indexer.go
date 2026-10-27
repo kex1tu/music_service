@@ -118,7 +118,10 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		pathViolationReason = fmt.Sprintf("Путь не соответствует каноническому шаблону (текущий: '%s', ожидается: '%s')", cleanRel, cleanSug)
 	}
 
-	cleanTitle := strings.ToLower(tags.Title)
+	cleanTitle := id3.CleanReleaseTitle(tags.Title)
+	if cleanTitle == "" {
+		cleanTitle = strings.ToLower(tags.Title)
+	}
 	fileHash := db.TrackHash(relPath)
 	query := `
 	INSERT INTO tracks (

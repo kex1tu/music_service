@@ -18,7 +18,7 @@
                 @click="backfillAllCovers()"
                 :disabled="isBackfillingCovers || missingCovers.length === 0"
                 aria-label="Докачать обложки для всех релизов"
-                class="px-3.5 py-2 bg-brand hover:bg-brand-hover disabled:opacity-40 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 shadow-lg shadow-brand/20 active:scale-95"
+                class="px-3.5 py-2 bg-brand hover:bg-brand-hover disabled:opacity-40 text-zinc-950 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-lg shadow-brand/20 active:scale-95"
                 title="Автопоиск и скачивание обложек для всех альбомов без обложек">
                 <template x-if="isBackfillingCovers">
                     <svg class="w-3.5 h-3.5 animate-spin" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">

@@ -190,6 +190,13 @@ func RankCandidates(
 			continue
 		}
 
+		// Проверка соответствия названия и артиста (защита от ложных «совпадений»)
+		match, titleScore, artistScore := CheckTitleAndArtistMatch(cand.Title, cand.Uploader, targetTitle, targetArtist)
+		if !match && titleScore < 0.35 && artistScore < 0.35 {
+			// Совершенно чужой трек с идентичным хронометражем бракуется
+			continue
+		}
+
 		// Минимальная дельта с эталонными хронометражами
 		deltaMin := 9999
 		if len(validDurations) > 0 {
@@ -204,25 +211,24 @@ func RankCandidates(
 			}
 		}
 
-		// Иерархия статусов согласно ТЗ:
-		// 1. Маркер-спаситель есть + эталона нет -> marked
-		// 2. Маркер-спаситель есть + дельта <= tolerance (<= 2с) -> marked
-		// 3. Маркер-спаситель есть + дельта > tolerance -> unverified
-		// 4. Маркера нет + дельта <= tolerance -> likely
-		// 5. Маркера нет + дельта 3-5с -> unverified
+		// Иерархия статусов согласно ТЗ с обязательной верификацией соответствия трека:
+		// 1. Маркер-спаситель есть + совпадение трека + эталона нет -> marked
+		// 2. Маркер-спаситель есть + совпадение трека + дельта <= tolerance (<= 2с) -> marked
+		// 3. Маркера нет + совпадение трека + дельта <= tolerance -> likely
+		// 4. Близкие альтернативы (дельта 3-5с при подтвержденном совпадении трека) -> unverified
 		var status string
-		if hasSavior && referenceMissing {
+		if hasSavior && match && referenceMissing {
 			status = "marked"
-		} else if hasSavior && deltaMin <= tolerance {
+		} else if hasSavior && match && deltaMin <= tolerance {
 			status = "marked"
-		} else if hasSavior && deltaMin > tolerance {
-			status = "unverified"
-		} else if !hasSavior && deltaMin <= tolerance {
+		} else if !hasSavior && match && deltaMin <= tolerance {
 			status = "likely"
-		} else if !hasSavior && deltaMin >= 3 && deltaMin <= 5 {
+		} else if hasSavior && deltaMin <= 5 {
+			status = "unverified"
+		} else if match && deltaMin >= 3 && deltaMin <= 5 {
 			status = "unverified"
 		} else {
-			// Отбраковываем кандидата при слишком большой дельте без маркера
+			// Отбраковываем кандидата при слишком большой дельте или несоответствии
 			continue
 		}
 

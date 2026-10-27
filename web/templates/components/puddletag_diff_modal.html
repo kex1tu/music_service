@@ -47,7 +47,7 @@
                             <button
                                 type="button"
                                 @click="patternInput = p.pattern; updatePatternDiff()"
-                                class="px-2 py-0.5 rounded bg-surface-elevated hover:bg-brand hover:text-white text-content-secondary border border-surface-border transition font-mono text-xs"
+                                class="px-2 py-0.5 rounded bg-surface-elevated hover:bg-brand hover:text-zinc-950 text-content-secondary border border-surface-border transition font-mono text-xs"
                                 x-text="p.label">
                             </button>
                         </template>
@@ -68,13 +68,13 @@
                 <!-- Кликабельные чипы доступных токенов -->
                 <div class="flex flex-wrap items-center gap-1.5 pt-1">
                     <span class="text-xs text-content-muted mr-1">Доступные токены:</span>
-                    <button type="button" @click="patternInput += '%artist%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%artist%</button>
-                    <button type="button" @click="patternInput += '%title%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%title%</button>
-                    <button type="button" @click="patternInput += '%album%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%album%</button>
-                    <button type="button" @click="patternInput += '%track%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%track%</button>
-                    <button type="button" @click="patternInput += '%year%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%year%</button>
-                    <button type="button" @click="patternInput += '%genre%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%genre%</button>
-                    <button type="button" @click="patternInput += '%disc%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-white transition font-mono text-xs">%disc%</button>
+                    <button type="button" @click="patternInput += '%artist%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-zinc-950 font-semibold transition font-mono text-xs">%artist%</button>
+                    <button type="button" @click="patternInput += '%title%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-zinc-950 font-semibold transition font-mono text-xs">%title%</button>
+                    <button type="button" @click="patternInput += '%album%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-zinc-950 font-semibold transition font-mono text-xs">%album%</button>
+                    <button type="button" @click="patternInput += '%track%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-zinc-950 font-semibold transition font-mono text-xs">%track%</button>
+                    <button type="button" @click="patternInput += '%year%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-zinc-950 font-semibold transition font-mono text-xs">%year%</button>
+                    <button type="button" @click="patternInput += '%genre%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-zinc-950 font-semibold transition font-mono text-xs">%genre%</button>
+                    <button type="button" @click="patternInput += '%disc%'; updatePatternDiff()" class="px-2 py-0.5 rounded-md bg-brand-muted text-brand border border-brand/30 hover:bg-brand hover:text-zinc-950 font-semibold transition font-mono text-xs">%disc%</button>
                 </div>
             </div>
 
@@ -139,7 +139,7 @@
                 type="button"
                 @click="applyPatternDiff()"
                 :disabled="patternDiffResults.length === 0 || isSaving"
-                class="px-5 py-2 bg-brand hover:bg-brand-hover text-white rounded-xl text-xs font-bold transition shadow-md shadow-brand/20 active:scale-95 disabled:opacity-50">
+                class="px-5 py-2 bg-brand hover:bg-brand-hover text-zinc-950 rounded-xl text-xs font-bold transition shadow-md shadow-brand/20 active:scale-95 disabled:opacity-50">
                 <span x-text="patternMode === 'filename_to_tag' ? 'Применить теги ко всем' : 'Переименовать файлы на диске'"></span>
             </button>
         </div>

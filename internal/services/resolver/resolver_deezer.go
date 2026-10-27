@@ -28,7 +28,7 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 			return nil, nil, fmt.Errorf("failed to get deezer album: %w", err)
 		}
 
-		genre := album.PrimaryGenre()
+		genre := id3.CanonicalizeGenre(album.PrimaryGenre())
 		year := album.ReleaseYear()
 		coverURL := album.BestCoverURL()
 
@@ -53,7 +53,7 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 			details := make([]trackDetail, total)
 
 			var wg sync.WaitGroup
-			sem := make(chan struct{}, 8) // максимум 8 параллельных потоков
+			sem := make(chan struct{}, 4) // Ограниченный пул: не более 3-4 параллельных запросов для защиты от rate-limit Deezer
 
 			for i, t := range album.Tracks.Data {
 				if t.ID <= 0 {
@@ -171,7 +171,7 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 			if track.Album.ID > 0 {
 				albCtx, albCancel := context.WithTimeout(ctx, 3*time.Second)
 				if alb, albErr := r.deezerClient.GetAlbum(albCtx, strconv.FormatInt(track.Album.ID, 10)); albErr == nil && alb != nil {
-					genre = alb.PrimaryGenre()
+					genre = id3.CanonicalizeGenre(alb.PrimaryGenre())
 					if year == 0 {
 						year = alb.ReleaseYear()
 					}

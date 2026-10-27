@@ -50,7 +50,7 @@
                                 type="button"
                                 @click="searchCovers()"
                                 :disabled="isSearchingCovers || !coverSearchQuery.trim()"
-                                class="px-4 py-2 bg-brand hover:bg-brand-hover disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition flex items-center space-x-1.5 shrink-0 shadow-sm active:scale-95">
+                                class="px-4 py-2 bg-brand hover:bg-brand-hover disabled:opacity-50 text-zinc-950 text-xs font-semibold rounded-lg transition flex items-center space-x-1.5 shrink-0 shadow-sm active:scale-95">
                                 <template x-if="isSearchingCovers">
                                     <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                         <path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12 2q.425 0 .713.288T13 3t-.288.713T12 4Q8.675 4 6.337 6.338T4 12t2.338 5.663T12 20t5.663-2.337T20 12q0-.425.288-.712T21 11t.713.288T22 12q0 2.05-.788 3.875t-2.15 3.188t-3.175 2.15t-3.875.787t-3.887-.787"/>
@@ -70,42 +70,42 @@
                             <button
                                 type="button"
                                 @click="coverSourceFilter = 'all'"
-                                :class="coverSourceFilter === 'all' ? 'bg-brand text-white border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
+                                :class="coverSourceFilter === 'all' ? 'bg-brand text-zinc-950 font-semibold border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
                                 class="px-2.5 py-1 rounded-md text-xs font-medium border transition">
                                 Все
                             </button>
                             <button
                                 type="button"
                                 @click="coverSourceFilter = 'apple'"
-                                :class="coverSourceFilter === 'apple' ? 'bg-brand text-white border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
+                                :class="coverSourceFilter === 'apple' ? 'bg-brand text-zinc-950 font-semibold border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
                                 class="px-2.5 py-1 rounded-md text-xs font-medium border transition">
                                 Apple Music (1400×1400)
                             </button>
                             <button
                                 type="button"
                                 @click="coverSourceFilter = 'deezer'"
-                                :class="coverSourceFilter === 'deezer' ? 'bg-brand text-white border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
+                                :class="coverSourceFilter === 'deezer' ? 'bg-brand text-zinc-950 font-semibold border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
                                 class="px-2.5 py-1 rounded-md text-xs font-medium border transition">
                                 Deezer (1400×1400)
                             </button>
                             <button
                                 type="button"
                                 @click="coverSourceFilter = 'yandex'"
-                                :class="coverSourceFilter === 'yandex' ? 'bg-brand text-white border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
+                                :class="coverSourceFilter === 'yandex' ? 'bg-brand text-zinc-950 font-semibold border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
                                 class="px-2.5 py-1 rounded-md text-xs font-medium border transition">
                                 Яндекс Музыка (1000×1000)
                             </button>
                             <button
                                 type="button"
                                 @click="coverSourceFilter = 'musicbrainz'"
-                                :class="coverSourceFilter === 'musicbrainz' ? 'bg-brand text-white border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
+                                :class="coverSourceFilter === 'musicbrainz' ? 'bg-brand text-zinc-950 font-semibold border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
                                 class="px-2.5 py-1 rounded-md text-xs font-medium border transition">
                                 MusicBrainz (1000×1000)
                             </button>
                             <button
                                 type="button"
                                 @click="coverSourceFilter = 'spotify'"
-                                :class="coverSourceFilter === 'spotify' ? 'bg-brand text-white border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
+                                :class="coverSourceFilter === 'spotify' ? 'bg-brand text-zinc-950 font-semibold border-brand shadow-sm shadow-brand/20' : 'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-hover hover:text-content-primary'"
                                 class="px-2.5 py-1 rounded-md text-xs font-medium border transition">
                                 Spotify (640×640)
                             </button>
@@ -152,7 +152,7 @@
                                         <button
                                             type="button"
                                             @click="selectCover(item)"
-                                            class="w-full py-1.5 bg-brand hover:bg-brand-hover text-white text-xs font-semibold rounded-lg transition shadow shadow-brand/20 active:scale-95">
+                                            class="w-full py-1.5 bg-brand hover:bg-brand-hover text-zinc-950 text-xs font-semibold rounded-lg transition shadow shadow-brand/20 active:scale-95">
                                             Выбрать
                                         </button>
                                     </div>

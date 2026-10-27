@@ -443,7 +443,7 @@ func (s *Service) PreflightRelease(ctx context.Context, rawURL, source string) (
 	}
 
 	total := len(preflightTracks)
-	genre := meta.Genre
+	genre := id3.CanonicalizeGenre(meta.Genre)
 	coverURL := meta.CoverURL
 
 	return &PreflightResponse{
@@ -681,7 +681,7 @@ func (s *Service) ClearCompletedJobs(ctx context.Context) int {
 	count := 0
 	for _, j := range all {
 		snap := j.Snapshot()
-		if snap.Status == StatusReady || snap.Status == StatusError || snap.Status == StatusCancelled {
+		if snap.Status == StatusReady || snap.Status == StatusPartialReady || snap.Status == StatusError || snap.Status == StatusCancelled {
 			_ = s.DeleteJob(ctx, snap.ID)
 			count++
 		}
@@ -1314,10 +1314,13 @@ func (s *Service) processSingleTrack(
 		tagData.Year = meta.Year
 	}
 	if track.Genre != nil {
-		tagData.Genre = *track.Genre
+		tagData.Genre = id3.CanonicalizeGenre(*track.Genre)
 	} else if meta.Genre != "" {
-		tagData.Genre = meta.Genre
+		tagData.Genre = id3.CanonicalizeGenre(meta.Genre)
 	}
+
+	_, syncedTracks := id3.SyncAlbumArtistAndTrackArtists(albArt, []id3.TrackTags{tagData})
+	tagData = syncedTracks[0]
 
 	var cover *id3.CoverInfo
 	if len(coverBytes) > 0 {
@@ -1333,16 +1336,27 @@ func (s *Service) processSingleTrack(
 
 	_ = id3.WriteTags(mp3Path, tagData, cover)
 
-	// Поиск синхронизированного текста через LRCLIB и извлечение контрольных точек отслушивания
+	// Поиск текста песни через LRCLIB (синхронизированного .lrc или обычного .txt)
+	// ВАЖНО: Тексты песен сохраняются строго во внешние файлы рядом с треком, никогда в ID3-тег
 	var spots []censorcheck.QuickListenSpot
 	if s.lyrics != nil {
-		lrcRes, _ := s.lyrics.SearchLyrics(ctx, track.Artist, track.Title, meta.AlbumTitle, track.Duration)
-		if lrcRes != nil && lrcRes.Synced && lrcRes.Lyrics != "" {
-			lrcFilename := fmt.Sprintf("%02d. %s.lrc", track.TrackNumber, safeTitle)
-			lrcPath := filepath.Join(convertedDir, lrcFilename)
-			_ = os.WriteFile(lrcPath, []byte(lrcRes.Lyrics), 0644)
+		primaryArt := resolver.ExtractPrimaryArtist(track.Artist)
+		lrcRes, _ := s.lyrics.SearchLyrics(ctx, primaryArt, track.Title, meta.AlbumTitle, track.Duration)
+		if (lrcRes == nil || lrcRes.Lyrics == "") && primaryArt != track.Artist {
+			lrcRes, _ = s.lyrics.SearchLyrics(ctx, track.Artist, track.Title, meta.AlbumTitle, track.Duration)
+		}
+		if lrcRes != nil && lrcRes.Lyrics != "" {
+			if lrcRes.Synced {
+				lrcFilename := fmt.Sprintf("%02d. %s.lrc", track.TrackNumber, safeTitle)
+				lrcPath := filepath.Join(convertedDir, lrcFilename)
+				_ = os.WriteFile(lrcPath, []byte(lrcRes.Lyrics), 0644)
 
-			spots = censorcheck.ExtractSpots(lrcRes.Lyrics, 3)
+				spots = censorcheck.ExtractSpots(lrcRes.Lyrics, 3)
+			} else {
+				txtFilename := fmt.Sprintf("%02d. %s.txt", track.TrackNumber, safeTitle)
+				txtPath := filepath.Join(convertedDir, txtFilename)
+				_ = os.WriteFile(txtPath, []byte(lrcRes.Lyrics), 0644)
+			}
 		}
 	}
 
@@ -1587,6 +1601,28 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 		return nil, fmt.Errorf("%w: domain %q is not allowed", ErrInvalidURL, parsedURL.Hostname())
 	}
 
+	var matchedJob *Job
+	var trackIdx int = -1
+	var matchedTrack *resolver.ResolvedTrack
+
+	s.jobsMu.Lock()
+	for _, j := range s.jobs {
+		for i := range j.Tracks {
+			if j.Tracks[i].TrackID == trackID {
+				j.Tracks[i].AudioSourceURL = targetURL
+				j.Tracks[i].VersionStatus = "manual"
+				matchedTrack = &j.Tracks[i]
+				matchedJob = j
+				trackIdx = i
+				break
+			}
+		}
+		if matchedTrack != nil {
+			break
+		}
+	}
+	s.jobsMu.Unlock()
+
 	// Фиксируем пин в репозитории
 	if s.repo != nil {
 		_ = s.repo.SavePinnedSource(ctx, PinnedTrackSourceDTO{
@@ -1595,6 +1631,48 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 			SourceType: "manual",
 			UpdatedAt:  time.Now().UTC(),
 		})
+
+		if matchedTrack != nil {
+			isrc := ""
+			if matchedTrack.ISRC != nil {
+				isrc = *matchedTrack.ISRC
+			}
+			cacheKey := resolver.BuildCacheKey(isrc, matchedTrack.Artist, matchedTrack.Title)
+			_ = s.repo.SavePinnedSource(ctx, PinnedTrackSourceDTO{
+				CacheKey:   cacheKey,
+				PinnedURL:  targetURL,
+				SourceType: "manual",
+				UpdatedAt:  time.Now().UTC(),
+			})
+		}
+	}
+
+	if matchedJob != nil && trackIdx >= 0 {
+		matchedJob.UpdateTrack(trackIdx, func(tr *resolver.ResolvedTrack) {
+			tr.AudioSourceURL = targetURL
+			tr.VersionStatus = "manual"
+		})
+
+		// Запускаем асинхронную дозагрузку и конвертацию выбранного трека
+		go func() {
+			var rawDir, convertedDir string
+			if s.tmpSandbox != nil {
+				rawDir, _ = s.tmpSandbox.Resolve(filepath.Join(matchedJob.ID, "raw"), true)
+				convertedDir, _ = s.tmpSandbox.Resolve(filepath.Join(matchedJob.ID, "converted"), true)
+			}
+			var coverBytes []byte
+			if convertedDir != "" {
+				coverBytes, _ = os.ReadFile(filepath.Join(convertedDir, "cover.jpg"))
+			}
+			meta := matchedJob.AlbumMetadata
+			if meta.AlbumTitle == "" && matchedJob.AlbumTitle != nil {
+				meta.AlbumTitle = *matchedJob.AlbumTitle
+			}
+			if meta.AlbumArtist == "" && matchedJob.ArtistName != nil {
+				meta.AlbumArtist = *matchedJob.ArtistName
+			}
+			s.processSingleTrack(context.Background(), matchedJob, &meta, trackIdx+1, *matchedTrack, rawDir, convertedDir, coverBytes, len(matchedJob.Tracks))
+		}()
 	}
 
 	return &SwitchVersionResult{

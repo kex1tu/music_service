@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"music-manager/internal/id3"
 )
 
 // TrackedArtistEntity представляет персистентную запись отслеживаемого артиста.
@@ -513,6 +515,10 @@ func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
 		var alb localAlb
 		if err := albumRows.Scan(&alb.cleanTitle, &alb.albumArtist, &alb.artistName, &alb.artistClean, &alb.folderPath); err == nil {
 			albumMap[alb.cleanTitle] = append(albumMap[alb.cleanTitle], alb)
+			normClean := id3.CleanReleaseTitle(alb.cleanTitle)
+			if normClean != "" && normClean != alb.cleanTitle {
+				albumMap[normClean] = append(albumMap[normClean], alb)
+			}
 		}
 	}
 	albumRows.Close()
@@ -529,6 +535,10 @@ func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
 		var ct string
 		if err := trackRows.Scan(&ct); err == nil {
 			trackSet[ct] = struct{}{}
+			normCt := id3.CleanReleaseTitle(ct)
+			if normCt != "" {
+				trackSet[normCt] = struct{}{}
+			}
 		}
 	}
 	trackRows.Close()
@@ -561,6 +571,8 @@ func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
 			tokens = []string{cleanArtistName}
 		}
 
+		normClean := id3.CleanReleaseTitle(cleanTitle)
+
 		if candidates, ok := albumMap[cleanTitle]; ok {
 			for _, c := range candidates {
 				if matchesAnyArtist(tokens, c.artistName) ||
@@ -574,10 +586,26 @@ func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
 			}
 		}
 
+		if !matchedAlb && normClean != "" {
+			if candidates, ok := albumMap[normClean]; ok {
+				for _, c := range candidates {
+					if matchesAnyArtist(tokens, c.artistName) ||
+						matchesAnyArtist(tokens, c.albumArtist) ||
+						matchesAnyArtist(tokens, c.artistClean) ||
+						containsAnyToken(c.folderPath, tokens) {
+						inLibrary = true
+						matchedAlb = true
+						break
+					}
+				}
+			}
+		}
+
 		if !matchedAlb {
 			for albClean, candidates := range albumMap {
 				if (len(albClean) >= 4 && strings.Contains(cleanTitle, albClean)) ||
-					(len(cleanTitle) >= 4 && strings.Contains(albClean, cleanTitle)) {
+					(len(cleanTitle) >= 4 && strings.Contains(albClean, cleanTitle)) ||
+					(normClean != "" && len(albClean) >= 4 && strings.Contains(normClean, albClean)) {
 					for _, c := range candidates {
 						if matchesAnyArtist(tokens, c.artistName) ||
 							matchesAnyArtist(tokens, c.albumArtist) ||
@@ -599,6 +627,10 @@ func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
 		if !inLibrary {
 			if _, ok := trackSet[cleanTitle]; ok {
 				inLibrary = true
+			} else if normClean != "" {
+				if _, ok := trackSet[normClean]; ok {
+					inLibrary = true
+				}
 			}
 		}
 

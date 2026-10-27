@@ -1189,6 +1189,33 @@ func (s *Service) CatalogMatchAlbum(ctx context.Context, albumPath, deezerID str
 	presentCount := 0
 
 	if matchedAlbum.Tracks != nil {
+		type detailedTrackInfo struct {
+			contributors []resolver.DeezerArtist
+		}
+		trackDetails := make([]detailedTrackInfo, len(matchedAlbum.Tracks.Data))
+		if s.deezer != nil {
+			var wg sync.WaitGroup
+			sem := make(chan struct{}, 3) // Ограничение: максимум 3 параллельных запроса для защиты от Rate-Limit
+			for i, t := range matchedAlbum.Tracks.Data {
+				if t.ID <= 0 {
+					continue
+				}
+				wg.Add(1)
+				go func(idx int, trackID int64) {
+					defer wg.Done()
+					sem <- struct{}{}
+					defer func() { <-sem }()
+
+					tCtx, tCancel := context.WithTimeout(ctx, 3*time.Second)
+					defer tCancel()
+					if tr, trErr := s.deezer.GetTrack(tCtx, strconv.FormatInt(trackID, 10)); trErr == nil && tr != nil {
+						trackDetails[idx] = detailedTrackInfo{contributors: tr.Contributors}
+					}
+				}(i, t.ID)
+			}
+			wg.Wait()
+		}
+
 		for i, t := range matchedAlbum.Tracks.Data {
 			pos := t.TrackPosition
 			if pos == 0 {
@@ -1206,11 +1233,30 @@ func (s *Service) CatalogMatchAlbum(ctx context.Context, albumPath, deezerID str
 				discNum = 1
 			}
 
+			trackArtist := t.Artist.Name
+			var contribs []resolver.DeezerArtist
+			if i < len(trackDetails) && len(trackDetails[i].contributors) > 0 {
+				contribs = trackDetails[i].contributors
+			} else if len(t.Contributors) > 0 {
+				contribs = t.Contributors
+			}
+			if len(contribs) > 0 {
+				var artList []string
+				for _, c := range contribs {
+					if c.Name != "" {
+						artList = append(artList, c.Name)
+					}
+				}
+				if len(artList) > 0 {
+					trackArtist = id3.FormatMultiValue(artList)
+				}
+			}
+
 			trInfo := map[string]any{
 				"track_number": pos,
 				"disc_number":  discNum,
 				"title":        id3.CleanTitle(t.Title, ""),
-				"artist":       t.Artist.Name,
+				"artist":       trackArtist,
 				"duration":     t.Duration,
 				"deezer_id":    strconv.FormatInt(t.ID, 10),
 				"deezer_url":   fmt.Sprintf("https://www.deezer.com/track/%d", t.ID),
@@ -1222,7 +1268,7 @@ func (s *Service) CatalogMatchAlbum(ctx context.Context, albumPath, deezerID str
 				missingDTOs = append(missingDTOs, MissingTrackEntityDTO{
 					AlbumID:          meta.ID,
 					Title:            id3.CleanTitle(t.Title, ""),
-					Artist:           t.Artist.Name,
+					Artist:           trackArtist,
 					TrackNumber:      pos,
 					DiscNumber:       discNum,
 					ExpectedDuration: t.Duration,
@@ -1930,13 +1976,41 @@ func (s *Service) CatalogMatchAlbumDetails(ctx context.Context, folderPath strin
 
 	catalogTracks := matchedDeezerAlbum.Tracks.Data
 	catalogCover := matchedDeezerAlbum.BestCoverURL()
-	catalogGenre := matchedDeezerAlbum.PrimaryGenre()
+	catalogGenre := id3.CanonicalizeGenre(matchedDeezerAlbum.PrimaryGenre())
 	catalogYear := matchedDeezerAlbum.ReleaseYear()
+
+	type detailedTrackInfo struct {
+		contributors []resolver.DeezerArtist
+	}
+	trackDetails := make([]detailedTrackInfo, len(catalogTracks))
+	if s.deezer != nil {
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 3) // Защита от Rate-Limit: максимум 3 параллельных запроса
+		for i, ct := range catalogTracks {
+			if ct.ID <= 0 {
+				continue
+			}
+			wg.Add(1)
+			go func(idx int, trackID int64) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				tCtx, tCancel := context.WithTimeout(ctx, 3*time.Second)
+				defer tCancel()
+				if tr, trErr := s.deezer.GetTrack(tCtx, strconv.FormatInt(trackID, 10)); trErr == nil && tr != nil {
+					trackDetails[idx] = detailedTrackInfo{contributors: tr.Contributors}
+				}
+			}(i, ct.ID)
+		}
+		wg.Wait()
+	}
 
 	var diffs []AlbumCatalogTrackDiff
 	for i, lt := range localTracks {
 		var matchedCatTrack *resolver.DeezerTrack
-		for _, ct := range catalogTracks {
+		catTrackIndex := -1
+		for cIdx, ct := range catalogTracks {
 			cPos := ct.TrackPosition
 			if cPos <= 0 {
 				cPos = 1
@@ -1944,6 +2018,7 @@ func (s *Service) CatalogMatchAlbumDetails(ctx context.Context, folderPath strin
 			if cPos == lt.trackNumber {
 				cCopy := ct
 				matchedCatTrack = &cCopy
+				catTrackIndex = cIdx
 				break
 			}
 		}
@@ -1951,6 +2026,7 @@ func (s *Service) CatalogMatchAlbumDetails(ctx context.Context, folderPath strin
 		if matchedCatTrack == nil && i < len(catalogTracks) {
 			cCopy := catalogTracks[i]
 			matchedCatTrack = &cCopy
+			catTrackIndex = i
 		}
 
 		diffItem := AlbumCatalogTrackDiff{
@@ -1963,8 +2039,15 @@ func (s *Service) CatalogMatchAlbumDetails(ctx context.Context, folderPath strin
 		if matchedCatTrack != nil {
 			catArt := matchedCatTrack.Artist.Name
 			var catArtists []string
-			if len(matchedCatTrack.Contributors) > 0 {
-				for _, c := range matchedCatTrack.Contributors {
+			var contribs []resolver.DeezerArtist
+			if catTrackIndex >= 0 && catTrackIndex < len(trackDetails) && len(trackDetails[catTrackIndex].contributors) > 0 {
+				contribs = trackDetails[catTrackIndex].contributors
+			} else if len(matchedCatTrack.Contributors) > 0 {
+				contribs = matchedCatTrack.Contributors
+			}
+
+			if len(contribs) > 0 {
+				for _, c := range contribs {
 					if c.Name != "" {
 						catArtists = append(catArtists, c.Name)
 					}
@@ -2125,7 +2208,9 @@ func (s *Service) ApplyCatalogAlbum(ctx context.Context, req ApplyCatalogAlbumRe
 			tags.Year = req.Year
 		}
 		if req.Genre != "" {
-			tags.Genre = req.Genre
+			tags.Genre = id3.CanonicalizeGenre(req.Genre)
+		} else if tags.Genre != "" {
+			tags.Genre = id3.CanonicalizeGenre(tags.Genre)
 		}
 
 		if wErr := id3.WriteTags(fullPath, *tags, coverInfo); wErr == nil {

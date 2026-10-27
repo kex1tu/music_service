@@ -30,6 +30,9 @@ function puddletagWorkstationComponent() {
         recursiveMode: false,
         isDownloaderMode: false,
         jobId: null,
+        jobIds: [],
+        releases: [],
+        activeReleaseTab: 'all',
 
         // Пагинация таблицы
         currentPage: 1,
@@ -140,6 +143,11 @@ function puddletagWorkstationComponent() {
         // Геттер отфильтрованных и отсортированных треков
         get displayTracks() {
             let list = this.tracks;
+
+            // 0. Фильтр по активному релизу в режиме загрузчика
+            if (this.isDownloaderMode && this.activeReleaseTab && this.activeReleaseTab !== 'all') {
+                list = list.filter(t => t.job_id === this.activeReleaseTab);
+            }
 
             // 1. Поисковый фильтр
             if (this.searchFilter && this.searchFilter.trim()) {
@@ -282,13 +290,11 @@ function puddletagWorkstationComponent() {
             });
 
             window.addEventListener('refresh-file-manager', (e) => {
-                let targetPath = '';
-                if (typeof e?.detail === 'string') {
+                let targetPath = this.currentPath || '';
+                if (typeof e?.detail === 'string' && e.detail !== '') {
                     targetPath = e.detail;
-                } else if (e?.detail && typeof e.detail.path === 'string') {
+                } else if (e?.detail && typeof e.detail.path === 'string' && e.detail.path !== '') {
                     targetPath = e.detail.path;
-                } else if (typeof this.currentPath === 'string') {
-                    targetPath = this.currentPath;
                 }
                 this.loadDirectory(targetPath);
             });
@@ -397,13 +403,38 @@ function puddletagWorkstationComponent() {
             this.loadDirectory(path);
         },
 
+        setActiveReleaseTab(tab) {
+            this.activeReleaseTab = tab;
+            this.currentPage = 1;
+            this.selectedIndices = [];
+            this._selectedSet = new Set();
+            if (tab === 'all') {
+                this.syncTagPanel();
+            } else {
+                const rel = (this.releases || []).find(r => r.jobId === tab);
+                if (rel) {
+                    this.tagPanel.album_artist = rel.album_artist || '';
+                    this.tagPanel.album = rel.album || '';
+                    this.tagPanel.year = rel.year || '';
+                    this.tagPanel.genre = rel.genre || '';
+                    this.tagPanel.cover_url = rel.coverUrl || null;
+                    this.tagPanel.has_cover = !!(rel.coverUrl || rel.coverPath);
+                } else {
+                    this.syncTagPanel();
+                }
+            }
+        },
+
         /**
          * Загружает треки свежескачанного релиза из очереди загрузчика.
          */
         loadJobData(payload) {
             if (!payload) return;
             this.isDownloaderMode = true;
-            this.jobId = payload.jobId || (payload.jobIds && payload.jobIds[0]) || null;
+            this.jobIds = payload.jobIds || (payload.jobId ? [payload.jobId] : []);
+            this.jobId = payload.jobId || (this.jobIds && this.jobIds[0]) || null;
+            this.releases = payload.releases || [];
+            this.activeReleaseTab = 'all';
             this.currentPath = payload.sourceDir || '';
             this.dirtyIndices.clear();
             this.selectedIndices = [];
@@ -418,6 +449,7 @@ function puddletagWorkstationComponent() {
                 const trackCover = t.cover_preview_url || t.cover_url || coverUrl;
                 return {
                     _trackIndex: idx,
+                    job_id: t.job_id || t.jobId || this.jobId || (this.jobIds && this.jobIds[0]) || '',
                     path: trackPath,
                     name: trackName,
                     title: t.title || '',
@@ -435,6 +467,7 @@ function puddletagWorkstationComponent() {
                     lyrics_status: t.lyrics_status || 'none',
                     has_cover: !!(t.has_cover || trackCover || hasCover),
                     cover_preview_url: trackCover,
+                    cover_url: t.cover_url || null,
                     cover_base64: t.cover_base64 || payload.coverBase64 || payload.cover_base64 || null
                 };
             });
@@ -1036,43 +1069,97 @@ function puddletagWorkstationComponent() {
             try {
                 // В зависимости от режима отправляем сохранение
                 if (this.isDownloaderMode) {
-                    // Режим загрузчика: переносим в библиотеку ВСЕ треки релиза через BatchSaveTags с флагом reorganize
-                    const tracksToSave = this.tracks.map((t, idx) => ({
-                        ...t,
-                        title: t.title || '',
-                        artist: t.artist || this.tagPanel.artist || this.tagPanel.album_artist || '',
-                        album: t.album || this.tagPanel.album || '',
-                        album_artist: t.album_artist || this.tagPanel.album_artist || '',
-                        year: t.year || Number(this.tagPanel.year) || null,
-                        genre: t.genre || this.tagPanel.genre || '',
-                        track_number: t.track_number !== undefined && t.track_number !== null ? t.track_number : (idx + 1),
-                        track_total: t.track_total || this.tracks.length,
-                    }));
+                    // Режим загрузчика: переносим в библиотеку треки релизов через BatchSaveTags с флагом reorganize
+                    const jobIds = (this.jobIds && this.jobIds.length > 0) ? this.jobIds : (this.jobId ? [this.jobId] : []);
+                    
+                    if (jobIds.length > 1) {
+                        // Несколько релизов: сохраняем каждый релиз изолированно в свою целевую папку
+                        for (const jid of jobIds) {
+                            const relTracks = this.tracks.filter(t => t.job_id === jid);
+                            if (relTracks.length === 0) continue;
+                            const relInfo = (this.releases || []).find(r => r.jobId === jid) || {};
 
-                    const res = await fetch('/tags/batch', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            album: {
-                                album_artist: this.tagPanel.album_artist || tracksToSave[0]?.album_artist || '',
-                                album: this.tagPanel.album || tracksToSave[0]?.album || '',
-                                year: Number(this.tagPanel.year) || tracksToSave[0]?.year || null,
-                                genre: this.tagPanel.genre || tracksToSave[0]?.genre || ''
-                            },
-                            tracks: tracksToSave,
-                            source_dir: this.currentPath,
-                            cover_base64: this.tagPanel.cover_base64 || tracksToSave[0]?.cover_base64 || '',
-                            cover_url: this.tagPanel.cover_url || tracksToSave[0]?.cover_url || '',
-                            reorganize: true
-                        })
-                    });
+                            const releaseAlbum = {
+                                album_artist: relTracks[0]?.album_artist || relInfo.album_artist || relTracks[0]?.artist || '',
+                                album: relTracks[0]?.album || relInfo.album || '',
+                                year: Number(relTracks[0]?.year) || Number(relInfo.year) || null,
+                                genre: relTracks[0]?.genre || relInfo.genre || ''
+                            };
 
-                    if (!res.ok) {
-                        const err = await res.json().catch(() => ({}));
-                        throw new Error(err.error || 'Ошибка перемещения в медиатеку');
+                            const tracksToSave = relTracks.map((t, idx) => ({
+                                ...t,
+                                title: t.title || '',
+                                artist: t.artist || releaseAlbum.album_artist || '',
+                                album: t.album || releaseAlbum.album || '',
+                                album_artist: t.album_artist || releaseAlbum.album_artist || '',
+                                year: t.year || releaseAlbum.year || null,
+                                genre: t.genre || releaseAlbum.genre || '',
+                                track_number: t.track_number !== undefined && t.track_number !== null ? t.track_number : (idx + 1),
+                                track_total: t.track_total || relTracks.length,
+                            }));
+
+                            const res = await fetch('/tags/batch', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    album: releaseAlbum,
+                                    tracks: tracksToSave,
+                                    source_dir: `tmp_downloads/${jid}/converted`,
+                                    cover_base64: relTracks[0]?.cover_base64 || '',
+                                    cover_url: relTracks[0]?.cover_url || relInfo.coverUrl || '',
+                                    reorganize: true
+                                })
+                            });
+
+                            if (!res.ok) {
+                                const err = await res.json().catch(() => ({}));
+                                throw new Error(err.error || `Ошибка сохранения релиза ${releaseAlbum.album}`);
+                            }
+                        }
+                    } else {
+                        // Одиночный релиз
+                        const tracksToSave = this.tracks.map((t, idx) => ({
+                            ...t,
+                            title: t.title || '',
+                            artist: t.artist || this.tagPanel.artist || this.tagPanel.album_artist || '',
+                            album: t.album || this.tagPanel.album || '',
+                            album_artist: t.album_artist || this.tagPanel.album_artist || '',
+                            year: t.year || Number(this.tagPanel.year) || null,
+                            genre: t.genre || this.tagPanel.genre || '',
+                            track_number: t.track_number !== undefined && t.track_number !== null ? t.track_number : (idx + 1),
+                            track_total: t.track_total || this.tracks.length,
+                        }));
+
+                        const res = await fetch('/tags/batch', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                album: {
+                                    album_artist: this.tagPanel.album_artist || tracksToSave[0]?.album_artist || '',
+                                    album: this.tagPanel.album || tracksToSave[0]?.album || '',
+                                    year: Number(this.tagPanel.year) || tracksToSave[0]?.year || null,
+                                    genre: this.tagPanel.genre || tracksToSave[0]?.genre || ''
+                                },
+                                tracks: tracksToSave,
+                                source_dir: this.currentPath,
+                                cover_base64: this.tagPanel.cover_base64 || tracksToSave[0]?.cover_base64 || '',
+                                cover_url: this.tagPanel.cover_url || tracksToSave[0]?.cover_url || '',
+                                reorganize: true
+                            })
+                        });
+
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            throw new Error(err.error || 'Ошибка перемещения в медиатеку');
+                        }
                     }
 
-                    Alpine.store('app').toast('Релиз успешно принят в медиатеку!', 'success');
+                    Alpine.store('app').toast(
+                        jobIds.length > 1
+                            ? `Успешно принято ${jobIds.length} релизов в медиатеку!`
+                            : 'Релиз успешно принят в медиатеку!',
+                        'success'
+                    );
                     Alpine.store('app').closeTagEditor();
 
                     // Очищаем завершенные задачи из очереди загрузок

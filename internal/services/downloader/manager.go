@@ -184,7 +184,7 @@ func (m *JobManager) ClearCompleted() int {
 		j.mu.RLock()
 		st := j.Status
 		j.mu.RUnlock()
-		if st == StatusReady || st == StatusError || st == StatusCancelled {
+		if st == StatusReady || st == StatusPartialReady || st == StatusError || st == StatusCancelled {
 			delete(m.jobs, id)
 			if timer, ok := m.syncTimers[id]; ok {
 				timer.Stop()

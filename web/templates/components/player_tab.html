@@ -30,7 +30,7 @@
                 <span class="text-brand font-semibold" x-text="`${$store.player.bufferProgressPercent}%`"></span>
             </div>
             <button
-                @click="$store.app.activeTab = 'files'; $dispatch('refresh-file-manager', '')"
+                @click="$store.app.activeTab = 'files'"
                 class="px-3.5 py-1.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white text-xs font-medium rounded-lg border border-surface-border transition flex items-center space-x-1.5">
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M4 20q-.825 0-1.412-.587T2 18V6q0-.825.588-1.412T4 4h5.175q.4 0 .763.15t.637.425L12 6h8q.825 0 1.413.588T22 8v10q0 .825-.587 1.413T20 20zm0-2h16V8h-8.825l-2-2H4zm0 0V6z"/>
@@ -188,7 +188,7 @@
                         @click="$store.player.togglePlay()"
                         :aria-label="$store.player.isPlaying ? 'Приостановить воспроизведение' : 'Начать воспроизведение'"
                         :title="$store.player.isPlaying ? 'Пауза (Пробел)' : 'Воспроизведение (Пробел)'"
-                        class="w-16 h-16 rounded-2xl bg-brand hover:bg-brand-hover text-white flex items-center justify-center transition shadow-lg shadow-brand/40 active:scale-95">
+                        class="w-16 h-16 rounded-2xl bg-brand hover:bg-brand-hover text-zinc-950 flex items-center justify-center transition shadow-lg shadow-brand/40 active:scale-95">
                         <template x-if="$store.player.isLoading">
                             <svg class="w-8 h-8 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -386,7 +386,7 @@
                             <template x-if="$store.player.currentTrack">
                                 <button
                                     @click="$store.app.openLyricsModal($store.player.currentTrack)"
-                                    class="px-3.5 py-1.5 bg-brand hover:bg-brand-hover text-white font-semibold text-xs rounded-lg transition shadow-md shadow-brand/20">
+                                    class="px-3.5 py-1.5 bg-brand hover:bg-brand-hover text-zinc-950 font-semibold text-xs rounded-lg transition shadow-md shadow-brand/20">
                                     Найти слова в LRCLIB
                                 </button>
                             </template>
@@ -482,7 +482,7 @@
                         </svg>
                         <span>ОЧЕРЕДЬ ПУСТА</span>
                         <button
-                            @click="$store.app.activeTab = 'files'; $dispatch('refresh-file-manager', '')"
+                            @click="$store.app.activeTab = 'files'"
                             class="text-brand hover:underline text-xs">
                             Выбрать треки в Медиатеке
                         </button>

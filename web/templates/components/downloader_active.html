@@ -64,8 +64,8 @@
                                         <button type="button"
                                                 @click.stop="$store.player.playTrack({ title: track.title, artist: track.artist, duration: track.duration, stream_url: '/api/stream?path=' + encodeURIComponent(track.converted_path), path: track.converted_path })"
                                                 :aria-label="$store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path))) ? 'Приостановить воспроизведение' : 'Слушать скачанный трек целиком'"
-                                                class="w-6 h-6 rounded-full flex items-center justify-center bg-white/10 hover:bg-brand hover:text-white text-content-primary transition shrink-0 focus-visible:ring-2 focus-visible:ring-white/40"
-                                                :class="$store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path))) ? 'bg-brand text-white' : ''"
+                                                class="w-6 h-6 rounded-full flex items-center justify-center bg-white/10 hover:bg-brand hover:text-zinc-950 text-content-primary transition shrink-0 focus-visible:ring-2 focus-visible:ring-white/40"
+                                                :class="$store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path))) ? 'bg-brand text-zinc-950 font-semibold' : ''"
                                                 :title="$store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path))) ? 'Пауза' : 'Слушать скачанный трек целиком'">
                                             <template x-if="$store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path)))">
                                                 <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
@@ -107,6 +107,17 @@
                                             <span x-text="Math.round(track.match_score) + '%'"></span>
                                         </span>
                                     </template>
+
+                                    <!-- Кнопка Выбрать источник вручную (Source Picker) -->
+                                    <button
+                                        type="button"
+                                        @click.stop="$store.sourcePicker.openForQueueTrack(job, track)"
+                                        aria-label="Выбрать музыкальный источник вручную"
+                                        class="px-2 py-0.5 rounded-sm text-xs font-mono transition flex items-center space-x-1 border shadow-xs focus-visible:ring-2 focus-visible:ring-white/30"
+                                        :class="track.status === 'waiting_source' || track.status === 'error' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30 animate-pulse' : 'bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
+                                        title="Выбрать источник вручную">
+                                        <span x-text="track.status === 'waiting_source' || track.status === 'error' ? 'Выбрать источник' : 'Источник'"></span>
+                                    </button>
 
                                     <!-- Кнопка выпадающего списка версий -->
                                     <template x-if="track.candidates && track.candidates.length > 1">
@@ -194,7 +205,7 @@
                                                             @click.stop="$store.player.playPreviewStream('/api/downloads/preview?url=' + encodeURIComponent(cand.url), cand.title, cand.uploader || '')"
                                                             aria-label="Предпрослушивание фрагмента дорожки"
                                                             class="px-2 py-0.5 rounded-sm text-xs font-mono transition flex items-center space-x-1 border focus-visible:ring-2 focus-visible:ring-white/30"
-                                                            :class="$store.player.currentTrack && $store.player.currentTrack.preview_url === ('/api/downloads/preview?url=' + encodeURIComponent(cand.url)) && $store.player.isPlaying ? 'bg-brand text-white border-brand shadow-xs animate-pulse' : 'bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
+                                                            :class="$store.player.currentTrack && $store.player.currentTrack.preview_url === ('/api/downloads/preview?url=' + encodeURIComponent(cand.url)) && $store.player.isPlaying ? 'bg-brand text-zinc-950 font-semibold border-brand shadow-xs animate-pulse' : 'bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
                                                             title="Предпрослушивание фрагмента 15 сек без скачивания">
                                                         <span>▶</span>
                                                         <span class="hidden sm:inline">Preview</span>

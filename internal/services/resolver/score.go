@@ -201,6 +201,15 @@ func (m *AudioMatcher) CalculateScore(targetTitle, targetArtist string, targetDu
 		}
 	}
 
+	// 6. Защита от ложных совпадений только по длительности:
+	// Если совпадение названия и артиста крайне слабое (< 0.40),
+	// совпадение хронометража не должно давать проходной балл (>= 25.0)
+	if trackRatio < 0.40 && artistRatio < 0.40 {
+		if score > 15.0 {
+			score = 15.0
+		}
+	}
+
 	if score < 0 {
 		return 0
 	}

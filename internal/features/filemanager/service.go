@@ -306,6 +306,19 @@ func (s *Service) ListFiles(ctx context.Context, relPath string, recursive bool)
 		if rErr != nil {
 			return nil, rErr
 		}
+
+		var dirTrackCounts map[string]int
+		if metadataCache != nil {
+			dirTrackCounts = make(map[string]int, len(metadataCache)/2)
+			for p := range metadataCache {
+				dir := filepath.Dir(p)
+				for dir != "." && dir != "" && dir != "/" {
+					dirTrackCounts[filepath.ToSlash(dir)]++
+					dir = filepath.Dir(dir)
+				}
+			}
+		}
+
 		for _, entry := range entries {
 			name := entry.Name()
 			if strings.HasPrefix(name, ".") || name == "tmp" || name == "tmp_downloads" {
@@ -322,11 +335,20 @@ func (s *Service) ListFiles(ctx context.Context, relPath string, recursive bool)
 
 			if entry.IsDir() {
 				totalDirs++
-				subEntries, _ := os.ReadDir(itemPath)
-				tCount := 0
-				for _, sub := range subEntries {
-					if !sub.IsDir() && strings.EqualFold(filepath.Ext(sub.Name()), ".mp3") {
-						tCount++
+				var tCount int
+				var countFound bool
+				if dirTrackCounts != nil {
+					if cnt, ok := dirTrackCounts[itemRel]; ok {
+						tCount = cnt
+						countFound = true
+					}
+				}
+				if !countFound {
+					subEntries, _ := os.ReadDir(itemPath)
+					for _, sub := range subEntries {
+						if !sub.IsDir() && strings.EqualFold(filepath.Ext(sub.Name()), ".mp3") {
+							tCount++
+						}
 					}
 				}
 				items = append(items, FileItem{

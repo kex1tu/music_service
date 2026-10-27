@@ -12,7 +12,7 @@
         <div class="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div class="space-y-3 max-w-xl">
                 <div class="flex items-center space-x-2">
-                    <span class="px-2.5 py-1 text-xs font-mono font-bold uppercase tracking-wider bg-brand text-white rounded-full shadow-md shadow-brand/20">ICY 320 kbps Zero-Transcoding</span>
+                    <span class="px-2.5 py-1 text-xs font-mono font-bold uppercase tracking-wider bg-brand text-zinc-950 rounded-full shadow-md shadow-brand/20">ICY 320 kbps Zero-Transcoding</span>
                     <template x-if="$store.radio.stats.navidrome_available || $store.radio.stats.subsonic_configured">
                         <span class="px-2.5 py-1 text-xs font-mono font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full"
                               x-text="$store.radio.stats.navidrome_available && $store.radio.stats.subsonic_configured ? 'Navidrome Connected' : ($store.radio.stats.navidrome_available ? 'Navidrome DB' : 'Subsonic Connected')">
@@ -30,7 +30,7 @@
                 <div class="pt-2 flex flex-wrap items-center gap-3">
                     <button
                         @click="$store.radio.playWave()"
-                        class="px-6 py-3 bg-brand hover:bg-brand-hover text-white font-bold rounded-2xl transition flex items-center space-x-3 shadow-lg shadow-brand/30 hover:scale-[1.02] active:scale-[0.98]">
+                        class="px-6 py-3 bg-brand hover:bg-brand-hover text-zinc-950 font-bold rounded-2xl transition flex items-center space-x-3 shadow-lg shadow-brand/30 hover:scale-[1.02] active:scale-[0.98]">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M8 5v14l11-7z"/>
                         </svg>
@@ -103,13 +103,13 @@
                         @contextmenu.prevent="$store.radio.exportGenreToNavidrome(g.name || g)"
                         :title="'ЛКМ — слушать на сайте, ПКМ — экспорт в Navidrome'"
                         :aria-label="'Включить радио по жанру ' + (g.name || g)"
-                        class="px-3 py-1.5 rounded-xl bg-surface-elevated hover:bg-brand hover:text-white border border-surface-border text-content-secondary transition flex items-center space-x-1.5 text-xs group">
-                        <svg class="w-3.5 h-3.5 text-brand group-hover:text-white transition" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        class="px-3 py-1.5 rounded-xl bg-surface-elevated hover:bg-brand hover:text-zinc-950 border border-surface-border text-content-secondary transition flex items-center space-x-1.5 text-xs group">
+                        <svg class="w-3.5 h-3.5 text-brand group-hover:text-zinc-950 transition" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M8 5v14l11-7z"/>
                         </svg>
                         <span class="font-medium" x-text="g.name || g"></span>
                         <template x-if="g.track_count">
-                            <span class="text-xs font-mono text-content-muted group-hover:text-white/70" x-text="g.track_count"></span>
+                            <span class="text-xs font-mono text-content-muted group-hover:text-zinc-800" x-text="g.track_count"></span>
                         </template>
                     </button>
                 </template>
@@ -134,7 +134,7 @@
                         class="flex-1 bg-surface-input border border-surface-border rounded-xl px-3 py-2 text-xs text-white placeholder-content-muted focus:outline-none focus:border-brand">
                     <button
                         @click="$store.radio.playArtist()"
-                        class="px-3 py-2 bg-brand hover:bg-brand-hover text-white text-xs font-semibold rounded-xl transition shrink-0"
+                        class="px-3 py-2 bg-brand hover:bg-brand-hover text-zinc-950 text-xs font-semibold rounded-xl transition shrink-0"
                         title="Воспроизвести на сайте">
                         Включить
                     </button>
@@ -194,7 +194,7 @@
             <div class="flex items-center space-x-3 shrink-0">
                 <button
                     @click="$store.radio.playWave()"
-                    class="px-5 py-2.5 bg-brand hover:bg-brand-hover text-white text-xs font-bold rounded-xl transition flex items-center space-x-2 shadow-md shadow-brand/20">
+                    class="px-5 py-2.5 bg-brand hover:bg-brand-hover text-zinc-950 text-xs font-bold rounded-xl transition flex items-center space-x-2 shadow-md shadow-brand/20">
                     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
                     <span>Включить поток</span>
                 </button>
@@ -208,13 +208,13 @@
             <div class="flex items-center space-x-2">
                 <button
                     @click="$store.radio.queueTab = 'queue'"
-                    :class="$store.radio.queueTab === 'queue' ? 'bg-brand text-white' : 'bg-surface-elevated text-content-secondary hover:text-white border border-surface-border'"
+                    :class="$store.radio.queueTab === 'queue' ? 'bg-brand text-zinc-950 font-bold' : 'bg-surface-elevated text-content-secondary hover:text-white border border-surface-border'"
                     class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition">
                     Очередь кандидатов
                 </button>
                 <button
                     @click="$store.radio.queueTab = 'history'"
-                    :class="$store.radio.queueTab === 'history' ? 'bg-brand text-white' : 'bg-surface-elevated text-content-secondary hover:text-white border border-surface-border'"
+                    :class="$store.radio.queueTab === 'history' ? 'bg-brand text-zinc-950 font-bold' : 'bg-surface-elevated text-content-secondary hover:text-white border border-surface-border'"
                     class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5">
                     <span>История эфира</span>
                     <template x-if="$store.radio.recentHistory.length">
@@ -255,7 +255,7 @@
                             @click="$store.player.playTrack(trk, $store.radio.waveQueue)"
                             :aria-label="'Слушать этот трек: ' + trk.title"
                             title="Слушать этот трек"
-                            class="p-1.5 rounded-lg bg-surface-elevated hover:bg-brand hover:text-white text-content-secondary transition">
+                            class="p-1.5 rounded-lg bg-surface-elevated hover:bg-brand hover:text-zinc-950 text-content-secondary transition">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M8 5v14l11-7z"/>
                             </svg>
@@ -288,7 +288,7 @@
                             @click="$store.player.playTrack(trk, $store.radio.recentHistory)"
                             :aria-label="'Слушать этот трек: ' + trk.title"
                             title="Слушать этот трек"
-                            class="p-1.5 rounded-lg bg-surface-elevated hover:bg-brand hover:text-white text-content-secondary transition">
+                            class="p-1.5 rounded-lg bg-surface-elevated hover:bg-brand hover:text-zinc-950 text-content-secondary transition">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M8 5v14l11-7z"/>
                             </svg>

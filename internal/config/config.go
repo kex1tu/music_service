@@ -62,7 +62,10 @@ func Load() (*Config, error) {
 
 	port, _ := strconv.Atoi(getEnv("PORT", "8010"))
 	sessionTTL, _ := strconv.Atoi(getEnv("SESSION_TTL", "604800"))
-	maxDownloads, _ := strconv.Atoi(getEnv("MAX_CONCURRENT_DOWNLOADS", "4"))
+	maxDownloads, _ := strconv.Atoi(getEnv("MAX_CONCURRENT_DOWNLOADS", "2"))
+	if maxDownloads <= 0 {
+		maxDownloads = 2
+	}
 	cookieSecure := getEnv("SESSION_COOKIE_SECURE", "false") == "true"
 	debug := getEnv("DEBUG", "false") == "true"
 

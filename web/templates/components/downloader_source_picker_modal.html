@@ -103,7 +103,7 @@
                             type="button"
                             @click="$store.sourcePicker.bindDirectUrl()"
                             :disabled="$store.sourcePicker.isSubmitting"
-                            class="px-4 py-2.5 bg-brand hover:bg-brand-hover disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow-md shadow-brand/20">
+                            class="px-4 py-2.5 bg-brand hover:bg-brand-hover disabled:opacity-50 text-zinc-950 font-bold rounded-xl text-xs transition flex items-center space-x-1.5 shadow-md shadow-brand/20">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                 <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
                             </svg>
@@ -231,7 +231,7 @@
                                         type="button"
                                         @click="$store.sourcePicker.togglePreview(cand)"
                                         class="px-2.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center space-x-1 border"
-                                        :class="$store.sourcePicker.previewingUrl === cand.url ? 'bg-brand text-white border-brand shadow-sm shadow-brand/40 animate-pulse' : 'bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
+                                        :class="$store.sourcePicker.previewingUrl === cand.url ? 'bg-brand text-zinc-950 font-semibold border-brand shadow-sm shadow-brand/40 animate-pulse' : 'bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
                                         :aria-label="($store.sourcePicker.previewingUrl === cand.url ? 'Остановить прослушивание трека ' : 'Предпрослушать трек ') + cand.title"
                                         title="Быстрое предпрослушивание 10-15 секунд без скачивания">
                                         <template x-if="$store.sourcePicker.previewingUrl !== cand.url">
@@ -253,7 +253,7 @@
                                         @click="$store.sourcePicker.selectCandidate(cand)"
                                         :disabled="$store.sourcePicker.isSubmitting"
                                         :aria-label="'Выбрать источник ' + cand.title"
-                                        class="px-3 py-1.5 bg-brand hover:bg-brand-hover disabled:opacity-50 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1 shadow-sm shadow-brand/20">
+                                        class="px-3 py-1.5 bg-brand hover:bg-brand-hover disabled:opacity-50 text-zinc-950 font-bold rounded-lg text-xs transition flex items-center space-x-1 shadow-sm shadow-brand/20">
                                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                             <path d="m9.55 18l-5.7-5.7l1.425-1.425L9.55 15.15l9.175-9.175L20.15 7.4z"/>
                                         </svg>

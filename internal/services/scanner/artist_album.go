@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+
+	"music-manager/internal/id3"
 )
 
 func (s *Scanner) getOrCreateArtist(name string) (int64, error) {
@@ -68,7 +70,10 @@ func (s *Scanner) getOrCreateAlbum(title string, artistID int64, albumArtistName
 		return 0, err
 	}
 
-	cleanTitle := strings.ToLower(title)
+	cleanTitle := id3.CleanReleaseTitle(title)
+	if cleanTitle == "" {
+		cleanTitle = strings.ToLower(title)
+	}
 	res, err := s.database.Conn().Exec(
 		"INSERT INTO albums (title, clean_title, artist_id, album_artist, year, folder_path, has_cover) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		title, cleanTitle, artistID, albumArtistName, year, albumDir, hasCover,

@@ -66,6 +66,21 @@
                 </button>
             </template>
 
+            <!-- Кнопка Принять все -->
+            <template x-if="$store.app.queue.readyCount > 0">
+                <button
+                    type="button"
+                    @click="$store.app.queue.acceptAllReadyJobs()"
+                    aria-label="Принять все готовые релизы в медиатеку в один клик"
+                    class="px-2.5 py-1 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 rounded-md text-xs font-bold transition flex items-center space-x-1 shadow-xs focus-visible:ring-2 focus-visible:ring-emerald-400"
+                    title="Принять все готовые релизы в медиатеку сразу">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="m9 16.17l-4.17-4.17l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                    </svg>
+                    <span>Принять все (<span x-text="$store.app.queue.readyCount"></span>)</span>
+                </button>
+            </template>
+
             <!-- Кнопка Редактировать всё -->
             <template x-if="$store.app.queue.readyCount > 0">
                 <button
@@ -86,9 +101,12 @@
                 type="button"
                 @click="$store.app.queue.clearCompleted()"
                 aria-label="Очистить завершенные задачи из очереди"
-                class="px-2.5 py-1 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border border-surface-border rounded-md text-xs transition focus-visible:ring-2 focus-visible:ring-white/30"
+                class="px-2.5 py-1 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border border-surface-border rounded-md text-xs font-medium transition flex items-center space-x-1 focus-visible:ring-2 focus-visible:ring-white/30"
                 title="Очистить завершенные и ошибочные задачи">
-                Очистить
+                <svg class="w-3.5 h-3.5 text-content-muted" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12z"/>
+                </svg>
+                <span>Очистить завершённые</span>
             </button>
         </div>
     </div>
@@ -164,8 +182,8 @@
                         <span class="text-xs text-white font-mono font-semibold tabular-nums w-10 text-right" x-text="`${Math.min(100, Math.max(0, Math.round(j.progress || 0)))}%`"></span>
                     </div>
 
-                    <!-- Колонка 3: Кнопки действий -->
-                    <div class="opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center space-x-1 shrink-0">
+                    <!-- Колонка 3: Кнопки действий (всегда доступны в 1 клик без наведения) -->
+                    <div class="flex items-center space-x-1 shrink-0">
                         <template x-if="(j.status === 'READY' || j.status === 'PARTIAL_READY') && j.is_backfill">
                             <button
                                 type="button"
@@ -255,8 +273,8 @@
                                             <button type="button"
                                                     @click.stop="$store.player.playTrack({ title: track.title, artist: track.artist, duration: track.duration, stream_url: '/api/stream?path=' + encodeURIComponent(track.converted_path), path: track.converted_path })"
                                                     :aria-label="$store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path))) ? 'Пауза' : 'Слушать трек целиком'"
-                                                    class="w-5 h-5 rounded-full flex items-center justify-center bg-white/10 hover:bg-brand hover:text-white text-content-primary transition shrink-0 focus-visible:ring-2 focus-visible:ring-white/40"
-                                                    :class="$store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path))) ? 'bg-brand text-white' : ''"
+                                                    class="w-5 h-5 rounded-full flex items-center justify-center bg-white/10 hover:bg-brand hover:text-zinc-950 text-content-primary transition shrink-0 focus-visible:ring-2 focus-visible:ring-white/40"
+                                                    :class="$store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path))) ? 'bg-brand text-zinc-950 font-semibold' : ''"
                                                     :title="$store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path))) ? 'Пауза' : 'Слушать скачанный трек целиком'">
                                                 <template x-if="$store.player.isPlaying && $store.player.currentTrack && ($store.player.currentTrack.path === track.converted_path || $store.player.currentTrack.stream_url === ('/api/stream?path=' + encodeURIComponent(track.converted_path)))">
                                                     <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
@@ -366,7 +384,7 @@
                                                                 @click.stop="$store.player.playPreviewStream('/api/downloads/preview?url=' + encodeURIComponent(cand.url), cand.title, cand.uploader || '')"
                                                                 aria-label="Предпрослушивание фрагмента кандидата"
                                                                 class="px-2 py-0.5 rounded-sm text-xs font-mono transition flex items-center space-x-1 border focus-visible:ring-2 focus-visible:ring-white/30"
-                                                                :class="$store.player.currentTrack && $store.player.currentTrack.preview_url === ('/api/downloads/preview?url=' + encodeURIComponent(cand.url)) && $store.player.isPlaying ? 'bg-brand text-white border-brand shadow-xs animate-pulse' : 'bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
+                                                                :class="$store.player.currentTrack && $store.player.currentTrack.preview_url === ('/api/downloads/preview?url=' + encodeURIComponent(cand.url)) && $store.player.isPlaying ? 'bg-brand text-zinc-950 font-semibold border-brand shadow-xs animate-pulse' : 'bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
                                                                 title="Предпрослушивание фрагмента 15 сек без скачивания">
                                                             <span>▶</span>
                                                             <span class="hidden sm:inline">Preview</span>

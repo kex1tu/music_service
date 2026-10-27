@@ -139,6 +139,7 @@ window.QueueEditorBridge = {
             let firstAlbum = null;
             let firstCoverPath = null;
             let hasAnyCover = false;
+            const releases = [];
 
             responses.forEach((data, index) => {
                 if (!data) return;
@@ -169,6 +170,17 @@ window.QueueEditorBridge = {
                     if (!album.year && single.year) album.year = single.year;
                     if (!album.genre && single.genre) album.genre = single.genre;
                 }
+
+                releases.push({
+                    jobId: jobId,
+                    album: album.album || readyJobs[index].album_title || 'Unknown Album',
+                    album_artist: album.album_artist || readyJobs[index].artist_name || 'Unknown Artist',
+                    year: album.year,
+                    genre: album.genre,
+                    coverUrl: album.cover_url,
+                    coverPath: album.cover_path,
+                    tracksCount: validTracks.length,
+                });
 
                 if (!firstAlbum && (album.album || album.album_artist)) {
                     firstAlbum = album;
@@ -229,6 +241,7 @@ window.QueueEditorBridge = {
                 coverPath: firstCoverPath || (allTracks[0]?.cover_path || null),
                 hasCover: hasAnyCover,
                 jobIds: allJobIds,
+                releases: releases,
             });
             queueMgr.isOpen = false;
             Alpine.store('app').toast(`Открыто релизов: ${allJobIds.length}, треков: ${allTracks.length}`, 'success');

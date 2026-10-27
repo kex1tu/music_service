@@ -11,6 +11,7 @@ import (
 
 	"music-manager/internal/config"
 	"music-manager/internal/core/sandbox"
+	"music-manager/internal/db"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/organizer"
 	"music-manager/internal/services/resolver"
@@ -25,6 +26,11 @@ type TagHandler struct {
 	musicbrainz  *resolver.MusicBrainzClient
 	shazam       *resolver.ShazamProvider
 	cfg          *config.Config
+	database     *db.DB
+}
+
+func (h *TagHandler) SetDB(database *db.DB) {
+	h.database = database
 }
 
 func NewTagHandler(

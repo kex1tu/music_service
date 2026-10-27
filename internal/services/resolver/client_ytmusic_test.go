@@ -368,3 +368,82 @@ func TestYouTubeMusicClient_MusicShelfRenderer(t *testing.T) {
 		t.Errorf("expected album 'AA LANGUAGE 2', got %q", tr.Album)
 	}
 }
+
+func TestYouTubeMusicClient_ExtractVideoID(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"contents": {
+				"tabbedSearchResultsRenderer": {
+					"tabs": [{
+						"tabRenderer": {
+							"content": {
+								"sectionListRenderer": {
+									"contents": [{
+										"musicShelfRenderer": {
+											"contents": [{
+												"musicResponsiveListItemRenderer": {
+													"flexColumns": [
+														{
+															"musicResponsiveListItemFlexColumnRenderer": {
+																"text": {
+																	"runs": [{
+																		"text": "Дым",
+																		"navigationEndpoint": {
+																			"watchEndpoint": {
+																				"videoId": "vid_h8hood_123"
+																			}
+																		}
+																	}]
+																}
+															}
+														},
+														{
+															"musicResponsiveListItemFlexColumnRenderer": {
+																"text": {
+																	"runs": [
+																		{"text": "Песня"},
+																		{"text": " • "},
+																		{
+																			"text": "h8.hood",
+																			"navigationEndpoint": {
+																				"browseEndpoint": {
+																					"browseEndpointContextSupportedConfigs": {
+																						"browseEndpointContextMusicConfig": {
+																							"pageType": "MUSIC_PAGE_TYPE_ARTIST"
+																						}
+																					}
+																				}
+																			}
+																		}
+																	]
+																}
+															}
+														}
+													]
+												}
+											}]
+										}
+									}]
+								}
+							}
+						}
+					}]
+				}
+			}
+		}`))
+	}))
+	defer mockServer.Close()
+
+	client := NewYouTubeMusicClient(mockServer.URL)
+	tracks, err := client.Search(context.Background(), "h8.hood Дым")
+	if err != nil {
+		t.Fatalf("search error: %v", err)
+	}
+	if len(tracks) != 1 {
+		t.Fatalf("expected 1 track, got %d", len(tracks))
+	}
+	if tracks[0].VideoID != "vid_h8hood_123" {
+		t.Errorf("expected VideoID 'vid_h8hood_123', got %q", tracks[0].VideoID)
+	}
+}

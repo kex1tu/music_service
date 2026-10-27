@@ -65,7 +65,7 @@
                 type="button"
                 @click="searchSources()"
                 :disabled="isSearchingSources"
-                class="px-4 py-2 bg-brand hover:bg-brand-hover text-white text-xs font-semibold rounded-xl shadow-md transition flex items-center space-x-1.5 active:scale-95 disabled:opacity-50">
+                class="px-4 py-2 bg-brand hover:bg-brand-hover text-zinc-950 text-xs font-semibold rounded-xl shadow-md transition flex items-center space-x-1.5 active:scale-95 disabled:opacity-50">
                 <template x-if="isSearchingSources">
                     <svg class="w-3.5 h-3.5 animate-spin" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 2v4c4.42 0 8 3.58 8 8s-3.58 8-8 8v4c6.63 0 12-5.37 12-12S18.63 2 12 2"/>
@@ -103,7 +103,7 @@
                     <span>Deezer</span>
                     <span
                         class="px-1.5 py-0.5 rounded-full text-xs font-mono font-bold"
-                        :class="activeSourceTab === 'deezer' ? 'bg-brand text-white' : 'bg-surface-elevated text-content-muted'"
+                        :class="activeSourceTab === 'deezer' ? 'bg-brand text-zinc-950 font-bold' : 'bg-surface-elevated text-content-muted'"
                         x-text="sourceResults.deezer ? sourceResults.deezer.count : 0">
                     </span>
                 </button>

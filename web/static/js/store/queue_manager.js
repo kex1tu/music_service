@@ -275,5 +275,28 @@ window.createQueueManager = function() {
                 return window.DownloaderPolling.acceptJobDirectly(jobId);
             }
         },
+
+        async acceptAllReadyJobs() {
+            const readyJobs = (this.jobs || []).filter(j => j.status === 'READY' || j.status === 'PARTIAL_READY');
+            if (readyJobs.length === 0) {
+                Alpine.store('app').toast('Нет готовых релизов для принятия', 'warning');
+                return;
+            }
+
+            Alpine.store('app').toast(`Принятие готовых релизов (${readyJobs.length})...`, 'info');
+            let accepted = 0;
+            for (const j of readyJobs) {
+                try {
+                    if (window.DownloaderPolling && window.DownloaderPolling.acceptJobDirectly) {
+                        await window.DownloaderPolling.acceptJobDirectly(j.id);
+                        accepted++;
+                    }
+                } catch (err) {
+                    console.error(`Ошибка принятия релиза ${j.id}:`, err);
+                }
+            }
+            Alpine.store('app').toast(`Успешно принято релизов: ${accepted}`, 'success');
+            await this.fetchQueue();
+        },
     };
 };

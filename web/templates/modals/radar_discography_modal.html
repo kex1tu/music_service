@@ -57,7 +57,7 @@
                     <span>Связи каталогов & поисковый псевдоним (Alias)</span>
                     <button
                         @click="$store.radar.saveCustomLinks()"
-                        class="px-3 py-1 bg-brand hover:bg-brand-hover text-white rounded-lg transition font-semibold">
+                        class="px-3 py-1 bg-brand hover:bg-brand-hover text-zinc-950 rounded-lg transition font-semibold">
                         Сохранить связи
                     </button>
                 </div>
@@ -162,7 +162,7 @@
                             <template x-if="rel.status !== 'in_library'">
                                 <button
                                     @click="$store.radar.downloadRelease(rel)"
-                                    class="px-3 py-1 bg-brand hover:bg-brand-hover text-white rounded-lg transition font-medium text-xs">
+                                    class="px-3 py-1 bg-brand hover:bg-brand-hover text-zinc-950 font-semibold rounded-lg transition text-xs">
                                     Скачать
                                 </button>
                             </template>

@@ -109,6 +109,20 @@ func (s *Service) SaveBatch(req BatchSaveRequest) (*OrganizerResult, error) {
 		}
 	}
 
+	// Canonicalize genres
+	if req.Album.Genre != "" {
+		req.Album.Genre = id3.CanonicalizeGenre(req.Album.Genre)
+	}
+	for i := range req.Tracks {
+		if req.Tracks[i].Genre != "" {
+			req.Tracks[i].Genre = id3.CanonicalizeGenre(req.Tracks[i].Genre)
+		}
+	}
+
+	// Bilateral synchronization between AlbumArtist and track artists
+	fallbackAlbumArtist, req.Tracks = id3.SyncAlbumArtistAndTrackArtists(fallbackAlbumArtist, req.Tracks)
+	req.Album.AlbumArtist = fallbackAlbumArtist
+
 	return s.MoveAlbum(req.SourceDir, fallbackAlbum, fallbackAlbumArtist, req.Tracks, req.CoverBase64)
 }
 
@@ -133,6 +147,13 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 			DestinationDir: defaultDir,
 			Tracks:         nil,
 		}, nil
+	}
+
+	fallbackAlbumArtist, tracks = id3.SyncAlbumArtistAndTrackArtists(fallbackAlbumArtist, tracks)
+	for i := range tracks {
+		if tracks[i].Genre != "" {
+			tracks[i].Genre = id3.CanonicalizeGenre(tracks[i].Genre)
+		}
 	}
 
 	// 1. Identify all unique target album directories needed by the tracks

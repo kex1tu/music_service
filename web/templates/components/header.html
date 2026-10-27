@@ -147,7 +147,7 @@
                 <span>Загрузчик</span>
             </button>
             <button
-                @click="$store.app.activeTab = 'files'; $dispatch('refresh-file-manager', '')"
+                @click="$store.app.activeTab = 'files'"
                 :aria-current="$store.app.activeTab === 'files' ? 'page' : false"
                 :class="$store.app.activeTab === 'files' ? 'bg-white text-zinc-950 font-semibold shadow-xs' : 'text-content-secondary hover:text-white hover:bg-white/[0.04]'"
                 class="h-8 px-2.5 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0 focus-visible:ring-2 focus-visible:ring-white/30">

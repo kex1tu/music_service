@@ -18,7 +18,7 @@
                 @click="fixSafeTagIssues()"
                 :disabled="isFixingSafeTags || safeIssuesCount() === 0"
                 aria-label="Быстрое локальное исправление безопасных дефектов"
-                class="px-3 py-2 bg-brand hover:bg-brand-hover disabled:opacity-40 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 shadow-lg shadow-brand/20 active:scale-95"
+                class="px-3 py-2 bg-brand hover:bg-brand-hover disabled:opacity-40 text-zinc-950 font-bold rounded-lg text-xs transition flex items-center space-x-1.5 shadow-lg shadow-brand/20 active:scale-95"
                 title="Быстрое детерминированное локальное исправление клипового мусора, номеров треков и topic-каналов">
                 <template x-if="isFixingSafeTags">
                     <svg class="w-3.5 h-3.5 animate-spin" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
@@ -80,7 +80,7 @@
         <div class="inline-flex p-1 bg-surface-elevated rounded-xl border border-surface-border self-start">
             <button
                 @click="tagViewMode = 'tracks'"
-                :class="tagViewMode === 'tracks' ? 'bg-brand text-white shadow-sm font-semibold' : 'text-content-muted hover:text-content-primary font-medium'"
+                :class="tagViewMode === 'tracks' ? 'bg-brand text-zinc-950 shadow-sm font-semibold' : 'text-content-muted hover:text-content-primary font-medium'"
                 class="px-3 py-1.5 rounded-lg text-xs transition flex items-center space-x-1.5">
                 <svg class="w-3.5 h-3.5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
@@ -90,7 +90,7 @@
             </button>
             <button
                 @click="tagViewMode = 'albums'"
-                :class="tagViewMode === 'albums' ? 'bg-brand text-white shadow-sm font-semibold' : 'text-content-muted hover:text-content-primary font-medium'"
+                :class="tagViewMode === 'albums' ? 'bg-brand text-zinc-950 shadow-sm font-semibold' : 'text-content-muted hover:text-content-primary font-medium'"
                 class="px-3 py-1.5 rounded-lg text-xs transition flex items-center space-x-1.5">
                 <svg class="w-3.5 h-3.5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z"/>
@@ -328,7 +328,7 @@
                                     <button
                                         @click="openAlbumDiffModal(grp.folder_path, grp.album, grp.artist)"
                                         :aria-label="'Сверить альбом онлайн: ' + grp.album"
-                                        class="px-3 py-1.5 bg-brand hover:bg-brand-hover text-white rounded text-xs font-semibold transition inline-flex items-center space-x-1.5 shadow-sm active:scale-95">
+                                        class="px-3 py-1.5 bg-brand hover:bg-brand-hover text-zinc-950 rounded text-xs font-semibold transition inline-flex items-center space-x-1.5 shadow-sm active:scale-95">
                                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14h2v2h-2zm0-10h2v8h-2z"/>
                                         </svg>
@@ -709,7 +709,7 @@
                 <button
                     @click="applyAlbumCatalog()"
                     :disabled="isApplyingAlbumCatalog || !albumDiffData || !(albumDiffData.tracks && albumDiffData.tracks.some(t => t.is_matched))"
-                    class="px-5 py-2 bg-brand hover:bg-brand-hover disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition shadow-lg flex items-center space-x-2 active:scale-95">
+                    class="px-5 py-2 bg-brand hover:bg-brand-hover disabled:opacity-50 text-zinc-950 rounded-lg text-xs font-bold transition shadow-lg flex items-center space-x-2 active:scale-95">
                     <template x-if="isApplyingAlbumCatalog">
                         <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
@@ -729,7 +729,7 @@
                 <button
                     @click="applyAlbumCatalog()"
                     :disabled="isApplyingAlbumCatalog || !albumDiffData || !(albumDiffData.tracks && albumDiffData.tracks.some(t => t.is_matched))"
-                    class="px-5 py-2 bg-brand hover:bg-brand-hover disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition shadow-lg flex items-center space-x-2 active:scale-95">
+                    class="px-5 py-2 bg-brand hover:bg-brand-hover disabled:opacity-50 text-zinc-950 rounded-lg text-xs font-bold transition shadow-lg flex items-center space-x-2 active:scale-95">
                     <template x-if="isApplyingAlbumCatalog">
                         <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>

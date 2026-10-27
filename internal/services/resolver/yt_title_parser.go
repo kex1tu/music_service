@@ -33,6 +33,11 @@ var (
 		"музыка первого", "melon music records", "label", "records",
 		"golden sound", "velvet music", "soyuz music", "союз мьюзик",
 	}
+
+	streamingJunkInParenRegex = regexp.MustCompile(`(?i)\s*[\(\[]\s*(?:official\s+(?:music\s+)?video|official\s+audio|official\s+hd\s+video|official\s+lyric\s+video|lyric\s+video|lyrics|клип|официальный\s+клип|премьера(?:\s+клипа)?(?:\s+\d{4})?|премьера\s+трека|video|audio|4k|hd|remastered(?:\s+\d{4})?|visualizer|prod\.(?:\s+by)?\s+[^\]\)]+|feat\.?|ft\.?|featuring|with|при\s+уч\.?|explicit|clean|censored|uncensored|uncut|до\s+цензуры|без\s+цензуры|с\s+цензурой|цензурная|sped\s+up|slowed)[^\]\)]*[\)\]]`)
+	streamingInlineFeatRegex  = regexp.MustCompile(`(?i)\s+(?:feat\.?|ft\.?|featuring|with|при\s+уч\.?)\s+[^—–:\(\[]+`)
+	punctuationRegex          = regexp.MustCompile(`[^\p{L}\p{N}\s]`)
+	multiSpaceRegex           = regexp.MustCompile(`\s+`)
 )
 
 // ParsedYouTubeTrack содержит результаты очистки и парсинга видео YouTube.
@@ -228,3 +233,138 @@ func ParseYouTubeTitle(rawTitle, channelName, uploader string) ParsedYouTubeTrac
 		IsStudioClip: hadJunk,
 	}
 }
+
+// NormalizeTrackTitleForMatching очищает название от клипового и стримингового мусора (Official Audio, feat, prod, explicit)
+// и пунктуации для точного семантического сопоставления.
+func NormalizeTrackTitleForMatching(title string) string {
+	t := strings.TrimSpace(title)
+	t = ytTrailingJunkRegex.ReplaceAllString(t, "")
+	t = streamingJunkInParenRegex.ReplaceAllString(t, "")
+	t = streamingInlineFeatRegex.ReplaceAllString(t, "")
+	t = punctuationRegex.ReplaceAllString(t, " ")
+	t = multiSpaceRegex.ReplaceAllString(t, " ")
+	return strings.ToLower(strings.TrimSpace(t))
+}
+
+// CheckTitleAndArtistMatch проверяет семантическое соответствие кандидата целевому треку.
+// Учитывает нормализацию мусорных суффиксов, транслитерацию и вхождение коротких названий (3-4 буквы).
+func CheckTitleAndArtistMatch(candidateTitle, candidateUploader, targetTitle, targetArtist string) (match bool, titleScore float64, artistScore float64) {
+	normTargetTitle := NormalizeTrackTitleForMatching(targetTitle)
+	normTargetArtist := NormalizeTrackTitleForMatching(targetArtist)
+
+	candTitle := candidateTitle
+	candPartArtist := ""
+	candPartTitle := ""
+
+	dashDelimiters := []string{" — ", " – ", " - ", " : "}
+	for _, delim := range dashDelimiters {
+		if idx := strings.Index(candTitle, delim); idx != -1 {
+			candPartArtist = strings.TrimSpace(candTitle[:idx])
+			candPartTitle = strings.TrimSpace(candTitle[idx+len(delim):])
+			break
+		}
+	}
+
+	normCandFull := NormalizeTrackTitleForMatching(candTitle)
+	normCandTitle := NormalizeTrackTitleForMatching(candPartTitle)
+	normCandPartArt := NormalizeTrackTitleForMatching(candPartArtist)
+	normCandUploader := NormalizeTrackTitleForMatching(candidateUploader)
+
+	// 1. Вычисление titleScore
+	if normCandTitle != "" {
+		titleScore = LevenshteinRatio(normCandTitle, normTargetTitle)
+	} else {
+		titleScore = LevenshteinRatio(normCandFull, normTargetTitle)
+	}
+	if fullRatio := LevenshteinRatio(normCandFull, normTargetTitle); fullRatio > titleScore {
+		titleScore = fullRatio
+	}
+
+	// Проверка вхождения подстроки для коротких и длинных названий
+	if len(normTargetTitle) >= 3 {
+		if strings.Contains(normCandFull, normTargetTitle) ||
+			(normCandTitle != "" && strings.Contains(normCandTitle, normTargetTitle)) {
+			if titleScore < 0.90 {
+				titleScore = 0.90
+			}
+		}
+	}
+	if len(normCandTitle) >= 3 && strings.Contains(normTargetTitle, normCandTitle) {
+		if titleScore < 0.85 {
+			titleScore = 0.85
+		}
+	}
+
+	// 2. Вычисление artistScore
+	if normTargetArtist != "" {
+		if normCandUploader != "" {
+			artistScore = LevenshteinRatio(normCandUploader, normTargetArtist)
+			if strings.Contains(normCandUploader, normTargetArtist) || strings.Contains(normTargetArtist, normCandUploader) {
+				if artistScore < 0.90 {
+					artistScore = 0.90
+				}
+			}
+		}
+		if normCandPartArt != "" {
+			r := LevenshteinRatio(normCandPartArt, normTargetArtist)
+			if r > artistScore {
+				artistScore = r
+			}
+			if strings.Contains(normCandPartArt, normTargetArtist) || strings.Contains(normTargetArtist, normCandPartArt) {
+				if artistScore < 0.90 {
+					artistScore = 0.90
+				}
+			}
+		}
+		if strings.Contains(normCandFull, normTargetArtist) {
+			if artistScore < 0.85 {
+				artistScore = 0.85
+			}
+		}
+
+		// Проверка транслитерированных вариантов (например, "h8.hood", "апология")
+		if artistScore < 0.60 {
+			for _, variant := range TransliterateArtist(targetArtist) {
+				normVar := NormalizeTrackTitleForMatching(variant)
+				if normVar == "" || normVar == normTargetArtist {
+					continue
+				}
+				if normCandUploader != "" {
+					if r := LevenshteinRatio(normCandUploader, normVar); r > artistScore {
+						artistScore = r
+					}
+					if strings.Contains(normCandUploader, normVar) {
+						if artistScore < 0.85 {
+							artistScore = 0.85
+						}
+					}
+				}
+				if normCandPartArt != "" {
+					if r := LevenshteinRatio(normCandPartArt, normVar); r > artistScore {
+						artistScore = r
+					}
+					if strings.Contains(normCandPartArt, normVar) {
+						if artistScore < 0.85 {
+							artistScore = 0.85
+						}
+					}
+				}
+				if strings.Contains(normCandFull, normVar) {
+					if artistScore < 0.85 {
+						artistScore = 0.85
+					}
+				}
+			}
+		}
+	} else {
+		// Если артист не задан, ориентируемся только на название
+		artistScore = 1.0
+	}
+
+	// Критерий успешного совпадения:
+	// - Хорошее совпадение названия (>= 0.65) И подтвержденный артист (>= 0.40)
+	// - ЛИБО очень высокое совпадение названия (>= 0.88)
+	match = (titleScore >= 0.65 && artistScore >= 0.40) || (titleScore >= 0.88)
+	return match, titleScore, artistScore
+}
+

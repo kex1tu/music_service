@@ -89,7 +89,7 @@ func (h *TagHandler) GetDeezerAlbumDetails(w http.ResponseWriter, r *http.Reques
 
 	cover := album.BestCoverURL()
 	year := album.ReleaseYear()
-	genre := album.PrimaryGenre()
+	genre := id3.CanonicalizeGenre(album.PrimaryGenre())
 
 	type trackDetail struct {
 		contributors []resolver.DeezerArtist
@@ -103,7 +103,7 @@ func (h *TagHandler) GetDeezerAlbumDetails(w http.ResponseWriter, r *http.Reques
 		details = make([]trackDetail, total)
 
 		var wg sync.WaitGroup
-		sem := make(chan struct{}, 8) // максимум 8 параллельных потоков
+		sem := make(chan struct{}, 4) // Ограниченный пул: не более 3-4 параллельных запросов для защиты от rate-limit Deezer
 
 		for i, t := range album.Tracks.Data {
 			if t.ID <= 0 {

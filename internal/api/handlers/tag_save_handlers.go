@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"music-manager/internal/id3"
 )
@@ -24,6 +26,14 @@ func (h *TagHandler) SaveTags(w http.ResponseWriter, r *http.Request) {
 	if err := id3.WriteTags(fullPath, tags, nil); err != nil {
 		http.Error(w, `{"error":"failed to write tags"}`, http.StatusInternalServerError)
 		return
+	}
+
+	if h.database != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_, _ = h.database.ReconcileAllRadarReleases(ctx)
+		}()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -95,12 +105,30 @@ func (h *TagHandler) BatchSaveTags(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.Album.Genre != "" {
+		req.Album.Genre = id3.CanonicalizeGenre(req.Album.Genre)
+	}
+	for i := range req.Tracks {
+		if req.Tracks[i].Genre != "" {
+			req.Tracks[i].Genre = id3.CanonicalizeGenre(req.Tracks[i].Genre)
+		}
+	}
+	req.Album.AlbumArtist, req.Tracks = id3.SyncAlbumArtistAndTrackArtists(req.Album.AlbumArtist, req.Tracks)
+
 	res, err := h.organizer.MoveAlbum(req.SourceDir, req.Album.Album, req.Album.AlbumArtist, req.Tracks, req.CoverBase64)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
+	}
+
+	if h.database != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_, _ = h.database.ReconcileAllRadarReleases(ctx)
+		}()
 	}
 
 	w.Header().Set("Content-Type", "application/json")

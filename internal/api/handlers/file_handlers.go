@@ -352,6 +352,22 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var metaCache map[string]db.TrackMetadataCache
+	var dirTrackCounts map[string]int
+	if h.database != nil {
+		metaCache, _ = h.database.GetTracksMetadataCache(r.Context())
+		if metaCache != nil {
+			dirTrackCounts = make(map[string]int, len(metaCache)/2)
+			for p := range metaCache {
+				dir := filepath.Dir(p)
+				for dir != "." && dir != "" && dir != "/" {
+					dirTrackCounts[filepath.ToSlash(dir)]++
+					dir = filepath.Dir(dir)
+				}
+			}
+		}
+	}
+
 	items := make([]fileItem, 0)
 	var totalDirs, totalFiles int
 
@@ -366,18 +382,26 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 
 		if e.IsDir() {
 			totalDirs++
-			// Count mp3 files in directory
-			subEntries, _ := os.ReadDir(itemFull)
-			tCount := 0
-			for _, sub := range subEntries {
-				if !sub.IsDir() && strings.EqualFold(filepath.Ext(sub.Name()), ".mp3") {
-					tCount++
+			var tCount int
+			var countFound bool
+			if dirTrackCounts != nil {
+				if cnt, ok := dirTrackCounts[filepath.ToSlash(itemRel)]; ok {
+					tCount = cnt
+					countFound = true
+				}
+			}
+			if !countFound {
+				subEntries, _ := os.ReadDir(itemFull)
+				for _, sub := range subEntries {
+					if !sub.IsDir() && strings.EqualFold(filepath.Ext(sub.Name()), ".mp3") {
+						tCount++
+					}
 				}
 			}
 
 			items = append(items, fileItem{
 				Name:         name,
-				Path:         itemRel,
+				Path:         filepath.ToSlash(itemRel),
 				Type:         "directory",
 				TrackCount:   &tCount,
 				LyricsStatus: "none",
@@ -389,7 +413,45 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 			if info != nil {
 				sz = info.Size()
 			}
-			items = append(items, h.buildFileItem(itemFull, itemRel, sz))
+			cleanRel := filepath.ToSlash(itemRel)
+			if meta, found := metaCache[cleanRel]; found {
+				ext := filepath.Ext(name)
+				tHash := db.TrackHash(cleanRel)
+				streamURL := "/api/tracks/" + tHash + "/stream"
+				h.trackCache.Store(tHash, cleanRel)
+
+				fItem := fileItem{
+					Name:         name,
+					Path:         cleanRel,
+					Type:         "file",
+					Size:         &sz,
+					Extension:    &ext,
+					ID:           &tHash,
+					StreamURL:    &streamURL,
+					TrackNumber:  &meta.TrackNumber,
+					TrackTotal:   &meta.TrackTotal,
+					DiscNumber:   &meta.DiscNumber,
+					DiscTotal:    &meta.DiscTotal,
+					Title:        &meta.Title,
+					Artist:       &meta.Artist,
+					Album:        &meta.Album,
+					Duration:     &meta.Duration,
+					HasCover:     meta.HasCover,
+					LyricsStatus: meta.LyricsStatus,
+				}
+				if meta.AlbumArtist != "" {
+					fItem.AlbumArtist = &meta.AlbumArtist
+				}
+				if meta.Year > 0 {
+					fItem.Year = &meta.Year
+				}
+				if meta.Genre != "" {
+					fItem.Genre = &meta.Genre
+				}
+				items = append(items, fItem)
+			} else {
+				items = append(items, h.buildFileItem(itemFull, itemRel, sz))
+			}
 		}
 	}
 
