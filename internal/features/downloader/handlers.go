@@ -187,16 +187,18 @@ func (m *Module) GetJobTracks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := DownloadTracksResponse{
-		JobID:       snap.ID,
-		AlbumArtist: albumArtist,
-		Album:       albumTitle,
-		Year:        year,
-		Genre:       genre,
-		DiscTotal:   discTot,
-		TrackTotal:  trackTot,
-		CoverURL:    coverURL,
-		CoverPath:   coverPath,
-		Tracks:      snap.Tracks,
+		JobID:           snap.ID,
+		AlbumArtist:     albumArtist,
+		Album:           albumTitle,
+		Year:            year,
+		Genre:           genre,
+		DiscTotal:       discTot,
+		TrackTotal:      trackTot,
+		CoverURL:        coverURL,
+		CoverPath:       coverPath,
+		Tracks:          snap.Tracks,
+		IsBackfill:      snap.IsBackfill,
+		TargetAlbumPath: snap.TargetAlbumPath,
 	}
 
 	httputil.RespondJSON(w, http.StatusOK, resp)

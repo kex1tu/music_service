@@ -117,7 +117,7 @@
                             </span>
                             <div class="text-xs text-amber-400 font-medium">
                                 <span>Отсутствуют: </span>
-                                <strong class="font-mono" x-text="alb.missing_track_numbers.map(n => '#' + n).join(', ')"></strong>
+                                <strong class="font-mono" x-text="(alb.missing_track_numbers || []).map(n => '#' + n).join(', ')"></strong>
                             </div>
                         </div>
                         <div class="w-full bg-surface-base rounded-full h-2 overflow-hidden border border-surface-border">

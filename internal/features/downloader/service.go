@@ -950,6 +950,52 @@ func (s *Service) executeBackfill(ctx context.Context, job *Job) {
 		}
 	}
 
+	if len(tracks) == 0 && s.resolver != nil {
+		deezerURL := job.URL
+		if deezerURL == "" && job.AlbumTitle != nil && *job.AlbumTitle != "" && s.resolver.Deezer() != nil {
+			art := ""
+			if job.ArtistName != nil {
+				art = *job.ArtistName
+			}
+			q := fmt.Sprintf(`artist:"%s" album:"%s"`, art, *job.AlbumTitle)
+			albums, sErr := s.resolver.Deezer().SearchAlbums(ctx, q)
+			if sErr != nil || len(albums) == 0 {
+				albums, sErr = s.resolver.Deezer().SearchAlbums(ctx, fmt.Sprintf("%s %s", art, *job.AlbumTitle))
+			}
+			if sErr == nil && len(albums) > 0 {
+				deezerURL = fmt.Sprintf("https://www.deezer.com/album/%d", albums[0].ID)
+			}
+		}
+
+		if deezerURL != "" {
+			m, allTracks, err := s.resolver.Resolve(ctx, deezerURL, "deezer")
+			if err == nil && m != nil {
+				meta = m
+				existingNumbers := make(map[int]bool)
+				if s.musicSandbox != nil && job.TargetAlbumPath != nil && *job.TargetAlbumPath != "" {
+					if fullPath, err := s.musicSandbox.Resolve(*job.TargetAlbumPath, true); err == nil {
+						if entries, err := os.ReadDir(fullPath); err == nil {
+							for _, e := range entries {
+								if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".mp3") {
+									itemFull := filepath.Join(fullPath, e.Name())
+									if t, err := id3.ReadTags(itemFull, e.Name()); err == nil && t.TrackNumber > 0 {
+										existingNumbers[t.TrackNumber] = true
+									}
+								}
+							}
+						}
+					}
+				}
+
+				for _, t := range allTracks {
+					if !existingNumbers[t.TrackNumber] {
+						tracks = append(tracks, t)
+					}
+				}
+			}
+		}
+	}
+
 	if meta == nil {
 		meta = &resolver.ReleaseMetadata{}
 	}

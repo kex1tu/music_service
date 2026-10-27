@@ -1,77 +1,63 @@
-# План реализации: Парсинг SoundCloud альбомов, Поиск полных релизов (Full Release Matching) и Валидация DEAD BLONDE
+# План реализации: Комплексная адаптация существующего интерфейса под Мобильные устройства и ПК (Mobile & Desktop UX Overhaul)
 
 - **Дата:** 2026-10-27  
-- **Статус плана:** `DONE (Полностью реализовано и верифицировано)`  
+- **Статус плана:** `PROPOSED (На согласовании)`  
 - **Целевые компоненты:**  
-  - [`internal/services/resolver/resolver_ytdlp.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/resolver_ytdlp.go) (Парсинг альбомов, плейлистов и метаданных треков SoundCloud)
-  - [`internal/services/resolver/client_ytmusic.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/client_ytmusic.go) (Поиск официальных альбомов/плейлистов через Innertube API)
-  - [`internal/services/resolver/full_release_matcher.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/full_release_matcher.go) (Новый движок сопоставления цельных релизов)
-  - [`internal/features/downloader/service.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/features/downloader/service.go) (Интеграция предпроверки полного релиза перед поштучным скачиванием)
-  - [`internal/services/resolver/sc_parser_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/sc_parser_test.go) (Тесты парсинга SoundCloud)
-  - [`internal/services/resolver/full_release_matcher_test.go`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/internal/services/resolver/full_release_matcher_test.go) (Тесты сопоставления треклистов и кейс DEAD BLONDE)
-
+  - [`web/templates/components/header.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/header.html) (Мобильный компактный топбар, поиск для смартфона и десктопная консоль)
+  - [`web/templates/components/audio_player.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audio_player.html) (Исправление бага переноса таймкода `w-8`, мобильный Mini-Player и адаптивные тач-кнопки)
+  - [`web/templates/components/queue_drawer.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/queue_drawer.html) (Динамическое позиционирование виджета очереди над плеером и навигацией)
+  - [`web/templates/components/file_manager.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/file_manager.html) (Исправление порядка отображения на мобилке: скрытие тяжелого инспектора тегов в основной ленте, приоритет папок и сетки треков)
+  - [`web/templates/components/puddletag_toolbar.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/puddletag_toolbar.html) (Мобильная лента кнопок тулбара с плавным сенсорным скроллом)
+  - [`web/templates/components/audit.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit.html) и [`web/templates/components/audit_metrics.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit_metrics.html) (Адаптивные кнопки действий `flex-wrap` и сетка метрик 2×2 на экранах `< md`)
+  - [`web/templates/components/player_tab.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/player_tab.html) (Мобильная компоновка выделенной вкладки плеера: компактный виниловый картридж, быстрый доступ к караоке-текстам)
+  - [`web/templates/index.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/index.html) (Интеграция Mobile Bottom Navigation Bar, учет Safe Area и отступов подвала)
+  - [`web/static/css/style.css`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/css/style.css) (CSS-утилиты безопасных зон `pb-safe`, `bottom-safe`, тач-таргеты 44px+)
 - **Архитектурные инварианты (AGENTS.md):**  
-  - **Pure Go / Zero-Python / Zero-Node.js:** Все парсеры и сопоставители пишутся строго на pure Go.
-  - **Sandbox обязателен:** Любые временные файлы только через `PathSandbox`.
-  - **Аудио-пайплайн:** `yt-dlp` для стримов, `ffmpeg` для MP3 320 kbps CBR, ID3v2.4 UTF-8 теги (`\x00` внутри фреймов, `\\` для UI), внешние `.lrc` тексты (никогда не вшиваются в MP3).
-  - **Graceful Fallback:** Если полный релиз не найден или совпадение неполное, система без сбоев переключается на поштучный поиск треков.
+  - **Zero-Node.js / Zero-npm:** Никаких package.json, сборщиков и внешних CSS-библиотек; строго Tailwind CDN и Alpine.js CDN.
+  - **Строго один стандарт иконок:** Только инлайновые Google Material Symbols SVG (`stroke-width: 1.75–2`, размеры 20x20 или 16x16, `viewBox="0 0 24 24"`).
+  - **Целостность шаблонов:** Сохранение всех 435 зарегистрированных JS-методов и ключей `:key` для прохождения `web/template_validator_test.go`.
+  - **Аудио-пайплайн:** MP3 320 kbps CBR, ID3v2.4 UTF-8 с null-разделителями `\x00`, companion `.lrc` рядом с треком.
 
 ---
 
 ## 1. Цель и границы задачи (Objective & Scope)
 
 ### 1.1. Проблематика
-1. **Некорректный парсинг альбомов/плейлистов SoundCloud (`sc`):**
-   При передаче ссылки вида `https://soundcloud.com/artist/sets/album` или плейлиста yt-dlp возвращает метаданные, где:
-   - `e.Artist` заполняется именем аккаунта SoundCloud (`uploader`), часто являющегося агрегатором/репост-пабликом (например, `"Русская Рэп-Сцена"` вместо `"DEAD BLONDE"`).
-   - В текущем коде `resolver_ytdlp.go` значение `e.Artist` слепо перезаписывает результат `ParseYouTubeTitle`, затирая реального исполнителя.
-   - Поле `album` у треков в сетах SoundCloud часто отсутствует, а поле `playlist_title` / `playlist` из yt-dlp вообще не считывается, из-за чего альбом релиза превращается в `"Unknown Album"`.
-   - В названиях треков SoundCloud часто содержится мусор (`[FREE DL]`, `(Buy = Free DL)`, `[OUT NOW]`), а также строка вида `Артист - Трек`, которая не разделяется на автора и название при заполнении метаданных.
+Инструментальная инспекция интерфейса через Playwright MCP на разрешениях **Desktop (1280×800, 1920×1080)** и **Mobile (375×812, 423×919)** выявила критические эргономические дефекты:
+1. **На смартфонах отсутствует доступ к половине разделов сервиса:** В верхней шапке помещаются только кнопки «Загрузчик» и «Файлы». Вкладки «Аудит», «Радар», «Радио» и «Плеер» уходят за правый край без визуальных индикаторов наличия скрытых пунктов. Поле поиска `Ctrl+K` скрыто (`hidden md:block`), лишая мобильного пользователя глобального поиска.
+2. **Баг разметки таймкода плеера:** Ширина контейнера цифр времени жестко зафиксирована на `w-8` (32px), из-за чего значение `--:--` или `04:05` переносится на две строки (`--:` на первой, `__` на второй), ломая линию трек-бара и смещая ползунок.
+3. **Коллизия плавающих элементов в нижнем правом углу:** Кнопка «Очередь: 0 акт. ^» накладывается на контроллеры плеера или перекрывает содержимое на узких экранах.
+4. **Инверсия приоритетов во вкладке «Файлы» на смартфонах:** Тяжелый блок «Инспектор тегов» (высотой более 500px с полями ввода и заглушкой обложки) отображается над файлами и папками. Пользователь должен долго скроллить вниз, чтобы увидеть свою музыку.
+5. **Горизонтальное переполнение в шапке Аудита:** Кнопки «Разложить по альбомам», «Для Navidrome», «Обновить данные» выходят за пределы экрана 375px без переноса. Сетка карточек метрик вытягивается в 1 бесконечную колонку (8 карточек подряд).
+6. **Неадаптированная трехпалубная консоль плеера:** На мобильных экранах виниловый картридж квадратной формы (`w-full aspect-square`) занимает весь первый экран смартфона, оттесняя караоке-тексты и управление глубоко вниз.
 
-2. **Поштучный поиск треков вместо скачивания альбома целиком из одного источника:**
-   Когда пользователь добавляет альбом из Deezer / Yandex / Spotify / Radar, система ищет аудио-источник для каждого трека по отдельности.
-   Это приводит к проблемам:
-   - Треки скачиваются из случайных источников (клипы с интро/аутро, live-выступления, любительские каверы, караоке, заниженный битрейт).
-   - Разрозненный мастеринг, скачущая громкость и рассинхрон версий.
-   - Если официальный альбом уже существует целиком на YouTube Music или SoundCloud как единый релиз, скачивание его поштучно — неэффективно и чревато ошибками.
-
-3. **Сложные кейсы резолвинга на примере артиста DEAD BLONDE:**
-   Для релизов DEAD BLONDE (альбомы «ПЕРЕСТРОЙКА», «СПЛЕТНИЦА», синглы «Мальчик на девятке», «Бесприданница», «Банкомат») существует масса фанатских ремиксов, замедленных версий (slowed + reverb), спид-апов и каверов с похожей длительностью. Требуется гарантировать отсечение фанатского мусора и точный матчинг официальных треков альбома.
+### 1.2. Границы задачи (Scope)
+* **In-Scope:**
+  - Внедрение нативного **Mobile Bottom Navigation Bar** на экранах `< md` (5 разделов с крупными тач-зонами 44px+ и Home Indicator Safe Area).
+  - Мобильный Top-Bar: компактный логотип, кнопка быстрого поиска (вызов мобильного окна поиска) и вход/профиль.
+  - Устранение бага переноса таймкода в стики-плеере (`audio_player.html`), адаптация плеера в компактный тач-бар на мобильных.
+  - Динамическое позиционирование плавающего виджета очереди загрузок (`queue_drawer.html`) с гарантией отсутствия наложений.
+  - Реструктуризация вкладки «Файлы»: скрытие тяжелого бокового инспектора тегов в основном потоке на мобильных (`hidden lg:flex`), прямой доступ к каталогам и трекам, вызов редактирования тегов через модал/шторку.
+  - Адаптация сетки метрик аудита (компактные 2×2 на мобилке) и перенос кнопок в `flex-wrap`.
+  - Мобильная оптимизация вкладки «Плеер» (`player_tab.html`): компактный картридж и легкий доступ к синхронизированным караоке-текстам.
+  - Проверка всех изменений через `go test -v ./...` и визуальная верификация в Playwright MCP со скриншотами.
+* **Out-of-Scope:**
+  - Изменение бэкенд-логики конвертации, резолвинга и тегирования (бэкенд работает стабильно, 100% тестов пройдены).
+  - Добавление npm/Node.js зависимостей или сторонних иконочных шрифтов.
 
 ---
 
-## 2. Архитектурный анализ текущего состояния
+## 2. Анализ текущего состояния и выявленные дефекты
 
-### 2.1. SoundCloud в `internal/services/resolver/resolver_ytdlp.go`
-- Структура `YtEntry` (строки 98–112) содержит поля:
-  ```go
-  type YtEntry struct {
-      ID, Title, Uploader, Channel, WebpageURL, URL, Thumbnail, Album, Artist, Genre string
-      Duration float64
-      TrackNumber any
-      ReleaseYear int
-  }
-  ```
-  В ней **отсутствуют** поля `PlaylistTitle string `json:"playlist_title"``, `Playlist string `json:"playlist"``, `Track string `json:"track"``.
-- В строках 228–236:
-  ```go
-  firstParsed := ParseYouTubeTitle(entries[0].Title, entries[0].Channel, entries[0].Uploader)
-  artistName := entries[0].Artist
-  if artistName == "" { artistName = firstParsed.Artist }
-  ```
-  Для SoundCloud yt-dlp всегда заполняет `entries[0].Artist = entries[0].Uploader`. Из-за этого `firstParsed.Artist` никогда не используется!
-- В строках 289–295:
-  ```go
-  parsed := ParseYouTubeTitle(e.Title, e.Channel, e.Uploader)
-  cleanArt := parsed.Artist
-  if e.Artist != "" { cleanArt = e.Artist }
-  ```
-  Автор трека также безусловно перезаписывается на `uploader`.
-
-### 2.2. Загрузка альбомов в `internal/features/downloader/service.go`
-- Метод `processTracks` (строки 991–1050) сразу запускает пул горутин для треков.
-- Каждый трек независимо вызывает `s.matcher.FindBestMatchWithDetails(...)`.
-- Нет этапа предварительного поиска цельного альбома/плейлиста.
+| Файл | Компонент | Текущее состояние | Выявленный дефект на Mobile / Desktop |
+|---|---|---|---|
+| [`header.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/header.html) | Главная шапка | Единый горизонтальный `nav` strip | На `< md` (375px) вкладки «Аудит», «Радар», «Радио», «Плеер» обрезаются; поиск скрыт `hidden md:block`. |
+| [`audio_player.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audio_player.html) | Стики-плеер | Контейнеры таймкодов `class="w-8 ..."` | 32px не вмещают моноширинный текст `04:05` / `--:--` (требуется $\ge 40$px) $\rightarrow$ перенос на две строки. На мобилке 3 колонки теснятся. |
+| [`queue_drawer.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/queue_drawer.html) | Плавающая очередь | `:class="$store.player?.isVisible ? 'bottom-24' : 'bottom-4'"` | На смартфонах без учета нижнего бара накладывается на нижние элементы управления. |
+| [`file_manager.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/file_manager.html) | Медиатека | `flex flex-col lg:flex-row` (Tag Panel перед Data Grid) | На смартфонах пустой «Инспектор тегов» (500px) стоит перед файлами, заставляя пользователя скроллить вслепую. |
+| [`audit.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit.html) | Аудит | `flex items-center space-x-3 shrink-0` | Три длинные кнопки вызывают горизонтальное переполнение экрана 375px. |
+| [`audit_metrics.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit_metrics.html) | Метрики аудита | `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` | 8 карточек на мобилке идут в 1 колонку, занимая 3 экрана вертикальной прокрутки. |
+| [`player_tab.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/player_tab.html) | Консоль плеера | `w-full aspect-square` для обложки | На экране 375px обложка вытягивается на 340×340px, сдвигая VU-метры и караоке далеко за пределы экрана. |
 
 ---
 
@@ -79,185 +65,173 @@
 
 ```mermaid
 flowchart TD
-    A["Пользователь добавляет альбом (Deezer / Yandex / Radar)"] --> B{"Число треков >= 2?"}
-    B -- Нет (сингл) --> C["Поштучный AudioMatcher (SoundCloud / YouTube)"]
-    B -- Да (альбом / EP) --> D["Full Release Matcher"]
-    
-    D --> E["Поиск альбома на YouTube Music (Innertube API)"]
-    D --> F["Поиск сета на SoundCloud (scsearch)"]
-    
-    E & F --> G["Сверка треклиста (Tracklist Verification)"]
-    G --> H{"Совпадение треклиста >= 85%?"}
-    
-    H -- Да --> I["Official Full Release Found!"]
-    I --> J["Привязать AudioSourceURL каждого трека из найденного релиза"]
-    J --> K["Параллельное скачивание всех дорожек из ЕДИНОГО источника"]
-    
-    H -- Нет --> L["Fallback: Поштучный AudioMatcher для каждого трека"]
-    L --> M["Строгая проверка исполнителя + дельты длительности"]
+    subgraph DesktopLayout["Десктопная архитектура (>= 768px / 1280–1920px)"]
+        D_Header["Верхняя консоль: Логотип + Глобальный поиск Ctrl+K + Вкладки + Профиль"]
+        D_Content["Контентная область max-w-[1600px] (двухколоночный Puddletag, 3-Deck плеер)"]
+        D_Player["Стики-плеер 3-колоночный с ползунком громкости и таймкодами min-w-[44px]"]
+        D_Header --> D_Content
+        D_Content --> D_Player
+    end
+
+    subgraph MobileLayout["Мобильная эргономика (< 768px / 375–430px)"]
+        M_Top["Компактный Top-Bar: Лого + Иконка быстрого поиска + Профиль"]
+        M_Content["Вертикальная лента: Сетка треков/папок на 1 месте, метрики 2x2, кнопки flex-wrap"]
+        M_MiniPlayer["Компактный Mini-Player Bar (40x40 обложка + Play/Pause 44x44 + Next)"]
+        M_BottomNav["Mobile Bottom Navigation Bar (5 табов с крупными тач-зонами + pb-safe)"]
+        M_Top --> M_Content
+        M_Content --> M_MiniPlayer
+        M_MiniPlayer --> M_BottomNav
+    end
 ```
 
-### 3.1. Специализированный парсер SoundCloud (`ParseSoundCloudEntry`)
-**Почему именно так:**
-- На SoundCloud авторы треков оформляются в названии через тире: `Исполнитель - Название трека`.
-- Аккаунт-загрузчик (`uploader`) часто является лейблом, фан-пабликом или агрегатором (например, `deadblonde-music`, `Русская Рэп-Сцена`), но не именем артиста.
-- Добавляем специальную функцию `ParseSoundCloudTrack(title, uploader, playlistTitle)`, которая:
-  1. Выделяет название альбома из `playlist_title` или `playlist`.
-  2. Если `title` содержит ` - ` / ` — `: делит на Artist и Title, очищает от промо-мусора (`[FREE DL]`, `(Prod. by ...)`).
-  3. Если в названии нет дефиса: проверяет, является ли `uploader` реальным исполнителем, и очищает его от суффиксов `Music`, `Official`, `Records`.
-  4. Формирует правильные теги `Artist`, `Title`, `Album`, `AlbumArtist`, `TrackNumber`.
+### 3.1. Разделение навигации: Top-Bar + Bottom Bar на мобильных
+* **Почему именно так:**
+  Попытка уместить 6 вкладок в горизонтальный верхний скролл на смартфоне противоречит стандартам мобильного UX (закон Фиттса и зоны досягаемости большого пальца). 
+  Нижний бар навигации (Bottom Nav) с 5 ключевыми пунктами (`Загрузчик`, `Файлы`, `Аудит`, `Радар`, `Плеер`):
+  - Обеспечивает мгновенный доступ к любому разделу в 1 тап большим пальцем.
+  - Освобождает верхнюю шапку для логотипа, полноценного вызова поиска и статуса авторизации.
+  - На десктопе (`>= md`) нижний бар автоматически скрывается (`hidden md:none`), а верхняя консоль сохраняет текущий привычный вид.
 
-### 3.2. Движок поиска цельных релизов (`FullReleaseMatcher`)
-**Почему именно так:**
-- Официальные релизы на YouTube Music имеют формат плейлистов альбомов (`browseId` вида `MPREb_...` или плейлист `OLAK5uy_...`), где треки идут в строгом альбомном порядке, без обрезок, с максимальным битрейтом и без лишних звуков.
-- **Алгоритм сопоставления треклиста (Tracklist Matching):**
-  1. Запрашиваем треклист кандидата (названия и длительности).
-  2. Проверяем количество треков: $|\text{targetCount} - \text{candidateCount}| \le 2$.
-  3. Для каждого трека исходного альбома ищем соответствующую позицию в кандидате:
-     - Очищаем названия от суффиксов (`(Explicit)`, `(Remastered)`, `(Audio)`).
-     - Вычисляем схожесть названий `StringSimilarity(target, candidate) >= 0.70` (или вхождение ключевых слов).
-     - Проверяем дельту длительности $|\text{targetDur} - \text{candidateDur}| \le 12$ секунд.
-  4. Если $\ge 85\%$ треков целевого альбома успешно сопоставлены:
-     - Релиз признается **валидным цельным альбомом**.
-     - Каждый трек исходного альбома получает прямой `AudioSourceURL` соответствующего трека из этого проверенного релиза.
-  5. Если совпадение меньше 85%:
-     - Полный релиз отклоняется, система выполняет безопасный fallback на индивидуальный поиск треков через `AudioMatcher`.
+### 3.2. Устранение бага таймкода и адаптация стики-плеера
+* **Почему именно так:**
+  Вместо жесткого `w-8` задается `min-w-[44px] w-auto text-center whitespace-nowrap font-mono tabular-nums`. 44px гарантируют достаточное пространство для 5 символов (`04:05`, `--:--`) шрифта JetBrains Mono без малейшего риска переноса строки.
+  На экранах `< md` стики-плеер переключается в режим **Mini-Player**: скрываются десктопные кнопки громкости и разворачивания, увеличивается кнопка Play/Pause до `w-10 h-10` (40px) с тач-таргетом `44px`, а тап по названию бесшовно переключает на вкладку плеера (`$store.app.activeTab = 'player'`).
+
+### 3.3. Реорганизация приоритетов во вкладке «Файлы»
+* **Почему именно так:**
+  Боковая панель тегов (`puddletag_tag_panel.html`) полезна на десктопе при одновременной работе с таблицей. На смартфоне пользователь приходит в раздел «Файлы», чтобы найти и воспроизвести трек или перейти в папку альбома. Скрытие инспектора тегов в потоке на мобилке (`hidden lg:flex`) и вызов редактирования тегов по кнопке «Теги» открывают моментальный обзор медиатеки.
 
 ---
 
 ## 4. Пошаговая декомпозиция реализации
 
-### Этап 1: Исправление парсинга альбомов и плейлистов SoundCloud (`resolver_ytdlp.go`)
-- **[MODIFY]** `internal/services/resolver/resolver_ytdlp.go`:
-  - Расширить структуру `YtEntry`:
-    ```go
-    type YtEntry struct {
-        ID            string  `json:"id"`
-        Title         string  `json:"title"`
-        Uploader      string  `json:"uploader"`
-        Channel       string  `json:"channel"`
-        Duration      float64 `json:"duration"`
-        WebpageURL    string  `json:"webpage_url"`
-        URL           string  `json:"url"`
-        Thumbnail     string  `json:"thumbnail"`
-        TrackNumber   any     `json:"track_number"`
-        Album         string  `json:"album"`
-        Artist        string  `json:"artist"`
-        Track         string  `json:"track"`
-        Playlist      string  `json:"playlist"`
-        PlaylistTitle string  `json:"playlist_title"`
-        ReleaseYear   int     `json:"release_year"`
-        Genre         string  `json:"genre"`
+### Этап 1: Нижняя навигация и верхний топбар на смартфонах (`header.html`, `index.html`)
+- **[MODIFY]** [`web/templates/components/header.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/header.html):
+  - Добавить мобильную кнопку поиска (иконка лупы) рядом с профилем на экранах `< md`.
+  - По клику на лупу открывать модальное/выезжающее окно быстрого поиска по коллекции.
+  - На десктопе (`hidden md:block`) сохранить текущий инпут поиска `Ctrl+K`.
+  - Скрыть десктопную полосу вкладок на экранах `< md` (`hidden md:flex`), исключив обрезание пунктов.
+- **[MODIFY]** [`web/templates/index.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/index.html):
+  - Внедрить компонент **Mobile Bottom Navigation Bar** перед закрывающим тегом `</body>`.
+  - 5 интерактивных кнопок:
+    1. `Загрузчик` (`$store.app.activeTab = 'downloader'`)
+    2. `Файлы` (`$store.app.activeTab = 'files'`)
+    3. `Аудит` (`$store.app.activeTab = 'audit'`)
+    4. `Радар` (`$store.app.activeTab = 'radar'`)
+    5. `Плеер` (`$store.app.activeTab = 'player'`)
+  - Индикатор активной вкладки (`text-white font-semibold` против `text-content-muted`), бейдж непрочитанных новинок на радаре, пульсирующая точка у плеера при `isPlaying`.
+  - Классы: `fixed bottom-0 inset-x-0 z-40 bg-surface-panel/95 backdrop-blur-lg border-t border-surface-border md:hidden pb-safe`.
+  - Увеличить нижний отступ основного контейнера `<main>`: `pb-24 sm:pb-32` для предотвращения перекрытия контента нижним баром.
+
+### Этап 2: Починка таймкода и мобильный Mini-Player (`audio_player.html`, `queue_drawer.html`)
+- **[MODIFY]** [`web/templates/components/audio_player.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audio_player.html):
+  - Заменить `w-8` в спанах текущего времени и длительности на `min-w-[44px] w-auto whitespace-nowrap font-mono tabular-nums`.
+  - На мобильных (`< md`):
+    - Стилизовать плеер как плавающий бар над Bottom Navigation (`bottom-[56px] md:bottom-0` с учетом safe area).
+    - Левая часть: обложка 40×40 с закруглением 6px, название трека и артист в одну строку с `truncate`.
+    - Центральная/правая часть: кнопка Play/Pause `w-10 h-10` (40px) по центру, кнопка «Следующий» `w-9 h-9`, скрытие ползунка громкости на мобильных.
+    - Клик по карточке трека открывает `$store.player.openPlayerTab()`.
+- **[MODIFY]** [`web/templates/components/queue_drawer.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/queue_drawer.html):
+  - Скорректировать отступ плавающей кнопки очереди с учетом мобильного плеера и нижнего бара:
+    ```html
+    :class="$store.player?.isVisible 
+        ? 'bottom-36 md:bottom-24' 
+        : 'bottom-20 md:bottom-4'"
+    ```
+  - Исключить любые перекрытия и наложения элементов в правом нижнем углу.
+
+### Этап 3: Реструктуризация медиатеки на мобильных (`file_manager.html`, `puddletag_toolbar.html`)
+- **[MODIFY]** [`web/templates/components/file_manager.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/file_manager.html):
+  - В блоке контейнера панелей:
+    ```html
+    <div class="flex flex-col lg:flex-row gap-3 items-stretch min-w-0">
+        <!-- На мобильных панель тегов скрыта в потоке и вызывается кнопкой в тулбаре -->
+        <div class="hidden lg:block lg:w-80 shrink-0">
+            {{ template "puddletag_tag_panel" . }}
+        </div>
+        <div class="flex-1 min-w-0">
+            {{ template "puddletag_grid" . }}
+        </div>
+    </div>
+    ```
+  - Папки и таблица файлов мгновенно доступны при переходе во вкладку.
+- **[MODIFY]** [`web/templates/components/puddletag_toolbar.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/puddletag_toolbar.html):
+  - Добавить мобильную кнопку «Инспектор тегов» (видна только на `< lg`), вызывающую боковую шторку или модал с инспектором тегов для выбранных треков.
+  - Настроить горизонтальную прокрутку тулбара с `no-scrollbar py-1 gap-1.5` и тач-таргетами кнопок.
+
+### Этап 4: Адаптация Аудита и Радара под мобильные экраны (`audit.html`, `audit_metrics.html`)
+- **[MODIFY]** [`web/templates/components/audit.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit.html):
+  - Заменить `flex items-center space-x-3 shrink-0` в блоке кнопок на `flex flex-wrap sm:flex-nowrap items-center gap-2`.
+  - Устранить вылезание кнопок «Разложить по альбомам», «Для Navidrome», «Обновить данные» за экран.
+- **[MODIFY]** [`web/templates/components/audit_metrics.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/audit_metrics.html):
+  - Заменить `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` на `grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-8 gap-2.5 sm:gap-4`.
+  - 8 карточек метрик выстраиваются в аккуратную сетку 2×2, сокращая высоту блока на смартфоне в 2 раза.
+  - Подкорректировать паддинги карточек на мобилке (`p-3 sm:p-5`), чтобы цифры и подписи смотрелись компактно и выразительно.
+
+### Этап 5: Адаптация выделенной вкладки плеера (`player_tab.html`)
+- **[MODIFY]** [`web/templates/components/player_tab.html`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/templates/components/player_tab.html):
+  - Ограничить размер обложки на мобильных экранах: вместо безразмерного `aspect-square` установить `max-w-[260px] mx-auto aspect-square` на экранах `< lg`.
+  - Сделать переключатель режима (Караоке LRC / Спектроанализатор / Паспорт) видимым и легкодоступным без бесконечной прокрутки.
+  - Кнопки управления воспроизведением увеличить для удобного нажатия пальцем.
+
+### Этап 6: CSS-утилиты и поддержка Safe Area (`web/static/css/style.css`)
+- **[MODIFY]** [`web/static/css/style.css`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/web/static/css/style.css):
+  - Добавить утилиты безопасных зон для iPhone (Home Indicator):
+    ```css
+    .pb-safe {
+        padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+    }
+    .bottom-safe {
+        bottom: env(safe-area-inset-bottom);
     }
     ```
-  - Реализовать функцию `ParseSoundCloudTitle(rawTitle, uploader string) (artist, title string)`:
-    - Разделение по ` - ` / ` — `.
-    - Очистка от суффиксов `[FREE DOWNLOAD]`, `(Free DL)`, `[OUT NOW]`, `(prod. by ...)`.
-    - Извлечение реального артиста вместо имени паблика-загрузчика.
-  - При обработке ссылок `soundcloud.com`:
-    - Использовать `PlaylistTitle` / `Playlist` в качестве `albumTitle` (вместо `"Unknown Album"`).
-    - Приоритетно использовать распарсенные из названия `artist` и `title`, если `e.Artist` совпадает с `uploader`.
-- **[NEW]** `internal/services/resolver/sc_parser_test.go`:
-  - Тест на парсинг треков из SoundCloud сета с различными форматами названий.
-  - Тест на извлечение имени альбома из `playlist_title`.
-  - Тест на кейс DEAD BLONDE (`DEAD BLONDE - Банкомат`, uploader `Русская Рэп-Сцена`).
-
-### Этап 2: Поиск официальных альбомов через Innertube API (`client_ytmusic.go`)
-- **[MODIFY]** `internal/services/resolver/client_ytmusic.go`:
-  - Добавить метод поиска альбомов:
-    ```go
-    // SearchAlbumRelease выполняет поиск официального альбома/плейлиста на YouTube Music
-    func (c *YTMusicClient) SearchAlbumRelease(ctx context.Context, artist, album string) (*AlbumReleaseCandidate, error)
-    ```
-  - Метод отправляет поисковый запрос `params: "EgWKAQIYAWoKEAkQBRAKEAMQBA=="` (фильтр только Альбомы в YouTube Music).
-  - Извлекает `browseId` (например, `MPREb_...`), название альбома, имя артиста, год и количество треков.
-  - Получает треклист альбома через `browse` запрос (`browseId`) со всеми `videoId`, названиями и длительностями.
-
-### Этап 3: Движок сопоставления цельных релизов (`full_release_matcher.go`)
-- **[NEW]** `internal/services/resolver/full_release_matcher.go`:
-  - Структура `FullReleaseMatchResult`:
-    ```go
-    type FullReleaseMatchResult struct {
-        SourceURL    string
-        SourceType   string // "ytmusic_album", "soundcloud_set"
-        ReleaseTitle string
-        MatchedCount int
-        TotalCount   int
-        TrackURLs    map[int]string // индекс трека (0..N-1) -> прямой AudioSourceURL
-    }
-    ```
-  - Функция `MatchFullRelease(ctx context.Context, targetArtist, targetAlbum string, targetTracks []ResolvedTrack) (*FullReleaseMatchResult, error)`:
-    1. Поиск официального альбома в YouTube Music.
-    2. Поиск сета в SoundCloud.
-    3. Оценка совпадения треклиста (проверка названий и дельты длительности $\le 12$ с).
-    4. При совпадении $\ge 85\%$ возврат полного маппинга `TrackURLs`.
-- **[NEW]** `internal/services/resolver/full_release_matcher_test.go`:
-  - Тест сопоставления альбома: идеальное совпадение всех треков.
-  - Тест сопоставления альбома с 1 пропущенным треком / интро (допустимый порог $\ge 85\%$).
-  - Тест отклонения чужого альбома или сборника лучших хитов.
-
-### Этап 4: Интеграция в пайплайн загрузки (`features/downloader/service.go`)
-- **[MODIFY]** `internal/features/downloader/service.go`:
-  - В метод `processTracks` перед циклом поштучной обработки добавить шаг предпроверки:
-    ```go
-    // Если треки пришли без прямых URL (из Deezer/Yandex/Radar) и это релиз от 2 треков:
-    if len(tracks) >= 2 && needsMatching(tracks) {
-        if fullMatch, err := s.resolver.MatchFullRelease(ctx, meta.AlbumArtist, meta.AlbumTitle, tracks); err == nil && fullMatch != nil {
-            job.SetStepAndStatus(fmt.Sprintf("Найден полный официальный релиз (%d/%d треков совпало), загрузка из единого источника...", fullMatch.MatchedCount, fullMatch.TotalCount), StatusDownloading)
-            for idx := range tracks {
-                if trURL, ok := fullMatch.TrackURLs[idx]; ok {
-                    tracks[idx].AudioSourceURL = trURL
-                }
-            }
-        }
-    }
-    ```
-  - Если полный релиз найден — все треки скачиваются из единого официального альбома.
-  - Если не найден — каждый трек ищется по отдельности через проверенный `AudioMatcher` (Graceful Fallback).
-
-### Этап 5: Валидация алгоритмов на релизах DEAD BLONDE
-- **[NEW]** `internal/services/resolver/dead_blonde_test.go`:
-  - Прогон треков альбома «СПЛЕТНИЦА» («Мальчик на девятке», «Бесприданница», «Первая любовь»):
-    - Проверка, что ремиксы (slowed, reverb, sped up, tiktok cuts) отсекаются по длительности и названию.
-    - Проверка, что каверы с чужими исполнителями отклоняются (`StringSimilarity(artist) >= 0.65`).
-    - Проверка, что официальный альбом определяется как единый релиз.
+  - Обеспечить прецизионную моноширинность и запрет разрыва строк для всех таймкодов.
 
 ---
 
-## 5. Анализ рисков и краевых случаев
+## 5. Анализ рисков и краевых случаев (Risks & Guardrails)
 
-| Риск / Краевой случай | Вероятность | Влияние | Стратегия митигации |
-|---|---|---|---|
-| В официальном альбоме YouTube Music порядок треков отличается от Deezer | Средняя | Низкое | Алгоритм матчит треки по названию и длительности по всему списку кандидата, а не строго по индексу `i == j`. |
-| В найденном альбоме отсутствует 1 бонус-трек | Средняя | Низкое | Порог $\ge 85\%$: найденные треки берутся из единого релиза, а недостающий трек докачивается индивидуально через `AudioMatcher`. |
-| YouTube Music отдает капчу или 429 | Низкая | Среднее | Graceful Fallback на поиск сета SoundCloud, а при отсутствии — на поштучный `yt-dlp`. |
-| Имя артиста на SoundCloud написано на кириллице, а в Deezer на латинице (или наоборот) | Средняя | Среднее | Использование транслитерации и нормализации регистра при сравнении авторов. |
+1. **Риск: Нарушение шаблонного валидатора `web/template_validator_test.go`:**
+   - *Меры:* Все создаваемые кнопки навигации используют строго существующие методы (`$store.app.activeTab = '...'`, `$store.player.playTrack(...)`), все циклы `<template x-for>` снабжаются уникальными `:key`, прямые вызовы `fetch()` запрещены (только `window.api`).
+2. **Риск: Перекрытие контента нижним баром или стики-плеером на смартфонах:**
+   - *Меры:* Главному контейнеру `<main>` задается достаточный динамический нижний паддинг (`pb-28 sm:pb-36`), а позиция виджета очереди `queue_drawer` адаптируется через реактивные классы Alpine.js.
+3. **Риск: Появление горизонтального скролла на 375px:**
+   - *Меры:* Все таблицы снабжаются `table-fixed w-full` и `truncate`, текстовые кнопки в тулбарах переводятся во `flex-wrap` или горизонтальную ленту с `overflow-x-auto no-scrollbar`. Инструментальный замер в Playwright: `document.documentElement.scrollWidth <= window.innerWidth`.
 
 ---
 
-## 6. План тестирования и верификации
+## 6. План тестирования и верификации (Verification Matrix)
 
-1. **Модульные тесты парсера SoundCloud:**
-   - `go test -v ./internal/services/resolver -run TestSoundCloudParser`
-2. **Модульные тесты Full Release Matcher:**
-   - `go test -v ./internal/services/resolver -run TestFullReleaseMatcher`
-3. **Специализированные тесты DEAD BLONDE:**
-   - `go test -v ./internal/services/resolver -run TestDeadBlonde`
-4. **Регрессионные тесты всех пакетов:**
-   - `go test -race ./...` (0 data races, 100% PASS).
-5. **Компиляция бинарника:**
-   - `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go`
-6. **E2E верификация в браузере через Playwright MCP:**
-   - Проверка добавления альбома в очередь загрузчика.
-   - Проверка логов сопоставления полного релиза.
+1. **Статическая валидация шаблонов Go:**
+   ```bash
+   go test -v ./web/...
+   ```
+   *Критерий:* 100% PASS (`TestTemplates_AllXForHaveKey`, `TestTemplates_ClickHandlersIntegrity`, `TestTemplates_NoInlineFetch`).
+2. **Полный сьют unit и интеграционных тестов:**
+   ```bash
+   go test -race ./...
+   ```
+   *Критерий:* 100% PASS по всем 25 пакетам, 0 race conditions.
+3. **Сборка бинарника:**
+   ```bash
+   go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go
+   ```
+   *Критерий:* Успешная компиляция без warning и ошибок.
+4. **Визуальная E2E-проверка через Playwright MCP:**
+   - **Desktop (1280×800 и 1920×1080):** Проверка шапки, таблицы Puddletag, таймкодов плеера (отсутствие переноса на две строки), позиционирования очереди.
+   - **Mobile (375×812 и 423×919):** Проверка работы Bottom Navigation Bar (переключение всех 5 вкладок), мгновенного отображения файлов без заслоняющего инспектора тегов, сетки метрик аудита 2×2, работы Mini-Player.
+   - Замер отсутствия горизонтального скролла на мобилке.
+   - Снятие и сохранение скриншотов до/после.
 
 ---
 
 ## 7. Критерии приемки (Definition of Done)
 
-- [x] Альбомы и плейлисты SoundCloud корректно парсят названия треков, отделяют автора от названия и заполняют имя альбома из `playlist_title`.
-- [x] Движок `FullReleaseMatcher` находит цельные релизы на YouTube Music / SoundCloud и при совпадении $\ge 85\%$ скачивает все дорожки из единого источника.
-- [x] При несовпадении треклиста работает плавный откат к поштучному поиску.
-- [x] Релизы DEAD BLONDE успешно проходят тесты на отсечение каверов и поиск официального альбома.
-- [x] Все тесты `go test -race ./...` проходят без ошибок и гонок.
-- [x] Бинарник собирается без ошибок и готов к повторному деплою.
+- [ ] На смартфонах `< 768px` функционирует Bottom Navigation Bar, открывающий все разделы сервиса.
+- [ ] Верхняя шапка на мобилке компактна, оснащена кнопкой быстрого поиска и не обрезает элементы.
+- [ ] Баг разметки таймкода (`--:--` и `04:05`) в `audio_player.html` устранен (нет переноса на 2 строки).
+- [ ] Виджет очереди не конфликтует и не перекрывает кнопки плеера.
+- [ ] Во вкладке «Файлы» на смартфонах папки и треки отображаются сразу, без тяжелого инспектора тегов вверху.
+- [ ] Вкладка «Аудит» на мобилке не имеет горизонтального скролла в кнопках, а карточки метрик расположены по 2 в ряд.
+- [ ] Тесты `go test -race ./...` и `web/template_validator_test.go` — 100% PASS.
+- [ ] Бинарник `bin/music-manager` собирается и протестирован через Playwright на десктопе и мобильном.

@@ -431,17 +431,18 @@ function puddletagWorkstationComponent() {
         loadJobData(payload) {
             if (!payload) return;
             this.isDownloaderMode = true;
-            this.jobIds = payload.jobIds || (payload.jobId ? [payload.jobId] : []);
-            this.jobId = payload.jobId || (this.jobIds && this.jobIds[0]) || null;
+            this.jobIds = payload.jobIds || payload.job_ids || (payload.jobId ? [payload.jobId] : (payload.job_id ? [payload.job_id] : []));
+            this.jobId = payload.jobId || payload.job_id || (this.jobIds && this.jobIds[0]) || null;
             this.releases = payload.releases || [];
             this.activeReleaseTab = 'all';
-            this.currentPath = payload.sourceDir || '';
+            this.currentPath = payload.sourceDir || payload.source_dir || '';
             this.dirtyIndices.clear();
             this.selectedIndices = [];
             this.editingCell = null;
 
             const coverUrl = payload.coverPreviewUrl || payload.cover_preview_url || payload.coverUrl || payload.cover_url || null;
-            const hasCover = !!(payload.hasCover || payload.has_cover || payload.coverPath || payload.cover_path || coverUrl);
+            const coverPath = payload.coverPath || payload.cover_path || null;
+            const hasCover = !!(payload.hasCover || payload.has_cover || coverPath || coverUrl);
 
             const validTracks = (payload.tracks || []).map((t, idx) => {
                 const trackPath = t.path || t.converted_path || '';

@@ -1,6 +1,6 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 92 блока задач полностью реализованы, включая аудит доступности WCAG 2.2 AA, инфостиль USERGUIDE.md, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js`, Studio Dark UI/UX редизайн, парсинг SoundCloud альбомов, Full Release Matcher и 100% тестов пройдены).
+- **Статус готовности:** **100% DONE** (Все 93 блока задач полностью реализованы, включая аудит доступности WCAG 2.2 AA, инфостиль USERGUIDE.md, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js`, Studio Dark UI/UX редизайн, парсинг SoundCloud альбомов, Full Release Matcher, объединение бэкфилл-релизов в редакторе тегов и 100% тестов пройдены).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **Vertical Feature Slices**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
 - **Размер бинарника:** 18 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
 - **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 25 пакетов зеленые).
@@ -1117,6 +1117,30 @@
     - **92.6. Верификация:**
       - 100% PASS: `go test -race ./...` (все 25 пакетов, 0 data races).
       - Сборка бинарника: `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешно скомпилирован (18 МБ).
+
+### Блок 93: Отображение полного треклиста и связка бэкфилл-задач с редактором тегов (Puddletag) (DONE)
+- **Цель:** Устранить проблему, при которой при нажатии «В теги» для докачанного как недостающий релиза не показывались треки альбома либо отображалась только одна докачанная дорожка без существующих треков медиатеки.
+- **Выполненные изменения:**
+  - **93.1. Устранение сбоя Alpine.js в компоненте неполных релизов (`audit_incomplete.html`):**
+    - В строке отображения отсутствующих номеров добавлена защита от `null`: `(alb.missing_track_numbers || []).map(n => '#' + n).join(', ')`. Устранен uncaught TypeError, блокировавший реактивность дерева Alpine.
+  - **93.2. Автоматическое определение бэкфилла в мосте редактора (`queue_editor_bridge.js`):**
+    - В `openJobInTagEditor`: при обнаружении `is_backfill && target_album_path` вызов прозрачно перенаправляется в `openBackfillJobInTagEditor`.
+    - В `openAllReadyJobsInTagEditor`: для бэкфилл-задач запрашиваются объединенные данные альбома через `/files/audit/incomplete-albums/editor-data`, связывающие уже присутствующие в медиатеке треки с докачанными в `tmp_downloads`.
+    - Добавлено формирование структуры `releases` с `album_artist` и `albumArtist` для корректного отображения табов и источника `sourceDir`.
+  - **93.3. Единый UI и доступность действий в очереди (`downloader_queue.html`, `queue_drawer.html`):**
+    - Для бэкфилл-релизов добавлена стандартная кнопка «В теги» (наряду с кнопкой «Принять» в один клик), вызывающая редактор тегов для полного альбома.
+  - **93.4. Нормализация данных и гибкий парсинг в Puddletag (`catalog_matcher.js`, `puddletag_workstation.js`):**
+    - В `loadJobData` добавлена поддержка как camelCase (`sourceDir`, `jobIds`, `hasCover`), так и snake_case (`source_dir`, `job_ids`, `has_cover`).
+    - В `catalog_matcher.js` нормализован пэйлоад, передаваемый в `openTagEditor`.
+  - **93.5. Бэкенд-поддержка бэкфилла (`downloader/handlers.go`, `downloader/types.go`, `audit/service.go`):**
+    - `DownloadTracksResponse` расширен полями `IsBackfill` и `TargetAlbumPath`.
+    - В `GetBackfillEditorData` добавлено автоматическое сканирование локальной обложки альбома (`cover.jpg`, `folder.jpg`, `cover.png`).
+    - В `executeBackfill` добавлен резолвинг недостающих треков через Deezer / SourceResolver при пустой таблице `missing_tracks`.
+  - **93.6. Верификация и деплой:**
+    - `go test ./...` — 100% PASS.
+    - `go test -race ./internal/features/downloader/... ./internal/features/audit/...` — 100% PASS, 0 data races.
+    - Развернуто на боевых серверах `nl_music` (194.76.168.20) и Сервер 2 (`13.143.193.207`).
+    - Верифицировано в Playwright: при нажатии «В теги» на релизе `21XXX - 21 Savage` открываются все 12 треков с полной сеткой метаданных.
 
 ---
 

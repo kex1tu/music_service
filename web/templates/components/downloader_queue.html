@@ -185,14 +185,27 @@
                     <!-- Колонка 3: Кнопки действий (всегда доступны в 1 клик без наведения) -->
                     <div class="flex items-center space-x-1 shrink-0">
                         <template x-if="(j.status === 'READY' || j.status === 'PARTIAL_READY') && j.is_backfill">
-                            <button
-                                type="button"
-                                @click="$store.app.queue.openBackfillJobInTagEditor(j)"
-                                aria-label="Редактировать теги всего релиза"
-                                class="px-2 py-1 bg-white hover:bg-zinc-200 text-zinc-950 rounded-sm text-xs font-semibold transition shadow-xs focus-visible:ring-2 focus-visible:ring-white/40"
-                                title="Редактировать теги всего релиза">
-                                Весь релиз
-                            </button>
+                            <div class="flex items-center space-x-1">
+                                <button
+                                    type="button"
+                                    @click="$store.app.queue.acceptJobDirectly(j.id)"
+                                    aria-label="Принять релиз в медиатеку в один клик"
+                                    class="px-2 py-1 bg-white hover:bg-zinc-200 text-zinc-950 rounded-sm text-xs font-semibold transition shadow-xs flex items-center space-x-1 focus-visible:ring-2 focus-visible:ring-white/40"
+                                    title="Принять релиз в медиатеку в 1 клик">
+                                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                                    </svg>
+                                    <span>Принять</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    @click="$store.app.queue.openBackfillJobInTagEditor(j)"
+                                    aria-label="Редактировать теги всего релиза"
+                                    class="px-2 py-1 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white rounded-sm text-xs font-medium border border-surface-border transition shadow-xs flex items-center space-x-1 focus-visible:ring-2 focus-visible:ring-white/30"
+                                    title="Редактировать теги всего релиза">
+                                    <span>В теги</span>
+                                </button>
+                            </div>
                         </template>
                         <template x-if="(j.status === 'READY' || j.status === 'PARTIAL_READY') && !j.is_backfill">
                             <div class="flex items-center space-x-1">

@@ -493,16 +493,18 @@ type QueueSummaryResponse struct {
 
 // DownloadTracksResponse — детальная информация о метаданных и треках задачи.
 type DownloadTracksResponse struct {
-	JobID       string                   `json:"job_id"`
-	AlbumArtist string                   `json:"album_artist"`
-	Album       string                   `json:"album"`
-	Year        *int                     `json:"year"`
-	Genre       *string                  `json:"genre"`
-	DiscTotal   int                      `json:"disc_total"`
-	TrackTotal  int                      `json:"track_total"`
-	CoverURL    *string                  `json:"cover_url"`
-	CoverPath   *string                  `json:"cover_path"`
-	Tracks      []resolver.ResolvedTrack `json:"tracks"`
+	JobID           string                   `json:"job_id"`
+	AlbumArtist     string                   `json:"album_artist"`
+	Album           string                   `json:"album"`
+	Year            *int                     `json:"year"`
+	Genre           *string                  `json:"genre"`
+	DiscTotal       int                      `json:"disc_total"`
+	TrackTotal      int                      `json:"track_total"`
+	CoverURL        *string                  `json:"cover_url"`
+	CoverPath       *string                  `json:"cover_path"`
+	Tracks          []resolver.ResolvedTrack `json:"tracks"`
+	IsBackfill      bool                     `json:"is_backfill,omitempty"`
+	TargetAlbumPath *string                  `json:"target_album_path,omitempty"`
 }
 
 // JobTracksResponse — алиас DownloadTracksResponse.

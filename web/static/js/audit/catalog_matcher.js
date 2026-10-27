@@ -190,7 +190,14 @@ window.AuditCatalogMatcher = {
                 const res = await fetch(`/files/audit/incomplete-albums/editor-data?path=${encodeURIComponent(albumPath)}`);
                 if (res.ok) {
                     const data = await res.json();
-                    Alpine.store('app').openTagEditor(data);
+                    Alpine.store('app').openTagEditor({
+                        album: data.album || {},
+                        tracks: data.tracks || [],
+                        sourceDir: data.source_dir || data.sourceDir || albumPath,
+                        coverPath: data.cover_path || data.coverPath || '',
+                        hasCover: !!(data.has_cover || data.hasCover || data.cover_path),
+                        jobIds: data.job_ids || data.jobIds || [],
+                    });
                 }
             } catch (e) {
                 Alpine.store('app').toast('Не удалось открыть релиз в редакторе тегов', 'error');

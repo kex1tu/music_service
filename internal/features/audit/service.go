@@ -1382,6 +1382,48 @@ func (s *Service) GetBackfillEditorData(ctx context.Context, albumPath, jobID st
 		jobIDs = append(jobIDs, jobID)
 	}
 
+	coverPath := ""
+	hasCover := false
+
+	if albumPath != "" && s.musicSandbox != nil {
+		for _, name := range []string{"cover.jpg", "cover.png", "folder.jpg", "front.jpg"} {
+			rel := filepath.Join(albumPath, name)
+			if full, err := s.musicSandbox.Resolve(rel, true); err == nil {
+				if _, err := os.Stat(full); err == nil {
+					coverPath = rel
+					hasCover = true
+					break
+				}
+			}
+		}
+	}
+	if !hasCover && jobID != "" && s.tmpSandbox != nil {
+		rel := filepath.Join(jobID, "converted", "cover.jpg")
+		if full, err := s.tmpSandbox.Resolve(rel, false); err == nil {
+			if _, err := os.Stat(full); err == nil {
+				coverPath = filepath.Join("tmp_downloads", jobID, "converted", "cover.jpg")
+				hasCover = true
+			}
+		}
+	}
+	if !hasCover && jobID != "" && s.tmpSandbox != nil {
+		rel := filepath.Join(jobID, "cover.jpg")
+		if full, err := s.tmpSandbox.Resolve(rel, false); err == nil {
+			if _, err := os.Stat(full); err == nil {
+				coverPath = filepath.Join("tmp_downloads", jobID, "cover.jpg")
+				hasCover = true
+			}
+		}
+	}
+	if !hasCover {
+		for _, t := range combined {
+			if t.HasCover {
+				hasCover = true
+				break
+			}
+		}
+	}
+
 	return &BackfillEditorDataResponse{
 		Album: map[string]any{
 			"album_artist": canonicalArtist,
@@ -1392,8 +1434,8 @@ func (s *Service) GetBackfillEditorData(ctx context.Context, albumPath, jobID st
 		},
 		Tracks:          tracksAny,
 		SourceDir:       albumPath,
-		CoverPath:       "",
-		HasCover:        false,
+		CoverPath:       coverPath,
+		HasCover:        hasCover,
 		JobIDs:          jobIDs,
 		MissingCount:    0,
 		BackfilledCount: len(combined),
