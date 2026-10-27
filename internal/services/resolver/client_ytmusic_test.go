@@ -447,3 +447,219 @@ func TestYouTubeMusicClient_ExtractVideoID(t *testing.T) {
 		t.Errorf("expected VideoID 'vid_h8hood_123', got %q", tracks[0].VideoID)
 	}
 }
+
+func TestYouTubeMusicClient_SearchAlbumRelease(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/youtubei/v1/search" {
+			w.Write([]byte(`{
+				"contents": {
+					"tabbedSearchResultsRenderer": {
+						"tabs": [{
+							"tabRenderer": {
+								"content": {
+									"sectionListRenderer": {
+										"contents": [{
+											"musicShelfRenderer": {
+												"contents": [{
+													"musicResponsiveListItemRenderer": {
+														"navigationEndpoint": {
+															"browseEndpoint": {
+																"browseId": "MPREb_AbAianWC2U6"
+															}
+														},
+														"overlay": {
+															"musicItemThumbnailOverlayRenderer": {
+																"content": {
+																	"musicPlayButtonRenderer": {
+																		"playNavigationEndpoint": {
+																			"watchPlaylistEndpoint": {
+																				"playlistId": "OLAK5uy_kY28dYd4bU5mCxgpXlRZPgpWnTXC2QB7A"
+																			}
+																		}
+																	}
+																}
+															}
+														},
+														"flexColumns": [
+															{
+																"musicResponsiveListItemFlexColumnRenderer": {
+																	"text": {
+																		"runs": [{"text": "СПЛЕТНИЦА"}]
+																	}
+																}
+															},
+															{
+																"musicResponsiveListItemFlexColumnRenderer": {
+																	"text": {
+																		"runs": [
+																			{"text": "Альбом"},
+																			{"text": " • "},
+																			{
+																				"text": "DEAD BLONDE",
+																				"navigationEndpoint": {
+																					"browseEndpoint": {
+																						"browseId": "UCneVw2164rmpaVJKFiWwlRg"
+																					}
+																				}
+																			},
+																			{"text": " • "},
+																			{"text": "2022"}
+																		]
+																	}
+																}
+															}
+														]
+													}
+												}]
+											}
+										}]
+									}
+								}
+							}
+						}]
+					}
+				}
+			}`))
+			return
+		}
+
+		if r.URL.Path == "/youtubei/v1/browse" {
+			w.Write([]byte(`{
+				"contents": {
+					"twoColumnBrowseResultsRenderer": {
+						"secondaryContents": {
+							"sectionListRenderer": {
+								"contents": [{
+									"musicShelfRenderer": {
+										"contents": [
+											{
+												"musicResponsiveListItemRenderer": {
+													"playlistItemData": {
+														"videoId": "m80jEPGrr7o"
+													},
+													"flexColumns": [
+														{
+															"musicResponsiveListItemFlexColumnRenderer": {
+																"text": {
+																	"runs": [{"text": "Банкомат"}]
+																}
+															}
+														},
+														{
+															"musicResponsiveListItemFlexColumnRenderer": {
+																"text": {
+																	"runs": [{"text": "DEAD BLONDE"}]
+																}
+															}
+														}
+													],
+													"fixedColumns": [{
+														"musicResponsiveListItemFixedColumnRenderer": {
+															"text": {
+																"runs": [{"text": "3:20"}]
+															}
+														}
+													}]
+												}
+											},
+											{
+												"musicResponsiveListItemRenderer": {
+													"playlistItemData": {
+														"videoId": "0pd_z_x144M"
+													},
+													"flexColumns": [
+														{
+															"musicResponsiveListItemFlexColumnRenderer": {
+																"text": {
+																	"runs": [{"text": "Красный свет"}]
+																}
+															}
+														},
+														{
+															"musicResponsiveListItemFlexColumnRenderer": {
+																"text": {
+																	"runs": [{"text": "DEAD BLONDE"}]
+																}
+															}
+														}
+													],
+													"fixedColumns": [{
+														"musicResponsiveListItemFixedColumnRenderer": {
+															"text": {
+																"runs": [{"text": "3:18"}]
+															}
+														}
+													}]
+												}
+											},
+											{
+												"musicResponsiveListItemRenderer": {
+													"playlistItemData": {
+														"videoId": "B2dcmYaRzaY"
+													},
+													"flexColumns": [
+														{
+															"musicResponsiveListItemFlexColumnRenderer": {
+																"text": {
+																	"runs": [{"text": "Самолёт"}]
+																}
+															}
+														},
+														{
+															"musicResponsiveListItemFlexColumnRenderer": {
+																"text": {
+																	"runs": [{"text": "DEAD BLONDE"}]
+																}
+															}
+														}
+													],
+													"fixedColumns": [{
+														"musicResponsiveListItemFixedColumnRenderer": {
+															"text": {
+																"runs": [{"text": "3:02"}]
+															}
+														}
+													}]
+												}
+											}
+										]
+									}
+								}]
+							}
+						}
+					}
+				}
+			}`))
+			return
+		}
+
+		http.NotFound(w, r)
+	}))
+	defer mockServer.Close()
+
+	client := NewYouTubeMusicClient(mockServer.URL)
+	album, err := client.SearchAlbumRelease(context.Background(), "DEAD BLONDE", "СПЛЕТНИЦА")
+	if err != nil {
+		t.Fatalf("SearchAlbumRelease error: %v", err)
+	}
+	if album == nil {
+		t.Fatal("expected album candidate, got nil")
+	}
+	if album.Title != "СПЛЕТНИЦА" {
+		t.Errorf("expected title 'СПЛЕТНИЦА', got %q", album.Title)
+	}
+	if album.Artist != "DEAD BLONDE" {
+		t.Errorf("expected artist 'DEAD BLONDE', got %q", album.Artist)
+	}
+	if album.Year != 2022 {
+		t.Errorf("expected year 2022, got %d", album.Year)
+	}
+	if len(album.Tracks) != 3 {
+		t.Fatalf("expected 3 tracks, got %d", len(album.Tracks))
+	}
+	if album.Tracks[0].Title != "Банкомат" || album.Tracks[0].Duration != 200 || album.Tracks[0].VideoID != "m80jEPGrr7o" {
+		t.Errorf("unexpected track 0: %+v", album.Tracks[0])
+	}
+}
+

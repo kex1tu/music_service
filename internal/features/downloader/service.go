@@ -1019,6 +1019,40 @@ func (s *Service) processTracks(
 	completedCount := 0
 	hasErrors := false
 
+	// Предпроверка цельного релиза (Full Release Matcher):
+	// Если треки требуют резолвинга (Deezer / Yandex / Radar) и это альбом/EP (>= 2 треков),
+	// пробуем найти официальный релиз целиком на YouTube Music для скачивания из единого источника
+	needsMatching := false
+	for _, t := range tracks {
+		if t.AudioSourceURL == "" || strings.Contains(t.AudioSourceURL, "deezer.com") {
+			needsMatching = true
+			break
+		}
+	}
+	if len(tracks) >= 2 && needsMatching && s.resolver != nil {
+		albumArt := meta.AlbumArtist
+		if albumArt == "" && len(tracks) > 0 {
+			albumArt = tracks[0].Artist
+		}
+		albumTit := meta.AlbumTitle
+		if albumTit == "" && len(tracks) > 0 {
+			albumTit = tracks[0].Album
+		}
+		if fullMatch, err := s.resolver.MatchFullRelease(ctx, albumArt, albumTit, tracks); err == nil && fullMatch != nil {
+			job.SetStepAndStatus(fmt.Sprintf("Найден полный официальный релиз (%d/%d треков совпало), загрузка из единого источника...", fullMatch.MatchedCount, fullMatch.TotalCount), StatusDownloading)
+			for idx := range tracks {
+				if trURL, ok := fullMatch.TrackURLs[idx]; ok && trURL != "" {
+					tracks[idx].AudioSourceURL = trURL
+					tracks[idx].VersionStatus = "official_release"
+					job.UpdateTrack(idx, func(tr *resolver.ResolvedTrack) {
+						tr.AudioSourceURL = trURL
+						tr.VersionStatus = "official_release"
+					})
+				}
+			}
+		}
+	}
+
 	// Параллельная обработка треков альбома с ограничением
 	concurrency := runtime.NumCPU() / 2
 	if concurrency < 2 {

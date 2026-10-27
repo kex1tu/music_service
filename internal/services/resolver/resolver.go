@@ -244,3 +244,10 @@ func (r *SourceResolver) Resolve(ctx context.Context, rawURL, explicitSource str
 		return nil, nil, fmt.Errorf("source %q is not fully supported for direct download yet", source)
 	}
 }
+
+// MatchFullRelease ищет цельный официальный релиз на YouTube Music и сопоставляет треклист.
+func (r *SourceResolver) MatchFullRelease(ctx context.Context, targetArtist, targetAlbum string, targetTracks []ResolvedTrack) (*FullReleaseMatchResult, error) {
+	matcher := NewFullReleaseMatcher(r.ytmusicClient)
+	return matcher.MatchFullRelease(ctx, targetArtist, targetAlbum, targetTracks)
+}
+

@@ -1,9 +1,9 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-- **Статус готовности:** **100% DONE** (Все 89 блоков задач полностью реализованы, включая аудит доступности WCAG 2.2 AA, инфостиль USERGUIDE.md, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js`, Studio Dark UI/UX редизайн и 100% тестов пройдены).
+- **Статус готовности:** **100% DONE** (Все 92 блока задач полностью реализованы, включая аудит доступности WCAG 2.2 AA, инфостиль USERGUIDE.md, вертикальные слайсы `internal/features/`, тестовый каркас `testkit`, типизированный API-клиент `web/static/js/api/client.js`, Studio Dark UI/UX редизайн, парсинг SoundCloud альбомов, Full Release Matcher и 100% тестов пройдены).
 - **Стек:** Высокопроизводительный сервис на **Pure Go (Chi)**, **yt-dlp**, **ffmpeg**, **ID3v2.4 Engine**, **SQLite (WAL)**, **Vertical Feature Slices**, **No-Build Frontend (HTML5 + Tailwind CDN + Alpine.js CDN)**.
-- **Размер бинарника:** 16 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
-- **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 24 пакета зеленые).
+- **Размер бинарника:** 18 МБ (единый статический бинарник `bin/music-manager`, время холодного старта ~2 мс, потребление RAM ~4–24 МБ).
+- **Результаты тестов:** 100% Go unit, fuzz & integration tests (все тесты пройдены, `go test -race ./...` — **0 data races**, все 25 пакетов зеленые).
 - **Безопасность:** Проведен глубокий аудит безопасности и фаззинг, сформирован [`SECURITY_AUDIT_REPORT.md`](file:///home/kex1tu/Рабочий%20стол/music%20download/music-manager/SECURITY_AUDIT_REPORT.md).
 - **Продакшен-деплой:** Развернут под управлением `systemd` (`music-manager.service`) на боевых серверах `nl_music` (194.76.168.20 / `https://musicdownloader.verymad.net/`) и Сервер 2 (13.143.193.207 / `https://mymusicdownload.verymad.net/`).
 
@@ -1086,6 +1086,37 @@
       - Race detector: `go test -race ./...` — **0 data races**.
       - Сборка бинарника: `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — **успешно**.
       - E2E верификация в браузере через **Playwright MCP**: проверены вкладки «Загрузчик», «Файлы» (быстрая навигация без сброса пути), «Радар», карточки артистов и дискографий, контрастность кнопок.
+
+  - **Блок 92 (Парсинг SoundCloud альбомов, Поиск полных релизов (Full Release Matching) и Валидация DEAD BLONDE):**
+    - **92.1. Исправление парсинга альбомов и плейлистов SoundCloud (`resolver_ytdlp.go`, `sc_parser.go`):**
+      - Расширена структура `YtEntry`: добавлены поля `PlaylistTitle`, `Playlist`, `Track`, `PlaylistIndex`.
+      - Реализована функция `ParseSoundCloudTitle(rawTitle, uploader string) (artist, title string)`: очистка от промо-тегов `[FREE DL]`, `(Buy = Free DL)`, `[OUT NOW]`, `(prod. by ...)`, лидирующих номеров дорожек и выделение реального автора вместо пабликов-агрегаторов.
+      - Обновлен список известных каналов-агрегаторов (`knownLabels`: "Русская Рэп-Сцена", "Рэп Сцена", "Новинки музыки", "Russian Rap").
+      - Защита от затирания распарсенного исполнителя: поле `uploader` больше не перезаписывает реального автора трека.
+      - Поле `PlaylistTitle` / `Playlist` приоритетно используется в качестве `AlbumTitle` для сетов SoundCloud.
+      - Покрыто модульными тестами в `sc_parser_test.go`.
+    - **92.2. Поиск официальных альбомов через Innertube API (`client_ytmusic.go`):**
+      - Реализован метод `SearchAlbumRelease(ctx, artist, album)` с фильтром альбомов (`params: "EgWKAQIYAWoKEAkQBRAKEAMQBA=="`).
+      - Реализован метод `GetAlbumReleaseTracks(ctx, browseID)` для получения официального треклиста с `VideoID`, названиями и хронометражем в секундах.
+      - Добавлен парсер строковой длительности `parseDurationSec` ("M:SS", "H:MM:SS").
+      - Покрыто тестами с mock HTTP-сервером в `client_ytmusic_test.go`.
+    - **92.3. Движок сопоставления цельных релизов (`full_release_matcher.go`):**
+      - Реализован компонент `FullReleaseMatcher` с методом `MatchTracklists`: сверка треклиста по названиям и жесткому ограничению дельты длительности $\le 12$ секунд.
+      - Реализован метод `MatchFullRelease`: порог приемки релиза $\ge 85\%$ совпадений с генерацией прямых ссылок `https://music.youtube.com/watch?v={videoId}` для всех треков альбома.
+      - Добавлен метод `r.MatchFullRelease(...)` в `SourceResolver`.
+      - Покрыто тестами в `full_release_matcher_test.go` (идеальное совпадение, пропуск интро/бонуса, отклонение сборников и каверов с дельтой $> 12$ с).
+    - **92.4. Интеграция в пайплайн загрузчика (`features/downloader/service.go`, `services/downloader/pipeline.go`):**
+      - Перед поштучной обработкой треков в `processTracks` внедрен этап предпроверки цельного релиза для альбомов и EP ($\ge 2$ треков).
+      - При обнаружении официального релиза треки привязываются к аудио-дорожкам из единого источника, предотвращая скачивание случайных фанатских каверов, live-версий и видеоклипов со звуковыми эффектами.
+      - При частичном или неполном совпадении ($< 85\%$) система прозрачно выполняет graceful fallback на индивидуальный поиск треков.
+    - **92.5. Комплексная валидация на релизах DEAD BLONDE (`dead_blonde_test.go`):**
+      - Проверено отсечение ремиксов (slowed+reverb, sped up, tiktok cuts) по названиям и длительности ($\le 12$ с).
+      - Проверено отклонение любительских каверов сторонних исполнителей (`LevenshteinRatio < 0.65`).
+      - Проверено 100% сопоставление 12 треков официального альбома «СПЛЕТНИЦА».
+      - Проверен парсинг треков SoundCloud сета от имени паблика «Русская Рэп-Сцена».
+    - **92.6. Верификация:**
+      - 100% PASS: `go test -race ./...` (все 25 пакетов, 0 data races).
+      - Сборка бинарника: `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешно скомпилирован (18 МБ).
 
 ---
 

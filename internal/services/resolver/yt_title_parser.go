@@ -32,6 +32,7 @@ var (
 		"universal music", "rhymes music", "black star", "zhara music",
 		"музыка первого", "melon music records", "label", "records",
 		"golden sound", "velvet music", "soyuz music", "союз мьюзик",
+		"русская рэп-сцена", "рэп сцена", "новинки музыки", "russian rap",
 	}
 
 	streamingJunkInParenRegex = regexp.MustCompile(`(?i)\s*[\(\[]\s*(?:official\s+(?:music\s+)?video|official\s+audio|official\s+hd\s+video|official\s+lyric\s+video|lyric\s+video|lyrics|клип|официальный\s+клип|премьера(?:\s+клипа)?(?:\s+\d{4})?|премьера\s+трека|video|audio|4k|hd|remastered(?:\s+\d{4})?|visualizer|prod\.(?:\s+by)?\s+[^\]\)]+|feat\.?|ft\.?|featuring|with|при\s+уч\.?|explicit|clean|censored|uncensored|uncut|до\s+цензуры|без\s+цензуры|с\s+цензурой|цензурная|sped\s+up|slowed)[^\]\)]*[\)\]]`)

@@ -96,19 +96,23 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 	runErr := cmd.Run()
 
 	type YtEntry struct {
-		ID          string  `json:"id"`
-		Title       string  `json:"title"`
-		Uploader    string  `json:"uploader"`
-		Channel     string  `json:"channel"`
-		Duration    float64 `json:"duration"`
-		WebpageURL  string  `json:"webpage_url"`
-		URL         string  `json:"url"`
-		Thumbnail   string  `json:"thumbnail"`
-		TrackNumber any     `json:"track_number"`
-		Album       string  `json:"album"`
-		Artist      string  `json:"artist"`
-		ReleaseYear int     `json:"release_year"`
-		Genre       string  `json:"genre"`
+		ID            string  `json:"id"`
+		Title         string  `json:"title"`
+		Uploader      string  `json:"uploader"`
+		Channel       string  `json:"channel"`
+		Duration      float64 `json:"duration"`
+		WebpageURL    string  `json:"webpage_url"`
+		URL           string  `json:"url"`
+		Thumbnail     string  `json:"thumbnail"`
+		TrackNumber   any     `json:"track_number"`
+		PlaylistIndex any     `json:"playlist_index"`
+		Album         string  `json:"album"`
+		Artist        string  `json:"artist"`
+		Track         string  `json:"track"`
+		Playlist      string  `json:"playlist"`
+		PlaylistTitle string  `json:"playlist_title"`
+		ReleaseYear   int     `json:"release_year"`
+		Genre         string  `json:"genre"`
 	}
 
 	var entries []YtEntry
@@ -224,21 +228,47 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 		}
 	}
 
+	isSoundCloud := strings.Contains(rawURL, "soundcloud.com")
+	if !isSoundCloud && len(entries) > 0 {
+		isSoundCloud = strings.Contains(entries[0].WebpageURL, "soundcloud.com") || strings.Contains(entries[0].URL, "soundcloud.com")
+	}
+
 	// Извлекаем артиста и альбом первого элемента для релиза
-	firstParsed := ParseYouTubeTitle(entries[0].Title, entries[0].Channel, entries[0].Uploader)
-	firstArtists := firstParsed.Artists
-	artistName := entries[0].Artist
-	if artistName == "" {
-		artistName = firstParsed.Artist
+	var firstArtists []string
+	var artistName string
+	var firstTitle string
+
+	if isSoundCloud {
+		scArt, scTit := ParseSoundCloudTitle(entries[0].Title, entries[0].Uploader)
+		if scArt != "" && scArt != "Unknown Artist" {
+			artistName = scArt
+		} else if entries[0].Artist != "" && !strings.EqualFold(entries[0].Artist, entries[0].Uploader) {
+			artistName = entries[0].Artist
+		} else {
+			artistName = CleanChannelName(entries[0].Uploader)
+		}
+		firstTitle = scTit
+		cleanArt, feats := ExtractFeatFromText(artistName)
+		firstArtists = []string{cleanArt}
+		firstArtists = append(firstArtists, feats...)
+	} else {
+		firstParsed := ParseYouTubeTitle(entries[0].Title, entries[0].Channel, entries[0].Uploader)
+		firstArtists = firstParsed.Artists
+		firstTitle = firstParsed.Title
+		artistName = entries[0].Artist
+		if artistName == "" || (entries[0].Uploader != "" && strings.EqualFold(artistName, entries[0].Uploader) && firstParsed.Artist != "" && firstParsed.Artist != "Unknown Artist") {
+			artistName = firstParsed.Artist
+		}
+		if len(firstArtists) == 0 && artistName != "" {
+			firstArtists = []string{artistName}
+		}
 	}
-	if len(firstArtists) == 0 && artistName != "" {
-		firstArtists = []string{artistName}
-	}
+
 	genre := entries[0].Genre
 	year := entries[0].ReleaseYear
 
 	if r.featEnricher != nil {
-		enriched := r.featEnricher.EnrichTrackDetails(ctx, firstParsed.Title, firstArtists)
+		enriched := r.featEnricher.EnrichTrackDetails(ctx, firstTitle, firstArtists)
 		firstArtists = enriched.Artists
 		if genre == "" && enriched.Genre != "" {
 			genre = enriched.Genre
@@ -253,11 +283,24 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 
 	isArtistPage := strings.Contains(rawURL, "/channel/") || strings.Contains(rawURL, "/releases")
 	albumTitle := entries[0].Album
+	if isSoundCloud {
+		if entries[0].PlaylistTitle != "" {
+			albumTitle = strings.TrimSpace(entries[0].PlaylistTitle)
+		} else if entries[0].Playlist != "" {
+			albumTitle = strings.TrimSpace(entries[0].Playlist)
+		}
+	}
 	if albumTitle == "" || isArtistPage || (len(entries) == 1 && (strings.EqualFold(albumTitle, "single") || strings.EqualFold(albumTitle, "singles"))) {
 		if isArtistPage && artistName != "" {
 			albumTitle = artistName
-		} else if firstParsed.Title != "" {
-			albumTitle = firstParsed.Title
+		} else if isSoundCloud && (entries[0].PlaylistTitle != "" || entries[0].Playlist != "") {
+			if entries[0].PlaylistTitle != "" {
+				albumTitle = strings.TrimSpace(entries[0].PlaylistTitle)
+			} else {
+				albumTitle = strings.TrimSpace(entries[0].Playlist)
+			}
+		} else if firstTitle != "" {
+			albumTitle = firstTitle
 		} else {
 			albumTitle = "Unknown Album"
 		}
@@ -284,19 +327,47 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 			if parsed, err := strconv.Atoi(tnStr); err == nil && parsed > 0 {
 				pos = parsed
 			}
+		} else if pi, ok := e.PlaylistIndex.(float64); ok && pi > 0 {
+			pos = int(pi)
+		} else if piStr, ok := e.PlaylistIndex.(string); ok {
+			if parsed, err := strconv.Atoi(piStr); err == nil && parsed > 0 {
+				pos = parsed
+			}
 		}
 
-		parsed := ParseYouTubeTitle(e.Title, e.Channel, e.Uploader)
-		cleanTit := parsed.Title
-		cleanArt := parsed.Artist
-		if e.Artist != "" {
-			cleanArt = e.Artist
+		var cleanTit, cleanArt string
+		var artists []string
+
+		if isSoundCloud {
+			scArt, scTit := ParseSoundCloudTitle(e.Title, e.Uploader)
+			if scTit != "" {
+				cleanTit = scTit
+			} else {
+				cleanTit = e.Title
+			}
+			if scArt != "" && scArt != "Unknown Artist" {
+				cleanArt = scArt
+			} else if e.Artist != "" && !strings.EqualFold(e.Artist, e.Uploader) {
+				cleanArt = e.Artist
+			} else {
+				cleanArt = CleanChannelName(e.Uploader)
+			}
+			artClean, feats := ExtractFeatFromText(cleanArt)
+			artists = []string{artClean}
+			artists = append(artists, feats...)
+		} else {
+			parsed := ParseYouTubeTitle(e.Title, e.Channel, e.Uploader)
+			cleanTit = parsed.Title
+			cleanArt = parsed.Artist
+			if e.Artist != "" && (e.Uploader == "" || !strings.EqualFold(e.Artist, e.Uploader) || parsed.Artist == "Unknown Artist") {
+				cleanArt = e.Artist
+			}
+			artists = parsed.Artists
+			if len(artists) == 0 && cleanArt != "" {
+				artists = []string{cleanArt}
+			}
 		}
 
-		artists := parsed.Artists
-		if len(artists) == 0 && cleanArt != "" {
-			artists = []string{cleanArt}
-		}
 		if r.featEnricher != nil {
 			artists = r.featEnricher.EnrichTrackArtists(ctx, cleanTit, artists)
 		}
@@ -313,6 +384,13 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 		}
 
 		trAlbum := strings.TrimSpace(e.Album)
+		if isSoundCloud {
+			if e.PlaylistTitle != "" {
+				trAlbum = strings.TrimSpace(e.PlaylistTitle)
+			} else if e.Playlist != "" {
+				trAlbum = strings.TrimSpace(e.Playlist)
+			}
+		}
 		if trAlbum == "" {
 			if !isArtistPage {
 				trAlbum = albumTitle
