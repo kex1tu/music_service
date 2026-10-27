@@ -1134,12 +1134,12 @@
 
 3. **Развертывание на боевых серверах:**
    - **Сервер 1 (`nl_music`):** `https://musicdownloader.verymad.net/`
-     - Git: актуализирован до `main` (`5df7786`).
+     - Git: актуализирован до `main` (`384a621`).
      - Бинарный файл: скомпилирован и синхронизирован в `/opt/music-manager/bin/music-manager`.
      - Сервис: `systemctl restart music-manager.service` (active/running).
      - Проверка эндпоинтов: `/api/health` — `200 OK`.
    - **Сервер 2:** `https://mymusicdownload.verymad.net/`
-     - Git: актуализирован до `main` (`5df7786`).
+     - Git: актуализирован до `main` (`384a621`).
      - Бинарный файл: скомпилирован и синхронизирован в `/root/music_service/bin/music-manager`.
      - Сервис: `systemctl restart music-manager.service` (active/running).
      - Проверка эндпоинтов: `/api/health` — `200 OK`.
