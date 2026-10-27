@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"music-manager/internal/core/httputil"
+	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
 
@@ -987,4 +989,148 @@ func (m *Module) getAppleMusicDiscography(w http.ResponseWriter, r *http.Request
 		TotalReleases: len(releases),
 		Releases:      releases,
 	})
+}
+
+// GetReleaseCandidates возвращает список кандидатов цельных релизов (альбомов/сетов)
+// для активной задачи, неполного релиза или папки библиотеки.
+// GET /downloads/release-candidates
+// GET /api/downloads/release-candidates
+func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
+	artist := strings.TrimSpace(httputil.QueryString(r, "artist", ""))
+	album := strings.TrimSpace(httputil.QueryString(r, "album", ""))
+	jobID := strings.TrimSpace(httputil.QueryString(r, "job_id", ""))
+	path := strings.TrimSpace(httputil.QueryString(r, "path", ""))
+
+	var targetTracks []resolver.ResolvedTrack
+
+	// 1. Если указан job_id — загружаем треки из задачи
+	if jobID != "" {
+		if job, ok := m.service.GetJob(jobID); ok {
+			targetTracks = job.Tracks
+			if artist == "" && job.ArtistName != nil {
+				artist = *job.ArtistName
+			}
+			if album == "" && job.AlbumTitle != nil {
+				album = *job.AlbumTitle
+			}
+		}
+	}
+
+	// 2. Если указан path папки в библиотеке — считываем MP3 через песочницу
+	if len(targetTracks) == 0 && path != "" && m.service.MusicSandbox() != nil {
+		if realPath, err := m.service.MusicSandbox().Resolve(path, false); err == nil {
+			if entries, err := os.ReadDir(realPath); err == nil {
+				for _, e := range entries {
+					if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".mp3") {
+						itemFull := filepath.Join(realPath, e.Name())
+						relTrack := filepath.Join(path, e.Name())
+						if t, err := id3.ReadTags(itemFull, relTrack); err == nil && t != nil {
+							if artist == "" && t.Artist != "" {
+								artist = t.Artist
+							}
+							if album == "" && t.Album != "" {
+								album = t.Album
+							}
+							targetTracks = append(targetTracks, resolver.ResolvedTrack{
+								TrackID:     fmt.Sprintf("local_%d", len(targetTracks)+1),
+								TrackNumber: t.TrackNumber,
+								Title:       t.Title,
+								Artist:      t.Artist,
+								Album:       t.Album,
+								Duration:    int(t.Duration),
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Если треков все еще нет, но есть artist и album — пробуем найти эталонный треклист через Deezer
+	if len(targetTracks) == 0 && artist != "" && album != "" && m.deezerClient != nil {
+		if albums, err := m.deezerClient.SearchAlbums(r.Context(), fmt.Sprintf("%s %s", artist, album)); err == nil && len(albums) > 0 {
+			if dAlbum, err := m.deezerClient.GetAlbum(r.Context(), strconv.FormatInt(albums[0].ID, 10)); err == nil && dAlbum != nil {
+				for _, dt := range dAlbum.Tracks.Data {
+					targetTracks = append(targetTracks, resolver.ResolvedTrack{
+						TrackID:     fmt.Sprintf("dz_%d", dt.ID),
+						TrackNumber: dt.TrackPosition,
+						Title:       dt.Title,
+						Artist:      dt.Artist.Name,
+						Album:       dAlbum.Title,
+						Duration:    dt.Duration,
+					})
+				}
+			}
+		}
+	}
+
+	if artist == "" && album == "" && len(targetTracks) == 0 {
+		httputil.RespondError(w, http.StatusBadRequest, "artist and album or job_id are required")
+		return
+	}
+
+	matcher := m.service.Resolver().FullReleaseMatcher()
+	cands, isCyrillic, err := matcher.SearchReleaseCandidates(r.Context(), artist, album, targetTracks)
+	if err != nil {
+		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	httputil.RespondJSON(w, http.StatusOK, ReleaseCandidatesResponse{
+		Artist:       artist,
+		Album:        album,
+		IsCyrillic:   isCyrillic,
+		TargetTracks: targetTracks,
+		Candidates:   cands,
+	})
+}
+
+// ParseReleaseURL парсит произвольную ссылку на сет/альбом и сопоставляет треклист с целевыми треками.
+// POST /downloads/release-candidates/parse-url
+// POST /api/downloads/release-candidates/parse-url
+func (m *Module) ParseReleaseURL(w http.ResponseWriter, r *http.Request) {
+	var req ParseReleaseURLRequest
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.RespondError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	req.URL = strings.TrimSpace(req.URL)
+	if req.URL == "" {
+		httputil.RespondError(w, http.StatusBadRequest, "url is required")
+		return
+	}
+
+	if !resolver.IsAllowedURL(req.URL) {
+		httputil.RespondError(w, http.StatusBadRequest, "domain is not in allowed whitelist")
+		return
+	}
+
+	matcher := m.service.Resolver().FullReleaseMatcher()
+	cand, err := matcher.ParseAndMatchReleaseURL(r.Context(), req.URL, req.Artist, req.Album, req.TargetTracks)
+	if err != nil {
+		httputil.RespondError(w, http.StatusBadRequest, fmt.Sprintf("ошибка парсинга ссылки: %v", err))
+		return
+	}
+
+	httputil.RespondJSON(w, http.StatusOK, cand)
+}
+
+// SwitchReleaseSource применяет выбранный источник цельного релиза к задаче и запускает скачивание.
+// POST /downloads/releases/switch-source
+// POST /api/downloads/releases/switch-source
+func (m *Module) SwitchReleaseSource(w http.ResponseWriter, r *http.Request) {
+	var req SwitchReleaseSourceRequest
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.RespondError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	result, err := m.service.SwitchReleaseSource(r.Context(), req)
+	if err != nil {
+		httputil.RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	httputil.RespondJSON(w, http.StatusOK, result)
 }

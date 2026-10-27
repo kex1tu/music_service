@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -396,13 +397,14 @@ func parseYtResponsiveListItem(r ytResponsiveListItem, addTrack func(YtMusicTrac
 	}
 }
 
-// AlbumTrackCandidate представляет трек официального альбома YouTube Music.
+// AlbumTrackCandidate представляет трек официального альбома YouTube Music или SoundCloud сета.
 type AlbumTrackCandidate struct {
-	VideoID  string `json:"video_id"`
-	Title    string `json:"title"`
-	Artist   string `json:"artist"`
-	Duration int    `json:"duration"` // в секундах
-	Index    int    `json:"index"`
+	VideoID   string `json:"video_id"`
+	DirectURL string `json:"direct_url,omitempty"`
+	Title     string `json:"title"`
+	Artist    string `json:"artist"`
+	Duration  int    `json:"duration"` // в секундах
+	Index     int    `json:"index"`
 }
 
 // AlbumReleaseCandidate представляет метаданные найденного альбома и его треклист.
@@ -438,6 +440,21 @@ func parseDurationSec(s string) int {
 
 // SearchAlbumRelease выполняет поиск официального альбома/плейлиста на YouTube Music
 func (c *YouTubeMusicClient) SearchAlbumRelease(ctx context.Context, artist, album string) (*AlbumReleaseCandidate, error) {
+	cands, err := c.SearchAlbumReleaseCandidates(ctx, artist, album, 1)
+	if err != nil {
+		return nil, err
+	}
+	if len(cands) == 0 {
+		return nil, nil
+	}
+	return &cands[0], nil
+}
+
+// SearchAlbumReleaseCandidates выполняет поиск альбомов в каталоге YouTube Music и возвращает список подходящих релизов с их треклистами.
+func (c *YouTubeMusicClient) SearchAlbumReleaseCandidates(ctx context.Context, artist, album string, limit int) ([]AlbumReleaseCandidate, error) {
+	if limit <= 0 {
+		limit = 5
+	}
 	cleanArt := strings.TrimSpace(artist)
 	cleanAlb := strings.TrimSpace(album)
 	if cleanAlb == "" {
@@ -682,35 +699,35 @@ func (c *YouTubeMusicClient) SearchAlbumRelease(ctx context.Context, artist, alb
 		return nil, nil
 	}
 
-	// Выбираем лучшего кандидата
-	var bestCand *rawCandidate
-	for i := range candidates {
-		c := &candidates[i]
-		if bestCand == nil || c.Score > bestCand.Score {
-			bestCand = c
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].Score > candidates[j].Score
+	})
+
+	var results []AlbumReleaseCandidate
+	for _, cand := range candidates {
+		if cand.Score < 0.35 {
+			continue
+		}
+		tracks, err := c.GetAlbumReleaseTracks(ctx, cand.BrowseID)
+		if err != nil || len(tracks) == 0 {
+			continue
+		}
+		results = append(results, AlbumReleaseCandidate{
+			BrowseID:    cand.BrowseID,
+			PlaylistID:  cand.PlaylistID,
+			Title:       cand.Title,
+			Artist:      cand.Artist,
+			Year:        cand.Year,
+			CoverURL:    cand.CoverURL,
+			Tracks:      tracks,
+			TotalTracks: len(tracks),
+		})
+		if len(results) >= limit {
+			break
 		}
 	}
 
-	if bestCand == nil || bestCand.Score < 0.45 {
-		return nil, nil
-	}
-
-	// Получаем треклист
-	tracks, err := c.GetAlbumReleaseTracks(ctx, bestCand.BrowseID)
-	if err != nil {
-		return nil, err
-	}
-
-	return &AlbumReleaseCandidate{
-		BrowseID:    bestCand.BrowseID,
-		PlaylistID:  bestCand.PlaylistID,
-		Title:       bestCand.Title,
-		Artist:      bestCand.Artist,
-		Year:        bestCand.Year,
-		CoverURL:    bestCand.CoverURL,
-		Tracks:      tracks,
-		TotalTracks: len(tracks),
-	}, nil
+	return results, nil
 }
 
 // GetAlbumReleaseTracks загружает треклист альбома по browseId.

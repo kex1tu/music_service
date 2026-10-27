@@ -621,3 +621,36 @@ type SoundCloudCacheDTO struct {
 	CheckedAt      time.Time                      `json:"checked_at"`
 	UpdatedAt      time.Time                      `json:"updated_at"`
 }
+
+// ReleaseCandidatesResponse — ответ поиска цельных источников релиза.
+type ReleaseCandidatesResponse struct {
+	Artist       string                          `json:"artist"`
+	Album        string                          `json:"album"`
+	IsCyrillic   bool                            `json:"is_cyrillic"`
+	TargetTracks []resolver.ResolvedTrack        `json:"target_tracks"`
+	Candidates   []resolver.ReleaseCandidateItem `json:"candidates"`
+}
+
+// ParseReleaseURLRequest — запрос разбора произвольной ссылки на релиз.
+type ParseReleaseURLRequest struct {
+	URL          string                   `json:"url"`
+	Artist       string                   `json:"artist"`
+	Album        string                   `json:"album"`
+	TargetTracks []resolver.ResolvedTrack `json:"target_tracks"`
+}
+
+// SwitchReleaseSourceRequest — запрос применения источника цельного релиза.
+type SwitchReleaseSourceRequest struct {
+	JobID        string         `json:"job_id"`
+	TargetPath   string         `json:"target_path,omitempty"`
+	SourceURL    string         `json:"source_url,omitempty"`
+	TrackMapping map[int]string `json:"track_mapping"` // targetIdx -> audioURL
+}
+
+// SwitchReleaseSourceResult — результат переключения источника релиза.
+type SwitchReleaseSourceResult struct {
+	JobID        string `json:"job_id"`
+	UpdatedCount int    `json:"updated_count"`
+	TotalTracks  int    `json:"total_tracks"`
+	Status       string `json:"status"`
+}

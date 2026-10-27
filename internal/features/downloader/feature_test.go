@@ -803,5 +803,184 @@ func TestDownloader_QuickListenSpots_ExtractedOnLyricsFound(t *testing.T) {
 	}
 }
 
+func TestDownloader_ReleaseCandidates_And_SwitchReleaseSource(t *testing.T) {
+	env, mod := setupTestModule(t)
+
+	// Мокаем FullReleaseMatcher для исключения сетевых запросов в тестах
+	scSearcher := resolver.NewSoundCloudSetSearcher("")
+	scSearcher.SetCustomSearchFunc(func(ctx context.Context, artist, album string, limit int) ([]resolver.AlbumReleaseCandidate, error) {
+		return []resolver.AlbumReleaseCandidate{
+			{
+				BrowseID:   "sc_mock_spletnitsa",
+				PlaylistID: "https://soundcloud.com/rusyarapscene/sets/spletnitsa",
+				Title:      "СПЛЕТНИЦА",
+				Artist:     "DEAD BLONDE",
+				Tracks: []resolver.AlbumTrackCandidate{
+					{
+						Title:     "Банкомат",
+						Artist:    "DEAD BLONDE",
+						Duration:  200,
+						DirectURL: "https://soundcloud.com/rusyarapscene/dead-blonde-bankomat",
+					},
+					{
+						Title:     "Красный свет",
+						Artist:    "DEAD BLONDE",
+						Duration:  198,
+						DirectURL: "https://soundcloud.com/rusyarapscene/dead-blonde-krasny-svet",
+					},
+				},
+				TotalTracks: 2,
+			},
+		}, nil
+	})
+	mockMatcher := resolver.NewFullReleaseMatcher(nil, scSearcher)
+	mod.Service().Resolver().SetFullReleaseMatcher(mockMatcher)
+
+	// 1. Проверяем валидацию пустого запроса
+	resp400 := env.Get("/api/downloads/release-candidates")
+	if resp400.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request, got %d", resp400.StatusCode)
+	}
+
+	// 2. Создаем задачу в очереди
+	job, err := mod.Service().CreateJob(context.Background(), "https://music.youtube.com/playlist?list=mock_cand_job", "youtube")
+	if err != nil {
+		t.Fatalf("CreateJob error: %v", err)
+	}
+
+	// Заполняем треки задачи потокобезопасно через SetMetadata
+	tot := 2
+	tracks := []resolver.ResolvedTrack{
+		{
+			TrackID:        "t1",
+			TrackNumber:    1,
+			TrackTotal:     &tot,
+			Title:          "Банкомат",
+			Artist:         "DEAD BLONDE",
+			Album:          "СПЛЕТНИЦА",
+			Duration:       200,
+			AudioSourceURL: "https://music.youtube.com/watch?v=old1",
+		},
+		{
+			TrackID:        "t2",
+			TrackNumber:    2,
+			TrackTotal:     &tot,
+			Title:          "Красный свет",
+			Artist:         "DEAD BLONDE",
+			Album:          "СПЛЕТНИЦА",
+			Duration:       198,
+			AudioSourceURL: "https://music.youtube.com/watch?v=old2",
+		},
+	}
+	job.SetMetadata(resolver.ReleaseMetadata{
+		AlbumArtist: "DEAD BLONDE",
+		AlbumTitle:  "СПЛЕТНИЦА",
+	}, tracks)
+
+	// 3. Запрашиваем кандидатов по job_id
+	respCands := env.Get(fmt.Sprintf("/api/downloads/release-candidates?job_id=%s", job.ID))
+	if respCands.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for release-candidates, got %d", respCands.StatusCode)
+	}
+	var candsResp downloader.ReleaseCandidatesResponse
+	env.DecodeJSON(respCands, &candsResp)
+	if !candsResp.IsCyrillic {
+		t.Errorf("expected is_cyrillic = true for DEAD BLONDE")
+	}
+	if len(candsResp.TargetTracks) != 2 {
+		t.Errorf("expected 2 target tracks, got %d", len(candsResp.TargetTracks))
+	}
+
+	// 4. Проверяем переключение источника релиза (SwitchReleaseSource)
+	switchReq := downloader.SwitchReleaseSourceRequest{
+		JobID:     job.ID,
+		SourceURL: "https://soundcloud.com/rusyarapscene/sets/spletnitsa",
+		TrackMapping: map[int]string{
+			0: "https://soundcloud.com/rusyarapscene/dead-blonde-bankomat",
+			1: "https://soundcloud.com/rusyarapscene/dead-blonde-krasny-svet",
+		},
+	}
+	respSwitch := env.PostJSON("/api/downloads/releases/switch-source", switchReq)
+	if respSwitch.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for switch-source, got %d. Body: %s", respSwitch.StatusCode, string(env.ReadBody(respSwitch)))
+	}
+	var switchRes downloader.SwitchReleaseSourceResult
+	env.DecodeJSON(respSwitch, &switchRes)
+	if switchRes.UpdatedCount != 2 {
+		t.Errorf("expected updated_count = 2, got %d", switchRes.UpdatedCount)
+	}
+
+	// Проверяем, что в задаче обновились AudioSourceURL
+	snap := job.Snapshot()
+	if snap.Tracks[0].AudioSourceURL != "https://soundcloud.com/rusyarapscene/dead-blonde-bankomat" {
+		t.Errorf("track 0 url not updated: %s", snap.Tracks[0].AudioSourceURL)
+	}
+	if snap.Tracks[1].AudioSourceURL != "https://soundcloud.com/rusyarapscene/dead-blonde-krasny-svet" {
+		t.Errorf("track 1 url not updated: %s", snap.Tracks[1].AudioSourceURL)
+	}
+	if snap.Tracks[0].VersionStatus != "manual" {
+		t.Errorf("track 0 version status = %q, want 'manual'", snap.Tracks[0].VersionStatus)
+	}
+}
+
+func TestDownloader_ParseReleaseURL(t *testing.T) {
+	env, mod := setupTestModule(t)
+
+	// 1. Проверяем отклонение домена вне whitelist
+	badReq := downloader.ParseReleaseURLRequest{
+		URL: "https://evil-site.com/set/123",
+	}
+	respBad := env.PostJSON("/api/downloads/release-candidates/parse-url", badReq)
+	if respBad.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for disallowed domain, got %d", respBad.StatusCode)
+	}
+
+	// 2. Мокаем parseURLFunc
+	scSearcher := resolver.NewSoundCloudSetSearcher("")
+	scSearcher.SetCustomParseURLFunc(func(ctx context.Context, setURL string) (*resolver.AlbumReleaseCandidate, error) {
+		return &resolver.AlbumReleaseCandidate{
+			BrowseID:   setURL,
+			PlaylistID: setURL,
+			Title:      "СПЛЕТНИЦА",
+			Artist:     "DEAD BLONDE",
+			Tracks: []resolver.AlbumTrackCandidate{
+				{
+					Title:     "Банкомат",
+					Artist:    "DEAD BLONDE",
+					Duration:  200,
+					DirectURL: "https://soundcloud.com/track1",
+				},
+			},
+			TotalTracks: 1,
+		}, nil
+	})
+	mockMatcher := resolver.NewFullReleaseMatcher(nil, scSearcher)
+	mod.Service().Resolver().SetFullReleaseMatcher(mockMatcher)
+
+	// 3. Успешный разбор валидной ссылки
+	goodReq := downloader.ParseReleaseURLRequest{
+		URL:    "https://soundcloud.com/deadblonde/sets/spletnitsa",
+		Artist: "DEAD BLONDE",
+		Album:  "СПЛЕТНИЦА",
+		TargetTracks: []resolver.ResolvedTrack{
+			{TrackID: "t1", TrackNumber: 1, Title: "Банкомат", Artist: "DEAD BLONDE", Duration: 200},
+		},
+	}
+	respGood := env.PostJSON("/api/downloads/release-candidates/parse-url", goodReq)
+	if respGood.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for parse-url, got %d. Body: %s", respGood.StatusCode, string(env.ReadBody(respGood)))
+	}
+	var parsedItem resolver.ReleaseCandidateItem
+	env.DecodeJSON(respGood, &parsedItem)
+	if parsedItem.Title != "СПЛЕТНИЦА" {
+		t.Errorf("expected title 'СПЛЕТНИЦА', got %q", parsedItem.Title)
+	}
+	if parsedItem.MatchedCount != 1 {
+		t.Errorf("expected matched count = 1, got %d", parsedItem.MatchedCount)
+	}
+}
+
+
+
 
 

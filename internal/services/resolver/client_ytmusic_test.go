@@ -661,5 +661,20 @@ func TestYouTubeMusicClient_SearchAlbumRelease(t *testing.T) {
 	if album.Tracks[0].Title != "Банкомат" || album.Tracks[0].Duration != 200 || album.Tracks[0].VideoID != "m80jEPGrr7o" {
 		t.Errorf("unexpected track 0: %+v", album.Tracks[0])
 	}
+
+	// Проверяем SearchAlbumReleaseCandidates с тем же мок-сервером
+	cands, err := client.SearchAlbumReleaseCandidates(context.Background(), "DEAD BLONDE", "СПЛЕТНИЦА", 5)
+	if err != nil {
+		t.Fatalf("SearchAlbumReleaseCandidates error: %v", err)
+	}
+	if len(cands) == 0 {
+		t.Fatal("expected at least 1 candidate from SearchAlbumReleaseCandidates, got 0")
+	}
+	if cands[0].Title != "СПЛЕТНИЦА" {
+		t.Errorf("expected candidate 0 title 'СПЛЕТНИЦА', got %q", cands[0].Title)
+	}
+	if len(cands[0].Tracks) != 3 {
+		t.Errorf("expected 3 tracks in candidate 0, got %d", len(cands[0].Tracks))
+	}
 }
 

@@ -1868,3 +1868,94 @@ func (s *Service) MusicSandbox() *sandbox.PathSandbox {
 func (s *Service) CookiesPath() string {
 	return s.cookiesPath
 }
+
+// SwitchReleaseSource привязывает выбранные аудиоисточники кандидатов ко всем трекам задачи
+// и немедленно перезапускает процесс загрузки.
+func (s *Service) SwitchReleaseSource(ctx context.Context, req SwitchReleaseSourceRequest) (*SwitchReleaseSourceResult, error) {
+	req.JobID = strings.TrimSpace(req.JobID)
+	if req.JobID == "" && strings.TrimSpace(req.SourceURL) == "" {
+		return nil, errors.New("необходимо указать job_id или source_url")
+	}
+
+	var job *Job
+	if req.JobID != "" {
+		var ok bool
+		job, ok = s.GetJob(req.JobID)
+		if !ok {
+			return nil, fmt.Errorf("задача %s не найдена", req.JobID)
+		}
+	} else if strings.TrimSpace(req.SourceURL) != "" {
+		cleanURL := strings.TrimSpace(req.SourceURL)
+		var err error
+		job, err = s.CreateJobWithOptions(ctx, cleanURL, "release_picker", JobOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("ошибка создания задачи загрузки: %w", err)
+		}
+	}
+
+	updatedCount := 0
+	totalTracks := 0
+
+	job.mu.Lock()
+	totalTracks = len(job.Tracks)
+	for idx := range job.Tracks {
+		if audioURL, ok := req.TrackMapping[idx]; ok && strings.TrimSpace(audioURL) != "" {
+			trimmedURL := strings.TrimSpace(audioURL)
+			job.Tracks[idx].AudioSourceURL = trimmedURL
+			job.Tracks[idx].VersionStatus = "manual"
+			job.Tracks[idx].Status = "pending"
+			job.Tracks[idx].Error = nil
+			updatedCount++
+
+			if s.repo != nil {
+				_ = s.repo.SavePinnedSource(ctx, PinnedTrackSourceDTO{
+					CacheKey:   job.Tracks[idx].TrackID,
+					PinnedURL:  trimmedURL,
+					SourceType: "manual",
+					UpdatedAt:  time.Now().UTC(),
+				})
+			}
+		} else {
+			// Оставшиеся несопоставленные треки: сбрасываем AudioSourceURL, чтобы AudioMatcher нашел их поштучно
+			job.Tracks[idx].AudioSourceURL = ""
+			job.Tracks[idx].Status = "pending"
+			job.Tracks[idx].Error = nil
+		}
+	}
+
+	job.Status = StatusQueued
+	job.Progress = 0.0
+	job.CompletedTracks = 0
+	job.CurrentStep = "Источник релиза обновлен, перезапуск очереди"
+	job.Error = nil
+	job.UpdatedAt = time.Now().UTC()
+	job.mu.Unlock()
+
+	job.notifyUpdate()
+
+	if s.repo != nil {
+		_ = s.repo.SaveJob(ctx, job)
+	}
+
+	// Очищаем предыдущие временные скачанные файлы
+	if s.tmpSandbox != nil {
+		if rawDir, err := s.tmpSandbox.Resolve(filepath.Join(job.ID, "raw"), false); err == nil {
+			_ = os.RemoveAll(rawDir)
+		}
+		if convDir, err := s.tmpSandbox.Resolve(filepath.Join(job.ID, "converted"), false); err == nil {
+			_ = os.RemoveAll(convDir)
+		}
+	}
+
+	select {
+	case s.workQueue <- job.ID:
+	default:
+	}
+
+	return &SwitchReleaseSourceResult{
+		JobID:        job.ID,
+		UpdatedCount: updatedCount,
+		TotalTracks:  totalTracks,
+		Status:       "queued",
+	}, nil
+}

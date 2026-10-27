@@ -34,6 +34,17 @@
             <div class="flex items-center space-x-1 shrink-0">
                 <button
                     type="button"
+                    @click="$store.releaseSourcePicker.openForLibraryDirectory(currentPath, '', '')"
+                    class="px-2 py-1 rounded-sm bg-surface-elevated border border-surface-border hover:border-brand/40 text-content-muted hover:text-brand text-xs font-mono transition flex items-center space-x-1 focus-visible:ring-2 focus-visible:ring-brand/30"
+                    title="Выбрать источник релиза (альбом YouTube Music или сет SoundCloud)"
+                    aria-label="Выбрать источник релиза">
+                    <svg class="w-3.5 h-3.5 text-brand" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z"/>
+                    </svg>
+                    <span>Источник</span>
+                </button>
+                <button
+                    type="button"
                     @click="promptRedownloadCurrentFolder()"
                     class="px-2 py-1 rounded-sm bg-surface-elevated border border-surface-border hover:border-white/20 text-content-muted hover:text-white text-xs font-mono transition flex items-center space-x-1 focus-visible:ring-2 focus-visible:ring-white/30"
                     title="Скачать текущий альбом/релиз заново"

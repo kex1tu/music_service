@@ -90,12 +90,13 @@ type ReleaseMetadata struct {
 
 // SourceResolver coordinates URL detection and metadata extraction.
 type SourceResolver struct {
-	deezerClient  *DeezerClient
-	yandexClient  *YandexMusicClient
-	ytmusicClient *YouTubeMusicClient
-	featEnricher  *FeatEnricher
-	audioMatcher  *AudioMatcher
-	cookiesPath   string
+	deezerClient       *DeezerClient
+	yandexClient       *YandexMusicClient
+	ytmusicClient      *YouTubeMusicClient
+	featEnricher       *FeatEnricher
+	audioMatcher       *AudioMatcher
+	fullReleaseMatcher *FullReleaseMatcher
+	cookiesPath        string
 }
 
 // NewSourceResolver creates a new SourceResolver.
@@ -245,9 +246,21 @@ func (r *SourceResolver) Resolve(ctx context.Context, rawURL, explicitSource str
 	}
 }
 
+// SetFullReleaseMatcher переопределяет FullReleaseMatcher (для мок-тестов).
+func (r *SourceResolver) SetFullReleaseMatcher(m *FullReleaseMatcher) {
+	r.fullReleaseMatcher = m
+}
+
+// FullReleaseMatcher возвращает настроенный экземпляр FullReleaseMatcher.
+func (r *SourceResolver) FullReleaseMatcher() *FullReleaseMatcher {
+	if r.fullReleaseMatcher != nil {
+		return r.fullReleaseMatcher
+	}
+	return NewFullReleaseMatcher(r.ytmusicClient, NewSoundCloudSetSearcher(r.cookiesPath))
+}
+
 // MatchFullRelease ищет цельный официальный релиз на YouTube Music и сопоставляет треклист.
 func (r *SourceResolver) MatchFullRelease(ctx context.Context, targetArtist, targetAlbum string, targetTracks []ResolvedTrack) (*FullReleaseMatchResult, error) {
-	matcher := NewFullReleaseMatcher(r.ytmusicClient)
-	return matcher.MatchFullRelease(ctx, targetArtist, targetAlbum, targetTracks)
+	return r.FullReleaseMatcher().MatchFullRelease(ctx, targetArtist, targetAlbum, targetTracks)
 }
 

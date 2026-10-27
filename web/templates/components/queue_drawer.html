@@ -154,6 +154,13 @@
                                         В теги
                                     </button>
                                 </template>
+                                <button
+                                    type="button"
+                                    @click="$store.releaseSourcePicker.openForJob(j)"
+                                    class="px-2 py-1 bg-surface-elevated text-content-secondary hover:text-white rounded text-xs font-semibold transition border border-surface-border focus-visible:ring-2 focus-visible:ring-white/40"
+                                    title="Сменить источник релиза">
+                                    Источник
+                                </button>
                                 <template x-if="j.status !== 'READY' && j.status !== 'ERROR'">
                                     <button
                                         type="button"

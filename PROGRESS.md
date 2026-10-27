@@ -1142,6 +1142,44 @@
     - Развернуто на боевых серверах `nl_music` (194.76.168.20) и Сервер 2 (`13.143.193.207`).
     - Верифицировано в Playwright: при нажатии «В теги» на релизе `21XXX - 21 Savage` открываются все 12 треков с полной сеткой метаданных.
 
+### Блок 94: Выбор источника целого релиза (Release Source Picker) и контекстная оценка цензуры (DONE)
+- **Цель:** Предоставить пользователю возможность вручную переключать источник всего релиза целиком (альбома или EP) между официальным стримингом YouTube Music и сетами SoundCloud (включая неофициальные профили и паблики), предотвращая скачивание цензурированных версий треков с вырезанными словами/битами, с интерактивной таблицей Side-by-Side сопоставления треков и переназначения дорожек.
+- **Выполненные изменения:**
+  - **94.1. Движок поиска сетов SoundCloud (`internal/services/resolver/sc_set_searcher.go`):**
+    - Реализован `SoundCloudSetSearcher` с поддержкой поиска сетов через `ytsearch` по домену `soundcloud.com` и парсинга ссылок на альбомы/сеты SoundCloud.
+    - Парсинг плейлистов `yt-dlp -J --flat-playlist`: извлечение треклиста, длительностей, прямых ссылок (`DirectURL`).
+    - Поддержка хуков для 100% мокирования сетевых вызовов в тестах без обращения к внешним серверам.
+  - **94.2. Полнорелизный матчер и контекстные правила цензуры (`internal/services/resolver/full_release_matcher.go`, `client_ytmusic.go`):**
+    - Внедрен скоринг кандидатов `ScoreReleaseCandidate(source, isCyrillic, matchedRatio)`:
+      - Для русскоязычных исполнителей (`\p{Cyrillic}`): официальные релизы YTM помечаются флагом `🚩 Офиц. релиз (возможна цензура)` со штрафом (-30 очков), а оригинальные сеты SoundCloud помечаются `⭐ SoundCloud (оригинал без цензуры)` с бонусом (+35 очков).
+      - Для зарубежных исполнителей: официальный релиз YTM помечается `⭐ Официальный релиз (студийное качество)` с бонусом (+40 очков), а неофициальные источники штрафуются (-15 очков).
+    - В `client_ytmusic.go` добавлен метод `SearchAlbumReleaseCandidates` для нахождения альтернативных официальных версий (Explicit/Clean, Deluxe).
+    - В `FullReleaseMatcher` добавлены методы `SearchReleaseCandidates` и `ParseAndMatchReleaseURL`.
+  - **94.3. Бэкенд API смены источника (`internal/features/downloader/`):**
+    - Введены типы `ReleaseCandidatesResponse`, `ParseReleaseURLRequest`, `SwitchReleaseSourceRequest`, `SwitchReleaseSourceResult`.
+    - Реализован метод `downloader.Service.SwitchReleaseSource`: сброс статусов треков, безопасная замена `AudioSourceURL` под мьютексом `job.mu`, сохранение закреплений в `pinned_sources`, удаление старых временных файлов в sandbox и перезапуск скачивания в очереди.
+    - Добавлены HTTP-хэндлеры и маршруты:
+      - `GET /downloads/release-candidates` & `GET /api/downloads/release-candidates`
+      - `POST /downloads/release-candidates/parse-url` & `POST /api/downloads/release-candidates/parse-url`
+      - `POST /downloads/releases/switch-source` & `POST /api/downloads/releases/switch-source`
+  - **94.4. Интерактивный фронтенд-компонент и модальное окно (`web/`):**
+    - Разработан модуль `web/static/js/downloader/release_source_picker.js` с хранилищем `Alpine.store('releaseSourcePicker')`:
+      - Поддержка открытия из Очереди загрузок (`openForJob`), Неполных релизов (`openForMissingAlbum`) и Файлового менеджера/Puddletag (`openForLibraryDirectory`).
+      - Автопоиск альтернативных кандидатов с группировкой по сервисам (YouTube Music / SoundCloud).
+      - Вкладка ручного ввода URL сета SoundCloud с валидацией через `parse-url`.
+      - Таблица Side-by-Side сравнения целевого треклиста и треклиста кандидата с цветовыми бейджами разницы таймингов ($\le 2$s зеленый, $\le 12$s желтый, несопоставленный красный).
+      - Интерактивный Dropdown ручного переназначения треков с кнопками очистки/сброса.
+    - Разработан HTML-шаблон `web/templates/components/downloader_release_source_picker_modal.html` в стилистике аудио-комбайна Tailwind CDN без Node.js сборки.
+    - Интеграция кнопок «Источник» / «Выбрать источник»:
+      - В очереди загрузок (`downloader_queue.html`, `queue_drawer.html`).
+      - В аудите неполных релизов (`audit_incomplete.html`).
+      - В сетке и панели инструментов Puddletag (`puddletag_grid.html`, `puddletag_toolbar.html`).
+  - **94.5. Тестирование и верификация:**
+    - `TestDownloader_ReleaseCandidates_And_SwitchReleaseSource` и `TestDownloader_ParseReleaseURL`: 100% PASS под `-race`.
+    - `full_release_matcher_test.go`, `sc_set_searcher_test.go`, `client_ytmusic_test.go`: 100% PASS под `-race`.
+    - Все 449 JS-методов и шаблоны `web/`: 100% PASS.
+    - Полный прогон `go test ./...`: 100% PASS во всех пакетах репозитория.
+
 ---
 
 ## 4. Верификация и Продакшен-Деплой
