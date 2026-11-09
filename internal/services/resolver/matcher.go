@@ -6,11 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
+
 	"strings"
 	"time"
 
 	"music-manager/internal/config"
+	"music-manager/internal/core/mediaexec"
 	"music-manager/internal/db"
 )
 
@@ -26,8 +27,8 @@ type YtCandidate struct {
 	Timestamp  int64   `json:"timestamp,omitempty"`
 }
 
-// EarlyExitMatchThreshold определяет порог (85%), при котором кандидат признается
-// эталонным студийным треком и дальнейший поиск по резервным шаблонам немедленно останавливается.
+// EarlyExitMatchThreshold is retained for compatibility with integrations.
+// Search no longer exits early or treats this uncalibrated rating as confidence.
 const EarlyExitMatchThreshold = 85.0
 
 // AudioMatcher matches Deezer track metadata to SoundCloud or YouTube audio streams.
@@ -43,11 +44,12 @@ type AudioMatcher struct {
 
 // MatchResult содержит детальные сведения о подобранном аудио-источнике.
 type MatchResult struct {
-	URL        string
-	Status     string // marked, likely, unverified, manual, or "" (for youtube)
-	Duration   int
-	Candidates []db.SoundCloudCandidateItem
-	MatchScore float64
+	Suggestions []CandidateTrackItem `json:"suggestions,omitempty"`
+	URL         string
+	Status      string // marked, likely, unverified, manual, or "" (for youtube)
+	Duration    int
+	Candidates  []db.SoundCloudCandidateItem
+	MatchScore  float64
 }
 
 // NewAudioMatcher creates a new AudioMatcher.
@@ -89,66 +91,20 @@ func (m *AudioMatcher) FindBestMatch(ctx context.Context, title, artist string, 
 	if err != nil {
 		return "", err
 	}
+	if res.URL == "" {
+		return "", fmt.Errorf("manual source selection required")
+	}
 	return res.URL, nil
 }
 
-// FindBestMatchWithDetails searches SoundCloud first using Uncensored Resolver ranking and SQLite cache,
-// falling back transparently to YouTube if no suitable candidates are found on SoundCloud.
+// FindBestMatchWithDetails returns a combined suggestion list. Cached/pinned
+// URLs do not authorize application; URL stays empty pending a user choice.
 func (m *AudioMatcher) FindBestMatchWithDetails(ctx context.Context, title, artist, isrc string, duration int) (*MatchResult, error) {
-	cacheKey := BuildCacheKey(isrc, artist, title)
-
-	// 0. Проверка постоянных ручных привязок пользователя (наивысший приоритет)
-	if m.db != nil {
-		if pin, err := m.db.GetPinnedSource(ctx, cacheKey); err == nil && pin != nil && pin.PinnedURL != "" {
-			return &MatchResult{
-				URL:      pin.PinnedURL,
-				Status:   "manual",
-				Duration: pin.Duration,
-			}, nil
-		}
+	items, err := m.SearchMultiCandidates(ctx, artist, title, duration)
+	if err != nil {
+		return nil, err
 	}
-
-	// 1. Проверка SQLite кэша
-	if m.db != nil {
-		ttlHours := 720
-		if m.cfg != nil && m.cfg.UncensoredCacheTTLHours > 0 {
-			ttlHours = m.cfg.UncensoredCacheTTLHours
-		}
-		if cached, err := m.db.GetSoundCloudCache(ctx, cacheKey, ttlHours); err == nil && cached != nil && cached.SelectedURL != "" {
-			return &MatchResult{
-				URL:        cached.SelectedURL,
-				Status:     cached.Status,
-				Duration:   cached.Duration,
-				Candidates: cached.Candidates,
-			}, nil
-		}
-	}
-
-	// 2. Поиск на SoundCloud с ранжированием
-	scRes, scErr := m.FindUncensoredSoundCloudMatch(ctx, title, artist, isrc, duration)
-	if scErr == nil && scRes != nil && scRes.URL != "" {
-		if len(scRes.Candidates) > 0 {
-			firstCand := scRes.Candidates[0]
-			scRes.MatchScore = m.CalculateScore(title, artist, duration, firstCand.Title, firstCand.Uploader, firstCand.Duration)
-		} else {
-			scRes.MatchScore = 80.0
-		}
-		return scRes, nil
-	}
-
-	// 3. Фоллбэк на YouTube при отсутствии подходящих кандидатов на SoundCloud
-	ytURL, ytScore, ytErr := m.FindYouTubeMatchWithScore(ctx, title, artist, duration)
-	if ytErr == nil && ytURL != "" {
-		return &MatchResult{
-			URL:        ytURL,
-			Status:     "",
-			Duration:   duration,
-			Candidates: nil,
-			MatchScore: ytScore,
-		}, nil
-	}
-
-	return nil, fmt.Errorf("no suitable audio match found for '%s - %s'", artist, title)
+	return &MatchResult{Status: "waiting_source", Suggestions: items}, nil
 }
 
 // FindUncensoredSoundCloudMatch executes candidate ranking on SoundCloud and caches the result.
@@ -260,7 +216,6 @@ func (m *AudioMatcher) FindSoundCloudMatch(ctx context.Context, title, artist st
 	return "", err
 }
 
-
 // FindYouTubeMatch specifically searches YouTube streams with scoring.
 func (m *AudioMatcher) FindYouTubeMatch(ctx context.Context, title, artist string, duration int) (string, error) {
 	url, _, err := m.FindYouTubeMatchWithScore(ctx, title, artist, duration)
@@ -323,21 +278,13 @@ func (m *AudioMatcher) FindYouTubeMatchWithScore(ctx context.Context, title, art
 				candChan = cand.Uploader
 			}
 			score := m.CalculateScore(title, artist, duration, cand.Title, candChan, int(cand.Duration))
-			if score > bestScore {
+			if score > bestScore && EvaluateTrack(title, artist, duration, cand.Title, candChan, int(cand.Duration), true).Compatible {
 				bestScore = score
 				cCopy := cand
 				bestCandidate = &cCopy
 			}
-			// Early Exit: если кандидат набрал >= 85.0%, моментально завершаем обход кандидатов
-			if bestScore >= EarlyExitMatchThreshold {
-				break
-			}
 		}
 
-		// Early Exit: прерываем обход оставшихся поисковых запросов
-		if bestScore >= EarlyExitMatchThreshold {
-			break
-		}
 	}
 
 	if bestCandidate != nil && bestScore >= 25.0 {
@@ -381,7 +328,8 @@ func (m *AudioMatcher) runSearch(ctx context.Context, query string) ([]YtCandida
 	cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "yt-dlp", args...)
+	cmd := mediaexec.CommandContext(cmdCtx, "yt-dlp", args...)
+	defer cmd.Close()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -396,7 +344,8 @@ func (m *AudioMatcher) runSearch(ctx context.Context, query string) ([]YtCandida
 				}
 				argsNoCookies = append(argsNoCookies, args[i])
 			}
-			cmdRetry := exec.CommandContext(cmdCtx, "yt-dlp", argsNoCookies...)
+			cmdRetry := mediaexec.CommandContext(cmdCtx, "yt-dlp", argsNoCookies...)
+			defer cmdRetry.Close()
 			stdout.Reset()
 			stderr.Reset()
 			cmdRetry.Stdout = &stdout

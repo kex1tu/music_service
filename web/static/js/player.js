@@ -248,8 +248,8 @@ document.addEventListener('alpine:init', () => {
             if (!streamUrl || !spot) return;
 
             // Смещение на 2 секунды назад для контекста
-            const startTime = Math.max(0, (spot.time_sec || 0) - 2.0);
-            const stopDuration = 5.0; // Играем ровно 5 секунд
+            const startTime = Number.isFinite(spot.start_sec) ? Math.max(0, spot.start_sec) : Math.max(0, (spot.time_sec || 0) - 2.0);
+            const stopDuration = Number.isFinite(spot.end_sec) ? Math.max(0.2, Math.min(60, spot.end_sec - startTime)) : 5.0;
 
             this.currentTrack = {
                 title: trackTitle || 'Отслушивание точки',
@@ -362,7 +362,7 @@ document.addEventListener('alpine:init', () => {
                     return;
                 }
                 try {
-                    const res = await fetch('/api/radio/stream/now-playing');
+                    const res = await window.api.raw('/api/radio/stream/now-playing');
                     if (res.ok) {
                         const data = await res.json();
                         if (data && data.current_track && this.currentTrack && this.currentTrack.is_radio) {
@@ -705,7 +705,7 @@ document.addEventListener('alpine:init', () => {
             this.currentLyricIndex = -1;
 
             try {
-                const res = await fetch(`/lyrics?path=${encodeURIComponent(trackPath)}`);
+                const res = await window.api.raw(`/lyrics?path=${encodeURIComponent(trackPath)}`);
                 if (!res.ok) throw new Error('Lyrics fetch failed');
                 const data = await res.json();
                 this.lyricsKind = data.kind || 'none';
@@ -786,7 +786,7 @@ document.addEventListener('alpine:init', () => {
             if (!track) return;
             try {
                 const id = track.id || track.path;
-                const res = await fetch(`/api/tracks/${encodeURIComponent(id)}/metadata`);
+                const res = await window.api.raw(`/api/tracks/${encodeURIComponent(id)}/metadata`);
                 if (res.ok) {
                     const data = await res.json();
                     this.techSpecs = {

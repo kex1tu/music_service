@@ -14,22 +14,23 @@ import (
 type JobStatus string
 
 const (
-	StatusQueued       JobStatus = "QUEUED"
-	StatusResolving    JobStatus = "RESOLVING"
-	StatusDownloading  JobStatus = "DOWNLOADING"
-	StatusConverting   JobStatus = "CONVERTING"
-	StatusTagging      JobStatus = "TAGGING"
-	StatusReady        JobStatus = "READY"
-	StatusPartialReady JobStatus = "PARTIAL_READY"
-	StatusError        JobStatus = "ERROR"
-	StatusCancelled    JobStatus = "CANCELLED"
+	StatusQueued        JobStatus = "QUEUED"
+	StatusWaitingSource JobStatus = "WAITING_SOURCE"
+	StatusResolving     JobStatus = "RESOLVING"
+	StatusDownloading   JobStatus = "DOWNLOADING"
+	StatusConverting    JobStatus = "CONVERTING"
+	StatusTagging       JobStatus = "TAGGING"
+	StatusReady         JobStatus = "READY"
+	StatusPartialReady  JobStatus = "PARTIAL_READY"
+	StatusError         JobStatus = "ERROR"
+	StatusCancelled     JobStatus = "CANCELLED"
 )
 
 // Priority возвращает числовой приоритет для детерминированной сортировки очереди:
 // 1 (Queued) -> 2 (В процессе) -> 3 (Ready) -> 4 (Error) -> 5 (Cancelled) -> 6 (Default).
 func (s JobStatus) Priority() int {
 	switch s {
-	case StatusQueued:
+	case StatusQueued, StatusWaitingSource:
 		return 1
 	case StatusResolving, StatusDownloading, StatusConverting, StatusTagging:
 		return 2
@@ -46,29 +47,29 @@ func (s JobStatus) Priority() int {
 
 // Job представляет доменную модель задачи загрузки в хранилище, сервисе и API.
 type Job struct {
-	mu                sync.RWMutex
-	ID                string                   `json:"id"`
-	Status            JobStatus                `json:"status"`
-	Source            string                   `json:"source"`
-	URL               string                   `json:"url"`
-	Progress          float64                  `json:"progress"`
-	CurrentStep       string                   `json:"current_step"`
-	TotalTracks       int                      `json:"total_tracks"`
-	CompletedTracks   int                      `json:"completed_tracks"`
-	Error             *string                  `json:"error,omitempty"`
-	TargetAlbumPath   *string                  `json:"target_album_path,omitempty"`
-	IsBackfill        bool                     `json:"is_backfill"`
-	AlbumTitle        *string                  `json:"album_title,omitempty"`
-	ArtistName        *string                  `json:"artist_name,omitempty"`
-	CreatedAt         string                   `json:"created_at"` // RFC3339 / RFC3339Nano формат для совместимости с фронтендом
-	UpdatedAt         time.Time                `json:"updated_at,omitempty"`
+	mu                   sync.RWMutex
+	ID                   string                   `json:"id"`
+	Status               JobStatus                `json:"status"`
+	Source               string                   `json:"source"`
+	URL                  string                   `json:"url"`
+	Progress             float64                  `json:"progress"`
+	CurrentStep          string                   `json:"current_step"`
+	TotalTracks          int                      `json:"total_tracks"`
+	CompletedTracks      int                      `json:"completed_tracks"`
+	Error                *string                  `json:"error,omitempty"`
+	TargetAlbumPath      *string                  `json:"target_album_path,omitempty"`
+	IsBackfill           bool                     `json:"is_backfill"`
+	AlbumTitle           *string                  `json:"album_title,omitempty"`
+	ArtistName           *string                  `json:"artist_name,omitempty"`
+	CreatedAt            string                   `json:"created_at"` // RFC3339 / RFC3339Nano формат для совместимости с фронтендом
+	UpdatedAt            time.Time                `json:"updated_at,omitempty"`
 	CoverRelativePath    string                   `json:"-"`
 	AlbumMetadata        resolver.ReleaseMetadata `json:"-"`
 	SelectedTrackIndices []int                    `json:"selected_track_indices,omitempty"`
 	Tracks               []resolver.ResolvedTrack `json:"tracks,omitempty"`
 	trackProgress        []float64                `json:"-"`
-	cancelFunc        func()                   `json:"-"`
-	onUpdate          func()                   `json:"-"`
+	cancelFunc           func()                   `json:"-"`
+	onUpdate             func()                   `json:"-"`
 }
 
 // DownloadJob является алиасом Job для совместимости.
@@ -389,20 +390,20 @@ type PreflightRequest struct {
 type PreflightTrackStatus string
 
 const (
-	TrackStatusNew              PreflightTrackStatus = "NEW"
+	TrackStatusNew               PreflightTrackStatus = "NEW"
 	TrackStatusExistsHighQuality PreflightTrackStatus = "EXISTS_HIGH_QUALITY"
 	TrackStatusExistsUpgrade     PreflightTrackStatus = "EXISTS_UPGRADE_AVAILABLE"
 )
 
 // ExistingTrackInfo содержит сведения о треке, уже найденном в медиатеке.
 type ExistingTrackInfo struct {
-	TrackID      int64  `json:"track_id"`
-	Title        string `json:"title"`
-	Artist       string `json:"artist"`
-	Album        string `json:"album"`
-	FilePath     string `json:"file_path"`
-	Bitrate      int    `json:"bitrate"`
-	QualityTier  string `json:"quality_tier"` // "true_320k" или "upscaled_128k"
+	TrackID     int64  `json:"track_id"`
+	Title       string `json:"title"`
+	Artist      string `json:"artist"`
+	Album       string `json:"album"`
+	FilePath    string `json:"file_path"`
+	Bitrate     int    `json:"bitrate"`
+	QualityTier string `json:"quality_tier"` // "true_320k" или "upscaled_128k"
 }
 
 // PreflightTrackItem представляет трек в предпросмотре релиза.
@@ -454,11 +455,14 @@ type BatchJobRequest = CreateBatchJobRequest
 
 // SwitchVersionRequest — запрос на переключение источника трека.
 type SwitchVersionRequest struct {
-	TargetURL string `json:"target_url"`
+	VersionPolicy resolver.VersionPolicy `json:"version_policy"`
+	TargetURL     string                 `json:"target_url"`
 }
 
 // BindBackfillSourceRequest — запрос на привязку источника к недостающему треку бэкфилла.
 type BindBackfillSourceRequest struct {
+	VersionPolicy resolver.VersionPolicy `json:"version_policy"`
+	Duration int `json:"duration"`
 	Path        string `json:"path"`
 	AlbumTitle  string `json:"album_title"`
 	ArtistName  string `json:"artist_name"`
@@ -557,11 +561,13 @@ type SwitchVersionResponse = SwitchVersionResult
 
 // CandidatesResponse — кандидаты поиска альтернативных источников трека.
 type CandidatesResponse struct {
-	Artist     string                        `json:"artist"`
-	Title      string                        `json:"title"`
-	Query      string                        `json:"query"`
-	Candidates []resolver.CandidateTrackItem `json:"candidates"`
-	Total      int                           `json:"total"`
+	VersionPolicy resolver.VersionPolicy        `json:"version_policy"`
+	Selection     string                        `json:"selection"`
+	Artist        string                        `json:"artist"`
+	Title         string                        `json:"title"`
+	Query         string                        `json:"query"`
+	Candidates    []resolver.CandidateTrackItem `json:"candidates"`
+	Total         int                           `json:"total"`
 }
 
 // DiscographyResponse — агрегированная дискография артиста.
@@ -609,26 +615,28 @@ type PinnedTrackSourceDTO struct {
 
 // SoundCloudCacheDTO — запись кэша альтернативных версий SoundCloud.
 type SoundCloudCacheDTO struct {
-	CacheKey       string                         `json:"cache_key"`
-	TrackTitle     string                         `json:"track_title"`
-	ArtistName     string                         `json:"artist_name"`
-	SelectedURL    string                         `json:"selected_url"`
-	Status         string                         `json:"status"`
-	Duration       int                            `json:"duration"`
-	IsManual       bool                           `json:"is_manual"`
-	CandidatesJSON string                         `json:"candidates_json"`
-	Candidates     []db.SoundCloudCandidateItem   `json:"candidates,omitempty"`
-	CheckedAt      time.Time                      `json:"checked_at"`
-	UpdatedAt      time.Time                      `json:"updated_at"`
+	CacheKey       string                       `json:"cache_key"`
+	TrackTitle     string                       `json:"track_title"`
+	ArtistName     string                       `json:"artist_name"`
+	SelectedURL    string                       `json:"selected_url"`
+	Status         string                       `json:"status"`
+	Duration       int                          `json:"duration"`
+	IsManual       bool                         `json:"is_manual"`
+	CandidatesJSON string                       `json:"candidates_json"`
+	Candidates     []db.SoundCloudCandidateItem `json:"candidates,omitempty"`
+	CheckedAt      time.Time                    `json:"checked_at"`
+	UpdatedAt      time.Time                    `json:"updated_at"`
 }
 
 // ReleaseCandidatesResponse — ответ поиска цельных источников релиза.
 type ReleaseCandidatesResponse struct {
-	Artist       string                          `json:"artist"`
-	Album        string                          `json:"album"`
-	IsCyrillic   bool                            `json:"is_cyrillic"`
-	TargetTracks []resolver.ResolvedTrack        `json:"target_tracks"`
-	Candidates   []resolver.ReleaseCandidateItem `json:"candidates"`
+	VersionPolicy resolver.VersionPolicy          `json:"version_policy"`
+	Selection     string                          `json:"selection"`
+	Artist        string                          `json:"artist"`
+	Album         string                          `json:"album"`
+	IsCyrillic    bool                            `json:"is_cyrillic"`
+	TargetTracks  []resolver.ResolvedTrack        `json:"target_tracks"`
+	Candidates    []resolver.ReleaseCandidateItem `json:"candidates"`
 }
 
 // ParseReleaseURLRequest — запрос разбора произвольной ссылки на релиз.
@@ -641,10 +649,12 @@ type ParseReleaseURLRequest struct {
 
 // SwitchReleaseSourceRequest — запрос применения источника цельного релиза.
 type SwitchReleaseSourceRequest struct {
-	JobID        string         `json:"job_id"`
-	TargetPath   string         `json:"target_path,omitempty"`
-	SourceURL    string         `json:"source_url,omitempty"`
-	TrackMapping map[int]string `json:"track_mapping"` // targetIdx -> audioURL
+	TargetTracks  []resolver.ResolvedTrack `json:"target_tracks,omitempty"`
+	VersionPolicy resolver.VersionPolicy   `json:"version_policy"`
+	JobID         string                   `json:"job_id"`
+	TargetPath    string                   `json:"target_path,omitempty"`
+	SourceURL     string                   `json:"source_url,omitempty"`
+	TrackMapping  map[int]string           `json:"track_mapping"` // targetIdx -> audioURL
 }
 
 // SwitchReleaseSourceResult — результат переключения источника релиза.

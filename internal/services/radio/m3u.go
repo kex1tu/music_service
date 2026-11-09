@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 )
 
@@ -68,19 +69,19 @@ func (g *M3UGenerator) GenerateWaveM3U(ctx context.Context) (string, error) {
 	}
 
 	// Создаем каталог Playlists, если он не существует
-	if err := os.MkdirAll(filepath.Dir(absTarget), 0755); err != nil {
+	if err := safefs.MkdirAll(filepath.Dir(absTarget), 0755); err != nil {
 		return "", fmt.Errorf("failed to create Playlists directory: %w", err)
 	}
 
 	// Атомарная запись через временный файл
 	tmpTarget := fmt.Sprintf("%s.tmp.%d", absTarget, os.Getpid())
-	if err := os.WriteFile(tmpTarget, []byte(sb.String()), 0644); err != nil {
+	if err := safefs.WriteFile(tmpTarget, []byte(sb.String()), 0644); err != nil {
 		return "", fmt.Errorf("failed to write temporary m3u file: %w", err)
 	}
-	_ = os.Chmod(tmpTarget, 0644)
+	_ = safefs.Chmod(tmpTarget, 0644)
 
-	if err := os.Rename(tmpTarget, absTarget); err != nil {
-		_ = os.Remove(tmpTarget)
+	if err := safefs.Rename(tmpTarget, absTarget); err != nil {
+		_ = safefs.Remove(tmpTarget)
 		return "", fmt.Errorf("failed to commit m3u file: %w", err)
 	}
 

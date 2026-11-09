@@ -28,7 +28,7 @@ function lyricsModalComponent() {
             this.isLoading = true;
 
             try {
-                const res = await fetch(`/lyrics?path=${encodeURIComponent(this.track.path)}`);
+                const res = await window.api.raw(`/lyrics?path=${encodeURIComponent(this.track.path)}`);
                 if (res.ok) {
                     const data = await res.json();
                     const text = data.lyrics || data.content;
@@ -61,7 +61,7 @@ function lyricsModalComponent() {
                 if (this.track.album) params.append('album', this.track.album);
                 if (this.track.duration) params.append('duration', this.track.duration);
 
-                const res = await fetch(`/lyrics/search?${params.toString()}`);
+                const res = await window.api.raw(`/lyrics/search?${params.toString()}`);
                 if (!res.ok) {
                     throw new Error('Сбой при поиске текста');
                 }
@@ -172,7 +172,7 @@ function lyricsModalComponent() {
             this.isSaving = true;
 
             try {
-                const res = await fetch('/lyrics', {
+                const res = await window.api.raw('/lyrics', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -220,7 +220,7 @@ function lyricsModalComponent() {
             if (!confirm('Удалить файл текста песни?')) return;
 
             try {
-                const res = await fetch(`/lyrics?path=${encodeURIComponent(this.track.path)}`, {
+                const res = await window.api.raw(`/lyrics?path=${encodeURIComponent(this.track.path)}`, {
                     method: 'DELETE',
                 });
 

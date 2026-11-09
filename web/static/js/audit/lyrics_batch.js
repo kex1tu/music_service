@@ -5,7 +5,7 @@ window.AuditLyrics = {
     async startBatchLyricsFetch() {
         if (this.lyricsProgress.is_running) return;
         try {
-            const res = await fetch('/files/audit/missing-lyrics/fetch-all', { method: 'POST' });
+            const res = await window.api.raw('/files/audit/missing-lyrics/fetch-all', { method: 'POST' });
             if (res.ok) {
                 this.lyricsProgress = await res.json();
                 Alpine.store('app').toast('Запущен пакетный поиск текстов песен', 'info');
@@ -18,7 +18,7 @@ window.AuditLyrics = {
 
     async checkLyricsProgress() {
         try {
-            const res = await fetch('/files/audit/missing-lyrics/progress');
+            const res = await window.api.raw('/files/audit/missing-lyrics/progress');
             if (res.ok) {
                 const data = await res.json();
                 this.lyricsProgress = data;
@@ -35,7 +35,7 @@ window.AuditLyrics = {
         if (this.lyricsPollInterval) clearInterval(this.lyricsPollInterval);
         this.lyricsPollInterval = setInterval(async () => {
             try {
-                const res = await fetch('/files/audit/missing-lyrics/progress');
+                const res = await window.api.raw('/files/audit/missing-lyrics/progress');
                 if (res.ok) {
                     const data = await res.json();
                     this.lyricsProgress = data;

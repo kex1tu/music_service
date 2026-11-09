@@ -128,6 +128,11 @@ func classifyWord(word string) (SpotCategory, bool) {
 	if w == "" {
 		return "", false
 	}
+	for _, stem := range []string{"суицид", "самоубий", "самоповрежд"} {
+		if strings.HasPrefix(w, stem) {
+			return CategorySuicide, true
+		}
+	}
 
 	// 1. Наркотики ст. 6.13 КоАП РФ
 	if _, ok := drugWordsSet[w]; ok {

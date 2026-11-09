@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+
+	"music-manager/internal/core/auth"
 )
 
 // MusicBrainzLogin инициирует OAuth 2.0 авторизацию пользователя на MusicBrainz.
@@ -29,6 +31,7 @@ func (h *TagHandler) MusicBrainzLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	state := uuid.New().String()
+	auth.RegisterOAuthState(state)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "mb_oauth_state",
 		Value:    state,
@@ -65,6 +68,11 @@ func (h *TagHandler) MusicBrainzLogin(w http.ResponseWriter, r *http.Request) {
 
 // MusicBrainzCallback обрабатывает перенаправление от MusicBrainz OAuth с кодом авторизации.
 func (h *TagHandler) MusicBrainzCallback(w http.ResponseWriter, r *http.Request) {
+	if !auth.ConsumeOAuthState(w, r) {
+		http.Error(w, "invalid or expired OAuth state", http.StatusForbidden)
+		return
+	}
+
 	if h.musicbrainz == nil {
 		http.Error(w, "MusicBrainz client is not initialized", http.StatusInternalServerError)
 		return

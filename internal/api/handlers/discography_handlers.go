@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os/exec"
+
 	"strconv"
 	"strings"
 	"time"
 
+	"music-manager/internal/core/mediaexec"
 	"music-manager/internal/services/resolver"
 )
 
@@ -241,7 +242,8 @@ func fetchYtReleases(ctx context.Context, targetURL, cookiesPath string) ([]Disc
 	cmdCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "yt-dlp", args...)
+	cmd := mediaexec.CommandContext(cmdCtx, "yt-dlp", args...)
+	defer cmd.Close()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -256,7 +258,8 @@ func fetchYtReleases(ctx context.Context, targetURL, cookiesPath string) ([]Disc
 				}
 				argsNoCookies = append(argsNoCookies, args[i])
 			}
-			cmdRetry := exec.CommandContext(cmdCtx, "yt-dlp", argsNoCookies...)
+			cmdRetry := mediaexec.CommandContext(cmdCtx, "yt-dlp", argsNoCookies...)
+			defer cmdRetry.Close()
 			stdout.Reset()
 			stderr.Reset()
 			cmdRetry.Stdout = &stdout

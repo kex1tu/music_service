@@ -100,19 +100,15 @@ jobs:
             service: "music-manager.service"
             health_url: "https://mymusicdownload.verymad.net/api/health"
     steps:
-      - name: Check target selection
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.target != 'all' && github.event.inputs.target != matrix.server.id
-        run: |
-          echo "Skipping ${{ matrix.server.name }} because target '${{ github.event.inputs.target }}' was chosen."
-          exit 0
-
-      - name: Download Binary Artifact
+      - if: github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all' || github.event.inputs.target == matrix.server.id
+        name: Download Binary Artifact
         uses: actions/download-artifact@v4
         with:
           name: music-manager-bin
           path: bin
 
-      - name: Configure SSH
+      - if: github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all' || github.event.inputs.target == matrix.server.id
+        name: Configure SSH
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
@@ -120,18 +116,21 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p ${{ matrix.server.port }} -H ${{ matrix.server.host }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      - name: Sync Git Repository on Server
+      - if: github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all' || github.event.inputs.target == matrix.server.id
+        name: Sync Git Repository on Server
         run: |
           ssh -i ~/.ssh/deploy_key -p ${{ matrix.server.port }} -o StrictHostKeyChecking=accept-new ${{ matrix.server.user }}@${{ matrix.server.host }} \
             "cd ${{ matrix.server.app_dir }} && git fetch origin main && git checkout -- . && git pull --ff-only origin main"
 
-      - name: Upload Prebuilt Binary
+      - if: github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all' || github.event.inputs.target == matrix.server.id
+        name: Upload Prebuilt Binary
         run: |
           ssh -i ~/.ssh/deploy_key -p ${{ matrix.server.port }} -o StrictHostKeyChecking=accept-new ${{ matrix.server.user }}@${{ matrix.server.host }} \
             "mkdir -p ${{ matrix.server.app_dir }}/bin"
           scp -i ~/.ssh/deploy_key -P ${{ matrix.server.port }} -o StrictHostKeyChecking=accept-new bin/music-manager ${{ matrix.server.user }}@${{ matrix.server.host }}:${{ matrix.server.app_dir }}/bin/music-manager.new
 
-      - name: Atomic Swap & Restart Service
+      - if: github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all' || github.event.inputs.target == matrix.server.id
+        name: Atomic Swap & Restart Service
         run: |
           ssh -i ~/.ssh/deploy_key -p ${{ matrix.server.port }} -o StrictHostKeyChecking=accept-new ${{ matrix.server.user }}@${{ matrix.server.host }} bash -s << 'EOF'
             set -e
@@ -152,7 +151,8 @@ jobs:
             echo "Service $SERVICE restarted successfully."
           EOF
 
-      - name: Verify Health Check & Auto-Rollback
+      - if: github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all' || github.event.inputs.target == matrix.server.id
+        name: Verify Health Check & Auto-Rollback
         run: |
           echo "Verifying service health on ${{ matrix.server.health_url }}..."
           HEALTHY=0

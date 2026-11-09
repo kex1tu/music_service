@@ -36,7 +36,7 @@
             params.append('audio_path', audioPath.trim());
         }
 
-        const resp = await fetch(`/api/catalog/search?${params.toString()}`, {
+        const resp = await window.api.raw(`/api/catalog/search?${params.toString()}`, {
             headers: { 'Accept': 'application/json' }
         });
 
@@ -74,7 +74,7 @@
             throw new Error(`Неизвестный источник метаданных: ${source}`);
         }
 
-        const resp = await fetch(endpoint, {
+        const resp = await window.api.raw(endpoint, {
             headers: { 'Accept': 'application/json' }
         });
 
@@ -340,7 +340,7 @@
      */
     async function getMusicBrainzOAuthStatus() {
         try {
-            const resp = await fetch('/api/auth/musicbrainz/status', {
+            const resp = await window.api.raw('/api/auth/musicbrainz/status', {
                 headers: { 'Accept': 'application/json' }
             });
             if (!resp.ok) return { configured: false, connected: false };
@@ -357,7 +357,7 @@
      */
     async function disconnectMusicBrainzOAuth() {
         try {
-            const resp = await fetch('/api/auth/musicbrainz/disconnect', {
+            const resp = await window.api.raw('/api/auth/musicbrainz/disconnect', {
                 method: 'POST',
                 headers: { 'Accept': 'application/json' }
             });

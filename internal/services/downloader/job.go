@@ -13,15 +13,16 @@ import (
 type JobStatus string
 
 const (
-	StatusQueued      JobStatus = "QUEUED"
-	StatusResolving   JobStatus = "RESOLVING"
-	StatusDownloading JobStatus = "DOWNLOADING"
-	StatusConverting  JobStatus = "CONVERTING"
-	StatusTagging     JobStatus = "TAGGING"
-	StatusReady        JobStatus = "READY"
-	StatusPartialReady JobStatus = "PARTIAL_READY"
-	StatusError        JobStatus = "ERROR"
-	StatusCancelled    JobStatus = "CANCELLED"
+	StatusQueued        JobStatus = "QUEUED"
+	StatusWaitingSource JobStatus = "WAITING_SOURCE"
+	StatusResolving     JobStatus = "RESOLVING"
+	StatusDownloading   JobStatus = "DOWNLOADING"
+	StatusConverting    JobStatus = "CONVERTING"
+	StatusTagging       JobStatus = "TAGGING"
+	StatusReady         JobStatus = "READY"
+	StatusPartialReady  JobStatus = "PARTIAL_READY"
+	StatusError         JobStatus = "ERROR"
+	StatusCancelled     JobStatus = "CANCELLED"
 )
 
 // DownloadJob represents an active or completed download task.
@@ -64,11 +65,11 @@ func (j *DownloadJob) MarshalJSON() ([]byte, error) {
 }
 
 // Snapshot creates an independent thread-safe copy of the job.
-func (j *DownloadJob) Snapshot() DownloadJob {
+func (j *DownloadJob) Snapshot() *DownloadJob {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 
-	snap := DownloadJob{
+	snap := &DownloadJob{
 		ID:                j.ID,
 		Status:            j.Status,
 		Source:            j.Source,

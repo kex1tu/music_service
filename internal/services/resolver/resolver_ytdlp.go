@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os/exec"
+
 	"strconv"
 	"strings"
 	"time"
 
+	"music-manager/internal/core/mediaexec"
 	"music-manager/internal/id3"
 )
 
@@ -88,7 +89,8 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "yt-dlp", args...)
+	cmd := mediaexec.CommandContext(cmdCtx, "yt-dlp", args...)
+	defer cmd.Close()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -147,7 +149,8 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 				}
 				argsNoCookies = append(argsNoCookies, args[i])
 			}
-			cmdRetry := exec.CommandContext(cmdCtx, "yt-dlp", argsNoCookies...)
+			cmdRetry := mediaexec.CommandContext(cmdCtx, "yt-dlp", argsNoCookies...)
+			defer cmdRetry.Close()
 			stdout.Reset()
 			stderr.Reset()
 			cmdRetry.Stdout = &stdout
@@ -444,4 +447,3 @@ func (r *SourceResolver) resolveYtDlp(ctx context.Context, rawURL string) (*Rele
 
 	return meta, tracks, nil
 }
-

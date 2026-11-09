@@ -14,6 +14,14 @@
      * @param {RequestInit} [options] - Параметры fetch
      * @returns {Promise<any>} Десериализованный JSON или текст ответа
      */
+    async function raw(url, options = {}) {
+        const target = new URL(url, window.location.href);
+        const res = await fetch(url, { ...options, ...(target.origin === window.location.origin ? { credentials: 'same-origin' } : {}) });
+        if (target.origin === window.location.origin && res.status === 401) {
+            window.dispatchEvent(new CustomEvent('api:unauthorized'));
+        }
+        return res;
+    }
     async function request(url, options = {}) {
         const headers = { ...(options.headers || {}) };
 
@@ -24,7 +32,7 @@
             body = JSON.stringify(body);
         }
 
-        const res = await fetch(url, {
+        const res = await raw(url, {
             ...options,
             headers,
             body,
@@ -84,6 +92,7 @@
 
     const api = {
         request,
+        raw,
 
         // ==================== AUTH ====================
         auth: {

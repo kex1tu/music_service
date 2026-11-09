@@ -38,7 +38,7 @@ window.DownloaderVersions = {
 
         this.switchingTrackId = track.track_id;
         try {
-            const res = await fetch(`/api/downloads/tracks/${encodeURIComponent(track.track_id)}/switch-version`, {
+            const res = await window.api.raw(`/api/downloads/tracks/${encodeURIComponent(track.track_id)}/switch-version`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ target_url: targetUrl }),
@@ -70,11 +70,34 @@ window.DownloaderVersions = {
         }
     },
 
+    getTrackSourceState(track) {
+        const url = track.audio_source_url || '';
+        const selected = !!url && !url.includes('deezer.com');
+        const waiting = track.status === 'waiting_source';
+        const failed = track.status === 'error';
+        let message = '';
+        if (waiting) {
+            message = selected
+                ? 'Источник выбран, но скачивание не удалось.'
+                : 'Для этого трека источник не назначен. Выберите его отдельно или в сопоставлении релиза.';
+        } else if (failed) {
+            message = selected
+                ? 'Ошибка обработки трека. Выбранный источник сохранён.'
+                : 'Ошибка обработки трека.';
+        }
+        return {
+            selected,
+            attention: waiting || failed,
+            action: selected ? 'Сменить источник' : 'Выбрать источник',
+            message,
+        };
+    },
+
     getVersionBadge(status) {
         switch (status) {
             case 'marked':
                 return {
-                    label: 'Оригинал',
+                    label: 'Заявлен оригинал',
                     tooltip: 'Помечена в названии как оригинал',
                     badgeClass: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
                     dotClass: 'bg-emerald-400',
@@ -82,7 +105,7 @@ window.DownloaderVersions = {
             case 'likely':
                 return {
                     label: 'Совпадение',
-                    tooltip: 'Та же запись (хронометраж совпал)',
+                    tooltip: 'Близкая длительность; версия не проверена',
                     badgeClass: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',
                     dotClass: 'bg-amber-400',
                 };

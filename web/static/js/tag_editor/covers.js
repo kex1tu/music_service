@@ -33,7 +33,7 @@ window.TagCovers = {
 
     async fetchCoverBase64(url) {
         try {
-            const res = await fetch(url);
+            const res = await window.api.raw(url);
             if (res.ok) {
                 const blob = await res.blob();
                 const reader = new FileReader();
@@ -139,7 +139,7 @@ window.TagCovers = {
             const q = `${track.artist || this.album.album_artist || ''} ${track.title || ''}`.trim();
             if (q) {
                 try {
-                    const res = await fetch(
+                    const res = await window.api.raw(
                         `/tags/covers/search?query=${encodeURIComponent(q)}&limit=1`
                     );
                     if (res.ok) {
@@ -175,7 +175,7 @@ window.TagCovers = {
         this.coverGalleryResults = [];
 
         try {
-            const res = await fetch(
+            const res = await window.api.raw(
                 `/tags/covers/search?query=${encodeURIComponent(this.coverSearchQuery.trim())}&limit=24`
             );
             if (res.ok) {

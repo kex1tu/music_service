@@ -15,6 +15,8 @@ import (
 	"music-manager/internal/api"
 	"music-manager/internal/api/handlers"
 	"music-manager/internal/config"
+	"music-manager/internal/core/auth"
+	"music-manager/internal/core/mediaexec"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	featureAudit "music-manager/internal/features/audit"
@@ -23,6 +25,7 @@ import (
 	featureRadar "music-manager/internal/features/radar"
 	featureRadio "music-manager/internal/features/radio"
 	featureTagEditor "music-manager/internal/features/tageditor"
+	"music-manager/internal/services/censorcheck"
 	"music-manager/internal/services/downloader"
 	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/organizer"
@@ -39,6 +42,10 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("[Main] Configuration error: %v", err)
+	}
+
+	if err := mediaexec.ValidateRuntime(); err != nil {
+		log.Printf("[Main] Downloads requiring yt-dlp are unavailable: %v", err)
 	}
 
 	// 2. Initialize sandboxes
@@ -186,9 +193,27 @@ func main() {
 	lyricsHandler := handlers.NewLyricsHandler(lyricsService)
 
 	// Initialize Audit Vertical Feature Slice
+	clouds := map[string]censorcheck.Transcriber{}
+	if cfg.CensorCloudEnabled {
+		for _, p := range []struct{ name, key, model string }{{"gemini", cfg.GeminiAPIKey, cfg.GeminiModel}, {"deepgram", cfg.DeepgramAPIKey, cfg.DeepgramModel}} {
+			if p.key == "" {
+				continue
+			}
+			client, err := censorcheck.NewCloudClient(p.name, p.key, p.model, nil)
+			if err != nil {
+				log.Fatalf("[Main] Invalid censorship provider configuration: %s", p.name)
+			}
+			clouds[p.name] = client
+		}
+	}
+	censorshipAudit, err := featureAudit.NewCensorshipAudit(database.Conn(), musicSandbox, clouds, cfg.CensorCloudDailySeconds)
+	if err != nil {
+		log.Fatalf("[Main] Failed to initialize censorship audit: %v", err)
+	}
 	auditRepo := featureAudit.NewRepository(database.Conn())
 	auditAdapter := &downloaderBackfillAdapter{svc: downloaderFeatureSvc}
 	auditFeatureSvc := featureAudit.NewService(featureAudit.ServiceConfig{
+		Censorship:      censorshipAudit,
 		MusicSandbox:    musicSandbox,
 		TmpSandbox:      tmpSandbox,
 		Repo:            auditRepo,
@@ -290,6 +315,7 @@ func main() {
 	// Initialize Radio & Radar Vertical Feature Slices
 	radioRepo := featureRadio.NewRepository(database.Conn())
 	radioFeatureSvc := featureRadio.NewService(featureRadio.ServiceConfig{
+		SessionPolicy:    auth.Policy{Name: cfg.SessionCookieName, TTL: cfg.SessionTTL, Secure: cfg.SessionCookieSecure},
 		Selector:         waveSelector,
 		Streamer:         icyStreamer,
 		M3U:              m3uGenerator,
@@ -486,6 +512,3 @@ func (f *fileManagerSourceFinder) FindAlbumURL(ctx context.Context, artist, albu
 	}
 	return "", fmt.Errorf("source not found for album %s - %s", artist, album)
 }
-
-
-

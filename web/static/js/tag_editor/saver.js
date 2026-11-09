@@ -104,7 +104,7 @@ window.TagSaver = {
                 group_by_album: component.groupByAlbum,
             };
 
-            const res = await fetch('/tags/batch', {
+            const res = await window.api.raw('/tags/batch', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
@@ -128,7 +128,7 @@ window.TagSaver = {
             if (component.jobIds && component.jobIds.length > 0) {
                 try {
                     await Promise.allSettled(
-                        component.jobIds.map((jid) => fetch(`/downloads/${jid}`, { method: 'DELETE' }))
+                        component.jobIds.map((jid) => window.api.raw(`/downloads/${jid}`, { method: 'DELETE' }))
                     );
                     if (Alpine.store('app').queue) {
                         await Alpine.store('app').queue.fetchQueue();

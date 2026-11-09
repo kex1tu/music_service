@@ -111,7 +111,7 @@ function libraryAuditComponent() {
             try {
                 if (force) {
                     try {
-                        await fetch('/files/audit/refresh', { method: 'POST' });
+                        await window.api.raw('/files/audit/refresh', { method: 'POST' });
                     } catch (e) {
                         console.warn('Сбой принудительного обновления индекса:', e);
                     }
@@ -133,7 +133,7 @@ function libraryAuditComponent() {
 
         async loadSummary() {
             try {
-                const res = await fetch(`/files/audit/summary?_t=${Date.now()}`);
+                const res = await window.api.raw(`/files/audit/summary?_t=${Date.now()}`);
                 if (res.ok) {
                     this.summary = await res.json();
                 }
@@ -144,7 +144,7 @@ function libraryAuditComponent() {
 
         async loadMissingLyrics() {
             try {
-                const res = await fetch(`/files/audit/missing-lyrics?_t=${Date.now()}`);
+                const res = await window.api.raw(`/files/audit/missing-lyrics?_t=${Date.now()}`);
                 if (res.ok) {
                     this.missingLyrics = await res.json();
                 }
@@ -155,7 +155,7 @@ function libraryAuditComponent() {
 
         async loadMissingCovers() {
             try {
-                const res = await fetch(`/files/audit/missing-covers?_t=${Date.now()}`);
+                const res = await window.api.raw(`/files/audit/missing-covers?_t=${Date.now()}`);
                 if (res.ok) {
                     this.missingCovers = await res.json();
                 }
@@ -166,7 +166,7 @@ function libraryAuditComponent() {
 
         async loadDuplicates() {
             try {
-                const res = await fetch(`/files/audit/duplicates?_t=${Date.now()}`);
+                const res = await window.api.raw(`/files/audit/duplicates?_t=${Date.now()}`);
                 if (res.ok) {
                     this.duplicatesData = await res.json();
                 }
@@ -177,7 +177,7 @@ function libraryAuditComponent() {
 
         async loadInvalidPaths() {
             try {
-                const res = await fetch(`/files/audit/invalid-paths?_t=${Date.now()}`);
+                const res = await window.api.raw(`/files/audit/invalid-paths?_t=${Date.now()}`);
                 if (res.ok) {
                     this.invalidPaths = await res.json();
                 }
@@ -188,7 +188,7 @@ function libraryAuditComponent() {
 
         async loadNonEnGenres() {
             try {
-                const res = await fetch(`/files/audit/non-en-genres?_t=${Date.now()}`);
+                const res = await window.api.raw(`/files/audit/non-en-genres?_t=${Date.now()}`);
                 if (res.ok) {
                     this.nonEnGenres = await res.json();
                 }

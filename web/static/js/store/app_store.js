@@ -27,7 +27,7 @@ document.addEventListener('alpine:init', () => {
 
         async checkAuth() {
             try {
-                const data = window.api ? await window.api.auth.me() : await fetch('/api/auth/me').then(r => r.json());
+                const data = window.api ? await window.api.auth.me() : await window.api.raw('/api/auth/me').then(r => r.json());
                 if (data && data.authenticated && data.login) {
                     this.user = data.login;
                 } else {
@@ -43,7 +43,7 @@ document.addEventListener('alpine:init', () => {
                 if (window.api) {
                     await window.api.auth.logout();
                 } else {
-                    await fetch('/logout', { method: 'POST' });
+                    await window.api.raw('/logout', { method: 'POST' });
                 }
             } catch (e) {
                 console.error('Ошибка выхода:', e);
@@ -60,7 +60,7 @@ document.addEventListener('alpine:init', () => {
                     if (window.api && window.api.files) {
                         await window.api.files.deleteBatch(item.paths);
                     } else {
-                        const res = await fetch('/files', {
+                        const res = await window.api.raw('/files', {
                             method: 'DELETE',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ paths: item.paths })
@@ -74,7 +74,7 @@ document.addEventListener('alpine:init', () => {
                     if (window.api && window.api.files) {
                         await window.api.files.delete(item.path);
                     } else {
-                        const res = await fetch(`/files?path=${encodeURIComponent(item.path)}`, { method: 'DELETE' });
+                        const res = await window.api.raw(`/files?path=${encodeURIComponent(item.path)}`, { method: 'DELETE' });
                         if (!res.ok) {
                             const err = await res.json().catch(() => ({}));
                             throw new Error(err.error || err.detail || err.message || 'Сбой при удалении');
@@ -102,13 +102,13 @@ document.addEventListener('alpine:init', () => {
                 const payload = {
                     path: item.path,
                     type: item.type || 'track',
-                    delete_existing: item.delete_existing !== false,
+                    delete_existing: false,
                 };
                 let resData;
                 if (window.api && window.api.files && window.api.files.redownload) {
                     resData = await window.api.files.redownload(payload);
                 } else {
-                    const res = await fetch('/files/redownload', {
+                    const res = await window.api.raw('/files/redownload', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(payload)

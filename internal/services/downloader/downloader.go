@@ -6,11 +6,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
-	"os"
+
 	"strings"
 	"sync"
 	"time"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	"music-manager/internal/services/resolver"
@@ -225,7 +226,7 @@ func (s *Service) RetryJob(jobID string) (*DownloadJob, error) {
 	// Clean up old temporary files
 	jobDir, err := s.tmpSandbox.Resolve(jobID, false)
 	if err == nil {
-		_ = os.RemoveAll(jobDir)
+		_ = safefs.RemoveAll(jobDir)
 	}
 
 	// Reset job state
@@ -248,7 +249,7 @@ func (s *Service) DeleteJob(id string) error {
 	s.jobs.Delete(id)
 	jobDir, err := s.tmpSandbox.Resolve(id, false)
 	if err == nil {
-		_ = os.RemoveAll(jobDir)
+		_ = safefs.RemoveAll(jobDir)
 	}
 	return nil
 }
@@ -290,7 +291,10 @@ func (s *Service) waitIfPaused(ctx context.Context) error {
 		}
 		s.pauseCond.Wait()
 	}
-	return nil
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.ctx.Err()
 }
 
 // ClearCompletedJobs очищает завершенные, ошибочные и отмененные задачи из памяти, БД и удаляет временные директории.
@@ -308,7 +312,7 @@ func (s *Service) ClearCompletedJobs() int {
 	for _, id := range clearedIDs {
 		jobDir, err := s.tmpSandbox.Resolve(id, false)
 		if err == nil {
-			_ = os.RemoveAll(jobDir)
+			_ = safefs.RemoveAll(jobDir)
 		}
 	}
 	return count
@@ -328,4 +332,3 @@ func (s *Service) RetryAllFailedJobs() ([]string, error) {
 	}
 	return retriedIDs, nil
 }
-

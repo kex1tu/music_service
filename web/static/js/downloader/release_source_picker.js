@@ -19,7 +19,9 @@ document.addEventListener('alpine:init', () => {
 
         targetTracks: [],
         candidates: [],
-        selectedCandidateIndex: 0,
+        selectedCandidateIndex: -1,
+ versionPolicy: "release",
+        searchSerial: 0,
         manualOverrides: {}, // targetIdx -> candTrack object
         activeRemapTargetIdx: null,
 
@@ -34,6 +36,7 @@ document.addEventListener('alpine:init', () => {
             this.artist = job.artist_name || '';
             this.album = job.album_title || '';
             this.targetTracks = job.tracks ? JSON.parse(JSON.stringify(job.tracks)) : [];
+            if (this.targetTracks.length && this.targetTracks.every(t => t.version_policy === this.targetTracks[0].version_policy)) this.versionPolicy = this.targetTracks[0].version_policy || 'release';
             this.isOpen = true;
             this.loadCandidates();
         },
@@ -65,6 +68,8 @@ document.addEventListener('alpine:init', () => {
         },
 
         reset() {
+            this.searchSerial++;
+            this.versionPolicy = 'release';
             this.isLoading = false;
             this.isParsingUrl = false;
             this.isApplying = false;
@@ -76,7 +81,7 @@ document.addEventListener('alpine:init', () => {
             this.isCyrillic = false;
             this.targetTracks = [];
             this.candidates = [];
-            this.selectedCandidateIndex = 0;
+            this.selectedCandidateIndex = -1;
             this.manualOverrides = {};
             this.activeRemapTargetIdx = null;
             this.directUrl = '';
@@ -85,26 +90,29 @@ document.addEventListener('alpine:init', () => {
         },
 
         async loadCandidates() {
+            const serial=++this.searchSerial;
             this.isLoading = true;
             this.errorMessage = '';
             this.candidates = [];
-            this.selectedCandidateIndex = 0;
+            this.selectedCandidateIndex = -1;
             this.manualOverrides = {};
 
             try {
                 const params = new URLSearchParams();
                 if (this.artist) params.append('artist', this.artist);
                 if (this.album) params.append('album', this.album);
+                params.append("version_policy",this.versionPolicy);
                 if (this.jobId) params.append('job_id', this.jobId);
                 if (this.targetPath) params.append('path', this.targetPath);
 
-                const res = await fetch(`/api/downloads/release-candidates?${params.toString()}`);
+                const res = await window.api.raw(`/api/downloads/release-candidates?${params.toString()}`);
                 if (!res.ok) {
                     const errData = await res.json().catch(() => ({}));
                     throw new Error(errData.error || `HTTP ${res.status}: Ошибка поиска релизов`);
                 }
 
                 const data = await res.json();
+                if(serial !== this.searchSerial)return;
                 this.artist = data.artist || this.artist;
                 this.album = data.album || this.album;
                 this.isCyrillic = Boolean(data.is_cyrillic);
@@ -119,7 +127,7 @@ document.addEventListener('alpine:init', () => {
                 console.error('[ReleaseSourcePicker] loadCandidates error:', err);
                 this.errorMessage = err.message || 'Сбой загрузки кандидатов релиза';
             } finally {
-                this.isLoading = false;
+                if(serial === this.searchSerial)this.isLoading = false;
             }
         },
 
@@ -214,7 +222,7 @@ document.addEventListener('alpine:init', () => {
             this.directError = '';
 
             try {
-                const res = await fetch('/api/downloads/release-candidates/parse-url', {
+                const res = await window.api.raw('/api/downloads/release-candidates/parse-url', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -232,7 +240,7 @@ document.addEventListener('alpine:init', () => {
 
                 const cand = await res.json();
                 this.candidates.unshift(cand);
-                this.selectedCandidateIndex = 0;
+                this.selectedCandidateIndex = -1;
                 this.manualOverrides = {};
                 this.activeTab = 'candidates';
                 this.directUrl = '';
@@ -262,13 +270,15 @@ document.addEventListener('alpine:init', () => {
                 }
 
                 const payload = {
+                    version_policy: this.versionPolicy,
+                    target_tracks: this.targetTracks,
                     job_id: this.jobId || '',
                     target_path: this.targetPath || '',
                     source_url: cand ? (cand.url || '') : '',
                     track_mapping: trackMapping,
                 };
 
-                const res = await fetch('/api/downloads/releases/switch-source', {
+                const res = await window.api.raw('/api/downloads/releases/switch-source', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload),

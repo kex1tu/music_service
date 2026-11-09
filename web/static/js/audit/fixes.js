@@ -14,7 +14,7 @@ window.AuditFixes = {
         Alpine.store('app').activeModal = null;
         Alpine.store('app').toast('Запущена реорганизация медиатеки по альбомам...', 'info');
         try {
-            const res = await fetch('/files/audit/reorganize', { method: 'POST' });
+            const res = await window.api.raw('/files/audit/reorganize', { method: 'POST' });
             if (res.ok) {
                 const data = await res.json();
                 if (data.errors && data.errors.length > 0) {
@@ -51,7 +51,7 @@ window.AuditFixes = {
         this.isRetaggingGenres = true;
         Alpine.store('app').toast('Запущена автоматическая перезапись тегов жанров...', 'info');
         try {
-            const res = await fetch('/files/audit/retag-genres', { method: 'POST' });
+            const res = await window.api.raw('/files/audit/retag-genres', { method: 'POST' });
             if (res.ok) {
                 const data = await res.json();
                 if (data.updated_count > 0) {
@@ -81,7 +81,7 @@ window.AuditFixes = {
         if (item._isFixing) return;
         item._isFixing = true;
         try {
-            const res = await fetch('/files/audit/fix-path', {
+            const res = await window.api.raw('/files/audit/fix-path', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ path: item.path, overwrite: true })
@@ -113,7 +113,7 @@ window.AuditFixes = {
         this.isFixingPaths = true;
         Alpine.store('app').toast('Исправление путей всех некорректных файлов...', 'info');
         try {
-            const res = await fetch('/files/audit/fix-all-paths', {
+            const res = await window.api.raw('/files/audit/fix-all-paths', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ overwrite: true })
@@ -152,7 +152,7 @@ window.AuditFixes = {
         grp._isFixing = true;
         Alpine.store('app').toast(`Удаление дубликатов для "${grp.artist} — ${grp.title}"...`, 'info');
         try {
-            const res = await fetch('/files/audit/duplicates/fix', {
+            const res = await window.api.raw('/files/audit/duplicates/fix', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ group_key: grp.key, album_path: grp.album_dir || null }),
@@ -184,7 +184,7 @@ window.AuditFixes = {
         this.isFixingDuplicates = true;
         Alpine.store('app').toast('Удаление всех дубликатов в медиатеке...', 'info');
         try {
-            const res = await fetch('/files/audit/duplicates/fix-all', {
+            const res = await window.api.raw('/files/audit/duplicates/fix-all', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
             });
@@ -229,7 +229,7 @@ window.AuditFixes = {
         this.isNormalizingNavidrome = true;
         Alpine.store('app').toast('Запущена синхронизация медиатеки для Navidrome (права, теги и нормализация синглов)...', 'info');
         try {
-            const res = await fetch('/files/audit/normalize-navidrome', { method: 'POST' });
+            const res = await window.api.raw('/files/audit/normalize-navidrome', { method: 'POST' });
             if (res.ok) {
                 const data = await res.json();
                 const rep = data.report || {};

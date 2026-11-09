@@ -184,11 +184,11 @@ func TestUserJourney_RadarDeduplicationAndDownload(t *testing.T) {
 
 // TestUserJourney_PuddletagDownloaderModeAcceptance:
 // Пользовательский сценарий Puddletag в режиме загрузчика:
-// 1. Загрузка завершена в tmp_downloads/{job_id} в статусе READY.
-// 2. Пользователь открывает редактор тегов и, НЕ меняя поля вручную (dirtyIndices пуст),
-//    нажимает "Принять в медиатеку".
-// 3. Сервер успешно переносит ВСЕ файлы релиза в целевую папку MUSIC_DIR/{destination_dir}/{Track}.mp3.
-// 4. Временная директория tmp_downloads/{job_id} очищается, задача удаляется из очереди.
+//  1. Загрузка завершена в tmp_downloads/{job_id} в статусе READY.
+//  2. Пользователь открывает редактор тегов и, НЕ меняя поля вручную (dirtyIndices пуст),
+//     нажимает "Принять в медиатеку".
+//  3. Сервер успешно переносит ВСЕ файлы релиза в целевую папку MUSIC_DIR/{destination_dir}/{Track}.mp3.
+//  4. Временная директория tmp_downloads/{job_id} очищается, задача удаляется из очереди.
 func TestUserJourney_PuddletagDownloaderModeAcceptance(t *testing.T) {
 	it := setupIntegrationServer(t)
 	cookie := loginForCookie(t, it.server.URL)
@@ -776,15 +776,15 @@ func TestUserJourney_RedownloadTrackAndRelease(t *testing.T) {
 	if resTrk["success"] != true {
 		t.Errorf("expected success true, got %v", resTrk["success"])
 	}
-	if resTrk["deleted"] != true {
-		t.Errorf("expected deleted true, got %v", resTrk["deleted"])
+	if resTrk["deleted"] != false {
+		t.Errorf("expected deleted false, got %v", resTrk["deleted"])
 	}
 	if resTrk["type"] != "track" {
 		t.Errorf("expected type track, got %v", resTrk["type"])
 	}
-	// Проверяем удаление файла трека с диска
-	if _, err := os.Stat(trkPath); !os.IsNotExist(err) {
-		t.Errorf("файл трека все еще существует после redownload с delete_existing: true")
+	// Original remains available while the replacement is staged.
+	if _, err := os.Stat(trkPath); err != nil {
+		t.Errorf("исходный трек потерян после redownload")
 	}
 
 	// Шаг 2: Повторное скачивание альбома
@@ -810,8 +810,7 @@ func TestUserJourney_RedownloadTrackAndRelease(t *testing.T) {
 	if resAlb["type"] != "album" {
 		t.Errorf("expected type album, got %v", resAlb["type"])
 	}
-	if _, err := os.Stat(albumDir); !os.IsNotExist(err) {
-		t.Errorf("папка альбома все еще существует после redownload альбома")
+	if _, err := os.Stat(albumDir); err != nil {
+		t.Errorf("исходный альбом потерян после redownload")
 	}
 }
-

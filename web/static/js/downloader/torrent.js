@@ -22,7 +22,7 @@ window.DownloaderTorrent = {
             const formData = new FormData();
             formData.append('file', file);
 
-            const response = await fetch('/downloads/torrent', {
+            const response = await window.api.raw('/downloads/torrent', {
                 method: 'POST',
                 body: formData,
             });

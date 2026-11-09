@@ -24,7 +24,7 @@ window.DownloaderDiscography = {
 
         this.isResolvingDiscography = true;
         try {
-            const resp = await fetch(`/downloads/discography?url=${encodeURIComponent(cleanUrl)}`);
+            const resp = await window.api.raw(`/downloads/discography?url=${encodeURIComponent(cleanUrl)}`);
             if (!resp.ok) {
                 const err = await resp.json();
                 throw new Error(err.detail || err.message || 'Не удалось получить дискографию');
@@ -104,7 +104,7 @@ window.DownloaderDiscography = {
 
         this.isSubmitting = true;
         try {
-            const resp = await fetch('/downloads/batch', {
+            const resp = await window.api.raw('/downloads/batch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

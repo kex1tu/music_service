@@ -10,12 +10,14 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
+
 	"path/filepath"
 	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"music-manager/internal/core/safefs"
 )
 
 // NavidromeStats содержит статистику прослушиваний из Navidrome.
@@ -101,7 +103,7 @@ func (r *NavidromeReader) IsAvailable() bool {
 	if r.dbPath == "" {
 		return false
 	}
-	info, err := os.Stat(r.dbPath)
+	info, err := safefs.Stat(r.dbPath)
 	return err == nil && !info.IsDir()
 }
 

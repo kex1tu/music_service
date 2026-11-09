@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
-	"os"
+
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"music-manager/internal/config"
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	"music-manager/internal/id3"
@@ -105,7 +106,7 @@ func (h *TagHandler) GetTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	st, err := os.Stat(fullPath)
+	st, err := safefs.Stat(fullPath)
 	if err != nil {
 		http.Error(w, `{"error":"file not found"}`, http.StatusNotFound)
 		return
@@ -119,7 +120,7 @@ func (h *TagHandler) GetTags(w http.ResponseWriter, r *http.Request) {
 		// Check for cover image file in the directory
 		for _, cand := range []string{"cover.jpg", "cover.png", "folder.jpg", "folder.png", "cover.jpeg"} {
 			imgPath := filepath.Join(fullPath, cand)
-			if _, err := os.Stat(imgPath); err == nil {
+			if _, err := safefs.Stat(imgPath); err == nil {
 				cRel := filepath.Join(relPath, cand)
 				coverPath = &cRel
 				hasCover = true
@@ -127,7 +128,7 @@ func (h *TagHandler) GetTags(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		err := filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
+		err := safefs.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil || d == nil {
 				return nil
 			}
@@ -257,7 +258,7 @@ func (h *TagHandler) GetTags(w http.ResponseWriter, r *http.Request) {
 	trackBase := strings.TrimSuffix(fullPath, filepath.Ext(fullPath))
 	trackRelBase := strings.TrimSuffix(relPath, filepath.Ext(relPath))
 	for _, candExt := range []string{".jpg", ".png", ".jpeg", ".webp"} {
-		if _, err := os.Stat(trackBase + candExt); err == nil {
+		if _, err := safefs.Stat(trackBase + candExt); err == nil {
 			cRel := trackRelBase + candExt
 			coverPath = &cRel
 			break
@@ -266,7 +267,7 @@ func (h *TagHandler) GetTags(w http.ResponseWriter, r *http.Request) {
 	if coverPath == nil {
 		dir := filepath.Dir(fullPath)
 		for _, cand := range []string{"cover.jpg", "cover.png", "folder.jpg", "folder.png", "cover.jpeg"} {
-			if _, err := os.Stat(filepath.Join(dir, cand)); err == nil {
+			if _, err := safefs.Stat(filepath.Join(dir, cand)); err == nil {
 				cRel := filepath.Join(filepath.Dir(relPath), cand)
 				coverPath = &cRel
 				break

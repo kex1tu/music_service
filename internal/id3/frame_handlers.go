@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"music-manager/internal/core/safefs"
 )
 
 // applyFrame применяет декодированное значение фрейма к структуре TrackTags.
@@ -117,10 +119,10 @@ func parseAPIC(data []byte) *CoverInfo {
 func checkLyrics(filePath string) string {
 	ext := filepath.Ext(filePath)
 	base := strings.TrimSuffix(filePath, ext)
-	if st, err := os.Stat(base + ".lrc"); err == nil && !st.IsDir() {
+	if st, err := safefs.Stat(base + ".lrc"); err == nil && !st.IsDir() {
 		return "lrc"
 	}
-	if st, err := os.Stat(base + ".txt"); err == nil && !st.IsDir() {
+	if st, err := safefs.Stat(base + ".txt"); err == nil && !st.IsDir() {
 		return "txt"
 	}
 	return "none"

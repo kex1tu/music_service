@@ -9,7 +9,7 @@ window.TagRecognition = {
         this.recognizingTrackPath = track.path;
 
         try {
-            const res = await fetch('/tags/recognize-audio', {
+            const res = await window.api.raw('/tags/recognize-audio', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ path: track.path }),
@@ -64,7 +64,7 @@ window.TagRecognition = {
             for (const track of this.tracks) {
                 this.shazamProgress.current++;
                 try {
-                    const res = await fetch('/tags/recognize-audio', {
+                    const res = await window.api.raw('/tags/recognize-audio', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ path: track.path }),

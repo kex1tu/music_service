@@ -129,6 +129,11 @@
 
             <!-- ВКЛАДКА 2: МУЛЬТИ-ПОИСК КАНДИДАТОВ -->
             <div x-show="$store.sourcePicker.activeTab === 'search'" class="space-y-4">
+                <label class="block text-sm text-content-secondary">Политика этой загрузки
+                    <select x-model="$store.sourcePicker.versionPolicy" @change="$store.sourcePicker.searchCandidates()" class="min-h-[44px] w-full mt-1 px-3 rounded bg-surface-input border border-surface-border">
+                        <option value="release">Как в выбранном релизе</option><option value="uncensored">Предпочитать без цензуры</option><option value="clean">Предпочитать clean</option>
+                    </select>
+                </label>
                 <!-- Строка поискового запроса -->
                 <div class="flex items-center space-x-2">
                     <div class="relative flex-1">
@@ -191,12 +196,16 @@
 
                                         <template x-if="cand.is_topic">
                                             <span class="px-1.5 py-0.5 rounded bg-brand/10 text-brand border border-brand/20 text-xs font-bold uppercase tracking-wider shrink-0">
-                                                Topic / HQ
+                                                Topic
                                             </span>
                                         </template>
 
                                         <h3 class="text-xs font-semibold text-white truncate" x-text="cand.title" :title="cand.title"></h3>
                                     </div>
+                                    <p class="text-xs text-content-secondary" x-text="`Соответствие: ${cand.score}/100 · цензура не проверена`"></p>
+                                    <p x-show="cand.saved_selection" class="text-xs text-content-secondary">Вы выбирали этот источник ранее. Повторное применение — вручную.</p>
+                                    <p x-show="cand.search_incomplete" class="text-xs text-amber-300">Часть источников недоступна; выдача неполная.</p>
+                                    <p class="text-xs text-amber-300 break-words" x-show="cand.evaluation && cand.evaluation.conflicts.length" x-text="$store.sourcePicker.explain(cand.evaluation)"></p>
 
                                     <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-content-muted">
                                         <span class="truncate max-w-[180px]" x-text="`Автор: ${cand.uploader || 'Не указан'}`"></span>

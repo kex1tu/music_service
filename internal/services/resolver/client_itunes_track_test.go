@@ -130,4 +130,3 @@ func TestITunesClient_SearchTracksWithCountry(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", results)
 	}
 }
-

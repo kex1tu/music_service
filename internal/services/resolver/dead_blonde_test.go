@@ -126,9 +126,9 @@ func TestDeadBlonde_FullAlbumSpletnitsa_Matching(t *testing.T) {
 func TestDeadBlonde_SoundCloudSet_Parsing(t *testing.T) {
 	uploader := "Русская Рэп-Сцена"
 	rawTracks := []struct {
-		title    string
-		wantArt  string
-		wantTit  string
+		title   string
+		wantArt string
+		wantTit string
 	}{
 		{"DEAD BLONDE - Банкомат [FREE DL]", "DEAD BLONDE", "Банкомат"},
 		{"DEAD BLONDE — Перестройка (Buy = Free DL)", "DEAD BLONDE", "Перестройка"},
@@ -153,13 +153,13 @@ func TestDeadBlonde_DurationToleranceDelta12s(t *testing.T) {
 		candDur   int
 		allowed   bool
 	}{
-		{200, 200, true},   // дельта 0с
-		{200, 205, true},   // дельта 5с
-		{200, 212, true},   // дельта 12с (ровно граница)
-		{200, 213, false},  // дельта 13с > 12с
-		{200, 188, true},   // дельта 12с
-		{200, 187, false},  // дельта 13с > 12с
-		{187, 235, false},  // дельта 48с (slowed)
+		{200, 200, true},  // дельта 0с
+		{200, 205, true},  // дельта 5с
+		{200, 212, true},  // дельта 12с (ровно граница)
+		{200, 213, false}, // дельта 13с > 12с
+		{200, 188, true},  // дельта 12с
+		{200, 187, false}, // дельта 13с > 12с
+		{187, 235, false}, // дельта 48с (slowed)
 	}
 
 	for _, tc := range testCases {

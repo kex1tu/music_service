@@ -274,13 +274,24 @@ func (h *DownloadHandler) GetCandidates(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	policy := resolver.VersionPolicy(r.URL.Query().Get("version_policy"))
+	if policy == "" {
+		policy = resolver.PolicyRelease
+	}
+	if !resolver.ValidVersionPolicy(policy) {
+		http.Error(w, `{"error":"invalid version_policy"}`, http.StatusBadRequest)
+		return
+	}
+	candidates = resolver.RankCandidateItems(candidates, title, artist, dur, policy)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"artist":     artist,
-		"title":      title,
-		"query":      customQ,
-		"candidates": candidates,
-		"total":      len(candidates),
+		"artist":         artist,
+		"title":          title,
+		"query":          customQ,
+		"candidates":     candidates,
+		"total":          len(candidates),
+		"version_policy": policy,
+		"selection":      "manual",
 	})
 }
 
@@ -347,4 +358,3 @@ func (h *DownloadHandler) BindBackfillSource(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(job)
 }
-

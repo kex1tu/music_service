@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
+
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 )
 
@@ -198,7 +199,7 @@ func (s *Service) GetLyrics(relPath string) (*LyricsResponse, error) {
 	lrcPath := base + ".lrc"
 	txtPath := base + ".txt"
 
-	if data, err := os.ReadFile(lrcPath); err == nil {
+	if data, err := safefs.ReadFile(lrcPath); err == nil {
 		text := string(data)
 		return &LyricsResponse{
 			TrackPath: relPath,
@@ -209,7 +210,7 @@ func (s *Service) GetLyrics(relPath string) (*LyricsResponse, error) {
 		}, nil
 	}
 
-	if data, err := os.ReadFile(txtPath); err == nil {
+	if data, err := safefs.ReadFile(txtPath); err == nil {
 		text := string(data)
 		return &LyricsResponse{
 			TrackPath: relPath,
@@ -260,15 +261,15 @@ func (s *Service) SaveLyrics(relPath string, content string, kind string) error 
 	}
 
 	targetPath := base + targetExt
-	if err := os.WriteFile(targetPath, []byte(content), 0644); err != nil {
+	if err := safefs.WriteFile(targetPath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write lyrics file: %w", err)
 	}
 
 	// Clean up alternate format if it exists
 	if targetExt == ".lrc" {
-		_ = os.Remove(base + ".txt")
+		_ = safefs.Remove(base + ".txt")
 	} else {
-		_ = os.Remove(base + ".lrc")
+		_ = safefs.Remove(base + ".lrc")
 	}
 
 	return nil
@@ -286,13 +287,13 @@ func (s *Service) DeleteLyrics(relPath string) (bool, error) {
 	txtPath := base + ".txt"
 
 	deleted := false
-	if _, err := os.Stat(lrcPath); err == nil {
-		if err := os.Remove(lrcPath); err == nil {
+	if _, err := safefs.Stat(lrcPath); err == nil {
+		if err := safefs.Remove(lrcPath); err == nil {
 			deleted = true
 		}
 	}
-	if _, err := os.Stat(txtPath); err == nil {
-		if err := os.Remove(txtPath); err == nil {
+	if _, err := safefs.Stat(txtPath); err == nil {
+		if err := safefs.Remove(txtPath); err == nil {
 			deleted = true
 		}
 	}

@@ -51,7 +51,7 @@ document.addEventListener('alpine:init', () => {
 
         async fetchUnreadCount() {
             try {
-                const res = await fetch('/api/radar/unread-count');
+                const res = await window.api.raw('/api/radar/unread-count');
                 if (res.ok) {
                     const data = await res.json();
                     this.unreadCount = data.unread || 0;
@@ -71,7 +71,7 @@ document.addEventListener('alpine:init', () => {
                     type: this.feedType,
                     search: this.feedSearch.trim()
                 });
-                const res = await fetch(`/api/radar/feed?${params.toString()}`);
+                const res = await window.api.raw(`/api/radar/feed?${params.toString()}`);
                 if (res.ok) {
                     const data = await res.json();
                     this.feedItems = data.items || [];
@@ -98,7 +98,7 @@ document.addEventListener('alpine:init', () => {
                     type: this.feedType,
                     search: this.feedSearch.trim()
                 });
-                const res = await fetch(`/api/radar/feed?${params.toString()}`);
+                const res = await window.api.raw(`/api/radar/feed?${params.toString()}`);
                 if (res.ok) {
                     const data = await res.json();
                     const newItems = data.items || [];
@@ -133,7 +133,7 @@ document.addEventListener('alpine:init', () => {
                 if (this.artistsOnlyFollowed) {
                     params.set('followed', 'true');
                 }
-                const res = await fetch(`/api/radar/artists?${params.toString()}`);
+                const res = await window.api.raw(`/api/radar/artists?${params.toString()}`);
                 if (res.ok) {
                     const data = await res.json();
                     this.artists = data.items || [];
@@ -156,7 +156,7 @@ document.addEventListener('alpine:init', () => {
             const name = this.newArtistName.trim();
             if (!name) return;
             try {
-                const res = await fetch('/api/radar/artists', {
+                const res = await window.api.raw('/api/radar/artists', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name })
@@ -175,7 +175,7 @@ document.addEventListener('alpine:init', () => {
         async toggleFollow(artist) {
             const targetState = !artist.is_followed;
             try {
-                const res = await fetch(`/api/radar/artists/${encodeURIComponent(artist.name)}/follow`, {
+                const res = await window.api.raw(`/api/radar/artists/${encodeURIComponent(artist.name)}/follow`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ followed: targetState })
@@ -192,7 +192,7 @@ document.addEventListener('alpine:init', () => {
         async toggleAutoDownload(artist) {
             const targetState = !artist.auto_download;
             try {
-                const res = await fetch(`/api/radar/artists/${encodeURIComponent(artist.name)}/auto-download`, {
+                const res = await window.api.raw(`/api/radar/artists/${encodeURIComponent(artist.name)}/auto-download`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ auto_download: targetState })
@@ -209,7 +209,7 @@ document.addEventListener('alpine:init', () => {
         async triggerScan(artistName = '') {
             try {
                 const body = artistName ? { artist: artistName } : {};
-                const res = await fetch('/api/radar/scan', {
+                const res = await window.api.raw('/api/radar/scan', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body)
@@ -241,7 +241,7 @@ document.addEventListener('alpine:init', () => {
             let wasRunning = this.progress.is_running;
             const check = async () => {
                 try {
-                    const res = await fetch('/api/radar/progress');
+                    const res = await window.api.raw('/api/radar/progress');
                     if (res.ok) {
                         const data = await res.json();
                         const previouslyRunning = wasRunning || this.progress.is_running;
@@ -270,7 +270,7 @@ document.addEventListener('alpine:init', () => {
 
         async cancelScan() {
             try {
-                await fetch('/api/radar/cancel', { method: 'POST' });
+                await window.api.raw('/api/radar/cancel', { method: 'POST' });
                 this.progress.is_running = false;
                 if (this.pollTimer) clearInterval(this.pollTimer);
                 Alpine.store('app').showToast('Сканирование остановлено', 'warning');
@@ -281,7 +281,7 @@ document.addEventListener('alpine:init', () => {
 
         async setReleaseStatus(release, status) {
             try {
-                const res = await fetch(`/api/radar/releases/${release.id}/status`, {
+                const res = await window.api.raw(`/api/radar/releases/${release.id}/status`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ status })
@@ -308,7 +308,7 @@ document.addEventListener('alpine:init', () => {
                 return;
             }
             try {
-                const res = await fetch('/downloads', {
+                const res = await window.api.raw('/downloads', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url: release.source_url, source: 'auto' })
@@ -336,7 +336,7 @@ document.addEventListener('alpine:init', () => {
             this.discographyReleases = [];
 
             try {
-                const res = await fetch(`/api/radar/artists/${encodeURIComponent(targetArtist)}/discography`);
+                const res = await window.api.raw(`/api/radar/artists/${encodeURIComponent(targetArtist)}/discography`);
                 if (res.ok) {
                     const data = await res.json();
                     this.discographyReleases = data.releases || [];
@@ -358,7 +358,7 @@ document.addEventListener('alpine:init', () => {
         async saveCustomLinks() {
             if (!this.selectedArtist) return;
             try {
-                const res = await fetch(`/api/radar/artists/${encodeURIComponent(this.selectedArtist)}/custom-links`, {
+                const res = await window.api.raw(`/api/radar/artists/${encodeURIComponent(this.selectedArtist)}/custom-links`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

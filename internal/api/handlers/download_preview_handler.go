@@ -5,10 +5,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os/exec"
+
 	"strings"
 	"time"
 
+	"music-manager/internal/core/mediaexec"
 	"music-manager/internal/services/resolver"
 )
 
@@ -29,7 +30,7 @@ func (h *DownloadHandler) PreviewAudio(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// 1. Получение прямого медиапотока через yt-dlp -g
-	cmdDlp := exec.CommandContext(ctx, "yt-dlp",
+	cmdDlp := mediaexec.CommandContext(ctx, "yt-dlp",
 		"--no-warnings",
 		"--no-playlist",
 		"--format", "bestaudio/best",
@@ -60,7 +61,7 @@ func (h *DownloadHandler) PreviewAudio(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Transfer-Encoding", "chunked")
 
-	cmdFfmpeg := exec.CommandContext(ctx, "ffmpeg",
+	cmdFfmpeg := mediaexec.CommandContext(ctx, "ffmpeg",
 		"-ss", "30",
 		"-i", streamURL,
 		"-t", "15",
@@ -74,7 +75,7 @@ func (h *DownloadHandler) PreviewAudio(w http.ResponseWriter, r *http.Request) {
 	cmdFfmpeg.Stdout = w
 	if err := cmdFfmpeg.Run(); err != nil {
 		// Если -ss 30 не сработал (трек короче 30 секунд), пробуем с начала (-ss 0)
-		cmdFallback := exec.CommandContext(ctx, "ffmpeg",
+		cmdFallback := mediaexec.CommandContext(ctx, "ffmpeg",
 			"-ss", "0",
 			"-i", streamURL,
 			"-t", "15",

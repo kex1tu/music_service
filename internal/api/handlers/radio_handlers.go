@@ -64,8 +64,8 @@ func (h *RadioHandler) checkStreamAuth(r *http.Request) bool {
 	if strings.HasPrefix(authHdr, "Bearer ") && strings.TrimPrefix(authHdr, "Bearer ") == h.cfg.RadioStreamToken {
 		return true
 	}
-	if cookie, err := r.Cookie(auth.CookieName); err == nil && cookie.Value != "" {
-		if _, valid := auth.ValidateSessionToken(cookie.Value, h.cfg.SecretKey); valid {
+	if cookie, err := r.Cookie(h.sessionCookieName()); err == nil && cookie.Value != "" {
+		if _, valid := auth.ValidateSessionToken(cookie.Value, h.cfg.SecretKey, auth.Policy{TTL: h.cfg.SessionTTL}); valid {
 			return true
 		}
 	}
@@ -247,4 +247,11 @@ func (h *RadioHandler) SyncNavidromeRadio(w http.ResponseWriter, r *http.Request
 		"name":       stationName,
 		"stream_url": streamURL,
 	})
+}
+
+func (h *RadioHandler) sessionCookieName() string {
+	if h.cfg.SessionCookieName != "" {
+		return h.cfg.SessionCookieName
+	}
+	return auth.CookieName
 }

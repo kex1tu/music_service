@@ -30,6 +30,7 @@ func (m *Module) Service() *Service {
 func (m *Module) RegisterRoutes(r chi.Router) {
 	// 1. Canonical /files/audit endpoints (35 routes)
 	r.Route("/files/audit", func(r chi.Router) {
+		m.registerCensorshipRoutes(r)
 		r.Get("/summary", m.Summary)
 		r.Post("/refresh", m.Refresh)
 		r.Get("/search", m.Search)
@@ -83,6 +84,7 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 
 	// 2. Modern RESTful aliases (/api/audit/*)
 	r.Route("/api/audit", func(r chi.Router) {
+		m.registerCensorshipRoutes(r)
 		r.Get("/summary", m.Summary)
 		r.Post("/refresh", m.Refresh)
 		r.Get("/search", m.Search)

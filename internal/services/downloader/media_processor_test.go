@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -159,6 +160,13 @@ func TestTranscodeToMP3_RealFFmpeg(t *testing.T) {
 		t.Fatalf("expected non-empty output mp3 file")
 	}
 
+	probe, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=bit_rate,sample_rate", "-of", "default=noprint_wrappers=1", outputMp3).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(probe), "bit_rate=320000") || !strings.Contains(string(probe), "sample_rate=44100") {
+		t.Fatalf("wrong audio output: %s", probe)
+	}
 	// 2. Context timeout cancellation case
 	cancelledCtx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
@@ -324,6 +332,3 @@ func TestValidateDownloadedStreamAudio_Snippet(t *testing.T) {
 		t.Fatalf("expected nil for 36s track with 180s expectation, got: %v", err)
 	}
 }
-
-
-

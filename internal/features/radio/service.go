@@ -13,28 +13,30 @@ import (
 
 // ServiceConfig определяет зависимости для инициализации сервиса Radio.
 type ServiceConfig struct {
-	Selector        *serviceRadio.WaveSelector
-	Streamer        *serviceRadio.IcyStreamer
-	M3U             *serviceRadio.M3UGenerator
-	Subsonic        *serviceRadio.NavidromeSubsonicClient
-	NavidromeReader *serviceRadio.NavidromeReader
-	Repo            Repository
+	SessionPolicy    auth.Policy
+	Selector         *serviceRadio.WaveSelector
+	Streamer         *serviceRadio.IcyStreamer
+	M3U              *serviceRadio.M3UGenerator
+	Subsonic         *serviceRadio.NavidromeSubsonicClient
+	NavidromeReader  *serviceRadio.NavidromeReader
+	Repo             Repository
 	RadioStreamToken string
-	SecretKey       string
-	RadioWaveSize   int
+	SecretKey        string
+	RadioWaveSize    int
 }
 
 // Service инкапсулирует бизнес-логику радиовещания «Моя Волна», генерации плейлистов и синхронизации с внешними серверами.
 type Service struct {
-	selector        *serviceRadio.WaveSelector
-	streamer        *serviceRadio.IcyStreamer
-	m3u             *serviceRadio.M3UGenerator
-	subsonic        *serviceRadio.NavidromeSubsonicClient
-	navidromeReader *serviceRadio.NavidromeReader
-	repo            Repository
+	sessionPolicy    auth.Policy
+	selector         *serviceRadio.WaveSelector
+	streamer         *serviceRadio.IcyStreamer
+	m3u              *serviceRadio.M3UGenerator
+	subsonic         *serviceRadio.NavidromeSubsonicClient
+	navidromeReader  *serviceRadio.NavidromeReader
+	repo             Repository
 	radioStreamToken string
-	secretKey       string
-	radioWaveSize   int
+	secretKey        string
+	radioWaveSize    int
 }
 
 // NewService создает новый экземпляр Service.
@@ -44,15 +46,16 @@ func NewService(cfg ServiceConfig) *Service {
 		waveSize = 60
 	}
 	return &Service{
-		selector:        cfg.Selector,
-		streamer:        cfg.Streamer,
-		m3u:             cfg.M3U,
-		subsonic:        cfg.Subsonic,
-		navidromeReader: cfg.NavidromeReader,
-		repo:            cfg.Repo,
+		selector:         cfg.Selector,
+		sessionPolicy:    cfg.SessionPolicy,
+		streamer:         cfg.Streamer,
+		m3u:              cfg.M3U,
+		subsonic:         cfg.Subsonic,
+		navidromeReader:  cfg.NavidromeReader,
+		repo:             cfg.Repo,
 		radioStreamToken: cfg.RadioStreamToken,
-		secretKey:       cfg.SecretKey,
-		radioWaveSize:   waveSize,
+		secretKey:        cfg.SecretKey,
+		radioWaveSize:    waveSize,
 	}
 }
 
@@ -72,8 +75,8 @@ func (s *Service) CheckStreamAuth(r *http.Request) bool {
 	if strings.HasPrefix(authHdr, "Bearer ") && strings.TrimPrefix(authHdr, "Bearer ") == s.radioStreamToken {
 		return true
 	}
-	if cookie, err := r.Cookie(auth.CookieName); err == nil && cookie.Value != "" {
-		if _, valid := auth.ValidateSessionToken(cookie.Value, s.secretKey); valid {
+	if cookie, err := r.Cookie(s.cookieName()); err == nil && cookie.Value != "" {
+		if _, valid := auth.ValidateSessionToken(cookie.Value, s.secretKey, s.sessionPolicy); valid {
 			return true
 		}
 	}
@@ -179,4 +182,11 @@ func (s *Service) SyncNavidromeRadio(ctx context.Context, req SyncRadioRequest, 
 		Name:      stationName,
 		StreamURL: streamURL,
 	}, nil
+}
+
+func (s *Service) cookieName() string {
+	if s.sessionPolicy.Name != "" {
+		return s.sessionPolicy.Name
+	}
+	return auth.CookieName
 }

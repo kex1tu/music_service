@@ -100,7 +100,7 @@ func NewRouter(p RouterParams) http.Handler {
 	})
 
 	// Protected Endpoints
-	authMiddleware := auth.Middleware(p.Config.SecretKey)
+	authMiddleware := auth.Middleware(p.Config.SecretKey, auth.Policy{Name: p.Config.SessionCookieName, TTL: p.Config.SessionTTL, Secure: p.Config.SessionCookieSecure})
 
 	// MusicBrainz OAuth Endpoints
 	if p.TagEditorModule != nil {

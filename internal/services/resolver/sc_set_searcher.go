@@ -6,24 +6,199 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
-	"os/exec"
+	"net/http"
+	"net/url"
+
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"music-manager/internal/core/mediaexec"
 )
+
+const defaultSoundCloudClientID = "xk6BGxLCsQJ5Ss0bH6sRdsZhts3gTNaU"
+
+var (
+	scriptSrcRegex = regexp.MustCompile(`<script[^>]+src="([^"]+)"`)
+	clientIDRegex  = regexp.MustCompile(`client_id[:=]\s*"([0-9a-zA-Z]{32})"`)
+)
+
+type scAPIUser struct {
+	Username  string `json:"username"`
+	Permalink string `json:"permalink"`
+}
+
+type scAPITrackItem struct {
+	ID           int64     `json:"id"`
+	Title        string    `json:"title"`
+	Duration     int64     `json:"duration"` // in milliseconds
+	PermalinkURL string    `json:"permalink_url"`
+	User         scAPIUser `json:"user"`
+}
+
+type scAPIAlbumItem struct {
+	ID           int64            `json:"id"`
+	Title        string           `json:"title"`
+	PermalinkURL string           `json:"permalink_url"`
+	ArtworkURL   string           `json:"artwork_url"`
+	TrackCount   int              `json:"track_count"`
+	User         scAPIUser        `json:"user"`
+	Tracks       []scAPITrackItem `json:"tracks"`
+}
+
+type scAPISearchResponse struct {
+	Collection   []scAPIAlbumItem `json:"collection"`
+	TotalResults int              `json:"total_results"`
+	NextHref     string           `json:"next_href"`
+}
 
 // SoundCloudSetSearcher осуществляет поиск и разбор плейлистов/сетов SoundCloud и других внешних ссылок.
 type SoundCloudSetSearcher struct {
 	cookiesPath  string
 	searchFunc   func(ctx context.Context, artist, album string, limit int) ([]AlbumReleaseCandidate, error)
 	parseURLFunc func(ctx context.Context, setURL string) (*AlbumReleaseCandidate, error)
+
+	httpClient  *http.Client
+	apiBaseURL  string
+	webBaseURL  string
+	clientID    string
+	clientIDMu  sync.RWMutex
+	clientIDExp time.Time
 }
 
 // NewSoundCloudSetSearcher создает новый экземпляр SoundCloudSetSearcher.
 func NewSoundCloudSetSearcher(cookiesPath string) *SoundCloudSetSearcher {
 	return &SoundCloudSetSearcher{
 		cookiesPath: cookiesPath,
+		httpClient: &http.Client{
+			Timeout: 15 * time.Second,
+		},
+		apiBaseURL: "https://api-v2.soundcloud.com",
+		webBaseURL: "https://soundcloud.com",
+		clientID:   defaultSoundCloudClientID,
 	}
+}
+
+// SetCustomHTTPClient позволяет настроить HTTP клиент (для тестов или прокси).
+func (s *SoundCloudSetSearcher) SetCustomHTTPClient(c *http.Client) {
+	if c != nil {
+		s.httpClient = c
+	}
+}
+
+// SetBaseURLs позволяет переопределить базовые URL для тестов.
+func (s *SoundCloudSetSearcher) SetBaseURLs(apiBaseURL, webBaseURL string) {
+	if apiBaseURL != "" {
+		s.apiBaseURL = strings.TrimRight(apiBaseURL, "/")
+	}
+	if webBaseURL != "" {
+		s.webBaseURL = strings.TrimRight(webBaseURL, "/")
+	}
+}
+
+// InvalidateClientID инвалидирует кэшированный client_id.
+func (s *SoundCloudSetSearcher) InvalidateClientID() {
+	s.clientIDMu.Lock()
+	defer s.clientIDMu.Unlock()
+	s.clientID = ""
+	s.clientIDExp = time.Time{}
+}
+
+// GetClientID возвращает валидный client_id, извлекая его динамически или возвращая кэшированный/дефолтный.
+func (s *SoundCloudSetSearcher) GetClientID(ctx context.Context) (string, error) {
+	s.clientIDMu.RLock()
+	if s.clientID != "" && time.Now().Before(s.clientIDExp) {
+		cid := s.clientID
+		s.clientIDMu.RUnlock()
+		return cid, nil
+	}
+	s.clientIDMu.RUnlock()
+
+	s.clientIDMu.Lock()
+	defer s.clientIDMu.Unlock()
+
+	if s.clientID != "" && time.Now().Before(s.clientIDExp) {
+		return s.clientID, nil
+	}
+
+	cid, err := s.resolveClientID(ctx)
+	if err != nil || cid == "" {
+		s.clientID = defaultSoundCloudClientID
+		s.clientIDExp = time.Now().Add(1 * time.Hour)
+		return s.clientID, nil
+	}
+
+	s.clientID = cid
+	s.clientIDExp = time.Now().Add(12 * time.Hour)
+	return s.clientID, nil
+}
+
+func (s *SoundCloudSetSearcher) resolveClientID(ctx context.Context) (string, error) {
+	webURL := s.webBaseURL
+	if webURL == "" {
+		webURL = "https://soundcloud.com"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, webURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	matches := scriptSrcRegex.FindAllStringSubmatch(string(bodyBytes), -1)
+	var scriptURLs []string
+	for _, m := range matches {
+		if len(m) > 1 && strings.HasSuffix(m[1], ".js") {
+			scriptURLs = append(scriptURLs, m[1])
+		}
+	}
+
+	count := 0
+	for i := len(scriptURLs) - 1; i >= 0 && count < 8; i-- {
+		sURL := scriptURLs[i]
+		if !strings.HasPrefix(sURL, "http") && strings.HasPrefix(sURL, "/") {
+			sURL = webURL + sURL
+		}
+		count++
+
+		sReq, err := http.NewRequestWithContext(ctx, http.MethodGet, sURL, nil)
+		if err != nil {
+			continue
+		}
+		sReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+
+		sResp, err := s.httpClient.Do(sReq)
+		if err != nil {
+			continue
+		}
+		jsBytes, err := io.ReadAll(sResp.Body)
+		sResp.Body.Close()
+		if err != nil {
+			continue
+		}
+
+		cMatch := clientIDRegex.FindStringSubmatch(string(jsBytes))
+		if len(cMatch) > 1 && len(cMatch[1]) == 32 {
+			return cMatch[1], nil
+		}
+	}
+
+	return "", fmt.Errorf("client_id не найден в скриптах SoundCloud")
 }
 
 // SetCustomSearchFunc позволяет переопределить функцию поиска сетов для тестов.
@@ -167,7 +342,8 @@ func (s *SoundCloudSetSearcher) ParseSetURL(ctx context.Context, setURL string) 
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "yt-dlp", args...)
+	cmd := mediaexec.CommandContext(cmdCtx, "yt-dlp", args...)
+	defer cmd.Close()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -178,6 +354,243 @@ func (s *SoundCloudSetSearcher) ParseSetURL(ctx context.Context, setURL string) 
 	}
 
 	return s.ParseOutputBytes(stdout.Bytes(), cleanURL)
+}
+
+func (s *SoundCloudSetSearcher) querySetsEndpoint(ctx context.Context, endpoint, query, clientID string, limit int) ([]scAPIAlbumItem, error) {
+	baseURL := s.apiBaseURL
+	if baseURL == "" {
+		baseURL = "https://api-v2.soundcloud.com"
+	}
+
+	reqURL := fmt.Sprintf("%s/%s?q=%s&client_id=%s&limit=%d",
+		baseURL,
+		endpoint,
+		url.QueryEscape(query),
+		url.QueryEscape(clientID),
+		limit,
+	)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("SoundCloud API error: status %d", resp.StatusCode)
+	}
+
+	var root scAPISearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&root); err != nil {
+		return nil, err
+	}
+
+	return root.Collection, nil
+}
+
+// HydrateTracks запрашивает полную информацию о треках по их ID через батчевый эндпоинт SoundCloud API /tracks?ids=...
+func (s *SoundCloudSetSearcher) HydrateTracks(ctx context.Context, clientID string, trackIDs []int64) (map[int64]scAPITrackItem, error) {
+	if len(trackIDs) == 0 {
+		return nil, nil
+	}
+
+	baseURL := s.apiBaseURL
+	if baseURL == "" {
+		baseURL = "https://api-v2.soundcloud.com"
+	}
+
+	result := make(map[int64]scAPITrackItem)
+
+	chunkSize := 50
+	for i := 0; i < len(trackIDs); i += chunkSize {
+		end := i + chunkSize
+		if end > len(trackIDs) {
+			end = len(trackIDs)
+		}
+		chunk := trackIDs[i:end]
+
+		idStrs := make([]string, len(chunk))
+		for idx, id := range chunk {
+			idStrs[idx] = strconv.FormatInt(id, 10)
+		}
+
+		reqURL := fmt.Sprintf("%s/tracks?ids=%s&client_id=%s",
+			baseURL,
+			url.QueryEscape(strings.Join(idStrs, ",")),
+			url.QueryEscape(clientID),
+		)
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			continue
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			var tracks []scAPITrackItem
+			if err := json.NewDecoder(resp.Body).Decode(&tracks); err == nil {
+				for _, tr := range tracks {
+					if tr.ID > 0 {
+						result[tr.ID] = tr
+					}
+				}
+			}
+		}
+		resp.Body.Close()
+	}
+
+	return result, nil
+}
+
+func (s *SoundCloudSetSearcher) convertAlbumToCandidate(album scAPIAlbumItem, hydrated map[int64]scAPITrackItem) AlbumReleaseCandidate {
+	coverURL := album.ArtworkURL
+	if coverURL != "" {
+		coverURL = strings.Replace(coverURL, "-large.jpg", "-t500x500.jpg", 1)
+	}
+
+	uploader := album.User.Username
+	firstArtist := ""
+	var tracks []AlbumTrackCandidate
+
+	for idx, tr := range album.Tracks {
+		fullTrack := tr
+		if fullTrack.Title == "" && hydrated != nil {
+			if h, ok := hydrated[fullTrack.ID]; ok {
+				fullTrack = h
+			}
+		}
+
+		if fullTrack.Title == "" {
+			continue
+		}
+
+		art, tit := ParseSoundCloudTitle(fullTrack.Title, uploader)
+		if firstArtist == "" && art != "" && art != "Unknown Artist" {
+			firstArtist = art
+		}
+
+		durSec := int(math.Round(float64(fullTrack.Duration) / 1000.0))
+		directURL := fullTrack.PermalinkURL
+
+		tracks = append(tracks, AlbumTrackCandidate{
+			VideoID:   strconv.FormatInt(fullTrack.ID, 10),
+			DirectURL: directURL,
+			Title:     tit,
+			Artist:    art,
+			Duration:  durSec,
+			Index:     idx + 1,
+		})
+	}
+
+	if firstArtist == "" {
+		firstArtist = uploader
+	}
+
+	albumTitle := album.Title
+	if albumTitle == "" && len(tracks) > 0 {
+		albumTitle = tracks[0].Title
+	}
+
+	return AlbumReleaseCandidate{
+		BrowseID:    fmt.Sprintf("sc_%d", album.ID),
+		PlaylistID:  album.PermalinkURL,
+		Title:       albumTitle,
+		Artist:      firstArtist,
+		CoverURL:    coverURL,
+		Tracks:      tracks,
+		TotalTracks: len(tracks),
+	}
+}
+
+// SearchSetsAPI выполняет прямой поиск альбомов и сетов через SoundCloud API v2.
+func (s *SoundCloudSetSearcher) SearchSetsAPI(ctx context.Context, query string, limit int) ([]AlbumReleaseCandidate, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+
+	clientID, err := s.GetClientID(ctx)
+	if err != nil || clientID == "" {
+		clientID = defaultSoundCloudClientID
+	}
+
+	albums, err := s.querySetsEndpoint(ctx, "search/albums", query, clientID, limit)
+	if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403")) {
+		s.InvalidateClientID()
+		if newID, nErr := s.GetClientID(ctx); nErr == nil && newID != "" {
+			clientID = newID
+			albums, _ = s.querySetsEndpoint(ctx, "search/albums", query, clientID, limit)
+		}
+	}
+
+	playlists, _ := s.querySetsEndpoint(ctx, "search/playlists_without_albums", query, clientID, limit)
+
+	var allItems []scAPIAlbumItem
+	seenURLs := make(map[string]bool)
+
+	for _, it := range albums {
+		if it.PermalinkURL != "" && !seenURLs[it.PermalinkURL] && it.TrackCount > 0 {
+			seenURLs[it.PermalinkURL] = true
+			allItems = append(allItems, it)
+		}
+	}
+	for _, it := range playlists {
+		if it.PermalinkURL != "" && !seenURLs[it.PermalinkURL] && it.TrackCount > 0 {
+			seenURLs[it.PermalinkURL] = true
+			allItems = append(allItems, it)
+		}
+	}
+
+	if len(allItems) == 0 {
+		return nil, nil
+	}
+
+	maxProcess := limit
+	if maxProcess > 5 {
+		maxProcess = 5
+	}
+	if len(allItems) > maxProcess {
+		allItems = allItems[:maxProcess]
+	}
+
+	var stubIDs []int64
+	for _, it := range allItems {
+		for _, tr := range it.Tracks {
+			if tr.Title == "" && tr.ID > 0 {
+				stubIDs = append(stubIDs, tr.ID)
+			}
+		}
+	}
+
+	hydratedMap := make(map[int64]scAPITrackItem)
+	if len(stubIDs) > 0 {
+		hMap, _ := s.HydrateTracks(ctx, clientID, stubIDs)
+		if hMap != nil {
+			hydratedMap = hMap
+		}
+	}
+
+	var candidates []AlbumReleaseCandidate
+	for _, item := range allItems {
+		cand := s.convertAlbumToCandidate(item, hydratedMap)
+		if len(cand.Tracks) > 0 {
+			candidates = append(candidates, cand)
+		}
+	}
+
+	return candidates, nil
 }
 
 // SearchSoundCloudSets выполняет поиск сетов/плейлистов на SoundCloud по артисту и названию альбома.
@@ -196,80 +609,11 @@ func (s *SoundCloudSetSearcher) SearchSoundCloudSets(ctx context.Context, artist
 		return nil, nil
 	}
 
-	// Формируем поисковый запрос для SoundCloud
-	query := fmt.Sprintf("scsearch15:%s %s", cleanArt, cleanAlb)
-	args := []string{
-		"--ignore-config",
-		"--no-download-archive",
-		"--dump-json",
-		"--flat-playlist",
-		"--no-warnings",
-		"--ignore-errors",
-		query,
+	query := fmt.Sprintf("%s %s", cleanArt, cleanAlb)
+	candidates, err := s.SearchSetsAPI(ctx, query, limit)
+	if err == nil && len(candidates) > 0 {
+		return candidates, nil
 	}
 
-	timeout := 20 * time.Second
-	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(cmdCtx, "yt-dlp", args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil && stdout.Len() == 0 {
-		return nil, nil
-	}
-
-	scanner := bufio.NewScanner(&stdout)
-	buf := make([]byte, 1024*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-
-	var allTracks []AlbumTrackCandidate
-	var coverURL string
-
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 {
-			continue
-		}
-		var e rawSetEntry
-		if err := json.Unmarshal(line, &e); err == nil && (e.WebpageURL != "" || e.URL != "") {
-			art, tit := ParseSoundCloudTitle(e.Title, e.Uploader)
-			durSec := int(math.Round(e.Duration))
-			directURL := e.WebpageURL
-			if directURL == "" {
-				directURL = e.URL
-			}
-
-			if coverURL == "" && len(e.Thumbnails) > 0 {
-				coverURL = e.Thumbnails[len(e.Thumbnails)-1].URL
-			}
-
-			allTracks = append(allTracks, AlbumTrackCandidate{
-				VideoID:   e.ID,
-				DirectURL: directURL,
-				Title:     tit,
-				Artist:    art,
-				Duration:  durSec,
-				Index:     len(allTracks) + 1,
-			})
-		}
-	}
-
-	if len(allTracks) == 0 {
-		return nil, nil
-	}
-
-	cand := AlbumReleaseCandidate{
-		BrowseID:    fmt.Sprintf("sc_%s_%s", cleanArt, cleanAlb),
-		PlaylistID:  fmt.Sprintf("https://soundcloud.com/search?q=%s", cleanArt),
-		Title:       cleanAlb,
-		Artist:      cleanArt,
-		CoverURL:    coverURL,
-		Tracks:      allTracks,
-		TotalTracks: len(allTracks),
-	}
-
-	return []AlbumReleaseCandidate{cand}, nil
+	return nil, nil
 }

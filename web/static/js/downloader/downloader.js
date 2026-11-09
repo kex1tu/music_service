@@ -120,7 +120,7 @@ function downloaderComponent() {
             // Для синглов проверяем наличие дубликата в 320 kbps.
             if (!cleanUrl.startsWith('magnet:') && this.source !== 'torrent') {
                 try {
-                    const preResp = await fetch('/downloads/preflight', {
+                    const preResp = await window.api.raw('/downloads/preflight', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -153,7 +153,7 @@ function downloaderComponent() {
             }
 
             try {
-                const response = await fetch('/downloads', {
+                const response = await window.api.raw('/downloads', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -211,7 +211,7 @@ function downloaderComponent() {
 
             this.isSubmitting = true;
             try {
-                const response = await fetch(`/downloads/${targetId}/retry`, {
+                const response = await window.api.raw(`/downloads/${targetId}/retry`, {
                     method: 'POST',
                 });
                 if (!response.ok) {
@@ -238,7 +238,7 @@ function downloaderComponent() {
             }
 
             try {
-                await fetch(`/downloads/${this.job.id}`, { method: 'DELETE' });
+                await window.api.raw(`/downloads/${this.job.id}`, { method: 'DELETE' });
                 Alpine.store('app').toast('Задача загрузки отменена', 'info');
             } catch (e) {
                 console.error(e);

@@ -2,10 +2,12 @@ package organizer
 
 import (
 	"io"
-	"os"
+
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"music-manager/internal/core/safefs"
 )
 
 var (
@@ -25,31 +27,31 @@ func getAlbumLock(albumDir string) *sync.Mutex {
 }
 
 func fileExists(path string) bool {
-	st, err := os.Stat(path)
+	st, err := safefs.Stat(path)
 	return err == nil && !st.IsDir()
 }
 
 func moveFile(src, dest string) error {
-	if err := os.Rename(src, dest); err == nil {
-		_ = os.Chmod(dest, 0644)
+	if err := safefs.Rename(src, dest); err == nil {
+		_ = safefs.Chmod(dest, 0644)
 		return nil
 	}
 	// Fallback to streaming copy and delete across different mount points (EXDEV)
 	if err := copyFile(src, dest); err != nil {
 		return err
 	}
-	_ = os.Chmod(dest, 0644)
-	return os.Remove(src)
+	_ = safefs.Chmod(dest, 0644)
+	return safefs.Remove(src)
 }
 
 func copyFile(src, dest string) error {
-	in, err := os.Open(src)
+	in, err := safefs.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
 
-	out, err := os.Create(dest)
+	out, err := safefs.Create(dest)
 	if err != nil {
 		return err
 	}
@@ -58,15 +60,15 @@ func copyFile(src, dest string) error {
 	if _, err := io.Copy(out, in); err != nil {
 		return err
 	}
-	_ = os.Chmod(dest, 0644)
+	_ = safefs.Chmod(dest, 0644)
 	return out.Sync()
 }
 
 // RemoveIfEmpty удаляет папку, если в ней нет файлов.
 func RemoveIfEmpty(dir string) {
-	entries, err := os.ReadDir(dir)
+	entries, err := safefs.ReadDir(dir)
 	if err == nil && len(entries) == 0 {
-		_ = os.Remove(dir)
+		_ = safefs.Remove(dir)
 	}
 }
 
@@ -83,14 +85,14 @@ func CleanEmptyParents(startDir, rootDir string) {
 			break
 		}
 
-		entries, err := os.ReadDir(curr)
+		entries, err := safefs.ReadDir(curr)
 		if err != nil || len(entries) > 0 {
 			// В директории еще остались файлы/папки — останавливаем подъем
 			break
 		}
 
 		// Удаляем пустую директорию
-		if err := os.Remove(curr); err != nil {
+		if err := safefs.Remove(curr); err != nil {
 			break
 		}
 

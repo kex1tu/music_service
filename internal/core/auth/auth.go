@@ -15,6 +15,26 @@ import (
 // CookieName is the HTTP cookie key for session authorization.
 const CookieName = "session_token"
 
+type Policy struct {
+	Name   string
+	TTL    int
+	Secure bool
+}
+
+func policy(ps []Policy) Policy {
+	p := Policy{Name: CookieName, TTL: 7 * 24 * 3600}
+	if len(ps) > 0 {
+		p = ps[0]
+		if p.Name == "" {
+			p.Name = CookieName
+		}
+		if p.TTL <= 0 {
+			p.TTL = 7 * 24 * 3600
+		}
+	}
+	return p
+}
+
 // HashPassword generates a bcrypt hash of a password.
 func HashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -39,7 +59,8 @@ func CreateSessionToken(login, secretKey string) string {
 }
 
 // ValidateSessionToken verifies HMAC signature and expiration (7 days).
-func ValidateSessionToken(token, secretKey string) (string, bool) {
+func ValidateSessionToken(token, secretKey string, ps ...Policy) (string, bool) {
+	p := policy(ps)
 	parts := strings.Split(token, ":")
 	if len(parts) != 3 {
 		return "", false
@@ -55,7 +76,7 @@ func ValidateSessionToken(token, secretKey string) (string, bool) {
 
 	now := time.Now().Unix()
 	// Disallow timestamps more than 5 minutes in the future, and expired after 7 days
-	if ts > now+300 || now-ts > 7*24*3600 {
+	if ts > now+300 || ts < now-int64(p.TTL) {
 		return "", false
 	}
 
@@ -72,21 +93,25 @@ func ValidateSessionToken(token, secretKey string) (string, bool) {
 }
 
 // SetSessionCookie sets an HTTP-only SameSite=Strict session cookie.
-func SetSessionCookie(w http.ResponseWriter, token string) {
+func SetSessionCookie(w http.ResponseWriter, token string, ps ...Policy) {
+	p := policy(ps)
 	http.SetCookie(w, &http.Cookie{
-		Name:     CookieName,
+		Name:     p.Name,
+		Secure:   p.Secure,
 		Value:    token,
 		Path:     "/",
-		MaxAge:   7 * 24 * 3600,
+		MaxAge:   p.TTL,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
 }
 
 // ClearSessionCookie deletes the session cookie.
-func ClearSessionCookie(w http.ResponseWriter) {
+func ClearSessionCookie(w http.ResponseWriter, ps ...Policy) {
+	p := policy(ps)
 	http.SetCookie(w, &http.Cookie{
-		Name:     CookieName,
+		Name:     p.Name,
+		Secure:   p.Secure,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
@@ -96,11 +121,11 @@ func ClearSessionCookie(w http.ResponseWriter) {
 }
 
 // Middleware verifies authentication for protected routes.
-func Middleware(secretKey string) func(http.Handler) http.Handler {
+func Middleware(secretKey string, ps ...Policy) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := ""
-			if cookie, err := r.Cookie(CookieName); err == nil && cookie.Value != "" {
+			if cookie, err := r.Cookie(policy(ps).Name); err == nil && cookie.Value != "" {
 				token = cookie.Value
 			} else if qToken := r.URL.Query().Get("token"); qToken != "" {
 				token = qToken
@@ -113,7 +138,7 @@ func Middleware(secretKey string) func(http.Handler) http.Handler {
 				return
 			}
 
-			_, valid := ValidateSessionToken(token, secretKey)
+			_, valid := ValidateSessionToken(token, secretKey, ps...)
 			if !valid {
 				http.Error(w, `{"error":"invalid session"}`, http.StatusUnauthorized)
 				return

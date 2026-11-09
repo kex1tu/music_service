@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"os"
+
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/services/resolver"
 )
 
@@ -97,7 +98,7 @@ func (h *TagHandler) SearchCatalog(w http.ResponseWriter, r *http.Request) {
 			if audioPath != "" {
 				fullPath, err := h.resolvePath(audioPath)
 				if err == nil {
-					if info, statErr := os.Stat(fullPath); statErr == nil && !info.IsDir() {
+					if info, statErr := safefs.Stat(fullPath); statErr == nil && !info.IsDir() {
 						rec, recErr := h.shazam.RecognizeAudioFile(ctx, fullPath)
 						if recErr == nil && rec != nil {
 							items = append(items, resolver.CatalogReleaseSummary{
@@ -329,7 +330,7 @@ func (h *TagHandler) GetCatalogShazamTrack(w http.ResponseWriter, r *http.Reques
 			http.Error(w, `{"error":"invalid audio path"}`, http.StatusBadRequest)
 			return
 		}
-		if info, statErr := os.Stat(fullPath); statErr != nil || info.IsDir() {
+		if info, statErr := safefs.Stat(fullPath); statErr != nil || info.IsDir() {
 			http.Error(w, `{"error":"audio file not found"}`, http.StatusNotFound)
 			return
 		}

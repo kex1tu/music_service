@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
+
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,6 +19,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"music-manager/internal/core/httputil"
+	"music-manager/internal/core/mediaexec"
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
@@ -316,7 +318,14 @@ func (m *Module) SwitchTrackVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := m.service.SwitchTrackVersion(r.Context(), trackID, req.TargetURL)
+	if req.VersionPolicy == "" {
+		req.VersionPolicy = resolver.PolicyRelease
+	}
+	if !resolver.ValidVersionPolicy(req.VersionPolicy) {
+		httputil.RespondError(w, 400, "invalid version_policy")
+		return
+	}
+	result, err := m.service.SwitchTrackVersion(r.Context(), trackID, req.TargetURL, req.VersionPolicy)
 	if err != nil {
 		if errors.Is(err, ErrInvalidURL) {
 			httputil.RespondError(w, http.StatusBadRequest, err.Error())
@@ -333,6 +342,14 @@ func (m *Module) SwitchTrackVersion(w http.ResponseWriter, r *http.Request) {
 // GET /downloads/candidates
 // GET /api/downloads/candidates
 func (m *Module) GetCandidates(w http.ResponseWriter, r *http.Request) {
+	policy := resolver.VersionPolicy(r.URL.Query().Get("version_policy"))
+	if policy == "" {
+		policy = resolver.PolicyRelease
+	}
+	if !resolver.ValidVersionPolicy(policy) {
+		httputil.RespondError(w, 400, "invalid version_policy")
+		return
+	}
 	artist := strings.TrimSpace(httputil.QueryString(r, "artist", ""))
 	title := strings.TrimSpace(httputil.QueryString(r, "title", ""))
 	customQ := strings.TrimSpace(httputil.QueryString(r, "q", ""))
@@ -343,13 +360,15 @@ func (m *Module) GetCandidates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	candidates, err := m.service.GetCandidates(r.Context(), artist, title, dur, customQ)
+	candidates, err := m.service.GetCandidates(r.Context(), artist, title, dur, customQ, r.URL.Query().Get("isrc"))
 	if err != nil {
 		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
+	candidates = resolver.RankCandidateItems(candidates, title, artist, dur, policy)
 	httputil.RespondJSON(w, http.StatusOK, CandidatesResponse{
+		VersionPolicy: policy, Selection: "manual",
 		Artist:     artist,
 		Title:      title,
 		Query:      customQ,
@@ -408,7 +427,7 @@ func defaultPreviewStreamer(ctx context.Context, targetURL string, w http.Respon
 		return nil
 	}
 
-	cmdDlp := exec.CommandContext(ctx, "yt-dlp",
+	cmdDlp := mediaexec.CommandContext(ctx, "yt-dlp",
 		"--no-warnings",
 		"--no-playlist",
 		"--format", "bestaudio/best",
@@ -436,7 +455,7 @@ func defaultPreviewStreamer(ctx context.Context, targetURL string, w http.Respon
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Transfer-Encoding", "chunked")
 
-	cmdFfmpeg := exec.CommandContext(ctx, "ffmpeg",
+	cmdFfmpeg := mediaexec.CommandContext(ctx, "ffmpeg",
 		"-ss", "30",
 		"-i", streamURL,
 		"-t", "15",
@@ -448,7 +467,7 @@ func defaultPreviewStreamer(ctx context.Context, targetURL string, w http.Respon
 	)
 	cmdFfmpeg.Stdout = w
 	if err := cmdFfmpeg.Run(); err != nil {
-		cmdFallback := exec.CommandContext(ctx, "ffmpeg",
+		cmdFallback := mediaexec.CommandContext(ctx, "ffmpeg",
 			"-ss", "0",
 			"-i", streamURL,
 			"-t", "15",
@@ -471,6 +490,13 @@ func (m *Module) BindBackfillSource(w http.ResponseWriter, r *http.Request) {
 	var req BindBackfillSourceRequest
 	if err := httputil.DecodeJSON(r, &req); err != nil {
 		httputil.RespondError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	if req.VersionPolicy == "" {
+		req.VersionPolicy = resolver.PolicyRelease
+	}
+	if !resolver.ValidVersionPolicy(req.VersionPolicy) {
+		httputil.RespondError(w, 400, "invalid version_policy")
 		return
 	}
 
@@ -501,19 +527,12 @@ func (m *Module) BindBackfillSource(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	job, err := m.service.CreateBackfillJob(
-		r.Context(),
-		req.Path,
-		req.AlbumTitle,
-		req.ArtistName,
-		"",
-		[]string{req.TargetURL},
-		[]int{req.TrackNumber},
-	)
+	selection, err := m.service.SwitchReleaseSource(r.Context(), SwitchReleaseSourceRequest{SourceURL: req.TargetURL, TargetPath: req.Path, VersionPolicy: req.VersionPolicy, TrackMapping: map[int]string{0: req.TargetURL}, TargetTracks: []resolver.ResolvedTrack{{Title: req.TrackTitle, Artist: req.ArtistName, Album: req.AlbumTitle, TrackNumber: req.TrackNumber, Duration: req.Duration}}})
 	if err != nil {
 		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	job, _ := m.service.GetJob(selection.JobID)
 
 	httputil.RespondJSON(w, http.StatusOK, job)
 }
@@ -824,7 +843,8 @@ func defaultYtReleasesFetcher(ctx context.Context, targetURL, cookiesPath string
 	cmdCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "yt-dlp", args...)
+	cmd := mediaexec.CommandContext(cmdCtx, "yt-dlp", args...)
+	defer cmd.Close()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -839,7 +859,8 @@ func defaultYtReleasesFetcher(ctx context.Context, targetURL, cookiesPath string
 				}
 				argsNoCookies = append(argsNoCookies, args[i])
 			}
-			cmdRetry := exec.CommandContext(cmdCtx, "yt-dlp", argsNoCookies...)
+			cmdRetry := mediaexec.CommandContext(cmdCtx, "yt-dlp", argsNoCookies...)
+			defer cmdRetry.Close()
 			stdout.Reset()
 			stderr.Reset()
 			cmdRetry.Stdout = &stdout
@@ -1019,7 +1040,7 @@ func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
 	// 2. Если указан path папки в библиотеке — считываем MP3 через песочницу
 	if len(targetTracks) == 0 && path != "" && m.service.MusicSandbox() != nil {
 		if realPath, err := m.service.MusicSandbox().Resolve(path, false); err == nil {
-			if entries, err := os.ReadDir(realPath); err == nil {
+			if entries, err := safefs.ReadDir(realPath); err == nil {
 				for _, e := range entries {
 					if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".mp3") {
 						itemFull := filepath.Join(realPath, e.Name())
@@ -1071,12 +1092,22 @@ func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
 
 	matcher := m.service.Resolver().FullReleaseMatcher()
 	cands, isCyrillic, err := matcher.SearchReleaseCandidates(r.Context(), artist, album, targetTracks)
+	policy := resolver.VersionPolicy(r.URL.Query().Get("version_policy"))
+	if policy == "" {
+		policy = resolver.PolicyRelease
+	}
+	if !resolver.ValidVersionPolicy(policy) {
+		httputil.RespondError(w, 400, "invalid version_policy")
+		return
+	}
+	cands = resolver.RankReleaseItems(cands, artist, album, targetTracks, policy)
 	if err != nil {
 		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	httputil.RespondJSON(w, http.StatusOK, ReleaseCandidatesResponse{
+		VersionPolicy: policy, Selection: "manual",
 		Artist:       artist,
 		Album:        album,
 		IsCyrillic:   isCyrillic,

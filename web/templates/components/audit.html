@@ -9,7 +9,7 @@
                 Проверяем качество тегов, наличие текстов (.lrc), обложек и дубликатов треков в медиатеке.
             </p>
         </div>
-        <div class="flex items-center space-x-3 shrink-0">
+        <div class="flex flex-wrap items-center gap-3 min-w-0">
             <button
                 @click="confirmReorganizeLibrary()"
                 :disabled="isReorganizing"
@@ -63,6 +63,7 @@
 
     <!-- Вкладки подразделов аудита -->
     <div class="flex flex-wrap gap-2 border-b border-surface-border pb-2">
+        <button @click="activeSubTab = 'censorship'" :aria-pressed="activeSubTab === 'censorship'" class="min-h-[44px] px-3 rounded border border-surface-border text-sm text-content-secondary">Проверка цензуры</button>
         <button
             @click="activeSubTab = 'lyrics'"
             :class="activeSubTab === 'lyrics' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
@@ -115,6 +116,7 @@
     </div>
 
     <!-- Секции аудита -->
+    {{ template "audit_censorship" . }}
     {{ template "audit_lyrics" . }}
     {{ template "audit_covers" . }}
     {{ template "audit_duplicates" . }}

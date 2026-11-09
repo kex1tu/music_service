@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
@@ -36,6 +37,9 @@ func CreateDummyMP3WithTags(musicSandbox *sandbox.PathSandbox, relPath string, t
 	if musicSandbox == nil {
 		return "", errors.New("testkit: musicSandbox cannot be nil")
 	}
+	// safefs/mediaexec locate descriptor roots through weak references. Keep
+	// the fixture's owning sandbox alive through the indirect ID3 operations.
+	defer runtime.KeepAlive(musicSandbox)
 
 	// 1. Разрешение пути через песочницу с запретом доступа к корню
 	absPath, err := musicSandbox.Resolve(relPath, false)

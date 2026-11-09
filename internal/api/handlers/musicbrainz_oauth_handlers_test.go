@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"music-manager/internal/config"
+	"music-manager/internal/core/auth"
 	"music-manager/internal/services/resolver"
 )
 
@@ -143,6 +144,11 @@ func TestMusicBrainzOAuthHandlers_CallbackAndStatusAndDisconnect(t *testing.T) {
 	// 2. Callback with error
 	wErr := httptest.NewRecorder()
 	reqErr := httptest.NewRequest("GET", "/api/auth/musicbrainz/callback?error=access_denied&error_description=User+cancelled", nil)
+	auth.RegisterOAuthState("fixture-reqErr")
+	reqErr.AddCookie(&http.Cookie{Name: "mb_oauth_state", Value: "fixture-reqErr"})
+	qreqErr := reqErr.URL.Query()
+	qreqErr.Set("state", "fixture-reqErr")
+	reqErr.URL.RawQuery = qreqErr.Encode()
 	tagHandler.MusicBrainzCallback(wErr, reqErr)
 	if wErr.Code != http.StatusBadRequest || !strings.Contains(wErr.Body.String(), "отменена или отклонена") {
 		t.Errorf("unexpected error handling: %d, body: %s", wErr.Code, wErr.Body.String())
@@ -151,6 +157,11 @@ func TestMusicBrainzOAuthHandlers_CallbackAndStatusAndDisconnect(t *testing.T) {
 	// 3. Callback with missing code
 	wNoCode := httptest.NewRecorder()
 	reqNoCode := httptest.NewRequest("GET", "/api/auth/musicbrainz/callback", nil)
+	auth.RegisterOAuthState("fixture-reqNoCode")
+	reqNoCode.AddCookie(&http.Cookie{Name: "mb_oauth_state", Value: "fixture-reqNoCode"})
+	qreqNoCode := reqNoCode.URL.Query()
+	qreqNoCode.Set("state", "fixture-reqNoCode")
+	reqNoCode.URL.RawQuery = qreqNoCode.Encode()
 	tagHandler.MusicBrainzCallback(wNoCode, reqNoCode)
 	if wNoCode.Code != http.StatusBadRequest || !strings.Contains(wNoCode.Body.String(), "отсутствует") {
 		t.Errorf("unexpected missing code handling: %d", wNoCode.Code)
@@ -159,6 +170,11 @@ func TestMusicBrainzOAuthHandlers_CallbackAndStatusAndDisconnect(t *testing.T) {
 	// 4. Callback success
 	wSuccess := httptest.NewRecorder()
 	reqSuccess := httptest.NewRequest("GET", "/api/auth/musicbrainz/callback?code=valid-code-777", nil)
+	auth.RegisterOAuthState("fixture-reqSuccess")
+	reqSuccess.AddCookie(&http.Cookie{Name: "mb_oauth_state", Value: "fixture-reqSuccess"})
+	qreqSuccess := reqSuccess.URL.Query()
+	qreqSuccess.Set("state", "fixture-reqSuccess")
+	reqSuccess.URL.RawQuery = qreqSuccess.Encode()
 	tagHandler.MusicBrainzCallback(wSuccess, reqSuccess)
 	if wSuccess.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK on successful callback, got %d", wSuccess.Code)

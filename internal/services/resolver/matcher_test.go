@@ -240,7 +240,7 @@ func TestAreArtistsEquivalent(t *testing.T) {
 	}
 }
 
-func TestEarlyExit_Threshold(t *testing.T) {
+func TestSearchEvaluatesAllQueries(t *testing.T) {
 	m := NewAudioMatcher("")
 
 	queryCount := 0
@@ -266,8 +266,8 @@ func TestEarlyExit_Threshold(t *testing.T) {
 		t.Errorf("expected score >= %.1f, got %.1f", EarlyExitMatchThreshold, score)
 	}
 
-	if queryCount != 1 {
-		t.Errorf("expected Early Exit after 1 query, but executed %d queries", queryCount)
+	if queryCount < 3 {
+		t.Errorf("expected full query evaluation, executed %d queries", queryCount)
 	}
 
 	if url != "https://www.youtube.com/watch?v=test_ideal_id" {
@@ -304,8 +304,8 @@ func TestEarlyExit_Threshold(t *testing.T) {
 	if err2 != nil {
 		t.Fatalf("unexpected error: %v", err2)
 	}
-	if queryCount2 != 2 {
-		t.Errorf("expected 2 queries until >= 85 reached, got %d", queryCount2)
+	if queryCount2 < 3 {
+		t.Errorf("expected all queries despite score >=85, got %d", queryCount2)
 	}
 	if score2 < EarlyExitMatchThreshold {
 		t.Errorf("expected score >= %.1f, got %.1f", EarlyExitMatchThreshold, score2)
@@ -314,6 +314,3 @@ func TestEarlyExit_Threshold(t *testing.T) {
 		t.Errorf("expected URL https://www.youtube.com/watch?v=second_topic_id, got %q", url2)
 	}
 }
-
-
-

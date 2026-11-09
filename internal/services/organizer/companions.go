@@ -3,16 +3,20 @@ package organizer
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+
 	"path/filepath"
 	"strings"
+
+	"music-manager/internal/core/safefs"
 )
 
 // FileSHA256 calculates SHA-256 checksum of a file.
 func FileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
+	f, err := safefs.Open(path)
 	if err != nil {
 		return "", err
 	}
@@ -44,15 +48,20 @@ func MoveTrackWithCompanions(srcMP3, destMP3 string, overwrite bool) (string, er
 
 	if fileExists(targetMP3) && !overwrite {
 		// Compare size and hash
-		srcStat, err1 := os.Stat(srcMP3)
-		destStat, err2 := os.Stat(targetMP3)
+		srcStat, err1 := safefs.Stat(srcMP3)
+		destStat, err2 := safefs.Stat(targetMP3)
 		if err1 == nil && err2 == nil && srcStat.Size() == destStat.Size() {
 			srcHash, hErr1 := FileSHA256(srcMP3)
 			destHash, hErr2 := FileSHA256(targetMP3)
-			if hErr1 == nil && hErr2 == nil && srcHash == destHash {
-				// Files are identical! Deduplicate: remove source
-				_ = os.Remove(srcMP3)
-				cleanCompanionFiles(srcMP3, targetMP3)
+			if hErr1 == nil && hErr2 == nil && srcHash == destHash && companionsCompatible(srcMP3, targetMP3) {
+				// Merge companions before removing the duplicate audio. On failure
+				// the original audio remains available for a retry.
+				if err := cleanCompanionFiles(srcMP3, targetMP3); err != nil {
+					return "", err
+				}
+				if err := safefs.Remove(srcMP3); err != nil {
+					return "", err
+				}
 				return targetMP3, nil
 			}
 		}
@@ -77,19 +86,24 @@ func MoveTrackWithCompanions(srcMP3, destMP3 string, overwrite bool) (string, er
 	}
 
 	// Ensure destination directory exists
-	_ = os.MkdirAll(filepath.Dir(targetMP3), 0755)
+	if err := safefs.MkdirAll(filepath.Dir(targetMP3), 0755); err != nil {
+		return "", err
+	}
 
 	if err := moveFile(srcMP3, targetMP3); err != nil {
 		return "", fmt.Errorf("failed to move audio file %s to %s: %w", srcMP3, targetMP3, err)
 	}
 
 	// Move companion files (.lrc, .txt, .jpg, .png, etc.)
-	moveCompanionFiles(srcMP3, targetMP3)
+	if err := moveCompanionFiles(srcMP3, targetMP3); err != nil {
+		rollback := moveFile(targetMP3, srcMP3)
+		return "", errors.Join(err, rollback)
+	}
 
 	return targetMP3, nil
 }
 
-func cleanCompanionFiles(srcAudio, destAudio string) {
+func cleanCompanionFiles(srcAudio, destAudio string) error {
 	srcBase := strings.TrimSuffix(srcAudio, filepath.Ext(srcAudio))
 	destBase := strings.TrimSuffix(destAudio, filepath.Ext(destAudio))
 
@@ -98,15 +112,29 @@ func cleanCompanionFiles(srcAudio, destAudio string) {
 		destComp := destBase + ext
 		if fileExists(srcComp) {
 			if fileExists(destComp) {
-				_ = os.Remove(srcComp)
+				a, e1 := FileSHA256(srcComp)
+				b, e2 := FileSHA256(destComp)
+				if e1 != nil || e2 != nil {
+					return errors.Join(e1, e2)
+				}
+				if a != b {
+					return fmt.Errorf("companion conflict: %s", destComp)
+				}
+				if err := safefs.Remove(srcComp); err != nil {
+					return err
+				}
 			} else {
-				_ = moveFile(srcComp, destComp)
+				if err := moveFile(srcComp, destComp); err != nil {
+					return err
+				}
 			}
 		}
 	}
+	return nil
 }
 
-func moveCompanionFiles(srcAudio, destAudio string) {
+func moveCompanionFiles(srcAudio, destAudio string) error {
+	var moved [][2]string
 	srcBase := strings.TrimSuffix(srcAudio, filepath.Ext(srcAudio))
 	destBase := strings.TrimSuffix(destAudio, filepath.Ext(destAudio))
 
@@ -114,7 +142,40 @@ func moveCompanionFiles(srcAudio, destAudio string) {
 		srcComp := srcBase + ext
 		destComp := destBase + ext
 		if fileExists(srcComp) && srcComp != destComp {
-			_ = moveFile(srcComp, destComp)
+			var moveErr error
+			if _, err := safefs.Lstat(destComp); err == nil {
+				moveErr = fmt.Errorf("companion destination already exists: %s", destComp)
+			} else if !errors.Is(err, os.ErrNotExist) {
+				moveErr = err
+			}
+			if moveErr == nil {
+				moveErr = moveFile(srcComp, destComp)
+			}
+			if err := moveErr; err != nil {
+				errs := []error{err}
+				for i := len(moved) - 1; i >= 0; i-- {
+					errs = append(errs, moveFile(moved[i][1], moved[i][0]))
+				}
+				return errors.Join(errs...)
+			}
+			moved = append(moved, [2]string{srcComp, destComp})
 		}
 	}
+	return nil
+}
+
+// Never deduplicate audio when doing so would discard a different sidecar.
+func companionsCompatible(srcAudio, dstAudio string) bool {
+	src := strings.TrimSuffix(srcAudio, filepath.Ext(srcAudio))
+	dst := strings.TrimSuffix(dstAudio, filepath.Ext(dstAudio))
+	for _, ext := range companionExtensions {
+		if fileExists(src+ext) && fileExists(dst+ext) {
+			a, e1 := FileSHA256(src + ext)
+			b, e2 := FileSHA256(dst + ext)
+			if e1 != nil || e2 != nil || a != b {
+				return false
+			}
+		}
+	}
+	return true
 }

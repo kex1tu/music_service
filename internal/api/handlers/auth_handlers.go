@@ -44,7 +44,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := auth.CreateSessionToken(req.Login, h.cfg.SecretKey)
-	auth.SetSessionCookie(w, token)
+	auth.SetSessionCookie(w, token, h.sessionPolicy(r))
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(loginResponse{
@@ -54,13 +54,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	auth.ClearSessionCookie(w)
+	auth.ClearSessionCookie(w, h.sessionPolicy(r))
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
 }
 
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(auth.CookieName)
+	cookie, err := r.Cookie(h.sessionPolicy(r).Name)
 	if err != nil || cookie.Value == "" {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -70,10 +70,18 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	login, valid := auth.ValidateSessionToken(cookie.Value, h.cfg.SecretKey)
+	login, valid := auth.ValidateSessionToken(cookie.Value, h.cfg.SecretKey, h.sessionPolicy(r))
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"login":         login,
 		"authenticated": valid,
 	})
+}
+
+func (h *AuthHandler) sessionPolicy(r *http.Request) auth.Policy {
+	name := h.cfg.SessionCookieName
+	if name == "" {
+		name = auth.CookieName
+	}
+	return auth.Policy{Name: name, TTL: h.cfg.SessionTTL, Secure: h.cfg.SessionCookieSecure || r.TLS != nil}
 }

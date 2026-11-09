@@ -393,8 +393,8 @@ func TestChallenger2_BoundaryConditions(t *testing.T) {
 	t.Run("XSS_OAuthCallback", func(t *testing.T) {
 		xssPayload := "<script>alert(1)</script>"
 		resp := env.Get("/api/auth/musicbrainz/callback?error=" + url.QueryEscape(xssPayload))
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Errorf("expected 400 for OAuth error callback, got %d", resp.StatusCode)
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("expected 403 for OAuth callback without state, got %d", resp.StatusCode)
 		}
 		body := string(env.ReadBody(resp))
 		if strings.Contains(body, "<script>alert(1)</script>") {

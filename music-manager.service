@@ -8,6 +8,7 @@ User=music
 Group=music
 WorkingDirectory=/opt/music-manager
 EnvironmentFile=/opt/music-manager/.env
+Environment="PATH=/opt/music-manager/tools:/usr/local/bin:/usr/bin:/bin"
 ExecStart=/opt/music-manager/bin/music-manager
 UMask=0022
 Restart=on-failure

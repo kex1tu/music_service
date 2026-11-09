@@ -65,7 +65,7 @@ document.addEventListener('alpine:init', () => {
             if (!this.url) return;
             this.isLoading = true;
             try {
-                const resp = await fetch('/downloads/preflight', {
+                const resp = await window.api.raw('/downloads/preflight', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url: this.url, source: this.source }),
@@ -179,7 +179,7 @@ document.addEventListener('alpine:init', () => {
 
             this.isStartingDownload = true;
             try {
-                const resp = await fetch('/downloads', {
+                const resp = await window.api.raw('/downloads', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

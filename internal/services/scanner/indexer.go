@@ -3,11 +3,12 @@ package scanner
 import (
 	"database/sql"
 	"fmt"
-	"os"
+
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/db"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/organizer"
@@ -32,7 +33,7 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		return err
 	}
 
-	st, err := os.Stat(fullPath)
+	st, err := safefs.Stat(fullPath)
 	if err != nil {
 		return err
 	}
@@ -89,7 +90,6 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 	if err != nil {
 		return err
 	}
-
 
 	// 3. Compute canonical path and validate path conformity
 	effAlbum := strings.TrimSpace(tags.Album)

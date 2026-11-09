@@ -2,12 +2,13 @@ package organizer
 
 import (
 	"fmt"
-	"os"
+
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
 )
@@ -214,10 +215,10 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve target album directory '%s': %w", dir, err)
 		}
-		if err := os.MkdirAll(targetFullDir, 0755); err != nil {
+		if err := safefs.MkdirAll(targetFullDir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create album directory '%s': %w", dir, err)
 		}
-		_ = os.Chmod(targetFullDir, 0755)
+		_ = safefs.Chmod(targetFullDir, 0755)
 		albumInfoMap[dir] = &targetAlbumInfo{
 			dirName:    dir,
 			fullDir:    targetFullDir,
@@ -367,7 +368,7 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 		cleanRel := strings.TrimPrefix(sourceDir, "tmp_downloads/")
 		cleanRel = strings.TrimPrefix(cleanRel, "tmp/")
 		if jobFull, err := s.tmpSandbox.Resolve(cleanRel, false); err == nil {
-			_ = os.RemoveAll(jobFull)
+			_ = safefs.RemoveAll(jobFull)
 		}
 	} else if !isTmp && sourceDir != "" && sourceDir != "." {
 		if srcDirFull, err := s.musicSandbox.Resolve(sourceDir, false); err == nil {

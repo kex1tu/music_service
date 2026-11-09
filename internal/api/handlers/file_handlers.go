@@ -6,13 +6,14 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
-	"os"
+
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	"music-manager/internal/id3"
@@ -219,7 +220,7 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if recursive {
-		st, err := os.Stat(fullPath)
+		st, err := safefs.Stat(fullPath)
 		if err != nil || !st.IsDir() {
 			http.Error(w, `{"error":"failed to read directory"}`, http.StatusInternalServerError)
 			return
@@ -244,7 +245,7 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 		}
 
 		items := make([]fileItem, 0)
-		_ = filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
+		_ = safefs.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return nil
 			}
@@ -346,7 +347,7 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries, err := os.ReadDir(fullPath)
+	entries, err := safefs.ReadDir(fullPath)
 	if err != nil {
 		http.Error(w, `{"error":"failed to read directory"}`, http.StatusInternalServerError)
 		return
@@ -391,7 +392,7 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if !countFound {
-				subEntries, _ := os.ReadDir(itemFull)
+				subEntries, _ := safefs.ReadDir(itemFull)
 				for _, sub := range subEntries {
 					if !sub.IsDir() && strings.EqualFold(filepath.Ext(sub.Name()), ".mp3") {
 						tCount++
@@ -489,18 +490,18 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			st, err := os.Stat(fPath)
+			st, err := safefs.Stat(fPath)
 			if err != nil {
 				continue
 			}
 			if st.IsDir() {
-				_ = os.RemoveAll(fPath)
+				_ = safefs.RemoveAll(fPath)
 			} else {
-				_ = os.Remove(fPath)
+				_ = safefs.Remove(fPath)
 				ext := filepath.Ext(fPath)
 				base := strings.TrimSuffix(fPath, ext)
-				_ = os.Remove(base + ".lrc")
-				_ = os.Remove(base + ".txt")
+				_ = safefs.Remove(base + ".lrc")
+				_ = safefs.Remove(base + ".txt")
 			}
 			cleanP := filepath.Clean(filepath.ToSlash(p))
 			_, _ = h.database.Conn().Exec("DELETE FROM tracks WHERE file_path = ?;", cleanP)
@@ -530,7 +531,7 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info, err := os.Stat(fullPath)
+	info, err := safefs.Stat(fullPath)
 	if err != nil {
 		http.Error(w, `{"error":"file not found"}`, http.StatusNotFound)
 		return
@@ -538,7 +539,7 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 
 	isDir := info.IsDir()
 	if isDir {
-		if err := os.RemoveAll(fullPath); err != nil {
+		if err := safefs.RemoveAll(fullPath); err != nil {
 			http.Error(w, `{"error":"failed to delete directory"}`, http.StatusInternalServerError)
 			return
 		}
@@ -575,7 +576,7 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 	} else {
 		ext := strings.ToLower(filepath.Ext(fullPath))
 
-		if err := os.Remove(fullPath); err != nil {
+		if err := safefs.Remove(fullPath); err != nil {
 			http.Error(w, `{"error":"failed to delete file"}`, http.StatusInternalServerError)
 			return
 		}
@@ -583,12 +584,12 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		if ext == ".mp3" {
 			// Удаляем сопутствующие тексты и обложки трека
 			base := strings.TrimSuffix(fullPath, filepath.Ext(fullPath))
-			_ = os.Remove(base + ".lrc")
-			_ = os.Remove(base + ".txt")
-			_ = os.Remove(base + ".jpg")
-			_ = os.Remove(base + ".jpeg")
-			_ = os.Remove(base + ".png")
-			_ = os.Remove(base + ".webp")
+			_ = safefs.Remove(base + ".lrc")
+			_ = safefs.Remove(base + ".txt")
+			_ = safefs.Remove(base + ".jpg")
+			_ = safefs.Remove(base + ".jpeg")
+			_ = safefs.Remove(base + ".png")
+			_ = safefs.Remove(base + ".webp")
 
 			// Синхронизация БД при удалении MP3
 			var trackID, albumID int64

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"music-manager/internal/core/safefs"
 )
 
 func (h *FileHandler) StreamAudio(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +35,7 @@ func (h *FileHandler) StreamAudio(w http.ResponseWriter, r *http.Request) {
 	// ServeFile natively handles HTTP 206 Partial Content range requests for seeking
 	w.Header().Set("Content-Type", "audio/mpeg")
 	w.Header().Set("Accept-Ranges", "bytes")
-	http.ServeFile(w, r, fullPath)
+	safefs.ServeFile(w, r, fullPath)
 }
 
 func (h *FileHandler) SearchLibrary(w http.ResponseWriter, r *http.Request) {

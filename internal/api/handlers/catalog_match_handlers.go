@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"os"
+
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
@@ -131,7 +132,7 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 
 	if len(localTracks) == 0 {
 		if fullPath, err := h.musicSandbox.Resolve(albumPath, false); err == nil {
-			entries, _ := os.ReadDir(fullPath)
+			entries, _ := safefs.ReadDir(fullPath)
 			for _, e := range entries {
 				if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".mp3") {
 					itemRel := filepath.Join(albumPath, e.Name())

@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"os"
+
 	"path/filepath"
 	"strings"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/downloader"
 	"music-manager/internal/services/organizer"
@@ -50,7 +51,7 @@ func (h *FileHandler) DownloadMissing(w http.ResponseWriter, r *http.Request) {
 
 	if artistName == "" || albumTitle == "" {
 		if fullPath, err := h.musicSandbox.Resolve(req.Path, false); err == nil {
-			entries, _ := os.ReadDir(fullPath)
+			entries, _ := safefs.ReadDir(fullPath)
 			for _, e := range entries {
 				if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".mp3") {
 					itemRel := filepath.Join(req.Path, e.Name())
@@ -368,7 +369,7 @@ func (h *FileHandler) ReorganizeLibrary(w http.ResponseWriter, r *http.Request) 
 
 // cleanAllEmptyDirs рекурсивно обходит дерево директорий снизу вверх и удаляет пустые папки
 func cleanAllEmptyDirs(root string) {
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	_ = safefs.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d == nil || !d.IsDir() || path == root {
 			return nil
 		}
@@ -382,7 +383,7 @@ func cleanAllEmptyDirs(root string) {
 
 	// Обход в обратном порядке (от листьев к корню), чтобы удалить вложенные пустые папки
 	var dirs []string
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	_ = safefs.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err == nil && d != nil && d.IsDir() && path != root {
 			name := d.Name()
 			if !strings.HasPrefix(name, ".") && name != "tmp" && name != "tmp_downloads" {

@@ -153,21 +153,10 @@
                 </span>
             </p>
 
-            <!-- Опция удаления с диска -->
-            <template x-if="$store.app.redownloadConfirmData">
-                <div class="p-3 bg-surface-input border border-surface-border rounded-xl">
-                    <label class="flex items-center space-x-2 text-xs text-content-primary cursor-pointer select-none">
-                        <input
-                            type="checkbox"
-                            x-model="$store.app.redownloadConfirmData.delete_existing"
-                            class="rounded bg-surface-elevated border-surface-border text-brand focus:ring-0 cursor-pointer w-4 h-4">
-                        <span class="font-medium text-amber-400">Удалить текущие файлы с сервера перед скачиванием</span>
-                    </label>
-                    <div class="text-xs text-content-muted ml-6 mt-0.5">
-                        Освободит место и удалит старые версии трека/релиза на диске
-                    </div>
-                </div>
-            </template>
+            <p class="text-xs text-content-secondary leading-relaxed">
+                Текущие файлы сохранятся. Новую загрузку можно прослушать и проверить перед приёмкой в медиатеку.
+                При совпадении пути разные версии сохраняются отдельно.
+            </p>
 
             <div class="pt-2 flex justify-end space-x-3">
                 <button

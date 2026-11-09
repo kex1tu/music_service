@@ -5,12 +5,13 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
+
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
@@ -163,7 +164,7 @@ func (s *Service) runBackfillPipeline(jobID, deezerAlbumID string, trackURLs []s
 				Title:       fmt.Sprintf("%s - Track %02d", aTit, num),
 				Artist:      aArt,
 				Album:       aTit,
-				AlbumArtist:  aArt,
+				AlbumArtist: aArt,
 				Status:      "pending",
 			})
 		}
@@ -213,8 +214,8 @@ func (s *Service) runBackfillPipeline(jobID, deezerAlbumID string, trackURLs []s
 		s.failJob(job, fmt.Sprintf("Sandbox error: %v", err))
 		return
 	}
-	_ = os.MkdirAll(rawDir, 0755)
-	_ = os.MkdirAll(convertedDir, 0755)
+	_ = safefs.MkdirAll(rawDir, 0755)
+	_ = safefs.MkdirAll(convertedDir, 0755)
 
 	s.processTracksPipeline(ctx, job, meta, tracks, rawDir, convertedDir)
 }
@@ -267,8 +268,8 @@ func (s *Service) runPipeline(jobID string) {
 		s.failJob(job, fmt.Sprintf("Sandbox error: %v", err))
 		return
 	}
-	_ = os.MkdirAll(rawDir, 0755)
-	_ = os.MkdirAll(convertedDir, 0755)
+	_ = safefs.MkdirAll(rawDir, 0755)
+	_ = safefs.MkdirAll(convertedDir, 0755)
 
 	s.processTracksPipeline(ctx, job, meta, tracks, rawDir, convertedDir)
 }
@@ -333,8 +334,8 @@ func (s *Service) processTracksPipeline(
 		cBytes, cErr := s.downloadCover(ctx, meta.CoverURL)
 		if cErr == nil && len(cBytes) > 0 {
 			coverBytes = cBytes
-			_ = os.WriteFile(filepath.Join(rawDir, "cover.jpg"), coverBytes, 0644)
-			_ = os.WriteFile(filepath.Join(convertedDir, "cover.jpg"), coverBytes, 0644)
+			_ = safefs.WriteFile(filepath.Join(rawDir, "cover.jpg"), coverBytes, 0644)
+			_ = safefs.WriteFile(filepath.Join(convertedDir, "cover.jpg"), coverBytes, 0644)
 			relCover, _ := s.tmpSandbox.ToRelative(filepath.Join(convertedDir, "cover.jpg"))
 			job.SetCoverPath(relCover)
 		}
@@ -346,35 +347,7 @@ func (s *Service) processTracksPipeline(
 		return
 	}
 
-	// Предпроверка цельного релиза (Full Release Matcher):
-	needsMatching := false
-	for _, t := range tracks {
-		if t.AudioSourceURL == "" || strings.Contains(t.AudioSourceURL, "deezer.com") {
-			needsMatching = true
-			break
-		}
-	}
-	if len(tracks) >= 2 && needsMatching && s.resolver != nil {
-		albumArt := meta.AlbumArtist
-		if albumArt == "" && len(tracks) > 0 {
-			albumArt = tracks[0].Artist
-		}
-		albumTit := meta.AlbumTitle
-		if albumTit == "" && len(tracks) > 0 {
-			albumTit = tracks[0].Album
-		}
-		if fullMatch, err := s.resolver.MatchFullRelease(ctx, albumArt, albumTit, tracks); err == nil && fullMatch != nil {
-			job.UpdateProgress(job.Progress, fmt.Sprintf("Найден полный официальный релиз (%d/%d треков совпало), загрузка из единого источника...", fullMatch.MatchedCount, fullMatch.TotalCount))
-			for idx := range tracks {
-				if trURL, ok := fullMatch.TrackURLs[idx]; ok && trURL != "" {
-					tracks[idx].AudioSourceURL = trURL
-					tracks[idx].VersionStatus = "official_release"
-				}
-			}
-			job.SetMetadata(*meta, tracks)
-		}
-	}
-
+	// Source matching is a proposal only. Missing sources require an explicit user binding.
 	// Process each track
 	var wg sync.WaitGroup
 	maxConcurrentTracks := runtime.NumCPU() / 2
@@ -407,44 +380,10 @@ trackLoop:
 			default:
 			}
 
-			// If audio stream URL is not yet resolved (e.g. Deezer album), match to YouTube
 			if track.AudioSourceURL == "" || strings.Contains(track.AudioSourceURL, "deezer.com") {
-				job.SetCurrentStep(fmt.Sprintf("Поиск аудиопотока %d/%d: %s", trackIdx, total, track.Title))
-
-				if s.resolver == nil || s.resolver.Matcher() == nil {
-					errStr := "audio matcher not available"
-					job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
-						tr.Status = "error"
-						tr.Error = &errStr
-					})
-					return
-				}
-
-				trackISRC := ""
-				if track.ISRC != nil {
-					trackISRC = *track.ISRC
-				}
-				matchRes, mErr := s.resolver.Matcher().FindBestMatchWithDetails(ctx, track.Title, track.Artist, trackISRC, track.Duration)
-				if mErr != nil {
-					errStr := "Источник не найден: требуется ручной выбор"
-					job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
-						tr.Status = "waiting_source"
-						tr.Error = &errStr
-					})
-					return
-				}
-				job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
-					tr.AudioSourceURL = matchRes.URL
-					tr.VersionStatus = matchRes.Status
-					tr.Candidates = matchRes.Candidates
-					tr.MatchScore = matchRes.MatchScore
-					tr.IsLowMatch = matchRes.MatchScore >= 50.0 && matchRes.MatchScore < 75.0
-				})
-				track.AudioSourceURL = matchRes.URL
-				track.VersionStatus = matchRes.Status
-				track.Candidates = matchRes.Candidates
-				track.MatchScore = matchRes.MatchScore
-				track.IsLowMatch = matchRes.MatchScore >= 50.0 && matchRes.MatchScore < 75.0
+				errStr := "Выберите источник трека или релиза вручную"
+				job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) { tr.Status = "waiting_source"; tr.Error = &errStr })
+				return
 			}
 
 			// Download stream with yt-dlp
@@ -454,120 +393,7 @@ trackLoop:
 			rawAudioFile, dErr := s.downloadAndValidateRawStream(ctx, track.AudioSourceURL, rawOutTemplate, track.Duration, func(p float64) {
 				job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
 			})
-			if dErr != nil && s.resolver != nil && s.resolver.Matcher() != nil {
-				isSC := strings.Contains(track.AudioSourceURL, "soundcloud.com")
-				isYT := strings.Contains(track.AudioSourceURL, "youtube.com") || strings.Contains(track.AudioSourceURL, "youtu.be")
-
-				if isSC {
-					// Обработка 404/410 для SoundCloud:
-					trackISRC := ""
-					if track.ISRC != nil {
-						trackISRC = *track.ISRC
-					}
-					cacheKey := resolver.BuildCacheKey(trackISRC, track.Artist, track.Title)
-					if s.Database() != nil {
-						if strings.Contains(strings.ToLower(dErr.Error()), "drm") {
-							_ = s.Database().DeletePinnedSource(ctx, cacheKey)
-						}
-						invEntry, invErr := s.Database().InvalidateSoundCloudURL(ctx, cacheKey, track.AudioSourceURL)
-						if invErr == nil && invEntry != nil {
-							if invEntry.IsManual && !strings.Contains(strings.ToLower(dErr.Error()), "drm") {
-								// Ручная ссылка: статус 'link_dead', НЕ подменять ссылку автоматически (если только это не фатальный DRM)
-								job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
-									tr.VersionStatus = "link_dead"
-								})
-								track.VersionStatus = "link_dead"
-							} else if invEntry.SelectedURL != "" {
-								// Автоматическая ссылка: переключаемся на следующего кандидата
-								job.SetCurrentStep(fmt.Sprintf("Ротация кандидата SoundCloud %d/%d: %s", trackIdx, total, track.Title))
-								job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
-									tr.AudioSourceURL = invEntry.SelectedURL
-									tr.VersionStatus = invEntry.Status
-									tr.Candidates = invEntry.Candidates
-								})
-								track.AudioSourceURL = invEntry.SelectedURL
-								track.VersionStatus = invEntry.Status
-								track.Candidates = invEntry.Candidates
-								rawAudioFile, dErr = s.downloadAndValidateRawStream(ctx, invEntry.SelectedURL, rawOutTemplate, track.Duration, func(p float64) {
-									job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
-								})
-							}
-						}
-					}
-
-					// Если SoundCloud всё ещё выдаёт ошибку — прозрачный фоллбэк на YouTube
-					if dErr != nil {
-						job.SetCurrentStep(fmt.Sprintf("Резервный поиск YouTube %d/%d: %s", trackIdx, total, track.Title))
-						if ytURL, ytScore, ytErr := s.resolver.Matcher().FindYouTubeMatchWithScore(ctx, track.Title, track.Artist, track.Duration); ytErr == nil && ytURL != "" {
-							job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
-								tr.AudioSourceURL = ytURL
-								tr.VersionStatus = ""
-								tr.MatchScore = ytScore
-								tr.IsLowMatch = ytScore >= 50.0 && ytScore < 75.0
-							})
-							track.AudioSourceURL = ytURL
-							track.MatchScore = ytScore
-							track.IsLowMatch = ytScore >= 50.0 && ytScore < 75.0
-							rawAudioFile, dErr = s.downloadAndValidateRawStream(ctx, ytURL, rawOutTemplate, track.Duration, func(p float64) {
-								job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
-							})
-						}
-					}
-				} else if isYT {
-					// Fallback from YouTube (e.g. age restriction / DRM) to SoundCloud
-					job.SetCurrentStep(fmt.Sprintf("Резервный поиск SoundCloud %d/%d: %s", trackIdx, total, track.Title))
-					if scURL, scErr := s.resolver.Matcher().FindSoundCloudMatch(ctx, track.Title, track.Artist, track.Duration); scErr == nil && scURL != "" {
-						job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
-							tr.AudioSourceURL = scURL
-						})
-						track.AudioSourceURL = scURL
-						rawAudioFile, dErr = s.downloadAndValidateRawStream(ctx, scURL, rawOutTemplate, track.Duration, func(p float64) {
-							job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
-						})
-					}
-				} else {
-					// Fallback from non-SC, non-YT (e.g. DRM or Deezer URL) to SoundCloud, then YouTube
-					trackISRC := ""
-					if track.ISRC != nil {
-						trackISRC = *track.ISRC
-					}
-					cacheKey := resolver.BuildCacheKey(trackISRC, track.Artist, track.Title)
-					if s.Database() != nil && strings.Contains(strings.ToLower(dErr.Error()), "drm") {
-						_ = s.Database().DeletePinnedSource(ctx, cacheKey)
-					}
-					job.SetCurrentStep(fmt.Sprintf("Резервный поиск SoundCloud %d/%d: %s", trackIdx, total, track.Title))
-					if scRes, scErr := s.resolver.Matcher().FindUncensoredSoundCloudMatch(ctx, track.Title, track.Artist, trackISRC, track.Duration); scErr == nil && scRes != nil && scRes.URL != "" {
-						job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
-							tr.AudioSourceURL = scRes.URL
-							tr.VersionStatus = scRes.Status
-							tr.Candidates = scRes.Candidates
-						})
-						track.AudioSourceURL = scRes.URL
-						track.VersionStatus = scRes.Status
-						track.Candidates = scRes.Candidates
-						rawAudioFile, dErr = s.downloadAndValidateRawStream(ctx, scRes.URL, rawOutTemplate, track.Duration, func(p float64) {
-							job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
-						})
-					}
-					if dErr != nil {
-						job.SetCurrentStep(fmt.Sprintf("Резервный поиск YouTube %d/%d: %s", trackIdx, total, track.Title))
-						if ytURL, ytScore, ytErr := s.resolver.Matcher().FindYouTubeMatchWithScore(ctx, track.Title, track.Artist, track.Duration); ytErr == nil && ytURL != "" {
-							job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
-								tr.AudioSourceURL = ytURL
-								tr.VersionStatus = ""
-								tr.MatchScore = ytScore
-								tr.IsLowMatch = ytScore >= 50.0 && ytScore < 75.0
-							})
-							track.AudioSourceURL = ytURL
-							track.MatchScore = ytScore
-							track.IsLowMatch = ytScore >= 50.0 && ytScore < 75.0
-							rawAudioFile, dErr = s.downloadAndValidateRawStream(ctx, ytURL, rawOutTemplate, track.Duration, func(p float64) {
-								job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
-							})
-						}
-					}
-				}
-			}
+			// A failed explicit source requires a new manual choice; never rotate or fallback.
 			if dErr != nil {
 				errStr := dErr.Error()
 				job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
@@ -576,7 +402,7 @@ trackLoop:
 				})
 				return
 			}
-			defer os.Remove(rawAudioFile)
+			defer safefs.Remove(rawAudioFile)
 
 			// Analyze audio quality telemetry (codec, bitrate, cutoff frequency)
 			qualityTelemetry := s.analyzeAudioQuality(ctx, rawAudioFile)
@@ -679,6 +505,12 @@ trackLoop:
 	// Final step: READY or ERROR
 	snap := job.Snapshot()
 	if snap.CompletedTracks == 0 && total > 0 {
+		for _, tr := range snap.Tracks {
+			if tr.Status == "waiting_source" {
+				job.SetStepAndStatus("Выберите источник вручную", StatusWaitingSource)
+				return
+			}
+		}
 		var errDetails []string
 		for _, tr := range snap.Tracks {
 			if tr.Error != nil && *tr.Error != "" {

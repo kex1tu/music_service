@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
@@ -433,8 +434,8 @@ func (h *FileHandler) ApplyCatalogTags(w http.ResponseWriter, r *http.Request) {
 	if coverInfo != nil && len(coverInfo.Data) > 0 {
 		albumDir := filepath.Dir(fullPath)
 		coverFile := filepath.Join(albumDir, "cover.jpg")
-		if _, statErr := os.Stat(coverFile); os.IsNotExist(statErr) {
-			_ = os.WriteFile(coverFile, coverInfo.Data, 0644)
+		if _, statErr := safefs.Stat(coverFile); os.IsNotExist(statErr) {
+			_ = safefs.WriteFile(coverFile, coverInfo.Data, 0644)
 		}
 	}
 

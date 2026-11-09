@@ -127,7 +127,7 @@
                     <div class="flex items-center space-x-2.5 min-w-0 flex-1">
                         <span class="text-xs font-mono font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider shrink-0 border"
                             :class="{
-                                'bg-amber-500/10 text-amber-300 border-amber-500/30': j.status === 'QUEUED' || j.status === 'RESOLVING',
+                                'bg-amber-500/10 text-amber-300 border-amber-500/30': j.status === 'QUEUED' || j.status === 'WAITING_SOURCE' || j.status === 'RESOLVING',
                                 'bg-sky-500/10 text-sky-300 border-sky-500/30': j.status === 'DOWNLOADING',
                                 'bg-purple-500/10 text-purple-300 border-purple-500/30': j.status === 'CONVERTING',
                                 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30': j.status === 'TAGGING',
@@ -136,7 +136,7 @@
                                 'bg-rose-500/10 text-rose-300 border-rose-500/30': j.status === 'ERROR',
                                 'bg-white/[0.04] text-content-muted border-white/[0.08]': j.status === 'CANCELLED',
                             }"
-                            x-text="j.status">
+                            x-text="j.status === 'WAITING_SOURCE' ? 'Выбор источника' : j.status">
                         </span>
                         <template x-if="j.is_backfill">
                             <span class="text-xs font-mono px-1.5 py-0.5 rounded-sm bg-sky-500/15 text-sky-300 border border-sky-500/30 uppercase tracking-wider shrink-0">
@@ -320,7 +320,7 @@
                                             <div class="text-xs text-content-muted truncate" x-text="track.artist"></div>
                                         </div>
                                     </div>
-                                    <div class="flex items-center space-x-1.5 shrink-0">
+                                    <div class="flex flex-wrap items-center justify-end gap-1.5 shrink-0 max-w-full">
                                         <span class="text-xs font-mono tabular-nums text-content-muted" x-text="window.AppFormatters ? window.AppFormatters.formatDuration(track.duration) : track.duration + 'с'"></span>
 
                                         <!-- Телеметрия качества звука (Cutoff & Spek) -->
@@ -353,11 +353,11 @@
                                         <button
                                             type="button"
                                             @click.stop="$store.sourcePicker.openForQueueTrack(j, track)"
-                                            aria-label="Выбрать музыкальный источник вручную"
-                                            class="px-2 py-0.5 rounded-sm text-xs font-mono transition flex items-center space-x-1 border shadow-xs focus-visible:ring-2 focus-visible:ring-white/30"
-                                            :class="track.status === 'waiting_source' || track.status === 'error' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30 animate-pulse' : 'bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
-                                            title="Выбрать источник вручную">
-                                            <span x-text="track.status === 'waiting_source' || track.status === 'error' ? 'Выбрать источник' : 'Источник'"></span>
+                                            :aria-label="getTrackSourceState(track).action + ': ' + track.title"
+                                            class="min-h-[44px] sm:min-h-0 px-2 py-0.5 rounded-sm text-xs font-mono transition flex items-center space-x-1 border shadow-xs focus-visible:ring-2 focus-visible:ring-white/30"
+                                            :class="getTrackSourceState(track).attention ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30' : 'bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white border-surface-border'"
+                                            :title="getTrackSourceState(track).selected ? 'Источник выбран. Можно выбрать другую запись.' : 'Назначить аудиоисточник для этого трека'">
+                                            <span x-text="getTrackSourceState(track).action"></span>
                                         </button>
 
                                         <!-- Кнопка версий -->
@@ -374,6 +374,16 @@
                                         </template>
                                     </div>
                                 </div>
+
+                                <template x-if="getTrackSourceState(track).attention">
+                                    <div class="mt-2 text-xs text-amber-300 min-w-0 break-words">
+                                        <p x-text="getTrackSourceState(track).message"></p>
+                                        <details x-show="track.error" class="mt-1">
+                                            <summary class="cursor-pointer py-2 text-content-secondary">Подробности ошибки</summary>
+                                            <p class="whitespace-pre-wrap break-all text-content-secondary" x-text="track.error"></p>
+                                        </details>
+                                    </div>
+                                </template>
 
                                 <!-- Quick-Listen Spots -->
                                 <template x-if="track.quick_listen_spots && track.quick_listen_spots.length > 0">

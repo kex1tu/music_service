@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
+
 	"strconv"
 	"strings"
 	"time"
+
+	"music-manager/internal/core/mediaexec"
 )
 
 // CommandExecutor определяет интерфейс для запуска внешних утилит (songrec).
@@ -15,7 +17,8 @@ type CommandExecutor func(ctx context.Context, name string, args ...string) ([]b
 
 // DefaultCommandExecutor запускает команду через exec.CommandContext.
 func DefaultCommandExecutor(ctx context.Context, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := mediaexec.CommandContext(ctx, name, args...)
+	defer cmd.Close()
 	return cmd.Output()
 }
 

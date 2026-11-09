@@ -3,11 +3,12 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"os"
+
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
@@ -22,7 +23,7 @@ func (h *FileHandler) BackfillEditorData(w http.ResponseWriter, r *http.Request)
 	// 1. Read existing library tracks
 	if albumPath != "" {
 		if fullPath, err := h.musicSandbox.Resolve(albumPath, true); err == nil {
-			entries, _ := os.ReadDir(fullPath)
+			entries, _ := safefs.ReadDir(fullPath)
 			for _, e := range entries {
 				if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".mp3") {
 					itemRel := filepath.Join(albumPath, e.Name())
@@ -100,7 +101,7 @@ func (h *FileHandler) BackfillEditorData(w http.ResponseWriter, r *http.Request)
 	if jobID != "" && h.tmpSandbox != nil {
 		jobDirRel := filepath.Join(jobID, "converted")
 		if fullJobDir, err := h.tmpSandbox.Resolve(jobDirRel, false); err == nil {
-			entries, _ := os.ReadDir(fullJobDir)
+			entries, _ := safefs.ReadDir(fullJobDir)
 			for _, e := range entries {
 				if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".mp3") {
 					itemRel := filepath.Join("tmp_downloads", jobID, "converted", e.Name())
@@ -173,7 +174,7 @@ func (h *FileHandler) BackfillEditorData(w http.ResponseWriter, r *http.Request)
 	if albumPath != "" {
 		if fullPath, err := h.musicSandbox.Resolve(albumPath, true); err == nil {
 			for _, c := range []string{"cover.jpg", "cover.png", "folder.jpg"} {
-				if _, err := os.Stat(filepath.Join(fullPath, c)); err == nil {
+				if _, err := safefs.Stat(filepath.Join(fullPath, c)); err == nil {
 					coverPath = filepath.Join(albumPath, c)
 					hasCover = true
 					break
@@ -184,7 +185,7 @@ func (h *FileHandler) BackfillEditorData(w http.ResponseWriter, r *http.Request)
 	if !hasCover && jobID != "" && h.tmpSandbox != nil {
 		jobDirRel := filepath.Join(jobID, "converted")
 		if fullJobDir, err := h.tmpSandbox.Resolve(jobDirRel, false); err == nil {
-			if _, err := os.Stat(filepath.Join(fullJobDir, "cover.jpg")); err == nil {
+			if _, err := safefs.Stat(filepath.Join(fullJobDir, "cover.jpg")); err == nil {
 				coverPath = filepath.Join("tmp_downloads", jobID, "converted", "cover.jpg")
 				hasCover = true
 			}

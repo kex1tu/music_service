@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	"music-manager/internal/id3"
@@ -111,13 +112,13 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 	// 3. Разрешение физического пути к существующему файлу через PathSandbox
 	if relFilePath != "" {
 		if p, err := s.musicSandbox.Resolve(relFilePath, false); err == nil {
-			if _, statErr := os.Stat(p); statErr == nil {
+			if _, statErr := safefs.Stat(p); statErr == nil {
 				absFilePath = p
 			}
 		}
 		if absFilePath == "" {
 			if p, err := s.tmpSandbox.Resolve(relFilePath, false); err == nil {
-				if _, statErr := os.Stat(p); statErr == nil {
+				if _, statErr := safefs.Stat(p); statErr == nil {
 					absFilePath = p
 				}
 			}
@@ -144,14 +145,14 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 	if dErr != nil {
 		return nil, fmt.Errorf("failed to download audio from target URL: %w", dErr)
 	}
-	defer os.Remove(rawFile)
+	defer safefs.Remove(rawFile)
 
 	// 6. Перекодирование в MP3 320 kbps CBR
 	tmpMP3File := filepath.Join(s.tmpSandbox.Root(), fmt.Sprintf("switch_%d.mp3", time.Now().UnixNano()))
 	if tErr := s.transcodeToMP3(ctx, rawFile, tmpMP3File); tErr != nil {
 		return nil, fmt.Errorf("failed to transcode audio to MP3: %w", tErr)
 	}
-	defer os.Remove(tmpMP3File)
+	defer safefs.Remove(tmpMP3File)
 
 	// 7. Если длительность кандидата неизвестна — замеряем через ffprobe
 	if candDuration <= 0 {
@@ -223,7 +224,7 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 	if destPath == "" {
 		if foundJob != nil {
 			convertedDir, _ := s.tmpSandbox.Resolve(filepath.Join(foundJob.ID, "converted"), true)
-			_ = os.MkdirAll(convertedDir, 0755)
+			_ = safefs.MkdirAll(convertedDir, 0755)
 			cleanTitle := id3.CleanTitle(title, "Track")
 			safeTitle := sandbox.SanitizeFilename(cleanTitle, "Track")
 			trackNum := 1
@@ -238,14 +239,14 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 		}
 	}
 
-	_ = os.Chmod(tmpMP3File, 0644)
-	if err := os.Rename(tmpMP3File, destPath); err != nil {
+	_ = safefs.Chmod(tmpMP3File, 0644)
+	if err := safefs.Rename(tmpMP3File, destPath); err != nil {
 		if cpErr := copyFile(tmpMP3File, destPath); cpErr != nil {
 			return nil, fmt.Errorf("failed to replace destination file: %w", cpErr)
 		}
-		_ = os.Remove(tmpMP3File)
+		_ = safefs.Remove(tmpMP3File)
 	}
-	_ = os.Chmod(destPath, 0644)
+	_ = safefs.Chmod(destPath, 0644)
 
 	// 10. Фиксация ручного выбора в SQLite базе данных
 	if s.Database() != nil {
@@ -310,17 +311,17 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 }
 
 func copyFile(src, dst string) error {
-	in, err := os.Open(src)
+	in, err := safefs.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
 
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := safefs.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
 
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	out, err := safefs.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
 	}

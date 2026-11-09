@@ -432,12 +432,12 @@
                                                     }"
                                                     x-text="match.source === 'yandex' ? 'Yandex' : (match.source === 'youtube_music' ? 'YT Music' : (match.source === 'deezer' ? 'Deezer' : 'iTunes'))">
                                                 </span>
-                                                <!-- Процент совпадения MatchScore -->
+                                                <!-- Оценка соответствия MatchScore -->
                                                 <template x-if="match.match_score">
                                                     <span
                                                         class="px-1.5 py-0.2 rounded text-xs font-bold"
                                                         :class="match.match_score >= 80 ? 'bg-brand-muted text-brand border border-brand/30' : (match.match_score >= 50 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30')"
-                                                        x-text="match.match_score + '% совпадение'">
+                                                        x-text="'Соответствие: ' + match.match_score + '/100'">
                                                     </span>
                                                 </template>
                                                 <!-- Длительность -->

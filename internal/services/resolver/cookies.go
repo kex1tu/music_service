@@ -2,8 +2,10 @@ package resolver
 
 import (
 	"bufio"
-	"os"
+
 	"strings"
+
+	"music-manager/internal/core/safefs"
 )
 
 // IsValidNetscapeCookiesFile проверяет, существует ли файл куков, не пустой ли он,
@@ -18,12 +20,12 @@ func IsValidNetscapeCookiesFile(path string) bool {
 		return false
 	}
 
-	info, err := os.Stat(cleanPath)
+	info, err := safefs.Stat(cleanPath)
 	if err != nil || info.IsDir() || info.Size() < 10 {
 		return false
 	}
 
-	f, err := os.Open(cleanPath)
+	f, err := safefs.Open(cleanPath)
 	if err != nil {
 		return false
 	}
@@ -71,4 +73,3 @@ func CleanYtDlpStderr(errStr string) string {
 	}
 	return strings.Join(clean, " ")
 }
-

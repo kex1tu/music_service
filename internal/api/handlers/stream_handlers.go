@@ -7,13 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
+
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	"music-manager/internal/id3"
@@ -129,7 +130,7 @@ func (h *FileHandler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, max-age=3600")
 
 	// http.ServeFile нативно реализует RFC 7233 Range-запросы и использует sendfile(2) в Linux
-	http.ServeFile(w, r, fullPath)
+	safefs.ServeFile(w, r, fullPath)
 }
 
 // TrackMetadataResponse представляет структурированные метаданные трека.
@@ -207,7 +208,7 @@ func (h *FileHandler) GetTrackMetadata(w http.ResponseWriter, r *http.Request) {
 		} else {
 			resp.Title = strings.TrimSuffix(filepath.Base(fullPath), filepath.Ext(fullPath))
 		}
-		if fi, err := os.Stat(fullPath); err == nil {
+		if fi, err := safefs.Stat(fullPath); err == nil {
 			resp.FileSize = fi.Size()
 		}
 	}
@@ -233,7 +234,7 @@ func (h *FileHandler) GetTrackCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	st, err := os.Stat(fullPath)
+	st, err := safefs.Stat(fullPath)
 	if err != nil {
 		http.Error(w, `{"error":"file not found"}`, http.StatusNotFound)
 		return
@@ -267,7 +268,7 @@ func (h *FileHandler) GetTrackCover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, candPath := range candidates {
-		if data, err := os.ReadFile(candPath); err == nil {
+		if data, err := safefs.ReadFile(candPath); err == nil {
 			mime := "image/jpeg"
 			if strings.HasSuffix(candPath, ".png") {
 				mime = "image/png"

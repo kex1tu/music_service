@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 )
@@ -299,7 +300,7 @@ func (s *IcyStreamer) prepareTrackFile(filePath string) (*os.File, int64, error)
 		return nil, 0, err
 	}
 
-	f, err := os.Open(absPath)
+	f, err := safefs.Open(absPath)
 	if err != nil {
 		return nil, 0, err
 	}

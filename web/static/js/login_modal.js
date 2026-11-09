@@ -16,7 +16,7 @@ function loginModalComponent() {
             this.isLoggingIn = true;
             this.error = null;
             try {
-                const res = await fetch('/login', {
+                const res = await window.api.raw('/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ login: this.loginUser, password: this.password })

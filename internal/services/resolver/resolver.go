@@ -51,30 +51,31 @@ type AudioQualityTelemetry struct {
 
 // ResolvedTrack defines the standardized track model across all sources.
 type ResolvedTrack struct {
-	TrackID        string                       `json:"track_id"`
-	TrackNumber    int                          `json:"track_number"`
-	TrackTotal     *int                         `json:"track_total,omitempty"`
-	DiscNumber     int                          `json:"disc_number"`
-	DiscTotal      *int                         `json:"disc_total,omitempty"`
-	Title          string                       `json:"title"`
-	Artist         string                       `json:"artist"`
-	Album          string                       `json:"album"`
-	AlbumArtist    string                       `json:"album_artist"`
-	Year           *int                         `json:"year,omitempty"`
-	Genre          *string                      `json:"genre,omitempty"`
-	Duration       int                          `json:"duration"`
-	ISRC           *string                      `json:"isrc,omitempty"`
-	CoverURL       *string                      `json:"cover_url,omitempty"`
-	AudioSourceURL string                       `json:"audio_source_url"`
-	ConvertedPath  *string                      `json:"converted_path,omitempty"`
-	Status         string                       `json:"status"` // pending, downloading, converting, ready, error
-	Error          *string                      `json:"error,omitempty"`
-	VersionStatus  string                       `json:"version_status,omitempty"`
-	Candidates     []db.SoundCloudCandidateItem `json:"candidates,omitempty"`
-	AudioQuality   *AudioQualityTelemetry       `json:"audio_quality,omitempty"`
+	VersionPolicy    VersionPolicy                 `json:"version_policy,omitempty"`
+	TrackID          string                        `json:"track_id"`
+	TrackNumber      int                           `json:"track_number"`
+	TrackTotal       *int                          `json:"track_total,omitempty"`
+	DiscNumber       int                           `json:"disc_number"`
+	DiscTotal        *int                          `json:"disc_total,omitempty"`
+	Title            string                        `json:"title"`
+	Artist           string                        `json:"artist"`
+	Album            string                        `json:"album"`
+	AlbumArtist      string                        `json:"album_artist"`
+	Year             *int                          `json:"year,omitempty"`
+	Genre            *string                       `json:"genre,omitempty"`
+	Duration         int                           `json:"duration"`
+	ISRC             *string                       `json:"isrc,omitempty"`
+	CoverURL         *string                       `json:"cover_url,omitempty"`
+	AudioSourceURL   string                        `json:"audio_source_url"`
+	ConvertedPath    *string                       `json:"converted_path,omitempty"`
+	Status           string                        `json:"status"` // pending, downloading, converting, ready, error
+	Error            *string                       `json:"error,omitempty"`
+	VersionStatus    string                        `json:"version_status,omitempty"`
+	Candidates       []db.SoundCloudCandidateItem  `json:"candidates,omitempty"`
+	AudioQuality     *AudioQualityTelemetry        `json:"audio_quality,omitempty"`
 	QuickListenSpots []censorcheck.QuickListenSpot `json:"quick_listen_spots,omitempty"`
-	MatchScore     float64                      `json:"match_score,omitempty"`
-	IsLowMatch     bool                         `json:"is_low_match,omitempty"`
+	MatchScore       float64                       `json:"match_score,omitempty"`
+	IsLowMatch       bool                          `json:"is_low_match,omitempty"`
 }
 
 // ReleaseMetadata holds album-level metadata.
@@ -263,4 +264,3 @@ func (r *SourceResolver) FullReleaseMatcher() *FullReleaseMatcher {
 func (r *SourceResolver) MatchFullRelease(ctx context.Context, targetArtist, targetAlbum string, targetTracks []ResolvedTrack) (*FullReleaseMatchResult, error) {
 	return r.FullReleaseMatcher().MatchFullRelease(ctx, targetArtist, targetAlbum, targetTracks)
 }
-

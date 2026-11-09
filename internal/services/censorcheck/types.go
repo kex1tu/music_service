@@ -4,6 +4,7 @@ package censorcheck
 type SpotCategory string
 
 const (
+	CategorySuicide SpotCategory = "SUICIDE_THEME"
 	// CategoryDrugCoAP — вещества, прекурсоры, приспособления и нарко-сленг (ст. 6.13 КоАП РФ).
 	CategoryDrugCoAP SpotCategory = "DRUG_COAP_6_13"
 	// CategorySuspect — подозрительные маркеры цензуры и эвфемизмы (clean, radio edit, балдеет, дуреет).

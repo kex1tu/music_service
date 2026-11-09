@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"music-manager/internal/core/auth"
 	"music-manager/internal/core/httputil"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
@@ -336,6 +337,7 @@ func (m *Module) MusicBrainzLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	state := uuid.New().String()
+	auth.RegisterOAuthState(state)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "mb_oauth_state",
 		Value:    state,
@@ -366,6 +368,11 @@ func (m *Module) MusicBrainzLogin(w http.ResponseWriter, r *http.Request) {
 // MusicBrainzCallback обрабатывает GET /api/auth/musicbrainz/callback
 // Публичный callback эндпоинт для перенаправления с musicbrainz.org.
 func (m *Module) MusicBrainzCallback(w http.ResponseWriter, r *http.Request) {
+	if !auth.ConsumeOAuthState(w, r) {
+		http.Error(w, "invalid or expired OAuth state", http.StatusForbidden)
+		return
+	}
+
 	if errParam := r.URL.Query().Get("error"); errParam != "" {
 		errDesc := r.URL.Query().Get("error_description")
 		if errDesc == "" {

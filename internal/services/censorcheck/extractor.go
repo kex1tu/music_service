@@ -33,6 +33,22 @@ func ExtractSpots(lrcContent string, maxSpots int) []QuickListenSpot {
 	if maxSpots <= 0 {
 		maxSpots = 3
 	}
+	return extractSpots(lrcContent, maxSpots)
+}
+
+// ExtractAuditSpots does not inherit the three-item presentation limit.
+func ExtractAuditSpots(lrcContent string) []QuickListenSpot {
+	return extractSpots(lrcContent, int(^uint(0)>>1))
+}
+
+var lrcOffsetRegex = regexp.MustCompile(`(?i)\[offset:([+-]?\d+)\]`)
+
+func extractSpots(lrcContent string, maxSpots int) []QuickListenSpot {
+	offset := 0.0
+	if m := lrcOffsetRegex.FindStringSubmatch(lrcContent); len(m) > 1 {
+		v, _ := strconv.Atoi(m[1])
+		offset = -float64(v) / 1000
+	}
 
 	lines := strings.Split(lrcContent, "\n")
 	var candidates []candidateSpot
@@ -80,7 +96,10 @@ func ExtractSpots(lrcContent string, maxSpots int) []QuickListenSpot {
 					frac = float64(val) / 1000.0
 				}
 			}
-			timestamps = append(timestamps, float64(min*60+sec)+frac)
+			if sec >= 60 {
+				continue
+			}
+			timestamps = append(timestamps, math.Max(0, float64(min*60+sec)+frac+offset))
 		}
 
 		// 1. Поиск многословных маркеров цензуры в строке
@@ -89,6 +108,15 @@ func ExtractSpots(lrcContent string, maxSpots int) []QuickListenSpot {
 			word     string
 			category SpotCategory
 			priority int
+		}
+		for _, p := range []string{"покончить с собой", "покончу с собой", "покончил с собой", "покончила с собой", "свести счеты с жизнью", "свести счёты с жизнью", "уйти из жизни"} {
+			if strings.Contains(" "+lineLower+" ", " "+p+" ") {
+				lineTriggers = append(lineTriggers, struct {
+					word     string
+					category SpotCategory
+					priority int
+				}{p, CategorySuicide, 1})
+			}
 		}
 
 		for _, marker := range multiWordSuspectMarkers {
@@ -126,7 +154,7 @@ func ExtractSpots(lrcContent string, maxSpots int) []QuickListenSpot {
 
 			seenInLine[tokenLower] = struct{}{}
 			prio := 3
-			if cat == CategoryDrugCoAP {
+			if cat == CategoryDrugCoAP || cat == CategorySuicide {
 				prio = 1
 			} else if cat == CategorySuspect {
 				prio = 2

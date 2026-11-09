@@ -5,9 +5,10 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
+
+	"music-manager/internal/core/safefs"
 )
 
 // WriteTags записывает канонические теги стандарта ID3v2.4 в MP3-файл.
@@ -16,7 +17,7 @@ func WriteTags(filePath string, tags TrackTags, cover *CoverInfo) error {
 	existingFrames, _ := ReadRawFrames(filePath)
 
 	// 1. Считываем аудиопоток (пропуская существующий ID3v2 заголовок)
-	file, err := os.Open(filePath)
+	file, err := safefs.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("не удалось открыть исходный файл: %w", err)
 	}
@@ -130,12 +131,12 @@ func WriteTags(filePath string, tags TrackTags, cover *CoverInfo) error {
 
 	// 4. Атомарная буферизованная запись во временный файл (буфер 128 КБ)
 	dir := filepath.Dir(filePath)
-	tmpFile, err := os.CreateTemp(dir, "tag_write_*.tmp")
+	tmpFile, err := safefs.CreateTemp(dir, "tag_write_*.tmp")
 	if err != nil {
 		return fmt.Errorf("не удалось создать временный файл: %w", err)
 	}
 	tmpName := tmpFile.Name()
-	defer os.Remove(tmpName)
+	defer safefs.Remove(tmpName)
 
 	bufWriter := bufio.NewWriterSize(tmpFile, 128*1024)
 
@@ -174,13 +175,13 @@ func WriteTags(filePath string, tags TrackTags, cover *CoverInfo) error {
 	file.Close()
 
 	// Гарантируем права 0644 для доступности сервисам (Navidrome, DLNA)
-	_ = os.Chmod(tmpName, 0644)
+	_ = safefs.Chmod(tmpName, 0644)
 
 	// Атомарная замена файла
-	if err := os.Rename(tmpName, filePath); err != nil {
+	if err := safefs.Rename(tmpName, filePath); err != nil {
 		return fmt.Errorf("не удалось обновить файл тегов: %w", err)
 	}
-	_ = os.Chmod(filePath, 0644)
+	_ = safefs.Chmod(filePath, 0644)
 
 	return nil
 }
@@ -342,4 +343,3 @@ func extractTXXXDescription(data []byte) string {
 		return decodeISO88591(payload)
 	}
 }
-

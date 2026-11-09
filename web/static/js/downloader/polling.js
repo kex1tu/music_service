@@ -4,7 +4,7 @@
 window.DownloaderPolling = {
     async poll(downloader, jobId) {
         try {
-            const res = await fetch(`/downloads/${jobId}`);
+            const res = await window.api.raw(`/downloads/${jobId}`);
             if (!res.ok) {
                 if (res.status === 404) {
                     if (downloader.pollInterval) {
@@ -56,7 +56,7 @@ window.DownloaderPolling = {
 
     async openTagEditorForJob(jobId) {
         try {
-            const res = await fetch(`/downloads/${jobId}/tracks`);
+            const res = await window.api.raw(`/downloads/${jobId}/tracks`);
             if (!res.ok) {
                 throw new Error('Не удалось получить подготовленные треки задачи');
             }
@@ -140,7 +140,7 @@ window.DownloaderPolling = {
     async acceptJobDirectly(jobId) {
         try {
             Alpine.store('app').toast('Перемещение релиза в медиатеку...', 'info');
-            const res = await fetch(`/downloads/${jobId}/tracks`);
+            const res = await window.api.raw(`/downloads/${jobId}/tracks`);
             if (!res.ok) {
                 throw new Error('Не удалось получить подготовленные треки задачи');
             }
@@ -179,7 +179,7 @@ window.DownloaderPolling = {
                 lyrics_status: 'none',
             }));
 
-            const saveRes = await fetch('/tags/batch', {
+            const saveRes = await window.api.raw('/tags/batch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -197,7 +197,7 @@ window.DownloaderPolling = {
             }
 
             Alpine.store('app').toast('Релиз успешно принят в медиатеку!', 'success');
-            await fetch(`/downloads/${jobId}`, { method: 'DELETE' });
+            await window.api.raw(`/downloads/${jobId}`, { method: 'DELETE' });
             if (Alpine.store('app').queue) {
                 await Alpine.store('app').queue.fetchQueue();
             }

@@ -60,7 +60,7 @@
 ## 3. Системные требования
 
 - **ОС:** Linux (Ubuntu 22.04 / 24.04 LTS, Debian 12, Arch Linux и др.)
-- **Go:** 1.22 или новее
+- **Go:** версия из `go.mod`
 - **Системные утилиты:**
   - `ffmpeg` версии 6.x+ (с поддержкой кодека `libmp3lame`)
   - `yt-dlp` (рекомендуется актуальная версия)
@@ -69,8 +69,37 @@
 Установка системных зависимостей в Ubuntu / Debian:
 ```bash
 sudo apt update
-sudo apt install -y golang ffmpeg yt-dlp
+sudo apt install -y ffmpeg
 ```
+
+
+Установите Go согласно `go.mod`. Для yt-dlp используйте официальный автономный
+Linux ELF (`yt-dlp_linux` для amd64, `yt-dlp_linux_aarch64` для arm64), переименованный
+в `yt-dlp`, а не Python-скрипт `yt-dlp` из pip/apt. Скачайте выбранную версию из
+[официальных релизов](https://github.com/yt-dlp/yt-dlp/releases), проверьте checksum
+и подпись релиза до установки. Разместите исполняемый файл в `tools/yt-dlp` установки.
+Официальные standalone-сборки включают EJS; установите также отдельный Deno >=2.3
+из [официального релиза Deno](https://github.com/denoland/deno/releases) в `tools/deno`.
+Системные Python и Node.js для этих инструментов не нужны. Deno включён yt-dlp по
+умолчанию; подробности — [руководство EJS](https://github.com/yt-dlp/yt-dlp/wiki/EJS).
+Проверки: `file tools/yt-dlp`, `tools/yt-dlp --version`, `tools/deno --version`.
+Systemd использует `tools/` первым в PATH. Для локального запуска:
+`PATH="$PWD/tools:$PATH" ./bin/music-manager`. При неподходящем runtime загрузки через yt-dlp возвращают диагностику,
+а локальная медиатека остаётся доступной.
+
+
+Секреты обязательны: `SECRET_KEY` должен содержать минимум 32 символа,
+`ADMIN_PASSWORD_HASH` — валидный bcrypt-хэш. Плейсхолдеры сервер не принимает.
+Для создания хэша без Python (Bash, пароль не попадает в историю команд):
+
+```bash
+read -rs -p 'Пароль: ' MM_PASSWORD; printf '\n'
+printf '%s' "$MM_PASSWORD" | go run ./cmd/passwordhash
+unset MM_PASSWORD
+```
+
+Запишите полученный хэш в `.env` в **одинарных кавычках**, чтобы символы `$`
+не интерпретировались загрузчиком окружения.
 
 ---
 
@@ -84,7 +113,7 @@ git clone https://github.com/your-username/music-manager.git /opt/music-manager
 cd /opt/music-manager
 
 # Компиляция статического бинарника
-go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go
+CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go
 ```
 
 ### 4.2 Конфигурация `.env`

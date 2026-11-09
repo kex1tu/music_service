@@ -584,5 +584,3 @@ func TestDeduplicateReleases(t *testing.T) {
 		t.Errorf("expected merged artist 'Daft Punk, Romanthony', got %q", disc.ArtistName)
 	}
 }
-
-

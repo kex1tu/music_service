@@ -19,7 +19,7 @@ function headerSearchComponent() {
             }
             this.isLoading = true;
             try {
-                const res = await fetch('/files/search?query=' + encodeURIComponent(q));
+                const res = await window.api.raw('/files/search?query=' + encodeURIComponent(q));
                 if (res.ok) {
                     this.results = await res.json();
                     this.isOpen = true;

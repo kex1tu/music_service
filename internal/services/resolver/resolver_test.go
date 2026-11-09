@@ -56,24 +56,14 @@ func TestCleanReleaseTitle(t *testing.T) {
 }
 
 func TestResolve_TorrentNotFound(t *testing.T) {
-	r := NewSourceResolver(nil, nil, "")
+	transport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"data":[]}`))}, nil
+	})
+	r := NewSourceResolver(NewDeezerClient(transport), nil, "")
 	_, _, err := r.Resolve(context.Background(), "magnet:?xt=urn:btih:abc&dn=NonExistentReleaseXYZ", "torrent")
 	if err == nil {
 		t.Errorf("expected error for non-existent torrent release, got nil")
 	}
-}
-
-func TestFindBestMatch_MaloletkaRemix(t *testing.T) {
-	m := NewAudioMatcher("")
-	matchURL, err := m.FindBestMatch(context.Background(), "Малолетка (Розочка Remix)", "Макс Корж", 196)
-	if err != nil {
-		t.Skipf("skipping live network test: %v", err)
-		return
-	}
-	if matchURL == "" {
-		t.Fatalf("expected non-empty matchURL, got empty")
-	}
-	t.Logf("Found match URL: %s", matchURL)
 }
 
 func TestDetectSource_YouTubeMusicArtist(t *testing.T) {
@@ -196,3 +186,20 @@ func TestResolve_DeezerAlbumContributors(t *testing.T) {
 	}
 }
 
+// The former live-network regression now uses fixed candidates. It must fail
+// deterministically if matching breaks instead of skipping on provider errors.
+func TestFindBestMatch_MaloletkaRemix(t *testing.T) {
+	m := NewAudioMatcher("")
+	calls := 0
+	m.SetSearchFn(func(ctx context.Context, query string) ([]YtCandidate, error) {
+		calls++
+		if strings.HasPrefix(query, "scsearch") {
+			return nil, nil
+		}
+		return []YtCandidate{{ID: "fixture_remix", Title: "Макс Корж - Малолетка (Розочка Remix)", Uploader: "Макс Корж", Duration: 196, URL: "https://www.youtube.com/watch?v=fixture_remix"}}, nil
+	})
+	url, _, err := m.FindYouTubeMatchWithScore(context.Background(), "Малолетка (Розочка Remix)", "Макс Корж", 196)
+	if err != nil || url != "https://www.youtube.com/watch?v=fixture_remix" || calls == 0 {
+		t.Fatalf("match=%q calls=%d err=%v", url, calls, err)
+	}
+}

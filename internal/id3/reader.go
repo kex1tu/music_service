@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"music-manager/internal/core/safefs"
 )
 
 // CoverInfo содержит бинарные данные обложки и её MIME-тип.
@@ -17,7 +19,7 @@ type CoverInfo struct {
 
 // ReadTags считывает метаданные из MP3-файла с защитой от поврежденных фреймов.
 func ReadTags(filePath string, relPath string) (*TrackTags, error) {
-	file, err := os.Open(filePath)
+	file, err := safefs.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("не удалось открыть файл '%s': %w", filePath, err)
 	}
@@ -71,7 +73,7 @@ func ReadTags(filePath string, relPath string) (*TrackTags, error) {
 
 // ReadCover извлекает фронтальную обложку (APIC type=3 или первую доступную).
 func ReadCover(filePath string) (*CoverInfo, error) {
-	file, err := os.Open(filePath)
+	file, err := safefs.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +192,7 @@ func parseFrames(file *os.File, version byte, flags byte, tagSize int, tags *Tra
 
 // ReadRawFrames извлекает все существующие валидные фреймы из MP3-файла.
 func ReadRawFrames(filePath string) ([]RawFrame, error) {
-	file, err := os.Open(filePath)
+	file, err := safefs.Open(filePath)
 	if err != nil {
 		return nil, err
 	}

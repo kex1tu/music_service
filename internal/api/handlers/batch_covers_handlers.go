@@ -8,11 +8,12 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
+
 	"path/filepath"
 	"strings"
 	"time"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/id3"
 )
 
@@ -336,13 +337,13 @@ func (h *FileHandler) applyCoverToAlbumDir(fullDir, folderRelPath string, coverB
 
 	// 1. Сохраняем cover.jpg в каталоге альбома с правами 0644
 	coverPath := filepath.Join(fullDir, "cover"+ext)
-	if err := os.WriteFile(coverPath, coverBytes, 0644); err != nil {
+	if err := safefs.WriteFile(coverPath, coverBytes, 0644); err != nil {
 		return 0, fmt.Errorf("failed to write album cover: %w", err)
 	}
-	_ = os.Chmod(coverPath, 0644)
+	_ = safefs.Chmod(coverPath, 0644)
 
 	// 2. Обходим треки альбома: сохраняем {TrackBase}.jpg и вшиваем APIC
-	entries, err := os.ReadDir(fullDir)
+	entries, err := safefs.ReadDir(fullDir)
 	if err != nil {
 		return 0, err
 	}
@@ -360,8 +361,8 @@ func (h *FileHandler) applyCoverToAlbumDir(fullDir, folderRelPath string, coverB
 
 		baseName := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
 		trackCoverPath := filepath.Join(fullDir, baseName+ext)
-		_ = os.WriteFile(trackCoverPath, coverBytes, 0644)
-		_ = os.Chmod(trackCoverPath, 0644)
+		_ = safefs.WriteFile(trackCoverPath, coverBytes, 0644)
+		_ = safefs.Chmod(trackCoverPath, 0644)
 
 		mp3Path := filepath.Join(fullDir, e.Name())
 		relTrack, _ := h.musicSandbox.ToRelative(mp3Path)

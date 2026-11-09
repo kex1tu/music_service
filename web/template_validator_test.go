@@ -301,3 +301,25 @@ func TestTemplates_NoInlineFetch(t *testing.T) {
 	}
 }
 
+// All browser networking passes through the shared response/API client.
+func TestJavaScriptNetworkingUsesAPIClient(t *testing.T) {
+	err := fs.WalkDir(web.Assets, "static/js", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".js") || path == "static/js/api/client.js" {
+			return nil
+		}
+		b, err := fs.ReadFile(web.Assets, path)
+		if err != nil {
+			return err
+		}
+		if regexp.MustCompile(`\bfetch\s*\(`).Match(b) {
+			t.Errorf("direct fetch in %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

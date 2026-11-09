@@ -1,28 +1,11 @@
-# Playwright Frontend Audit Tests
+# Браузерная проверка
 
-Внешний инструмент E2E тестирования фронтенда (Alpine.js, Tailwind CDN, Audio Player, Downloader, Radar).
+Используйте внешний подключённый браузерный инструмент Codex/Playwright без
+установки npm-пакетов в проект или сервис. TypeScript-файлы в этом каталоге —
+сценарии для внешнего тестового окружения, не runtime-зависимости приложения.
 
-> [!NOTE]
-> Согласно `AGENTS.md`, Playwright хранится строго изолированно в `scripts/playwright/` и не является зависимостью сервиса. В `go.mod` и `web/` зависимости npm не добавляются.
-
-## Установка
-
-```bash
-cd scripts/playwright
-npm init -y
-npm install --save-dev @playwright/test
-npx playwright install chromium
-```
-
-## Запуск
-
-1. Запустите backend-сервис:
-```bash
-./bin/music-manager
-```
-
-2. В отдельном терминале запустите E2E тесты:
-```bash
-cd scripts/playwright
-BASE_URL="http://localhost:8080" MM_PASSWORD="yourpassword" npx playwright test
-```
+Запустите сервер с временными MUSIC_DIR, TMP_DIR, DATABASE_PATH и тестовыми
+секретами. Проверьте размеры 375×812, 423×919, 1280×800, 1920×1080:
+навигацию, поиск, редактор после сортировки/фильтрации, очередь, LRC и плеер.
+Сохраните скриншоты и замер scrollWidth <= innerWidth. Не используйте рабочую
+медиатеку для изменяющих сценариев.

@@ -677,4 +677,3 @@ func TestYouTubeMusicClient_SearchAlbumRelease(t *testing.T) {
 		t.Errorf("expected 3 tracks in candidate 0, got %d", len(cands[0].Tracks))
 	}
 }
-

@@ -19,7 +19,7 @@ window.AuditCovers = {
         Alpine.store('app').toast('Запущен пакетный поиск обложек альбомов', 'info');
 
         try {
-            const res = await fetch('/files/audit/missing-covers/backfill-all', { method: 'POST' });
+            const res = await window.api.raw('/files/audit/missing-covers/backfill-all', { method: 'POST' });
             if (res.ok) {
                 const data = await res.json();
                 this.updateCoversProgress(data);
@@ -37,7 +37,7 @@ window.AuditCovers = {
 
     async checkCoversProgress() {
         try {
-            const res = await fetch(`/files/audit/missing-covers/progress?_t=${Date.now()}`);
+            const res = await window.api.raw(`/files/audit/missing-covers/progress?_t=${Date.now()}`);
             if (res.ok) {
                 const data = await res.json();
                 if (data.is_running) {
@@ -70,7 +70,7 @@ window.AuditCovers = {
         if (this.coversPollInterval) clearInterval(this.coversPollInterval);
         this.coversPollInterval = setInterval(async () => {
             try {
-                const res = await fetch(`/files/audit/missing-covers/progress?_t=${Date.now()}`);
+                const res = await window.api.raw(`/files/audit/missing-covers/progress?_t=${Date.now()}`);
                 if (res.ok) {
                     const data = await res.json();
                     this.updateCoversProgress(data);
@@ -95,7 +95,7 @@ window.AuditCovers = {
 
     async cancelCoversBackfill() {
         try {
-            const res = await fetch('/files/audit/missing-covers/cancel', { method: 'POST' });
+            const res = await window.api.raw('/files/audit/missing-covers/cancel', { method: 'POST' });
             if (res.ok) {
                 if (this.coversPollInterval) {
                     clearInterval(this.coversPollInterval);
@@ -118,7 +118,7 @@ window.AuditCovers = {
         Alpine.store('app').toast(`Поиск обложки для "${item.album || item.path}"...`, 'info');
 
         try {
-            const res = await fetch('/files/audit/missing-covers/backfill', {
+            const res = await window.api.raw('/files/audit/missing-covers/backfill', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ folder_path: item.path }),

@@ -235,3 +235,31 @@ func TestAuth_Middleware(t *testing.T) {
 		t.Errorf("expected 401 for invalid token, got %d", rec5.Code)
 	}
 }
+
+func TestConfiguredTTLAndCookieName(t *testing.T) {
+	secret := "fixture-only-session-key"
+	payload := fmt.Sprintf("admin:%d", time.Now().Add(-10*time.Second).Unix())
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	token := payload + ":" + hex.EncodeToString(mac.Sum(nil))
+	if _, ok := ValidateSessionToken(token, secret, Policy{TTL: 1}); ok {
+		t.Fatal("ignored configured TTL")
+	}
+	if _, ok := ValidateSessionToken(token, secret, Policy{TTL: 120}); !ok {
+		t.Fatal("rejected unexpired configured TTL")
+	}
+	handler := Middleware(secret, Policy{Name: "custom_session", TTL: 120})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	for _, name := range []string{"custom_session", CookieName} {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.AddCookie(&http.Cookie{Name: name, Value: token})
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		expected := http.StatusUnauthorized
+		if name == "custom_session" {
+			expected = http.StatusNoContent
+		}
+		if w.Code != expected {
+			t.Errorf("cookie=%s: got %d want %d", name, w.Code, expected)
+		}
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/id3"
 )
 
@@ -136,14 +137,14 @@ func (h *FileHandler) FixDuplicates(w http.ResponseWriter, r *http.Request) {
 			errs = append(errs, fmt.Sprintf("invalid path %s: %v", p, err))
 			continue
 		}
-		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+		if err := safefs.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 			errs = append(errs, fmt.Sprintf("failed to remove %s: %v", p, err))
 		} else {
 			deleted = append(deleted, p)
 			// Remove companion .lrc/.txt
 			baseNoExt := strings.TrimSuffix(fullPath, filepath.Ext(fullPath))
-			_ = os.Remove(baseNoExt + ".lrc")
-			_ = os.Remove(baseNoExt + ".txt")
+			_ = safefs.Remove(baseNoExt + ".lrc")
+			_ = safefs.Remove(baseNoExt + ".txt")
 			_ = h.database.DeleteTrack(r.Context(), p)
 		}
 	}
@@ -255,13 +256,13 @@ func (h *FileHandler) FixAllDuplicates(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+			if err := safefs.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 				errs = append(errs, fmt.Sprintf("failed to remove %s: %v", p, err))
 			} else {
 				deleted = append(deleted, p)
 				baseNoExt := strings.TrimSuffix(fullPath, filepath.Ext(fullPath))
-				_ = os.Remove(baseNoExt + ".lrc")
-				_ = os.Remove(baseNoExt + ".txt")
+				_ = safefs.Remove(baseNoExt + ".lrc")
+				_ = safefs.Remove(baseNoExt + ".txt")
 				_ = h.database.DeleteTrack(r.Context(), p)
 			}
 		}

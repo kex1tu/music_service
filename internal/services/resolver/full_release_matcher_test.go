@@ -281,76 +281,21 @@ func TestFullReleaseMatcher_MatchFullRelease_Success(t *testing.T) {
 }
 
 func TestCensorshipScoring_RussianArtist(t *testing.T) {
-	// Для русскоязычных артистов:
-	// YouTube Music официальный релиз -> red_flag, штраф
-	// SoundCloud сет -> recommended, бонус
-
-	isCyrillic := true
-	matchedRatio := 1.0
-
-	scoreYTM, statusYTM, badgeYTM := ScoreReleaseCandidate("ytmusic_album", isCyrillic, matchedRatio)
-	if statusYTM != "red_flag" {
-		t.Errorf("YTM status = %q, want 'red_flag'", statusYTM)
-	}
-	if !strings.Contains(badgeYTM, "цензура") {
-		t.Errorf("YTM badge = %q, want warning about censorship", badgeYTM)
-	}
-	// 60 - 30 = 30
-	if scoreYTM != 30 {
-		t.Errorf("YTM score = %d, want 30", scoreYTM)
-	}
-
-	scoreSC, statusSC, badgeSC := ScoreReleaseCandidate("soundcloud_set", isCyrillic, matchedRatio)
-	if statusSC != "recommended" {
-		t.Errorf("SC status = %q, want 'recommended'", statusSC)
-	}
-	if !strings.Contains(badgeSC, "оригинал") {
-		t.Errorf("SC badge = %q, want badge with original/uncensored", badgeSC)
-	}
-	// 60 + 35 = 95
-	if scoreSC != 95 {
-		t.Errorf("SC score = %d, want 95", scoreSC)
-	}
-
-	if scoreSC <= scoreYTM {
-		t.Errorf("SoundCloud score (%d) should be strictly greater than YTM score (%d) for Russian artist", scoreSC, scoreYTM)
+	for _, lang := range []bool{true, false} {
+		for _, source := range []string{"ytmusic_album", "soundcloud_set"} {
+			score, status, badge := ScoreReleaseCandidate(source, lang, 1)
+			if score != 100 || status != "unknown" || badge != "Цензура не проверена" {
+				t.Fatalf("platform or alphabet asserted censorship: %d %s %s", score, status, badge)
+			}
+		}
 	}
 }
 
 func TestCensorshipScoring_ForeignArtist(t *testing.T) {
-	// Для зарубежных артистов:
-	// YouTube Music официальный релиз -> recommended, высший балл
-	// SoundCloud сет -> neutral / штраф
-
-	isCyrillic := false
-	matchedRatio := 1.0
-
-	scoreYTM, statusYTM, badgeYTM := ScoreReleaseCandidate("ytmusic_album", isCyrillic, matchedRatio)
-	if statusYTM != "recommended" {
-		t.Errorf("YTM status = %q, want 'recommended'", statusYTM)
-	}
-	if !strings.Contains(badgeYTM, "Официальный") {
-		t.Errorf("YTM badge = %q, want official badge", badgeYTM)
-	}
-	// 60 + 40 = 100
-	if scoreYTM != 100 {
-		t.Errorf("YTM score = %d, want 100", scoreYTM)
-	}
-
-	scoreSC, statusSC, badgeSC := ScoreReleaseCandidate("soundcloud_set", isCyrillic, matchedRatio)
-	if statusSC != "neutral" {
-		t.Errorf("SC status = %q, want 'neutral'", statusSC)
-	}
-	if !strings.Contains(badgeSC, "Неофициальный") {
-		t.Errorf("SC badge = %q, want 'Неофициальный источник'", badgeSC)
-	}
-	// 60 - 15 = 45
-	if scoreSC != 45 {
-		t.Errorf("SC score = %d, want 45", scoreSC)
-	}
-
-	if scoreYTM <= scoreSC {
-		t.Errorf("YTM score (%d) should be strictly greater than SoundCloud score (%d) for foreign artist", scoreYTM, scoreSC)
+	exact, _, _ := ScoreReleaseCandidate("ytmusic_album", false, 1)
+	wrong, _, _ := ScoreReleaseCandidate("soundcloud_set", true, 0)
+	if wrong >= exact {
+		t.Fatal("source preference overrides coverage")
 	}
 }
 
@@ -471,7 +416,7 @@ func TestFullReleaseMatcher_SearchReleaseCandidates(t *testing.T) {
 	if first.MatchedCount != 2 {
 		t.Errorf("candidate matched count = %d, want 2", first.MatchedCount)
 	}
-	if first.CensorStatus != "red_flag" {
+	if first.CensorStatus != "unknown" {
 		t.Errorf("candidate censor status = %q, want 'red_flag' for Cyrillic official release", first.CensorStatus)
 	}
 	if first.TrackMapping[0] != "https://music.youtube.com/watch?v=v1" {
@@ -533,17 +478,17 @@ func TestFullReleaseMatcher_CensorshipRanking_SoundCloudVsYTM(t *testing.T) {
 		t.Fatalf("expected at least 2 candidates, got %d", len(candsRU))
 	}
 	// Первым должен быть SoundCloud с бейджем рекомендовано
-	if candsRU[0].Source != "soundcloud_set" {
+	if candsRU[0].Source != "ytmusic_album" {
 		t.Errorf("candidate 0 source = %q, want 'soundcloud_set'", candsRU[0].Source)
 	}
-	if candsRU[0].CensorStatus != "recommended" {
+	if candsRU[0].CensorStatus != "unknown" {
 		t.Errorf("candidate 0 status = %q, want 'recommended'", candsRU[0].CensorStatus)
 	}
 	// Вторым должен быть YouTube Music с красным флагом возможной цензуры
-	if candsRU[1].Source != "ytmusic_album" {
+	if candsRU[1].Source != "soundcloud_set" {
 		t.Errorf("candidate 1 source = %q, want 'ytmusic_album'", candsRU[1].Source)
 	}
-	if candsRU[1].CensorStatus != "red_flag" {
+	if candsRU[1].CensorStatus != "unknown" {
 		t.Errorf("candidate 1 status = %q, want 'red_flag'", candsRU[1].CensorStatus)
 	}
 
@@ -595,15 +540,159 @@ func TestFullReleaseMatcher_CensorshipRanking_SoundCloudVsYTM(t *testing.T) {
 	if candsEN[0].Source != "ytmusic_album" {
 		t.Errorf("EN candidate 0 source = %q, want 'ytmusic_album'", candsEN[0].Source)
 	}
-	if candsEN[0].CensorStatus != "recommended" {
+	if candsEN[0].CensorStatus != "unknown" {
 		t.Errorf("EN candidate 0 status = %q, want 'recommended'", candsEN[0].CensorStatus)
 	}
 	// Вторым должен быть SoundCloud
 	if candsEN[1].Source != "soundcloud_set" {
 		t.Errorf("EN candidate 1 source = %q, want 'soundcloud_set'", candsEN[1].Source)
 	}
-	if candsEN[1].CensorStatus != "neutral" {
+	if candsEN[1].CensorStatus != "unknown" {
 		t.Errorf("EN candidate 1 status = %q, want 'neutral'", candsEN[1].CensorStatus)
 	}
 }
 
+func TestKishlak_SbornikHuyniIKartinki_FullAlbumCandidateMatching(t *testing.T) {
+	// 19 целевых треков эталонного треклиста
+	trackTitles := []string{
+		"Возвращайся [intro]", "Сборник хуйни и картинки", "А у нас на районе",
+		"Накуримся, напьемся", "Пьяные города", "Дрочу на твои фото",
+		"Я диско шар", "Нонсенс", "Я уебу тебя", "Тебя любят все",
+		"Танцуй", "Человек", "Нахуй мне такой друг", "Моя маленькая сука",
+		"Безобразие", "Скучно", "Молитва", "Угу", "Зависима",
+	}
+	durations := []int{
+		95, 107, 156, 145, 126, 170, 126, 130, 184, 160,
+		140, 150, 172, 165, 135, 155, 148, 162, 180,
+	}
+
+	var targetTracks []ResolvedTrack
+	for i, tit := range trackTitles {
+		targetTracks = append(targetTracks, ResolvedTrack{
+			TrackID:     fmt.Sprintf("k_%d", i+1),
+			TrackNumber: i + 1,
+			Title:       tit,
+			Artist:      "Кишлак",
+			Album:       "Сборник хуйни и картинки",
+			Duration:    durations[i],
+		})
+	}
+
+	// Мок SoundCloud Searcher, возвращающий 2 полноценных сета на 19 треков
+	scSearcher := NewSoundCloudSetSearcher("")
+	scSearcher.SetCustomSearchFunc(func(ctx context.Context, artist, album string, limit int) ([]AlbumReleaseCandidate, error) {
+		var setTracks1 []AlbumTrackCandidate
+		var setTracks2 []AlbumTrackCandidate
+		for i, tit := range trackTitles {
+			setTracks1 = append(setTracks1, AlbumTrackCandidate{
+				VideoID:   fmt.Sprintf("sc_track_%d", i+1),
+				DirectURL: fmt.Sprintf("https://soundcloud.com/kishlak/track-%d", i+1),
+				Title:     tit,
+				Artist:    "Кишлак",
+				Duration:  durations[i],
+				Index:     i + 1,
+			})
+			setTracks2 = append(setTracks2, AlbumTrackCandidate{
+				VideoID:   fmt.Sprintf("sc_fan_%d", i+1),
+				DirectURL: fmt.Sprintf("https://soundcloud.com/vladimir-utrobin/track-%d", i+1),
+				Title:     tit,
+				Artist:    "Кишлак",
+				Duration:  durations[i],
+				Index:     i + 1,
+			})
+		}
+
+		return []AlbumReleaseCandidate{
+			{
+				BrowseID:    "sc_1670891711",
+				PlaylistID:  "https://soundcloud.com/kishlak/sets/sbornik-xujni-i-kartinki",
+				Title:       "сборник хуйни и картинки",
+				Artist:      "Кишлак",
+				CoverURL:    "https://i1.sndcdn.com/artworks-sample-t500x500.jpg",
+				Tracks:      setTracks1,
+				TotalTracks: 19,
+			},
+			{
+				BrowseID:    "sc_999999999",
+				PlaylistID:  "https://soundcloud.com/vladimir-utrobin/sets/sbornik-xujni-i-kartinki",
+				Title:       "Сборник хуйни и картинки",
+				Artist:      "Кишлак",
+				CoverURL:    "https://i1.sndcdn.com/artworks-fan-t500x500.jpg",
+				Tracks:      setTracks2,
+				TotalTracks: 19,
+			},
+		}, nil
+	})
+
+	// Мок YouTube Music с 1 официальным (подверженным цензуре) альбомом
+	ytmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/youtubei/v1/search" {
+			w.Write([]byte(`{"contents":{"tabbedSearchResultsRenderer":{"tabs":[{"tabRenderer":{"content":{"sectionListRenderer":{"contents":[{"musicShelfRenderer":{"contents":[{"musicResponsiveListItemRenderer":{"navigationEndpoint":{"browseEndpoint":{"browseId":"MPREb_Kishlak"}},"flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Сборник хуйни и картинки"}]}}},{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Кишлак"}]}}}]}}]}}]}}}}]}}}`))
+			return
+		}
+		if r.URL.Path == "/youtubei/v1/browse" {
+			// Отдаем 19 треков с их реальной длительностью
+			var items []string
+			for i, tit := range trackTitles {
+				durStr := fmt.Sprintf("%d:%02d", durations[i]/60, durations[i]%60)
+				items = append(items, fmt.Sprintf(`{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"yt_k"},"flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":%q}]}}}],"fixedColumns":[{"musicResponsiveListItemFixedColumnRenderer":{"text":{"runs":[{"text":%q}]}}}]}}`, tit, durStr))
+			}
+			jsonResp := fmt.Sprintf(`{"contents":{"twoColumnBrowseResultsRenderer":{"secondaryContents":{"sectionListRenderer":{"contents":[{"musicShelfRenderer":{"contents":[%s]}}]}}}}}`, strings.Join(items, ","))
+			w.Write([]byte(jsonResp))
+			return
+		}
+	}))
+	defer ytmServer.Close()
+
+	matcher := NewFullReleaseMatcher(NewYouTubeMusicClient(ytmServer.URL), scSearcher)
+
+	cands, isCyrillic, err := matcher.SearchReleaseCandidates(context.Background(), "Кишлак", "Сборник хуйни и картинки", targetTracks)
+	if err != nil {
+		t.Fatalf("SearchReleaseCandidates failed: %v", err)
+	}
+
+	if !isCyrillic {
+		t.Errorf("expected isCyrillic = true for Кишлак")
+	}
+
+	if len(cands) != 3 {
+		t.Fatalf("expected 3 candidates (2 SoundCloud + 1 YTM), got %d", len(cands))
+	}
+
+	// 1 место: SoundCloud сет с высшим баллом 95 и бейджем без цензуры
+	topCand := cands[0]
+	if topCand.Source != "soundcloud_set" {
+		t.Errorf("top candidate source = %q, want 'soundcloud_set'", topCand.Source)
+	}
+	if topCand.Score != 100 {
+		t.Errorf("top candidate score = %d, want 95", topCand.Score)
+	}
+	if topCand.CensorStatus != "unknown" {
+		t.Errorf("top candidate censor status = %q, want 'recommended'", topCand.CensorStatus)
+	}
+	if topCand.CensorBadge != "Цензура не проверена" {
+		t.Errorf("top candidate badge = %q, want '⭐ SoundCloud (оригинал без цензуры)'", topCand.CensorBadge)
+	}
+	if topCand.MatchedCount != 19 {
+		t.Errorf("top candidate matched count = %d, want 19", topCand.MatchedCount)
+	}
+	if topCand.MatchedRatio != 1.0 {
+		t.Errorf("top candidate matched ratio = %f, want 1.0", topCand.MatchedRatio)
+	}
+
+	// Последнее место: YouTube Music официальный альбом со штрафом за цензуру в РФ (Score 30)
+	lastCand := cands[2]
+	if lastCand.Source != "ytmusic_album" {
+		t.Errorf("last candidate source = %q, want 'ytmusic_album'", lastCand.Source)
+	}
+	if lastCand.Score >= topCand.Score {
+		t.Errorf("last candidate score = %d, want 30", lastCand.Score)
+	}
+	if lastCand.CensorStatus != "unknown" {
+		t.Errorf("last candidate censor status = %q, want 'red_flag'", lastCand.CensorStatus)
+	}
+	if lastCand.CensorBadge != "Цензура не проверена" {
+		t.Errorf("last candidate badge = %q, want '🚩 Офиц. релиз (возможна цензура)'", lastCand.CensorBadge)
+	}
+}

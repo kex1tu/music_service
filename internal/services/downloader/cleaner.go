@@ -2,8 +2,10 @@ package downloader
 
 import (
 	"context"
-	"os"
+
 	"time"
+
+	"music-manager/internal/core/safefs"
 )
 
 func (s *Service) startCleaner(ctx context.Context, maxAge time.Duration) {
@@ -22,7 +24,7 @@ func (s *Service) startCleaner(ctx context.Context, maxAge time.Duration) {
 
 func (s *Service) cleanOldTempDirs(maxAge time.Duration) {
 	root := s.tmpSandbox.Root()
-	entries, err := os.ReadDir(root)
+	entries, err := safefs.ReadDir(root)
 	if err != nil {
 		return
 	}
@@ -41,7 +43,7 @@ func (s *Service) cleanOldTempDirs(maxAge time.Duration) {
 			continue
 		}
 		if info.ModTime().Before(cutoff) {
-			_ = os.RemoveAll(dirPath)
+			_ = safefs.RemoveAll(dirPath)
 		}
 	}
 }

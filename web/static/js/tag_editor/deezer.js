@@ -101,7 +101,7 @@ window.TagDeezer = {
         const endpoint = `/tags/deezer/albums?query=${encodeURIComponent(this.deezerQuery.trim())}`;
 
         try {
-            const res = await fetch(endpoint);
+            const res = await window.api.raw(endpoint);
             if (res.ok) {
                 this.deezerResults = await res.json();
                 if (this.deezerResults.length === 0) {
@@ -126,7 +126,7 @@ window.TagDeezer = {
         const endpoint = `/tags/deezer/tracks?query=${encodeURIComponent(this.deezerQuery.trim())}`;
 
         try {
-            const res = await fetch(endpoint);
+            const res = await window.api.raw(endpoint);
             if (res.ok) {
                 this.deezerResults = await res.json();
                 if (this.deezerResults.length === 0) {
@@ -150,7 +150,7 @@ window.TagDeezer = {
         const endpoint = `/tags/deezer/tracks/${trackId}`;
 
         try {
-            const res = await fetch(endpoint);
+            const res = await window.api.raw(endpoint);
             if (!res.ok) {
                 const err = await res.json();
                 throw new Error(err.message || 'Не удалось загрузить данные трека');
@@ -217,7 +217,7 @@ window.TagDeezer = {
         const endpoint = `/tags/deezer/albums/${albumId}`;
 
         try {
-            const res = await fetch(endpoint);
+            const res = await window.api.raw(endpoint);
             if (!res.ok) {
                 const err = await res.json();
                 throw new Error(err.message || 'Не удалось загрузить данные альбома');

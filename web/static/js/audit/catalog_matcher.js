@@ -35,7 +35,7 @@ window.AuditCatalogMatcher = {
     async loadIncompleteAlbums() {
         this.incompleteLoading = true;
         try {
-            const res = await fetch(`/files/audit/incomplete-albums?_t=${Date.now()}`);
+            const res = await window.api.raw(`/files/audit/incomplete-albums?_t=${Date.now()}`);
             if (res.ok) {
                 const data = await res.json();
                 this.incompleteAlbums = data.albums || [];
@@ -62,7 +62,7 @@ window.AuditCatalogMatcher = {
         this.catalogMatchLoading = { ...this.catalogMatchLoading, [path]: true };
         try {
             const url = `/files/audit/incomplete-albums/catalog-match?path=${encodeURIComponent(path)}&_t=${Date.now()}`;
-            const res = await fetch(url);
+            const res = await window.api.raw(url);
             if (res.ok) {
                 const matched = await res.json();
                 const idx = this.incompleteAlbums.findIndex(a => a.path === path);
@@ -130,7 +130,7 @@ window.AuditCatalogMatcher = {
 
             console.log('[Audit] Sending POST /files/audit/incomplete-albums/download-missing:', payload);
 
-            const res = await fetch('/files/audit/incomplete-albums/download-missing', {
+            const res = await window.api.raw('/files/audit/incomplete-albums/download-missing', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
@@ -187,7 +187,7 @@ window.AuditCatalogMatcher = {
             await Alpine.store('app').queue.openBackfillJobInTagEditor(job);
         } else {
             try {
-                const res = await fetch(`/files/audit/incomplete-albums/editor-data?path=${encodeURIComponent(albumPath)}`);
+                const res = await window.api.raw(`/files/audit/incomplete-albums/editor-data?path=${encodeURIComponent(albumPath)}`);
                 if (res.ok) {
                     const data = await res.json();
                     Alpine.store('app').openTagEditor({

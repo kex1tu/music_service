@@ -35,7 +35,7 @@ document.addEventListener('alpine:init', () => {
 
         async fetchNowPlaying() {
             try {
-                const res = await fetch('/api/radio/stream/now-playing');
+                const res = await window.api.raw('/api/radio/stream/now-playing');
                 if (res.ok) {
                     const data = await res.json();
                     this.nowPlaying = data.current_track || null;
@@ -66,7 +66,7 @@ document.addEventListener('alpine:init', () => {
 
         async fetchStats() {
             try {
-                const res = await fetch('/api/radio/wave/stats');
+                const res = await window.api.raw('/api/radio/wave/stats');
                 if (res.ok) {
                     this.stats = await res.json();
                     if (this.stats && this.stats.stream_token) {
@@ -81,7 +81,7 @@ document.addEventListener('alpine:init', () => {
         async fetchQueue() {
             this.isLoading = true;
             try {
-                const res = await fetch('/api/radio/wave/queue?limit=25');
+                const res = await window.api.raw('/api/radio/wave/queue?limit=25');
                 if (res.ok) {
                     const data = await res.json();
                     this.waveQueue = data.tracks || [];
@@ -95,7 +95,7 @@ document.addEventListener('alpine:init', () => {
 
         async fetchGenres() {
             try {
-                const res = await fetch('/api/radio/genres');
+                const res = await window.api.raw('/api/radio/genres');
                 if (res.ok) {
                     const data = await res.json();
                     this.genres = data.genres || [];
@@ -142,7 +142,7 @@ document.addEventListener('alpine:init', () => {
         async generateM3U() {
             this.isGeneratingM3U = true;
             try {
-                const res = await fetch('/api/radio/m3u/generate', { method: 'POST' });
+                const res = await window.api.raw('/api/radio/m3u/generate', { method: 'POST' });
                 if (res.ok) {
                     const data = await res.json();
                     Alpine.store('app').toast(`Плейлист ${data.playlist_path} успешно сгенерирован`, 'success');
@@ -164,7 +164,7 @@ document.addEventListener('alpine:init', () => {
                 if (!streamUrl) {
                     streamUrl = this.getStreamUrl('wave', '', true);
                 }
-                const res = await fetch('/api/radio/navidrome/sync-radio', {
+                const res = await window.api.raw('/api/radio/navidrome/sync-radio', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name: name, stream_url: streamUrl })

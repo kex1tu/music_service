@@ -10,7 +10,7 @@ window.QueueEditorBridge = {
                 return this.openBackfillJobInTagEditor(queueMgr, job);
             }
 
-            const res = await fetch(`/downloads/${jobId}/tracks`);
+            const res = await window.api.raw(`/downloads/${jobId}/tracks`);
             if (!res.ok) throw new Error('Не удалось получить треки релиза');
             const data = await res.json();
 
@@ -113,7 +113,7 @@ window.QueueEditorBridge = {
             if (!albumPath) {
                 return this.openJobInTagEditor(queueMgr, job.id);
             }
-            const res = await fetch(`/files/audit/incomplete-albums/editor-data?path=${encodeURIComponent(albumPath)}&job_id=${encodeURIComponent(job.id)}`);
+            const res = await window.api.raw(`/files/audit/incomplete-albums/editor-data?path=${encodeURIComponent(albumPath)}&job_id=${encodeURIComponent(job.id)}`);
             if (!res.ok) throw new Error('Не удалось загрузить объединенные данные релиза');
             const data = await res.json();
             const album = {
@@ -173,7 +173,7 @@ window.QueueEditorBridge = {
                 readyJobs.map(async (j) => {
                     if (j.is_backfill && j.target_album_path) {
                         try {
-                            const r = await fetch(`/files/audit/incomplete-albums/editor-data?path=${encodeURIComponent(j.target_album_path)}&job_id=${encodeURIComponent(j.id)}`);
+                            const r = await window.api.raw(`/files/audit/incomplete-albums/editor-data?path=${encodeURIComponent(j.target_album_path)}&job_id=${encodeURIComponent(j.id)}`);
                             if (r.ok) {
                                 const bData = await r.json();
                                 return { isBackfill: true, job: j, data: bData };
@@ -182,12 +182,12 @@ window.QueueEditorBridge = {
                             console.warn('Failed to load backfill editor-data for job', j.id, err);
                         }
                     }
-                    const r = await fetch(`/downloads/${j.id}/tracks`);
+                    const r = await window.api.raw(`/downloads/${j.id}/tracks`);
                     if (r.ok) {
                         const dData = await r.json();
                         if (dData.is_backfill && dData.target_album_path) {
                             try {
-                                const bRes = await fetch(`/files/audit/incomplete-albums/editor-data?path=${encodeURIComponent(dData.target_album_path)}&job_id=${encodeURIComponent(j.id)}`);
+                                const bRes = await window.api.raw(`/files/audit/incomplete-albums/editor-data?path=${encodeURIComponent(dData.target_album_path)}&job_id=${encodeURIComponent(j.id)}`);
                                 if (bRes.ok) {
                                     const bData = await bRes.json();
                                     return { isBackfill: true, job: j, data: bData };

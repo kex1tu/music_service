@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
@@ -86,7 +87,7 @@ func (s *Service) ResolvePath(relPath string) (fullPath string, isTmp bool, err 
 	// 1. Попытка разрешить в tmpSandbox
 	if s.tmpSandbox != nil {
 		if full, err := s.tmpSandbox.Resolve(cleanRel, true); err == nil {
-			if st, statErr := os.Stat(full); statErr == nil && !st.IsDir() {
+			if st, statErr := safefs.Stat(full); statErr == nil && !st.IsDir() {
 				return full, true, nil
 			}
 		}
@@ -163,7 +164,7 @@ func (s *Service) ListFiles(ctx context.Context, relPath string, recursive bool)
 		return nil, err
 	}
 
-	st, err := os.Stat(fullPath)
+	st, err := safefs.Stat(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrFileNotFound
@@ -224,7 +225,7 @@ func (s *Service) ListFiles(ctx context.Context, relPath string, recursive bool)
 		const maxDepth = 20
 		maxTracks := 100000
 
-		err = filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
+		err = safefs.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return nil
 			}
@@ -302,7 +303,7 @@ func (s *Service) ListFiles(ctx context.Context, relPath string, recursive bool)
 
 		totalFiles = len(items)
 	} else {
-		entries, rErr := os.ReadDir(fullPath)
+		entries, rErr := safefs.ReadDir(fullPath)
 		if rErr != nil {
 			return nil, rErr
 		}
@@ -344,7 +345,7 @@ func (s *Service) ListFiles(ctx context.Context, relPath string, recursive bool)
 					}
 				}
 				if !countFound {
-					subEntries, _ := os.ReadDir(itemPath)
+					subEntries, _ := safefs.ReadDir(itemPath)
 					for _, sub := range subEntries {
 						if !sub.IsDir() && strings.EqualFold(filepath.Ext(sub.Name()), ".mp3") {
 							tCount++
@@ -501,7 +502,11 @@ func (s *Service) DeleteFile(ctx context.Context, relPath string) (*DeleteRespon
 		return nil, err
 	}
 
-	st, err := os.Stat(fullPath)
+	if (s.musicSandbox != nil && fullPath == s.musicSandbox.Root()) || (s.tmpSandbox != nil && fullPath == s.tmpSandbox.Root()) {
+		return nil, ErrInvalidPath
+	}
+
+	st, err := safefs.Stat(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrFileNotFound
@@ -513,7 +518,7 @@ func (s *Service) DeleteFile(ctx context.Context, relPath string) (*DeleteRespon
 
 	if st.IsDir() {
 		// Удаление директории
-		if err := os.RemoveAll(fullPath); err != nil {
+		if err := safefs.RemoveAll(fullPath); err != nil {
 			return nil, fmt.Errorf("failed to remove directory: %w", err)
 		}
 		if s.repo != nil && !isTmp {
@@ -531,16 +536,16 @@ func (s *Service) DeleteFile(ctx context.Context, relPath string) (*DeleteRespon
 	ext := strings.ToLower(filepath.Ext(fullPath))
 	baseName := strings.TrimSuffix(fullPath, ext)
 
-	if err := os.Remove(fullPath); err != nil {
+	if err := safefs.Remove(fullPath); err != nil {
 		return nil, fmt.Errorf("failed to remove file: %w", err)
 	}
 
 	if s.repo != nil && !isTmp {
 		if ext == ".mp3" {
 			// Удаляем сопутствующие файлы текстов и обложки
-			_ = os.Remove(baseName + ".lrc")
-			_ = os.Remove(baseName + ".txt")
-			_ = os.Remove(baseName + ".jpg")
+			_ = safefs.Remove(baseName + ".lrc")
+			_ = safefs.Remove(baseName + ".txt")
+			_ = safefs.Remove(baseName + ".jpg")
 
 			deletedTracks, _ = s.repo.DeleteTrackByPath(ctx, relPath)
 		} else if ext == ".jpg" || ext == ".png" {
@@ -610,11 +615,11 @@ func (s *Service) cleanupEmptyParents(dir string, isTmp bool) {
 	}
 
 	for dir != root && dir != "/" && dir != "." {
-		entries, err := os.ReadDir(dir)
+		entries, err := safefs.ReadDir(dir)
 		if err != nil || len(entries) > 0 {
 			break
 		}
-		if err := os.Remove(dir); err != nil {
+		if err := safefs.Remove(dir); err != nil {
 			break
 		}
 		dir = filepath.Dir(dir)
@@ -654,10 +659,10 @@ func (s *Service) RenameFile(ctx context.Context, oldRel, newRel string) (*Renam
 		}
 		affectedFiles = renamed
 	} else {
-		if err := os.MkdirAll(filepath.Dir(newFull), 0755); err != nil {
+		if err := safefs.MkdirAll(filepath.Dir(newFull), 0755); err != nil {
 			return nil, err
 		}
-		if err := os.Rename(oldFull, newFull); err != nil {
+		if err := safefs.Rename(oldFull, newFull); err != nil {
 			return nil, err
 		}
 		affectedFiles = append(affectedFiles, newRel)
@@ -667,7 +672,7 @@ func (s *Service) RenameFile(ctx context.Context, oldRel, newRel string) (*Renam
 		newBase := strings.TrimSuffix(newFull, filepath.Ext(newFull))
 		for _, companionExt := range []string{".lrc", ".txt"} {
 			if fileExists(oldBase + companionExt) {
-				_ = os.Rename(oldBase+companionExt, newBase+companionExt)
+				_ = safefs.Rename(oldBase+companionExt, newBase+companionExt)
 				affectedFiles = append(affectedFiles, strings.TrimSuffix(newRel, filepath.Ext(newRel))+companionExt)
 			}
 		}
@@ -706,7 +711,7 @@ func (s *Service) StreamAudio(w http.ResponseWriter, r *http.Request, relPath st
 		return
 	}
 
-	file, err := os.Open(fullPath)
+	file, err := safefs.Open(fullPath)
 	if err != nil {
 		http.Error(w, `{"error":"failed to open file"}`, http.StatusNotFound)
 		return
@@ -736,7 +741,7 @@ func (s *Service) StreamTrack(w http.ResponseWriter, r *http.Request, idOrHash s
 		return
 	}
 
-	fi, err := os.Stat(fullPath)
+	fi, err := safefs.Stat(fullPath)
 	if err != nil || fi.IsDir() {
 		http.Error(w, `{"error":"file unavailable"}`, http.StatusNotFound)
 		return
@@ -760,7 +765,7 @@ func (s *Service) StreamTrack(w http.ResponseWriter, r *http.Request, idOrHash s
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("ETag", etag)
 
-	http.ServeFile(w, r, fullPath)
+	safefs.ServeFile(w, r, fullPath)
 }
 
 // GetTrackMetadata возвращает метаданные трека без блокировок.
@@ -775,7 +780,7 @@ func (s *Service) GetTrackMetadata(ctx context.Context, idOrHash string) (*Track
 	}
 
 	// Читаем метаданные на лету из файла
-	fi, _ := os.Stat(fullPath)
+	fi, _ := safefs.Stat(fullPath)
 	codec := strings.TrimPrefix(strings.ToLower(filepath.Ext(fullPath)), ".")
 	if codec == "" {
 		codec = "mp3"
@@ -855,7 +860,7 @@ func (s *Service) GetTrackCover(ctx context.Context, idOrHash string) ([]byte, s
 			}
 			candPath = resolvedPath
 		}
-		if data, rErr := os.ReadFile(candPath); rErr == nil && len(data) > 0 {
+		if data, rErr := safefs.ReadFile(candPath); rErr == nil && len(data) > 0 {
 			mime := "image/jpeg"
 			if strings.HasSuffix(candPath, ".png") {
 				mime = "image/png"
@@ -893,7 +898,7 @@ func (s *Service) ReorganizeLibrary(ctx context.Context, dryRun bool) (*Reorgani
 }
 
 func fileExists(p string) bool {
-	st, err := os.Stat(p)
+	st, err := safefs.Stat(p)
 	return err == nil && !st.IsDir()
 }
 
@@ -903,7 +908,7 @@ func TrackHash(relPath string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// Redownload ставит задачу на повторное скачивание трека или альбома, опционально удаляя существующие файлы.
+// Redownload stages a fresh download while preserving the existing library files.
 func (s *Service) Redownload(ctx context.Context, req RedownloadRequest) (*RedownloadResponse, error) {
 	relPath := strings.TrimSpace(req.Path)
 	if relPath == "" || relPath == "." {
@@ -924,7 +929,7 @@ func (s *Service) Redownload(ctx context.Context, req RedownloadRequest) (*Redow
 		isDir = false
 	} else {
 		// Автоопределение по файловой системе
-		if fi, statErr := os.Stat(fullPath); statErr == nil {
+		if fi, statErr := safefs.Stat(fullPath); statErr == nil {
 			isDir = fi.IsDir()
 		} else {
 			ext := strings.ToLower(filepath.Ext(relPath))
@@ -948,7 +953,7 @@ func (s *Service) Redownload(ctx context.Context, req RedownloadRequest) (*Redow
 		}
 		// Если в БД не найдено, пробуем прочитать теги аудиофайла внутри каталога
 		if artist == "" && album == "" {
-			_ = filepath.WalkDir(fullPath, func(path string, d os.DirEntry, wErr error) error {
+			_ = safefs.WalkDir(fullPath, func(path string, d os.DirEntry, wErr error) error {
 				if wErr != nil || d.IsDir() {
 					return nil
 				}
@@ -1030,15 +1035,8 @@ func (s *Service) Redownload(ctx context.Context, req RedownloadRequest) (*Redow
 		}
 	}
 
-	// 3. Если запрошено удаление существующих файлов — удаляем через DeleteFile
+	// Existing files remain available until the staged download is accepted.
 	deleted := false
-	if req.DeleteExisting {
-		_, dErr := s.DeleteFile(ctx, relPath)
-		if dErr != nil && !errors.Is(dErr, ErrFileNotFound) {
-			return nil, fmt.Errorf("ошибка удаления перед повторной загрузкой: %w", dErr)
-		}
-		deleted = true
-	}
 
 	// 4. Ставим задачу в очередь загрузчика
 	jobID := ""
@@ -1048,6 +1046,8 @@ func (s *Service) Redownload(ctx context.Context, req RedownloadRequest) (*Redow
 			return nil, fmt.Errorf("ошибка постановки задачи в очередь загрузчика: %w", cErr)
 		}
 		jobID = id
+	} else {
+		return nil, fmt.Errorf("очередь загрузчика недоступна")
 	}
 
 	msg := "Трек успешно поставлен в очередь повторной загрузки"

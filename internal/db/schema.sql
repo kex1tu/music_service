@@ -260,3 +260,53 @@ CREATE TABLE IF NOT EXISTS radio_history (
 );
 CREATE INDEX IF NOT EXISTS idx_radio_hist_track_time ON radio_history(track_id, played_at);
 
+
+-- Censorship audit is evidence-only; no legacy heuristic is a verified result.
+CREATE TABLE IF NOT EXISTS censorship_runs (
+ id TEXT PRIMARY KEY,
+ state TEXT NOT NULL DEFAULT 'queued',
+ provider TEXT NOT NULL DEFAULT 'local',
+ options_json TEXT NOT NULL,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS censorship_items (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ run_id TEXT NOT NULL REFERENCES censorship_runs(id) ON DELETE CASCADE,
+ file_path TEXT NOT NULL,
+ reference_path TEXT NOT NULL DEFAULT '',
+ state TEXT NOT NULL DEFAULT 'queued',
+ verdict TEXT NOT NULL DEFAULT 'not_checked',
+ result_json TEXT NOT NULL DEFAULT '{}',
+ error TEXT NOT NULL DEFAULT '',
+ manual_decision TEXT NOT NULL DEFAULT '',
+ manual_note TEXT NOT NULL DEFAULT '',
+    attempt_token TEXT NOT NULL DEFAULT '',
+ UNIQUE(run_id,file_path)
+);
+CREATE INDEX IF NOT EXISTS idx_censorship_queue ON censorship_items(run_id,state,id);
+CREATE TABLE IF NOT EXISTS censorship_cache (
+ cache_key TEXT PRIMARY KEY,
+ result_json TEXT NOT NULL,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS censorship_transcripts (
+ cache_key TEXT PRIMARY KEY,
+ transcript_json TEXT NOT NULL,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS censorship_evidence (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ item_id INTEGER NOT NULL REFERENCES censorship_items(id) ON DELETE CASCADE,
+ evidence_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS censorship_cloud_usage (
+ provider TEXT NOT NULL,
+ day TEXT NOT NULL,
+ seconds INTEGER NOT NULL,
+ PRIMARY KEY(provider,day)
+);
+CREATE TABLE IF NOT EXISTS download_source_selections (
+ job_id TEXT PRIMARY KEY REFERENCES download_jobs(id) ON DELETE CASCADE,
+ payload_json TEXT NOT NULL
+);

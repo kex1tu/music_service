@@ -3,6 +3,7 @@ package organizer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -181,5 +182,63 @@ func TestMoveTrackWithCompanions_ImageAndLyrics(t *testing.T) {
 
 	if fileExists(srcMP3) || fileExists(srcLRC) || fileExists(srcJPG) {
 		t.Errorf("source files still exist after move")
+	}
+}
+
+func TestDedupPreservesDifferentLyrics(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mp3")
+	dst := filepath.Join(dir, "dst.mp3")
+	for _, p := range []string{src, dst} {
+		if err := os.WriteFile(p, []byte("identical-audio"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src.lrc"), []byte("new"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dst.lrc"), []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	actual, err := MoveTrackWithCompanions(src, dst, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual == dst {
+		t.Fatal("conflicting lyrics deduplicated")
+	}
+	b, err := os.ReadFile(strings.TrimSuffix(actual, ".mp3") + ".lrc")
+	if err != nil || string(b) != "new" {
+		t.Fatalf("new lyrics lost: %q %v", b, err)
+	}
+	b, err = os.ReadFile(filepath.Join(dir, "dst.lrc"))
+	if err != nil || string(b) != "old" {
+		t.Fatalf("old lyrics changed: %q %v", b, err)
+	}
+}
+
+func TestCompanionFailurePreservesAudio(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mp3")
+	dst := filepath.Join(dir, "dst.mp3")
+	if err := os.WriteFile(src, []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src.lrc"), []byte("lyrics"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "dst.lrc"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MoveTrackWithCompanions(src, dst, false); err == nil {
+		t.Fatal("expected companion failure")
+	}
+	b, err := os.ReadFile(src)
+	if err != nil || string(b) != "original" {
+		t.Fatalf("original lost: %q %v", b, err)
+	}
+	b, err = os.ReadFile(filepath.Join(dir, "src.lrc"))
+	if err != nil || string(b) != "lyrics" {
+		t.Fatalf("lyrics lost: %q %v", b, err)
 	}
 }

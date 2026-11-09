@@ -18,43 +18,44 @@ type DirectoryListingResponse struct {
 
 // FileItem представляет отдельный элемент файловой системы (аудиофайл или директорию) для медиатеки.
 type FileItem struct {
-	Name         string   `json:"name"`
-	Path         string   `json:"path"`
-	Type         string   `json:"type"` // "directory" или "file"
-	IsDir        bool     `json:"is_dir"`
-	Size         *int64   `json:"size,omitempty"`
-	ModTime      string   `json:"mod_time,omitempty"`
-	Extension    string   `json:"extension,omitempty"`
-	TrackCount   *int     `json:"track_count,omitempty"` // Для каталогов: количество треков внутри
-	TrackNumber  *int     `json:"track_number,omitempty"`
-	TrackTotal   *int     `json:"track_total,omitempty"`
-	DiscNumber   *int     `json:"disc_number,omitempty"`
-	DiscTotal    *int     `json:"disc_total,omitempty"`
-	Title        string   `json:"title,omitempty"`
-	Artist       string   `json:"artist,omitempty"`
-	Album        string   `json:"album,omitempty"`
-	AlbumArtist  string   `json:"album_artist,omitempty"`
-	Year         *int     `json:"year,omitempty"`
-	Genre        string   `json:"genre,omitempty"`
-	Duration     *int     `json:"duration,omitempty"`
-	Bitrate      int      `json:"bitrate,omitempty"`
-	HasCover     bool     `json:"has_cover"`
-	HasLyrics    bool     `json:"has_lyrics,omitempty"`
-	LyricsStatus string   `json:"lyrics_status"`
-	ID              *string  `json:"id,omitempty"`
-	StreamURL       *string  `json:"stream_url,omitempty"`
-	TrackID         int64    `json:"track_id,omitempty"`
-	TrackHash       string   `json:"track_hash,omitempty"`
-	DeezerID        string   `json:"deezer_id,omitempty"`
-	PinnedSourceURL string   `json:"pinned_source_url,omitempty"`
-	AlbumDeezerID   string   `json:"album_deezer_id,omitempty"`
+	Name            string  `json:"name"`
+	Path            string  `json:"path"`
+	Type            string  `json:"type"` // "directory" или "file"
+	IsDir           bool    `json:"is_dir"`
+	Size            *int64  `json:"size,omitempty"`
+	ModTime         string  `json:"mod_time,omitempty"`
+	Extension       string  `json:"extension,omitempty"`
+	TrackCount      *int    `json:"track_count,omitempty"` // Для каталогов: количество треков внутри
+	TrackNumber     *int    `json:"track_number,omitempty"`
+	TrackTotal      *int    `json:"track_total,omitempty"`
+	DiscNumber      *int    `json:"disc_number,omitempty"`
+	DiscTotal       *int    `json:"disc_total,omitempty"`
+	Title           string  `json:"title,omitempty"`
+	Artist          string  `json:"artist,omitempty"`
+	Album           string  `json:"album,omitempty"`
+	AlbumArtist     string  `json:"album_artist,omitempty"`
+	Year            *int    `json:"year,omitempty"`
+	Genre           string  `json:"genre,omitempty"`
+	Duration        *int    `json:"duration,omitempty"`
+	Bitrate         int     `json:"bitrate,omitempty"`
+	HasCover        bool    `json:"has_cover"`
+	HasLyrics       bool    `json:"has_lyrics,omitempty"`
+	LyricsStatus    string  `json:"lyrics_status"`
+	ID              *string `json:"id,omitempty"`
+	StreamURL       *string `json:"stream_url,omitempty"`
+	TrackID         int64   `json:"track_id,omitempty"`
+	TrackHash       string  `json:"track_hash,omitempty"`
+	DeezerID        string  `json:"deezer_id,omitempty"`
+	PinnedSourceURL string  `json:"pinned_source_url,omitempty"`
+	AlbumDeezerID   string  `json:"album_deezer_id,omitempty"`
 }
 
 // RedownloadRequest задает параметры повторной загрузки трека или альбома.
 type RedownloadRequest struct {
-	Path           string `json:"path"`
-	Type           string `json:"type,omitempty"` // "track" или "album"
-	DeleteExisting bool   `json:"delete_existing"`
+	Path string `json:"path"`
+	Type string `json:"type,omitempty"` // "track" или "album"
+	// Deprecated: accepted for compatibility; originals are always preserved.
+	DeleteExisting bool `json:"delete_existing"`
 }
 
 // RedownloadResponse содержит результат инициации повторной загрузки.
@@ -100,22 +101,22 @@ type DeleteResponse struct {
 
 // TrackMetadataResponse представляет полную информацию о треке для веб-плеера и клиентов.
 type TrackMetadataResponse struct {
-	ID          string  `json:"id"`
-	Title       string  `json:"title"`
-	Artist      string  `json:"artist"`
-	Album       string  `json:"album"`
-	DurationSec int     `json:"duration_sec"`
-	BitrateKbps int     `json:"bitrate_kbps"`
-	SampleRate  int     `json:"sample_rate"`
-	TrackNumber int     `json:"track_number,omitempty"`
-	Year        int     `json:"year,omitempty"`
-	Genre       string  `json:"genre,omitempty"`
-	Codec       string  `json:"codec"`
-	FileSize    int64   `json:"file_size"`
-	HasCover    bool    `json:"has_cover"`
-	StreamURL   string  `json:"stream_url"`
-	CoverURL    string  `json:"cover_url"`
-	FilePath    string  `json:"file_path,omitempty"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Artist      string `json:"artist"`
+	Album       string `json:"album"`
+	DurationSec int    `json:"duration_sec"`
+	BitrateKbps int    `json:"bitrate_kbps"`
+	SampleRate  int    `json:"sample_rate"`
+	TrackNumber int    `json:"track_number,omitempty"`
+	Year        int    `json:"year,omitempty"`
+	Genre       string `json:"genre,omitempty"`
+	Codec       string `json:"codec"`
+	FileSize    int64  `json:"file_size"`
+	HasCover    bool   `json:"has_cover"`
+	StreamURL   string `json:"stream_url"`
+	CoverURL    string `json:"cover_url"`
+	FilePath    string `json:"file_path,omitempty"`
 }
 
 // LibraryTrackItem описывает трек при выводе каталога медиатеки.

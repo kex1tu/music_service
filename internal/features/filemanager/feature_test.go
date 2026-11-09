@@ -60,7 +60,6 @@ func (m *mockSourceFinder) FindAlbumURL(ctx context.Context, artist, album strin
 	return "https://www.deezer.com/album/67890", nil
 }
 
-
 func setupFileManagerEnv(t *testing.T) (*testkit.TestEnv, *filemanager.Module) {
 	t.Helper()
 	env := testkit.NewEnv(t)
@@ -518,14 +517,14 @@ func TestFileManager_Redownload_Track(t *testing.T) {
 	if !strings.Contains(res.SourceURL, "5678") {
 		t.Errorf("expected sourceURL to contain deezer track ID 5678, got %q", res.SourceURL)
 	}
-	if !res.Deleted {
-		t.Errorf("expected Deleted true, got false")
+	if res.Deleted {
+		t.Errorf("original must remain until acceptance")
 	}
 
-	// Проверяем, что файл действительно удален с диска
+	// Original remains available until the staged download is reviewed.
 	fullPath, _ := env.MusicSandbox.Resolve("Linkin Park/Meteora/01. Foreword.mp3", false)
-	if _, err := os.Stat(fullPath); !os.IsNotExist(err) {
-		t.Errorf("expected file to be deleted from disk, but it still exists")
+	if _, err := os.Stat(fullPath); err != nil {
+		t.Errorf("original must remain: %v", err)
 	}
 }
 
@@ -580,4 +579,3 @@ func TestFileManager_Redownload_PathTraversalSecurity(t *testing.T) {
 		t.Errorf("expected 403 Forbidden for path traversal, got %d", resp.StatusCode)
 	}
 }
-

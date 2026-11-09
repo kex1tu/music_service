@@ -3,10 +3,11 @@ package organizer
 import (
 	"bytes"
 	"encoding/base64"
-	"os"
+
 	"path/filepath"
 	"strings"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/id3"
 )
 
@@ -20,7 +21,7 @@ func hasCoverInDir(dir string) bool {
 }
 
 func extractCoverFromTracks(dir string) {
-	entries, err := os.ReadDir(dir)
+	entries, err := safefs.ReadDir(dir)
 	if err != nil {
 		return
 	}
@@ -37,11 +38,11 @@ func extractCoverFromTracks(dir string) {
 			}
 			coverPath := filepath.Join(dir, "cover"+ext)
 			if !fileExists(coverPath) {
-				_ = os.WriteFile(coverPath, cover.Data, 0644)
+				_ = safefs.WriteFile(coverPath, cover.Data, 0644)
 			}
 			trackCoverPath := filepath.Join(dir, strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))+ext)
 			if !fileExists(trackCoverPath) {
-				_ = os.WriteFile(trackCoverPath, cover.Data, 0644)
+				_ = safefs.WriteFile(trackCoverPath, cover.Data, 0644)
 			}
 			return
 		}
@@ -59,7 +60,7 @@ func syncTrackNamedCovers(dir string) {
 		}
 	}
 
-	entries, err := os.ReadDir(dir)
+	entries, err := safefs.ReadDir(dir)
 	if err != nil {
 		return
 	}
@@ -95,10 +96,10 @@ func syncTrackNamedCovers(dir string) {
 					if cover.MimeType == "image/png" || bytes.HasPrefix(cover.Data, []byte("\x89PNG")) {
 						ext = ".png"
 					}
-					_ = os.WriteFile(filepath.Join(dir, trackBase+ext), cover.Data, 0644)
+					_ = safefs.WriteFile(filepath.Join(dir, trackBase+ext), cover.Data, 0644)
 					if dirCoverPath == "" {
 						dirCoverPath = filepath.Join(dir, "cover"+ext)
-						_ = os.WriteFile(dirCoverPath, cover.Data, 0644)
+						_ = safefs.WriteFile(dirCoverPath, cover.Data, 0644)
 					}
 				}
 			}
@@ -195,5 +196,5 @@ func saveBase64Cover(targetCoverPath string, base64Data string) error {
 	if len(data) == 0 {
 		return nil
 	}
-	return os.WriteFile(targetCoverPath, data, 0644)
+	return safefs.WriteFile(targetCoverPath, data, 0644)
 }

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -9,30 +10,40 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
+
+	"music-manager/internal/core/safefs"
 )
 
 // Config хранит всю конфигурацию сервиса.
 type Config struct {
-	Host                   string
-	Port                   int
-	MusicDir               string
-	TmpDir                 string
-	DatabasePath           string
-	SecretKey              string
-	AdminLogin             string
-	AdminPasswordHash      string
-	SessionCookieName      string
-	SessionTTL             int
-	SessionCookieSecure    bool
-	MaxConcurrentDownloads int
-	CookiesFile            string
-	YandexMusicToken       string
-	YandexMusicProxy       string
-	MusicBrainzUserToken   string
+	CensorCloudEnabled      bool
+	CensorCloudDailySeconds int
+	GeminiAPIKey            string
+	GeminiModel             string
+	DeepgramAPIKey          string
+	DeepgramModel           string
+
+	Host                    string
+	Port                    int
+	MusicDir                string
+	TmpDir                  string
+	DatabasePath            string
+	SecretKey               string
+	AdminLogin              string
+	AdminPasswordHash       string
+	SessionCookieName       string
+	SessionTTL              int
+	SessionCookieSecure     bool
+	MaxConcurrentDownloads  int
+	CookiesFile             string
+	YandexMusicToken        string
+	YandexMusicProxy        string
+	MusicBrainzUserToken    string
 	MusicBrainzClientID     string
 	MusicBrainzClientSecret string
 	MusicBrainzRedirectURI  string
-	Debug                  bool
+	Debug                   bool
 
 	// Uncensored SoundCloud Resolver
 	UncensoredDurationTolerance int
@@ -59,6 +70,10 @@ type Config struct {
 func Load() (*Config, error) {
 	// Игнорируем ошибку, если .env файл отсутствует в окружении
 	_ = godotenv.Load(".env")
+	return loadEnvironment()
+}
+
+func loadEnvironment() (*Config, error) {
 
 	port, _ := strconv.Atoi(getEnv("PORT", "8010"))
 	sessionTTL, _ := strconv.Atoi(getEnv("SESSION_TTL", "604800"))
@@ -96,15 +111,22 @@ func Load() (*Config, error) {
 	}
 	radarAutoDL := getEnv("RADAR_AUTO_DOWNLOAD", "false") == "true"
 
+	censorSeconds, _ := strconv.Atoi(getEnv("CENSOR_CLOUD_DAILY_SECONDS", "0"))
 	cfg := &Config{
+		CensorCloudEnabled:          getEnv("CENSOR_CLOUD_ENABLED", "false") == "true",
+		CensorCloudDailySeconds:     censorSeconds,
+		GeminiAPIKey:                getEnv("GEMINI_API_KEY", ""),
+		GeminiModel:                 getEnv("GEMINI_MODEL", ""),
+		DeepgramAPIKey:              getEnv("DEEPGRAM_API_KEY", ""),
+		DeepgramModel:               getEnv("DEEPGRAM_MODEL", ""),
 		Host:                        getEnv("HOST", "127.0.0.1"),
 		Port:                        port,
 		MusicDir:                    musicDir,
 		TmpDir:                      tmpDir,
 		DatabasePath:                dbPath,
-		SecretKey:                   getEnv("SECRET_KEY", "dev_secret_key_at_least_32_characters_long_123456"),
+		SecretKey:                   getEnv("SECRET_KEY", ""),
 		AdminLogin:                  getEnv("ADMIN_LOGIN", "admin"),
-		AdminPasswordHash:           getEnv("ADMIN_PASSWORD_HASH", "$2b$12$wozlKXTTPPu7agkeGiiLYuZz36hysQzOES/6c6ZCQ2GfyCNrnYLBm"),
+		AdminPasswordHash:           getEnv("ADMIN_PASSWORD_HASH", ""),
 		SessionCookieName:           getEnv("SESSION_COOKIE_NAME", "music_manager_session"),
 		SessionTTL:                  sessionTTL,
 		SessionCookieSecure:         cookieSecure,
@@ -133,6 +155,18 @@ func Load() (*Config, error) {
 		RadarAutoDownload:           radarAutoDL,
 	}
 
+	if len(cfg.SecretKey) < 32 || strings.HasPrefix(cfg.SecretKey, "change_me") || cfg.AdminPasswordHash == "" {
+		return nil, fmt.Errorf("SECRET_KEY (at least 32 characters) and ADMIN_PASSWORD_HASH are required")
+	}
+	if _, err := bcrypt.Cost([]byte(cfg.AdminPasswordHash)); err != nil {
+		return nil, fmt.Errorf("invalid ADMIN_PASSWORD_HASH: %w", err)
+	}
+	if cfg.SessionTTL <= 0 {
+		return nil, fmt.Errorf("SESSION_TTL must be positive")
+	}
+	if err := (&http.Cookie{Name: cfg.SessionCookieName, Value: "probe"}).Valid(); err != nil {
+		return nil, fmt.Errorf("invalid SESSION_COOKIE_NAME: %w", err)
+	}
 	// Fail-fast проверка прав на запись в директории
 	if err := verifyStorageDirectory(cfg.MusicDir, "MUSIC_DIR"); err != nil {
 		return nil, err
@@ -144,7 +178,7 @@ func Load() (*Config, error) {
 	// Создаем родительскую папку для базы данных, если нужно
 	dbDir := filepath.Dir(cfg.DatabasePath)
 	if dbDir != "" && dbDir != "." {
-		_ = os.MkdirAll(dbDir, 0755)
+		_ = safefs.MkdirAll(dbDir, 0755)
 	}
 
 	return cfg, nil
@@ -159,15 +193,15 @@ func getEnv(key, fallback string) string {
 }
 
 func verifyStorageDirectory(dirPath, name string) error {
-	if err := os.MkdirAll(dirPath, 0755); err != nil {
+	if err := safefs.MkdirAll(dirPath, 0755); err != nil {
 		return fmt.Errorf("каталог %s ('%s') не может быть создан: %w", name, dirPath, err)
 	}
 
 	probeFile := filepath.Join(dirPath, fmt.Sprintf(".probe_%s.tmp", uuid.New().String()))
-	if err := os.WriteFile(probeFile, []byte("probe_rw_test"), 0600); err != nil {
+	if err := safefs.WriteFile(probeFile, []byte("probe_rw_test"), 0600); err != nil {
 		return fmt.Errorf("каталог %s ('%s') недоступен для записи: %w", name, dirPath, err)
 	}
-	_ = os.Remove(probeFile)
+	_ = safefs.Remove(probeFile)
 
 	return nil
 }

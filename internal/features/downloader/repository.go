@@ -165,7 +165,10 @@ func (r *Repository) SaveJob(ctx context.Context, job *Job) error {
 		snap.TotalTracks, snap.CompletedTracks, snap.Error, snap.TargetAlbumPath,
 		snap.IsBackfill, snap.AlbumTitle, snap.ArtistName,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	return r.saveSourceSelections(ctx, snap)
 }
 
 // GetJob возвращает задачу по её строковому идентификатору. Если запись отсутствует, возвращает (nil, nil).
@@ -183,6 +186,9 @@ func (r *Repository) GetJob(ctx context.Context, id string) (*Job, error) {
 		return nil, nil
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := r.loadSourceSelections(ctx, job); err != nil {
 		return nil, err
 	}
 	return job, nil
@@ -219,7 +225,11 @@ func (r *Repository) ListJobs(ctx context.Context, limit, offset int) ([]*Job, e
 		}
 		list = append(list, j)
 	}
-	return list, nil
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	return r.loadSelectionsForList(ctx, list)
 }
 
 // GetAllJobs возвращает полный список всех задач из базы данных.
@@ -245,7 +255,11 @@ func (r *Repository) GetAllJobs(ctx context.Context) ([]*Job, error) {
 		}
 		list = append(list, j)
 	}
-	return list, nil
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	return r.loadSelectionsForList(ctx, list)
 }
 
 // UpdateJobProgress обновляет текущий процент выполнения и статусную строку шага.

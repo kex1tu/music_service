@@ -25,6 +25,12 @@ document.addEventListener('alpine:init', () => {
 
         // Вкладка 2: Мульти-поиск кандидатов
         searchQuery: '',
+        versionPolicy: "release",
+        searchSerial: 0,
+        explain(e) {
+            const names = { title_mismatch: 'Другое название', artist_mismatch: 'Другой исполнитель', version_mismatch: 'Другая версия записи', duration_mismatch: 'Существенное отличие длительности', short_title_mismatch: 'Короткое название не совпало', remix_identity_unknown: 'Не подтверждён тот же ремикс', version_detail_mismatch: 'Другая редакция версии' };
+            return (e?.conflicts || []).map(v => names[v] || v).join(' · ');
+        },
         isLoadingCandidates: false,
         candidates: [],
         candidatesError: null,
@@ -38,9 +44,11 @@ document.addEventListener('alpine:init', () => {
 
         openForQueueTrack(job, track) {
             this.reset();
+            this.versionPolicy = track.version_policy || 'release';
             this.context = {
                 jobId: job ? job.id : null,
                 trackId: track.track_id || track.id || '',
+                isrc: track.isrc || '',
                 trackNumber: track.track_number || 1,
                 title: track.title || '',
                 artist: track.artist || (job ? job.artist_name : '') || '',
@@ -64,6 +72,7 @@ document.addEventListener('alpine:init', () => {
             this.context = {
                 jobId: null,
                 trackId: track.track_number ? `missing_${track.track_number}` : '',
+                isrc: track.isrc || '',
                 trackNumber: track.track_number || 1,
                 title: tit,
                 artist: art,
@@ -87,6 +96,8 @@ document.addEventListener('alpine:init', () => {
         },
 
         reset() {
+            this.searchSerial++;
+            this.versionPolicy = 'release';
             this.directUrl = '';
             this.searchQuery = '';
             this.isLoadingCandidates = false;
@@ -100,6 +111,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         async searchCandidates() {
+            const serial=++this.searchSerial;
             const q = this.searchQuery.trim();
             if (!q && !this.context.title) return;
 
@@ -113,16 +125,19 @@ document.addEventListener('alpine:init', () => {
                     artist: this.context.artist || '',
                     title: this.context.title || '',
                     duration: String(this.context.expectedDuration || 0),
+                    version_policy: this.versionPolicy,
+                    isrc: this.context.isrc || '',
                     q: q,
                 });
 
-                const res = await fetch(`/api/downloads/candidates?${params.toString()}`);
+                const res = await window.api.raw(`/api/downloads/candidates?${params.toString()}`);
                 if (!res.ok) {
                     const errData = await res.json().catch(() => ({}));
                     throw new Error(errData.error || `HTTP ${res.status}: Ошибка поиска кандидатов`);
                 }
 
                 const data = await res.json();
+                if (serial !== this.searchSerial) return;
                 this.candidates = data.candidates || [];
                 if (this.candidates.length === 0) {
                     this.candidatesError = 'По запросу кандидатов не найдено. Попробуйте уточнить поисковый запрос.';
@@ -131,7 +146,7 @@ document.addEventListener('alpine:init', () => {
                 console.error('[SourcePicker] Ошибка поиска:', err);
                 this.candidatesError = err.message || 'Сбой выполнения мульти-поиска';
             } finally {
-                this.isLoadingCandidates = false;
+                if (serial === this.searchSerial) this.isLoadingCandidates = false;
             }
         },
 
@@ -194,9 +209,11 @@ document.addEventListener('alpine:init', () => {
                         track_title: this.context.title,
                         track_number: this.context.trackNumber,
                         target_url: targetUrl,
+                        version_policy: this.versionPolicy,
+                        duration: this.context.expectedDuration,
                     };
 
-                    const res = await fetch('/api/downloads/backfill/bind-source', {
+                    const res = await window.api.raw('/api/downloads/backfill/bind-source', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(payload),
@@ -212,10 +229,10 @@ document.addEventListener('alpine:init', () => {
                 } else {
                     // Режим трека из очереди
                     this.submitStep = 'Скачивание и накат ID3v2.4 тегов...';
-                    const res = await fetch(`/api/downloads/tracks/${encodeURIComponent(this.context.trackId)}/bind-source`, {
+                    const res = await window.api.raw(`/api/downloads/tracks/${encodeURIComponent(this.context.trackId)}/bind-source`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ target_url: targetUrl }),
+                        body: JSON.stringify({ target_url: targetUrl, version_policy: this.versionPolicy }),
                     });
 
                     if (!res.ok) {

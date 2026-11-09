@@ -8,8 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"os/exec"
+
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -17,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"music-manager/internal/core/mediaexec"
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/services/resolver"
 )
 
@@ -47,7 +48,8 @@ func (s *Service) downloadRawStream(ctx context.Context, sourceURL, outputTempla
 	}
 	args = append(args, "--", sourceURL)
 
-	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
+	cmd := mediaexec.CommandContext(ctx, "yt-dlp", args...)
+	defer cmd.Close()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err
@@ -81,7 +83,8 @@ func (s *Service) downloadRawStream(ctx context.Context, sourceURL, outputTempla
 				}
 				argsNoCookies = append(argsNoCookies, args[i])
 			}
-			cmdRetry := exec.CommandContext(ctx, "yt-dlp", argsNoCookies...)
+			cmdRetry := mediaexec.CommandContext(ctx, "yt-dlp", argsNoCookies...)
+			defer cmdRetry.Close()
 			stdoutRetry, pErr := cmdRetry.StdoutPipe()
 			if pErr == nil {
 				var stderrRetry bytes.Buffer
@@ -116,7 +119,7 @@ func (s *Service) downloadAndValidateRawStream(ctx context.Context, sourceURL, o
 		return "", err
 	}
 	if vErr := validateDownloadedStreamAudio(ctx, rawFile, expectedDurationSec); vErr != nil {
-		_ = os.Remove(rawFile)
+		_ = safefs.Remove(rawFile)
 		return "", vErr
 	}
 	return rawFile, nil
@@ -125,7 +128,7 @@ func (s *Service) downloadAndValidateRawStream(ctx context.Context, sourceURL, o
 func (s *Service) findDownloadedFile(outputTemplate string) (string, error) {
 	dir := filepath.Dir(outputTemplate)
 	pattern := filepath.Base(strings.Replace(outputTemplate, "%(ext)s", "*", 1))
-	matches, err := filepath.Glob(filepath.Join(dir, pattern))
+	matches, err := safefs.Glob(filepath.Join(dir, pattern))
 	if err != nil || len(matches) == 0 {
 		return "", fmt.Errorf("downloaded audio file not found matching template %s", outputTemplate)
 	}
@@ -140,7 +143,6 @@ func buildFfmpegArgs(inputRaw, outputMP3 string) []string {
 		"-vn",
 		"-codec:a", "libmp3lame",
 		"-b:a", "320k",
-		"-q:a", "0",
 		"-ar", "44100",
 		"-ac", "2",
 		"-map_metadata", "-1",
@@ -151,7 +153,8 @@ func buildFfmpegArgs(inputRaw, outputMP3 string) []string {
 func (s *Service) transcodeToMP3(ctx context.Context, inputRaw, outputMP3 string) error {
 	args := buildFfmpegArgs(inputRaw, outputMP3)
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd := mediaexec.CommandContext(ctx, "ffmpeg", args...)
+	defer cmd.Close()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -159,7 +162,7 @@ func (s *Service) transcodeToMP3(ctx context.Context, inputRaw, outputMP3 string
 		return fmt.Errorf("ffmpeg transcoding error: %w: %s", err, stderr.String())
 	}
 
-	info, err := os.Stat(outputMP3)
+	info, err := safefs.Stat(outputMP3)
 	if err != nil || info.Size() == 0 {
 		return fmt.Errorf("transcoded MP3 is empty or missing")
 	}
@@ -202,7 +205,8 @@ func validateDownloadedStreamAudio(ctx context.Context, rawFilePath string, expe
 		rawFilePath,
 	}
 
-	cmd := exec.CommandContext(ctx, "ffprobe", args...)
+	cmd := mediaexec.CommandContext(ctx, "ffprobe", args...)
+	defer cmd.Close()
 	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("ffprobe probe failed: %w", err)
@@ -247,7 +251,8 @@ func probeAudioStream(ctx context.Context, inputRaw string) (codec string, bitra
 		inputRaw,
 	}
 
-	cmd := exec.CommandContext(ctx, "ffprobe", args...)
+	cmd := mediaexec.CommandContext(ctx, "ffprobe", args...)
+	defer cmd.Close()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -299,7 +304,8 @@ func measureSpectralCutoff(ctx context.Context, inputRaw string) (int, error) {
 		"-",
 	}
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd := mediaexec.CommandContext(ctx, "ffmpeg", args...)
+	defer cmd.Close()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -318,7 +324,8 @@ func measureSpectralCutoff(ctx context.Context, inputRaw string) (int, error) {
 			"-f", "null",
 			"-",
 		}
-		cmdRetry := exec.CommandContext(ctx, "ffmpeg", argsRetry...)
+		cmdRetry := mediaexec.CommandContext(ctx, "ffmpeg", argsRetry...)
+		defer cmdRetry.Close()
 		cmdRetry.Stdout = &stdout
 		cmdRetry.Stderr = &stderr
 		if rErr := cmdRetry.Run(); rErr != nil {
@@ -434,4 +441,3 @@ func (s *Service) analyzeAudioQuality(ctx context.Context, inputRaw string) *res
 
 	return classifyAudioQuality(codec, bitrate, cutoffHz)
 }
-

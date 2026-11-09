@@ -12,16 +12,20 @@ import (
 
 // CandidateTrackItem представляет найденного кандидата для ручного выбора источника.
 type CandidateTrackItem struct {
-	ID          string `json:"id"`
-	Source      string `json:"source"`       // "ytmusic", "soundcloud", "youtube", "bandcamp"
-	Title       string `json:"title"`
-	Uploader    string `json:"uploader"`
-	URL         string `json:"url"`
-	Duration    int    `json:"duration"`
-	DeltaSec    int    `json:"delta_seconds"`
-	BitrateInfo string `json:"bitrate_info"` // e.g. "Opus 160k", "AAC 256k", "MP3 128k"
-	IsTopic     bool   `json:"is_topic"`
-	Score       int    `json:"score"`
+	SavedSelection   bool            `json:"saved_selection"`
+	SearchIncomplete bool            `json:"search_incomplete"`
+	ID               string          `json:"id"`
+	Source           string          `json:"source"` // "ytmusic", "soundcloud", "youtube", "bandcamp"
+	Title            string          `json:"title"`
+	Uploader         string          `json:"uploader"`
+	URL              string          `json:"url"`
+	Duration         int             `json:"duration"`
+	DeltaSec         int             `json:"delta_seconds"`
+	BitrateInfo      string          `json:"bitrate_info"` // e.g. "Opus 160k", "AAC 256k", "MP3 128k"
+	IsTopic          bool            `json:"is_topic"`
+	Score            int             `json:"score"`
+	Evaluation       MatchEvaluation `json:"evaluation"`
+	Policy           VersionPolicy   `json:"version_policy"`
 }
 
 // SearchMultiCandidates выполняет параллельный Fast Fan-Out поиск кандидатов
@@ -42,15 +46,18 @@ func (m *AudioMatcher) SearchMultiCandidates(ctx context.Context, artist, title 
 	var mu sync.Mutex
 	var allCandidates []CandidateTrackItem
 	seenURLs := make(map[string]bool)
+	incomplete := false
+	markIncomplete := func() { mu.Lock(); incomplete = true; mu.Unlock() }
 
 	addCandidates := func(items []CandidateTrackItem) {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, item := range items {
-			if item.URL == "" || seenURLs[item.URL] {
+			key:=item.Source+":"+candidateKey(item.URL)
+			if item.URL == "" || seenURLs[key] {
 				continue
 			}
-			seenURLs[item.URL] = true
+			seenURLs[key] = true
 			allCandidates = append(allCandidates, item)
 		}
 	}
@@ -64,6 +71,9 @@ func (m *AudioMatcher) SearchMultiCandidates(ctx context.Context, artist, title 
 			ytmClient = NewYouTubeMusicClient("")
 		}
 		ytmTracks, err := ytmClient.Search(searchCtx, q)
+		if err != nil {
+			markIncomplete()
+		}
 		if err == nil && len(ytmTracks) > 0 {
 			var res []CandidateTrackItem
 			for _, tr := range ytmTracks {
@@ -102,6 +112,9 @@ func (m *AudioMatcher) SearchMultiCandidates(ctx context.Context, artist, title 
 		}
 		scQuery := fmt.Sprintf("scsearch10:%s", cleanQ)
 		scCandidates, err := m.runSearch(searchCtx, scQuery)
+		if err != nil {
+			markIncomplete()
+		}
 		if err == nil && len(scCandidates) > 0 {
 			var res []CandidateTrackItem
 			for _, cand := range scCandidates {
@@ -137,6 +150,9 @@ func (m *AudioMatcher) SearchMultiCandidates(ctx context.Context, artist, title 
 		}
 		ytQuery := fmt.Sprintf("ytsearch10:%s", cleanQ)
 		ytCandidates, err := m.runSearch(searchCtx, ytQuery)
+		if err != nil {
+			markIncomplete()
+		}
 		if err == nil && len(ytCandidates) > 0 {
 			var res []CandidateTrackItem
 			for _, cand := range ytCandidates {
@@ -177,6 +193,15 @@ func (m *AudioMatcher) SearchMultiCandidates(ctx context.Context, artist, title 
 	}()
 
 	wg.Wait()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	for i := range allCandidates {
+		allCandidates[i].SearchIncomplete = incomplete
+	}
+	if len(allCandidates) == 0 && incomplete {
+		return nil, fmt.Errorf("candidate search incomplete: providers unavailable")
+	}
 
 	// Сортировка кандидатов по убыванию Score, а при равенстве — по минимальному |DeltaSec|
 	sort.Slice(allCandidates, func(i, j int) bool {
@@ -186,64 +211,10 @@ func (m *AudioMatcher) SearchMultiCandidates(ctx context.Context, artist, title 
 		return math.Abs(float64(allCandidates[i].DeltaSec)) < math.Abs(float64(allCandidates[j].DeltaSec))
 	})
 
-	return allCandidates, nil
+	return RankCandidateItems(allCandidates, title, artist, expectedDuration, PolicyRelease), nil
 }
 
 // calculateCandidateScore вычисляет оценку соответствия кандидата от 0 до 100.
 func calculateCandidateScore(candTitle, candChannel, origTitle, origArtist string, candDur, expectedDur int, isTopic bool, source string) int {
-	score := 50
-
-	// 1. Бонус за источник
-	if isTopic || source == "ytmusic" {
-		score += 25
-	} else if source == "soundcloud" {
-		score += 10
-	}
-
-	// 2. Дельта длительности
-	if expectedDur > 0 && candDur > 0 {
-		diff := int(math.Abs(float64(candDur - expectedDur)))
-		if diff <= 2 {
-			score += 25
-		} else if diff <= 5 {
-			score += 15
-		} else if diff <= 10 {
-			score += 5
-		} else if diff > 30 {
-			score -= 30
-		}
-	}
-
-	// 3. Совпадение названия
-	cleanCandTitle := strings.ToLower(CleanQueryText(candTitle))
-	cleanOrigTitle := strings.ToLower(CleanQueryText(origTitle))
-	if cleanOrigTitle != "" && strings.Contains(cleanCandTitle, cleanOrigTitle) {
-		score += 15
-	}
-
-	// 4. Совпадение исполнителя
-	cleanCandChan := strings.ToLower(CleanQueryText(candChannel))
-	cleanOrigArtist := strings.ToLower(CleanQueryText(origArtist))
-	if cleanOrigArtist != "" && (strings.Contains(cleanCandChan, cleanOrigArtist) || strings.Contains(cleanCandTitle, cleanOrigArtist)) {
-		score += 10
-	}
-
-	// Штрафы за нежелательные слова (live, concert, 8d audio, slowed, remix если в оригинале нет remix)
-	if !strings.Contains(cleanOrigTitle, "live") && strings.Contains(cleanCandTitle, "live") {
-		score -= 20
-	}
-	if !strings.Contains(cleanOrigTitle, "remix") && strings.Contains(cleanCandTitle, "remix") {
-		score -= 15
-	}
-	if strings.Contains(cleanCandTitle, "slowed") || strings.Contains(cleanCandTitle, "reverb") || strings.Contains(cleanCandTitle, "speed up") {
-		score -= 35
-	}
-
-	if score < 0 {
-		score = 0
-	}
-	if score > 100 {
-		score = 100
-	}
-	return score
+	return EvaluateTrack(origTitle, origArtist, expectedDur, candTitle, candChannel, candDur, source != "ytmusic").Score
 }

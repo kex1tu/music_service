@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/organizer"
@@ -33,6 +34,7 @@ var (
 
 // ServiceConfig defines dependencies for constructing the Audit service.
 type ServiceConfig struct {
+	Censorship      *CensorshipAudit
 	MusicSandbox    *sandbox.PathSandbox
 	TmpSandbox      *sandbox.PathSandbox
 	Repo            AuditRepository
@@ -53,6 +55,7 @@ type ServiceConfig struct {
 // Service encapsulates library integrity auditing, duplicate detection and resolution,
 // path reorganization, tag health auditing, batch lyrics/cover workers, and catalog matching.
 type Service struct {
+	censorship      *CensorshipAudit
 	musicSandbox    *sandbox.PathSandbox
 	tmpSandbox      *sandbox.PathSandbox
 	repo            AuditRepository
@@ -94,6 +97,7 @@ func NewService(cfg ServiceConfig) *Service {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{
+		censorship:      cfg.Censorship,
 		musicSandbox:    cfg.MusicSandbox,
 		tmpSandbox:      cfg.TmpSandbox,
 		repo:            cfg.Repo,
@@ -116,6 +120,9 @@ func NewService(cfg ServiceConfig) *Service {
 
 // Close gracefully stops any active background batch operations and waits for completion.
 func (s *Service) Close() error {
+	if s.censorship != nil {
+		s.censorship.Close()
+	}
 	s.cancel()
 
 	s.lyricsMu.Lock()
@@ -259,7 +266,7 @@ func (s *Service) deleteTrackAndCompanions(ctx context.Context, relPath string) 
 	}
 
 	// 2. Remove audio file
-	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+	if err := safefs.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove audio file: %w", err)
 	}
 
@@ -270,7 +277,7 @@ func (s *Service) deleteTrackAndCompanions(ctx context.Context, relPath string) 
 	for _, ext := range []string{".lrc", ".txt"} {
 		companionRel := filepath.Join(dirRel, baseNoExt+ext)
 		if companionFull, cErr := s.musicSandbox.Resolve(companionRel, false); cErr == nil {
-			_ = os.Remove(companionFull)
+			_ = safefs.Remove(companionFull)
 		}
 	}
 
@@ -931,12 +938,12 @@ func (s *Service) applyCoverToAlbumDir(fullDir, folderRelPath string, coverBytes
 	}
 
 	coverPath := filepath.Join(fullDir, "cover"+ext)
-	if err := os.WriteFile(coverPath, coverBytes, 0644); err != nil {
+	if err := safefs.WriteFile(coverPath, coverBytes, 0644); err != nil {
 		return 0, fmt.Errorf("failed to write album cover: %w", err)
 	}
-	_ = os.Chmod(coverPath, 0644)
+	_ = safefs.Chmod(coverPath, 0644)
 
-	entries, err := os.ReadDir(fullDir)
+	entries, err := safefs.ReadDir(fullDir)
 	if err != nil {
 		return 0, err
 	}
@@ -954,8 +961,8 @@ func (s *Service) applyCoverToAlbumDir(fullDir, folderRelPath string, coverBytes
 
 		baseName := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
 		trackCoverPath := filepath.Join(fullDir, baseName+ext)
-		_ = os.WriteFile(trackCoverPath, coverBytes, 0644)
-		_ = os.Chmod(trackCoverPath, 0644)
+		_ = safefs.WriteFile(trackCoverPath, coverBytes, 0644)
+		_ = safefs.Chmod(trackCoverPath, 0644)
 
 		mp3Path := filepath.Join(fullDir, e.Name())
 		relTrack, _ := s.musicSandbox.ToRelative(mp3Path)
@@ -1308,7 +1315,7 @@ func (s *Service) GetBackfillEditorData(ctx context.Context, albumPath, jobID st
 
 	if albumPath != "" && s.musicSandbox != nil {
 		if fullPath, err := s.musicSandbox.Resolve(albumPath, true); err == nil {
-			entries, _ := os.ReadDir(fullPath)
+			entries, _ := safefs.ReadDir(fullPath)
 			for _, e := range entries {
 				if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".mp3") {
 					itemRel := filepath.Join(albumPath, e.Name())
@@ -1348,7 +1355,7 @@ func (s *Service) GetBackfillEditorData(ctx context.Context, albumPath, jobID st
 	if jobID != "" && s.tmpSandbox != nil {
 		jobDirRel := filepath.Join(jobID, "converted")
 		if fullJobDir, err := s.tmpSandbox.Resolve(jobDirRel, false); err == nil {
-			entries, _ := os.ReadDir(fullJobDir)
+			entries, _ := safefs.ReadDir(fullJobDir)
 			for _, e := range entries {
 				if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".mp3") {
 					itemRel := filepath.Join("tmp_downloads", jobID, "converted", e.Name())
@@ -1389,7 +1396,7 @@ func (s *Service) GetBackfillEditorData(ctx context.Context, albumPath, jobID st
 		for _, name := range []string{"cover.jpg", "cover.png", "folder.jpg", "front.jpg"} {
 			rel := filepath.Join(albumPath, name)
 			if full, err := s.musicSandbox.Resolve(rel, true); err == nil {
-				if _, err := os.Stat(full); err == nil {
+				if _, err := safefs.Stat(full); err == nil {
 					coverPath = rel
 					hasCover = true
 					break
@@ -1400,7 +1407,7 @@ func (s *Service) GetBackfillEditorData(ctx context.Context, albumPath, jobID st
 	if !hasCover && jobID != "" && s.tmpSandbox != nil {
 		rel := filepath.Join(jobID, "converted", "cover.jpg")
 		if full, err := s.tmpSandbox.Resolve(rel, false); err == nil {
-			if _, err := os.Stat(full); err == nil {
+			if _, err := safefs.Stat(full); err == nil {
 				coverPath = filepath.Join("tmp_downloads", jobID, "converted", "cover.jpg")
 				hasCover = true
 			}
@@ -1409,7 +1416,7 @@ func (s *Service) GetBackfillEditorData(ctx context.Context, albumPath, jobID st
 	if !hasCover && jobID != "" && s.tmpSandbox != nil {
 		rel := filepath.Join(jobID, "cover.jpg")
 		if full, err := s.tmpSandbox.Resolve(rel, false); err == nil {
-			if _, err := os.Stat(full); err == nil {
+			if _, err := safefs.Stat(full); err == nil {
 				coverPath = filepath.Join("tmp_downloads", jobID, "cover.jpg")
 				hasCover = true
 			}
@@ -1930,7 +1937,7 @@ func (s *Service) CatalogMatchAlbumDetails(ctx context.Context, folderPath strin
 		return nil, fmt.Errorf("%w: %v", ErrFolderNotFound, err)
 	}
 
-	entries, err := os.ReadDir(fullDir)
+	entries, err := safefs.ReadDir(fullDir)
 	if err != nil {
 		return nil, err
 	}
@@ -2183,8 +2190,8 @@ func (s *Service) ApplyCatalogTags(ctx context.Context, req ApplyCatalogTagsRequ
 	if coverInfo != nil && len(coverInfo.Data) > 0 {
 		albumDir := filepath.Dir(fullPath)
 		coverFile := filepath.Join(albumDir, "cover.jpg")
-		if _, statErr := os.Stat(coverFile); os.IsNotExist(statErr) {
-			_ = os.WriteFile(coverFile, coverInfo.Data, 0644)
+		if _, statErr := safefs.Stat(coverFile); os.IsNotExist(statErr) {
+			_ = safefs.WriteFile(coverFile, coverInfo.Data, 0644)
 		}
 	}
 
@@ -2209,8 +2216,8 @@ func (s *Service) ApplyCatalogAlbum(ctx context.Context, req ApplyCatalogAlbumRe
 				MimeType: mime,
 				Data:     data,
 			}
-			_ = os.WriteFile(filepath.Join(fullDir, "cover.jpg"), data, 0644)
-			_ = os.Chmod(filepath.Join(fullDir, "cover.jpg"), 0644)
+			_ = safefs.WriteFile(filepath.Join(fullDir, "cover.jpg"), data, 0644)
+			_ = safefs.Chmod(filepath.Join(fullDir, "cover.jpg"), 0644)
 		}
 	}
 

@@ -474,8 +474,8 @@ func TestFileHandler_CatalogMatchTrack(t *testing.T) {
 	if topMatch.Title != "Mock Track" {
 		t.Errorf("expected title 'Mock Track', got %q", topMatch.Title)
 	}
-	if topMatch.MatchScore < 80 {
-		t.Errorf("expected high match score >= 80, got %d", topMatch.MatchScore)
+	if topMatch.MatchScore != 74 {
+		t.Errorf("missing duration must limit match rating to 74, got %d", topMatch.MatchScore)
 	}
 }
 

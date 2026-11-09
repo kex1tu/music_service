@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
+
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
@@ -41,7 +42,7 @@ func (h *TagHandler) GetCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	st, err := os.Stat(fullPath)
+	st, err := safefs.Stat(fullPath)
 	if err != nil {
 		http.Error(w, "file not found", http.StatusNotFound)
 		return
@@ -75,7 +76,7 @@ func (h *TagHandler) GetCover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, candPath := range candidates {
-		if data, err := os.ReadFile(candPath); err == nil {
+		if data, err := safefs.ReadFile(candPath); err == nil {
 			mime := "image/jpeg"
 			if strings.HasSuffix(candPath, ".png") {
 				mime = "image/png"
@@ -490,6 +491,6 @@ func searchMusicBrainzCoversHandler(ctx context.Context, client *http.Client, qu
 }
 
 func fileExists(path string) bool {
-	st, err := os.Stat(path)
+	st, err := safefs.Stat(path)
 	return err == nil && !st.IsDir()
 }

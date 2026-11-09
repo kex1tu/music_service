@@ -339,7 +339,7 @@ function puddletagWorkstationComponent() {
 
             try {
                 const url = `/files?path=${encodeURIComponent(path || '')}&recursive=false&_t=${Date.now()}`;
-                const res = await fetch(url);
+                const res = await window.api.raw(url);
                 if (!res.ok) {
                     const err = await res.json().catch(() => ({}));
                     throw new Error(err.error || err.message || 'Ошибка загрузки каталога');
@@ -798,7 +798,7 @@ function puddletagWorkstationComponent() {
             try {
                 const results = window.apiClient?.tags?.searchCovers
                     ? await window.apiClient.tags.searchCovers(q)
-                    : await fetch(`/tags/covers/search?query=${encodeURIComponent(q)}&limit=24`).then(r => r.json());
+                    : await window.api.raw(`/tags/covers/search?query=${encodeURIComponent(q)}&limit=24`).then(r => r.json());
 
                 this.coverGalleryResults = Array.isArray(results) ? results : [];
                 if (this.coverGalleryResults.length === 0) {
@@ -851,7 +851,7 @@ function puddletagWorkstationComponent() {
         async fetchCoverBase64(url) {
             if (!url) return;
             try {
-                const res = await fetch(url);
+                const res = await window.api.raw(url);
                 if (res.ok) {
                     const blob = await res.blob();
                     const reader = new FileReader();
@@ -941,7 +941,7 @@ function puddletagWorkstationComponent() {
 
                 this.isSaving = true;
                 try {
-                    const res = await fetch('/files/rename-pattern', {
+                    const res = await window.api.raw('/files/rename-pattern', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ items: itemsToRename, dry_run: false })
@@ -1099,7 +1099,7 @@ function puddletagWorkstationComponent() {
                                 track_total: t.track_total || relTracks.length,
                             }));
 
-                            const res = await fetch('/tags/batch', {
+                            const res = await window.api.raw('/tags/batch', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
@@ -1131,7 +1131,7 @@ function puddletagWorkstationComponent() {
                             track_total: t.track_total || this.tracks.length,
                         }));
 
-                        const res = await fetch('/tags/batch', {
+                        const res = await window.api.raw('/tags/batch', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -1167,7 +1167,7 @@ function puddletagWorkstationComponent() {
                     const jobIdsToClean = (this.jobIds && this.jobIds.length > 0) ? this.jobIds : (this.jobId ? [this.jobId] : []);
                     if (jobIdsToClean.length > 0) {
                         try {
-                            await Promise.allSettled(jobIdsToClean.map(jid => fetch(`/downloads/${jid}`, { method: 'DELETE' })));
+                            await Promise.allSettled(jobIdsToClean.map(jid => window.api.raw(`/downloads/${jid}`, { method: 'DELETE' })));
                             if (Alpine.store('app').queue) {
                                 await Alpine.store('app').queue.fetchQueue();
                             }
@@ -1179,7 +1179,7 @@ function puddletagWorkstationComponent() {
                 } else {
                     const dirtyTracksList = Array.from(this.dirtyIndices).map(idx => this.tracks[idx]);
                     // Режим медиатеки: атомарно перезаписываем ID3v2.4 теги
-                    const res = await fetch('/tags/batch', {
+                    const res = await window.api.raw('/tags/batch', {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({

@@ -13,6 +13,7 @@ import (
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	"music-manager/internal/services/resolver"
+	"music-manager/internal/testkit"
 )
 
 func TestJobManager(t *testing.T) {
@@ -124,6 +125,8 @@ func TestService_CreateBackfillJob(t *testing.T) {
 	svc := NewService(context.Background(), jobMgr, nil, tmpSb, musicSb, "", 1)
 	defer svc.Close()
 
+	svc.PauseQueue()
+
 	// Create backfill job
 	job, err := svc.CreateBackfillJob(
 		"Test Album - Cool Artist",
@@ -137,17 +140,18 @@ func TestService_CreateBackfillJob(t *testing.T) {
 		t.Fatalf("unexpected error creating backfill job: %v", err)
 	}
 
-	if !job.IsBackfill {
+	snapshot := job.Snapshot()
+	if !snapshot.IsBackfill {
 		t.Errorf("expected IsBackfill true, got false")
 	}
-	if job.TargetAlbumPath == nil || *job.TargetAlbumPath != "Test Album - Cool Artist" {
-		t.Errorf("expected TargetAlbumPath 'Test Album - Cool Artist', got %v", job.TargetAlbumPath)
+	if snapshot.TargetAlbumPath == nil || *snapshot.TargetAlbumPath != "Test Album - Cool Artist" {
+		t.Errorf("expected TargetAlbumPath 'Test Album - Cool Artist', got %v", snapshot.TargetAlbumPath)
 	}
-	if job.AlbumTitle == nil || *job.AlbumTitle != "Test Album" {
-		t.Errorf("expected AlbumTitle 'Test Album', got %v", job.AlbumTitle)
+	if snapshot.AlbumTitle == nil || *snapshot.AlbumTitle != "Test Album" {
+		t.Errorf("expected AlbumTitle 'Test Album', got %v", snapshot.AlbumTitle)
 	}
-	if job.ArtistName == nil || *job.ArtistName != "Cool Artist" {
-		t.Errorf("expected ArtistName 'Cool Artist', got %v", job.ArtistName)
+	if snapshot.ArtistName == nil || *snapshot.ArtistName != "Cool Artist" {
+		t.Errorf("expected ArtistName 'Cool Artist', got %v", snapshot.ArtistName)
 	}
 	job.mu.Lock()
 	status := job.Status
@@ -290,7 +294,7 @@ func TestDomainWhitelist_SoundcloudIO(t *testing.T) {
 	tmpSb, _ := sandbox.NewPathSandbox(tmpDir)
 	musicSb, _ := sandbox.NewPathSandbox(tmpDir)
 
-	res := resolver.NewSourceResolver(nil, nil, "")
+	res := resolver.NewSourceResolver(resolver.NewDeezerClient(testkit.NewMockTransport()), nil, "")
 	svc := NewService(context.Background(), NewJobManager(nil), res, tmpSb, musicSb, "", 1)
 	defer svc.Close()
 
@@ -467,7 +471,7 @@ func TestService_CreateBatchJobs(t *testing.T) {
 	tmpSb, _ := sandbox.NewPathSandbox(tmpDir)
 	musicSb, _ := sandbox.NewPathSandbox(tmpDir)
 
-	res := resolver.NewSourceResolver(nil, nil, "")
+	res := resolver.NewSourceResolver(resolver.NewDeezerClient(testkit.NewMockTransport()), nil, "")
 	mgr := NewJobManager(nil)
 	svc := NewService(context.Background(), mgr, res, tmpSb, musicSb, "", 1)
 	defer svc.Close()
@@ -552,7 +556,7 @@ func TestService_Getters(t *testing.T) {
 	musicSb, _ := sandbox.NewPathSandbox(tmpDir)
 
 	mgr := NewJobManager(nil)
-	res := resolver.NewSourceResolver(nil, nil, "cookies.txt")
+	res := resolver.NewSourceResolver(resolver.NewDeezerClient(testkit.NewMockTransport()), nil, "cookies.txt")
 	svc := NewService(context.Background(), mgr, res, tmpSb, musicSb, "cookies.txt", 2)
 	defer svc.Close()
 
@@ -607,7 +611,3 @@ func TestService_WaitIfPaused_ContextCancel(t *testing.T) {
 
 	svc.ResumeQueue()
 }
-
-
-
-

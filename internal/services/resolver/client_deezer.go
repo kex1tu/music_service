@@ -46,14 +46,14 @@ type DeezerArtist struct {
 
 // DeezerAlbum represents album data in Deezer API.
 type DeezerAlbum struct {
-	ID          int64            `json:"id"`
-	Title       string           `json:"title"`
-	CoverXL     string           `json:"cover_xl"`
-	CoverBig    string           `json:"cover_big"`
-	CoverMedium string           `json:"cover_medium"`
-	ReleaseDate string           `json:"release_date"`
-	RecordType  string           `json:"record_type"`
-	NbTracks    int              `json:"nb_tracks"`
+	ID           int64            `json:"id"`
+	Title        string           `json:"title"`
+	CoverXL      string           `json:"cover_xl"`
+	CoverBig     string           `json:"cover_big"`
+	CoverMedium  string           `json:"cover_medium"`
+	ReleaseDate  string           `json:"release_date"`
+	RecordType   string           `json:"record_type"`
+	NbTracks     int              `json:"nb_tracks"`
 	Artist       DeezerArtist     `json:"artist"`
 	Contributors []DeezerArtist   `json:"contributors,omitempty"`
 	Artists      []DeezerArtist   `json:"artists,omitempty"`
@@ -110,9 +110,7 @@ type DeezerClient struct {
 
 // NewDeezerClient creates a new DeezerClient with anti-bot headers and proxy/fallback support.
 func NewDeezerClient(customTransport ...http.RoundTripper) *DeezerClient {
-	var transport http.RoundTripper = &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-	}
+	var transport http.RoundTripper = http.DefaultTransport
 	if len(customTransport) > 0 && customTransport[0] != nil {
 		transport = customTransport[0]
 	} else if proxyURLStr := strings.TrimSpace(os.Getenv("DEEZER_PROXY")); proxyURLStr != "" {
@@ -586,5 +584,3 @@ func (c *DeezerClient) GetRelatedArtists(ctx context.Context, artistID string) (
 
 	return result.Data, nil
 }
-
-

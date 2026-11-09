@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"os"
+
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,6 +13,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	"music-manager/internal/services/resolver"
@@ -64,7 +65,7 @@ func (s *Scanner) ScanAll(ctx context.Context) (int, error) {
 	count := 0
 	seenPaths := make(map[string]bool)
 
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+	err := safefs.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil // continue on permission or read errors
 		}
@@ -198,7 +199,7 @@ func (s *Scanner) StartWatcher(ctx context.Context) error {
 	root := s.musicSandbox.Root()
 
 	// Add root and all subdirectories to watcher
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	_ = safefs.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err == nil && d.IsDir() {
 			name := d.Name()
 			if !strings.HasPrefix(name, ".") && name != "tmp" && name != "tmp_downloads" {
@@ -231,7 +232,7 @@ func (s *Scanner) StartWatcher(ctx context.Context) error {
 
 				// If directory created, add to watcher
 				if event.Op&fsnotify.Create != 0 {
-					if fi, err := os.Stat(event.Name); err == nil && fi.IsDir() {
+					if fi, err := safefs.Stat(event.Name); err == nil && fi.IsDir() {
 						_ = watcher.Add(event.Name)
 					}
 				}

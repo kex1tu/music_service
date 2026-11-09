@@ -29,8 +29,8 @@ func TestComputeCatalogMatchScore_PartialMatch(t *testing.T) {
 			Duration: 230,
 		},
 	)
-	if score < 70 || score > 95 {
-		t.Errorf("expected score in range [70, 95] for partial match, got %d", score)
+	if score > 39 {
+		t.Errorf("expected live version conflict to cap score at 39, got %d", score)
 	}
 }
 
@@ -114,4 +114,3 @@ func TestComputeCatalogMatchScore_Ranking(t *testing.T) {
 			scoreExact, scoreDelta, scoreRemix, scoreUnrelated)
 	}
 }
-

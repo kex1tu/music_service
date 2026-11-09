@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"music-manager/internal/core/mediaexec"
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
@@ -142,7 +144,7 @@ func (s *Service) ResolvePath(relPath string) (string, bool, error) {
 	// 1. Попытка разрешить во временной песочнице
 	if s.tmpSandbox != nil {
 		if full, err := s.tmpSandbox.Resolve(cleanRel, true); err == nil {
-			if st, statErr := os.Stat(full); statErr == nil && !st.IsDir() {
+			if st, statErr := safefs.Stat(full); statErr == nil && !st.IsDir() {
 				return full, true, nil
 			}
 		}
@@ -166,7 +168,7 @@ func (s *Service) GetTags(ctx context.Context, relPath string, asAlbum ...bool) 
 		return nil, err
 	}
 
-	st, err := os.Stat(fullPath)
+	st, err := safefs.Stat(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrFileNotFound
@@ -202,7 +204,7 @@ func (s *Service) readSingleFileTags(ctx context.Context, fullPath, relPath stri
 	trackRelBase := strings.TrimSuffix(relPath, filepath.Ext(relPath))
 
 	for _, candExt := range []string{".jpg", ".png", ".jpeg", ".webp"} {
-		if _, err := os.Stat(trackBase + candExt); err == nil {
+		if _, err := safefs.Stat(trackBase + candExt); err == nil {
 			cRel := trackRelBase + candExt
 			coverPath = &cRel
 			break
@@ -211,7 +213,7 @@ func (s *Service) readSingleFileTags(ctx context.Context, fullPath, relPath stri
 	if coverPath == nil {
 		dir := filepath.Dir(fullPath)
 		for _, cand := range []string{"cover.jpg", "cover.png", "folder.jpg", "folder.png", "cover.jpeg"} {
-			if _, err := os.Stat(filepath.Join(dir, cand)); err == nil {
+			if _, err := safefs.Stat(filepath.Join(dir, cand)); err == nil {
 				cRel := filepath.Join(filepath.Dir(relPath), cand)
 				coverPath = &cRel
 				break
@@ -266,7 +268,7 @@ func (s *Service) readDirectoryTags(ctx context.Context, fullPath, relPath strin
 	// Проверка наличия файла обложки в каталоге
 	for _, cand := range []string{"cover.jpg", "cover.png", "folder.jpg", "folder.png", "cover.jpeg"} {
 		imgPath := filepath.Join(fullPath, cand)
-		if _, err := os.Stat(imgPath); err == nil {
+		if _, err := safefs.Stat(imgPath); err == nil {
 			cRel := filepath.Join(relPath, cand)
 			coverPath = &cRel
 			hasCover = true
@@ -274,7 +276,7 @@ func (s *Service) readDirectoryTags(ctx context.Context, fullPath, relPath strin
 		}
 	}
 
-	err := filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
+	err := safefs.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil || d == nil {
 			return nil
 		}
@@ -488,7 +490,7 @@ func (s *Service) GetCover(ctx context.Context, relPath string) (*CoverInfo, err
 		return nil, err
 	}
 
-	st, err := os.Stat(fullPath)
+	st, err := safefs.Stat(fullPath)
 	if err != nil {
 		return nil, ErrFileNotFound
 	}
@@ -534,7 +536,7 @@ func (s *Service) GetCover(ctx context.Context, relPath string) (*CoverInfo, err
 			}
 			candPath = resolvedPath
 		}
-		if data, err := os.ReadFile(candPath); err == nil {
+		if data, err := safefs.ReadFile(candPath); err == nil {
 			mime := "image/jpeg"
 			if strings.HasSuffix(candPath, ".png") {
 				mime = "image/png"
@@ -1287,7 +1289,7 @@ func (s *Service) RecognizeAudio(ctx context.Context, relPath string) (*Recogniz
 		return &RecognizeAudioResponse{Recognized: false}, nil
 	}
 
-	st, err := os.Stat(fullPath)
+	st, err := safefs.Stat(fullPath)
 	if err != nil || st.IsDir() {
 		return &RecognizeAudioResponse{Recognized: false}, nil
 	}
@@ -1317,7 +1319,8 @@ func (s *Service) RecognizeAudio(ctx context.Context, relPath string) (*Recogniz
 	recCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(recCtx, songrecBin, "audio-file-to-recognized-song", fullPath)
+	cmd := mediaexec.CommandContext(recCtx, songrecBin, "audio-file-to-recognized-song", fullPath)
+	defer cmd.Close()
 	out, err := cmd.Output()
 	if err != nil {
 		return &RecognizeAudioResponse{Recognized: false}, nil
@@ -1462,7 +1465,7 @@ func (s *Service) SearchCatalog(ctx context.Context, query, audioPath string) (*
 			var items []CatalogReleaseSummary
 			if audioPath != "" {
 				if fullPath, _, err := s.ResolvePath(audioPath); err == nil {
-					if info, statErr := os.Stat(fullPath); statErr == nil && !info.IsDir() {
+					if info, statErr := safefs.Stat(fullPath); statErr == nil && !info.IsDir() {
 						rec, recErr := s.shazam.RecognizeAudioFile(searchCtx, fullPath)
 						if recErr == nil && rec != nil {
 							items = append(items, CatalogReleaseSummary{
@@ -1655,7 +1658,7 @@ func (s *Service) GetCatalogShazamTrack(ctx context.Context, id, query, audioPat
 		if err != nil {
 			return nil, err
 		}
-		if info, statErr := os.Stat(fullPath); statErr != nil || info.IsDir() {
+		if info, statErr := safefs.Stat(fullPath); statErr != nil || info.IsDir() {
 			return nil, ErrFileNotFound
 		}
 		return s.shazam.RecognizeAudioFile(ctx, fullPath)
@@ -1808,7 +1811,7 @@ func (s *Service) RenamePattern(ctx context.Context, req RenamePatternRequest) (
 		}
 
 		// Проверяем существование исходного файла
-		stCurrent, err := os.Stat(currentFull)
+		stCurrent, err := safefs.Stat(currentFull)
 		if err != nil {
 			results = append(results, RenamePatternResult{
 				CurrentPath: item.CurrentPath,
@@ -1862,7 +1865,7 @@ func (s *Service) RenamePattern(ctx context.Context, req RenamePatternRequest) (
 		}
 
 		// 4. Проверка коллизий
-		if _, err := os.Stat(targetFull); err == nil {
+		if _, err := safefs.Stat(targetFull); err == nil {
 			results = append(results, RenamePatternResult{
 				CurrentPath: item.CurrentPath,
 				NewPath:     targetRel,
@@ -1895,7 +1898,7 @@ func (s *Service) RenamePattern(ctx context.Context, req RenamePatternRequest) (
 
 		// 6. Убеждаемся, что целевая директория существует
 		targetDir := filepath.Dir(targetFull)
-		if err := os.MkdirAll(targetDir, 0755); err != nil {
+		if err := safefs.MkdirAll(targetDir, 0755); err != nil {
 			results = append(results, RenamePatternResult{
 				CurrentPath: item.CurrentPath,
 				NewPath:     targetRel,
@@ -1906,7 +1909,7 @@ func (s *Service) RenamePattern(ctx context.Context, req RenamePatternRequest) (
 		}
 
 		// 7. Выполняем переименование основного файла
-		if err := os.Rename(currentFull, targetFull); err != nil {
+		if err := safefs.Rename(currentFull, targetFull); err != nil {
 			results = append(results, RenamePatternResult{
 				CurrentPath: item.CurrentPath,
 				NewPath:     targetRel,
@@ -1922,8 +1925,8 @@ func (s *Service) RenamePattern(ctx context.Context, req RenamePatternRequest) (
 		for _, lyricsExt := range []string{".lrc", ".txt"} {
 			curLyr := currentBase + lyricsExt
 			tarLyr := targetBase + lyricsExt
-			if _, err := os.Stat(curLyr); err == nil {
-				_ = os.Rename(curLyr, tarLyr)
+			if _, err := safefs.Stat(curLyr); err == nil {
+				_ = safefs.Rename(curLyr, tarLyr)
 			}
 		}
 

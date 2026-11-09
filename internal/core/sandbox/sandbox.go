@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 var (
@@ -24,7 +25,9 @@ var (
 
 // PathSandbox обеспечивает строгую изоляцию операций файловой системы внутри заданного корня.
 type PathSandbox struct {
-	root string
+	root     string
+	handleMu sync.Mutex
+	handle   *os.Root
 }
 
 // NewPathSandbox инициализирует новую песочницу и проверяет доступность корня.
@@ -48,7 +51,15 @@ func NewPathSandbox(rootPath string) (*PathSandbox, error) {
 		return nil, fmt.Errorf("%w: путь '%s' существует, но не является директорией", ErrStorageConfig, absRoot)
 	}
 
-	return &PathSandbox{root: filepath.Clean(absRoot)}, nil
+	sb := &PathSandbox{root: filepath.Clean(absRoot)}
+	if err == nil {
+		sb.handle, err = os.OpenRoot(sb.root)
+		if err != nil {
+			return nil, err
+		}
+	}
+	register(sb)
+	return sb, nil
 }
 
 // Root возвращает канонический абсолютный путь корня песочницы.

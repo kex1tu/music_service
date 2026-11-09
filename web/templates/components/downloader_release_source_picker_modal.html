@@ -33,17 +33,7 @@
                     <span class="text-content-muted">•</span>
                     <span class="text-content-secondary font-medium" x-text="$store.releaseSourcePicker.artist"></span>
 
-                    <!-- Контекстный бейдж языка/политики цензуры -->
-                    <template x-if="$store.releaseSourcePicker.isCyrillic">
-                        <span class="px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/25 font-medium text-[11px] flex items-center gap-1">
-                            <span>🇷🇺 RU-исполнитель: приоритет авторскому оригиналу без цензуры (SoundCloud)</span>
-                        </span>
-                    </template>
-                    <template x-if="!$store.releaseSourcePicker.isCyrillic">
-                        <span class="px-2.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/25 font-medium text-[11px] flex items-center gap-1">
-                            <span>🌐 Зарубежный исполнитель: приоритет официальному студийному качеству</span>
-                        </span>
-                    </template>
+                    <span class="text-content-muted">Цензура определяется проверкой записи, а не площадкой.</span>
                 </div>
             </div>
 
@@ -60,6 +50,11 @@
         </div>
 
         <!-- 2. ПЕРЕКЛЮЧАТЕЛЬ ВКЛАДОК -->
+        <label class="block px-5 py-3 text-sm text-content-secondary">Политика этой загрузки
+            <select x-model="$store.releaseSourcePicker.versionPolicy" @change="$store.releaseSourcePicker.loadCandidates()" class="min-h-[44px] w-full mt-1 px-3 rounded bg-surface-input border border-surface-border">
+                <option value="release">Как в выбранном релизе</option><option value="uncensored">Предпочитать без цензуры</option><option value="clean">Предпочитать clean</option>
+            </select>
+        </label>
         <div class="flex border-b border-surface-border bg-surface-base px-5">
             <button
                 type="button"
@@ -196,7 +191,10 @@
                                             x-text="cand.censor_badge">
                                         </span>
 
-                                        <span class="text-[10px] font-mono text-content-muted" x-text="`Score: ${cand.score}`"></span>
+                                        <span class="text-xs font-mono text-content-muted" x-text="`Соответствие: ${cand.score}/100`"></span>
+                                        <span class="text-xs text-content-muted" x-text="`Пропусков: ${cand.missing_tracks || 0} · дополнительных: ${cand.extra_tracks || 0}`"></span>
+                                        <span x-show="cand.mapping_limited" class="text-xs text-amber-300">Треклист слишком большой для цельного сопоставления; выберите дорожки отдельно.</span>
+                                        <span class="text-xs text-amber-300" x-show="cand.evaluation && cand.evaluation.conflicts.length" x-text="$store.sourcePicker.explain(cand.evaluation)"></span>
                                     </div>
                                 </div>
                             </template>

@@ -32,8 +32,8 @@ components:
     sessionCookie:
       type: apiKey
       in: cookie
-      name: session_token
-      description: HMAC-SHA256 сессионный токен администратора
+      name: music_manager_session
+      description: HMAC-SHA256 сессия; имя задаёт SESSION_COOKIE_NAME, TTL задаёт SESSION_TTL, SameSite=Strict
 
   schemas:
     ErrorResponse:
@@ -100,8 +100,8 @@ components:
           example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
         status:
           type: string
-          enum: [queued, resolving, downloading, converting, tagging, ready, error, cancelled]
-          example: ready
+          enum: [QUEUED, WAITING_SOURCE, RESOLVING, DOWNLOADING, CONVERTING, TAGGING, READY, PARTIAL_READY, ERROR, CANCELLED]
+          example: READY
         url:
           type: string
           example: https://music.youtube.com/watch?v=dQw4w9WgXcQ
@@ -1056,3 +1056,188 @@ paths:
       responses:
         '200':
           description: Теги применены
+
+  /files/redownload:
+    post:
+      tags: [Files]
+      summary: Повторная загрузка с сохранением текущих файлов
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+                type:
+                  type: string
+                  enum: [track, file, album, directory]
+                delete_existing:
+                  type: boolean
+                  deprecated: true
+                  description: Принимается для совместимости; исходники всегда сохраняются
+      responses:
+        '200':
+          description: Новая задача поставлена в очередь; deleted всегда false
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, job_id, source_url, deleted, type]
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  job_id:
+                    type: string
+                  source_url:
+                    type: string
+                  deleted:
+                    type: boolean
+                    enum: [false]
+                  type:
+                    type: string
+                    enum: [track, album]
+        '400':
+          description: Некорректный запрос или путь
+        '401':
+          description: Требуется сессия
+        '403':
+          description: Выход из песочницы
+        '500':
+          description: Ошибка источника или очереди; исходник сохранён
+  /api/files/redownload:
+    $ref: '#/paths/~1files~1redownload'
+
+  /api/audit/censorship:
+    get:
+      tags: [Audit]
+      security: [{sessionCookie: []}]
+      summary: Последние запуски аудита цензуры и доступные провайдеры
+      responses:
+        '200':
+          description: До 25 запусков, providers и daily_audio_seconds
+          content:
+            application/json:
+              schema: {type: object}
+        '401': {description: Требуется сессия}
+    post:
+      tags: [Audit]
+      security: [{sessionCookie: []}]
+      summary: Запустить постоянный аудит MP3 без изменения медиатеки
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path: {type: string, description: Относительная папка; пусто означает всю медиатеку}
+                paths:
+                  type: array
+                  description: Непустой список отдельных MP3 имеет приоритет над path
+                  items: {type: string}
+                references:
+                  type: object
+                  description: Относительный путь трека -> относительный путь MP3-эталона
+                  additionalProperties: {type: string}
+                provider: {type: string, enum: [local, gemini, deepgram], default: local}
+      responses:
+        '202':
+          description: Задание создано
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: string, format: uuid}
+        '400': {description: Неверный выбор, путь или выключенный провайдер}
+        '401': {description: Требуется сессия}
+
+  /api/audit/censorship/{runID}/items:
+    get:
+      tags: [Audit]
+      security: [{sessionCookie: []}]
+      summary: Результаты аудита с доказательствами и ручными решениями
+      parameters:
+        - {name: runID, in: path, required: true, schema: {type: string}}
+        - name: verdict
+          in: query
+          schema: {type: string, enum: [not_checked, insufficient_data, suspected, checked_words_preserved]}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        '200':
+          description: items содержит покрытие, ограничения, таймкоды, расшифровки и происхождение доказательств; результат не доказывает отсутствие цензуры во всём треке
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {type: object}}
+        '401': {description: Требуется сессия}
+
+  /api/audit/censorship/{runID}/{action}:
+    post:
+      tags: [Audit]
+      security: [{sessionCookie: []}]
+      summary: Управление очередью аудита
+      parameters:
+        - {name: runID, in: path, required: true, schema: {type: string}}
+        - {name: action, in: path, required: true, schema: {type: string, enum: [pause, resume, cancel, retry]}}
+      responses:
+        '200': {description: Действие выполнено}
+        '401': {description: Требуется сессия}
+        '404': {description: Запуск не найден}
+        '409': {description: Действие недоступно в текущем состоянии}
+
+  /api/audit/censorship-items/{itemID}/decision:
+    post:
+      tags: [Audit]
+      security: [{sessionCookie: []}]
+      summary: Сохранить ручное решение отдельно от алгоритмического результата
+      parameters:
+        - {name: itemID, in: path, required: true, schema: {type: integer}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                decision: {type: string, enum: ['', confirmed_censored, cleared, uncertain]}
+                note: {type: string, maxLength: 4000}
+      responses:
+        '200': {description: Решение сохранено; MP3 и теги не изменены}
+        '400': {description: Неверный идентификатор или решение}
+        '401': {description: Требуется сессия}
+
+  /api/audit/censorship-items/{itemID}/audio:
+    get:
+      tags: [Audit]
+      security: [{sessionCookie: []}]
+      summary: Прослушать проверяемый MP3 или эталон с поддержкой Range
+      parameters:
+        - {name: itemID, in: path, required: true, schema: {type: integer}}
+        - {name: reference, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200': {description: Аудиопоток, content: {audio/mpeg: {schema: {type: string, format: binary}}}}
+        '206': {description: Диапазон аудиопотока}
+        '401': {description: Требуется сессия}
+        '404': {description: Запись или безопасный MP3 недоступны}
+
+  /files/audit/censorship:
+    $ref: '#/paths/~1api~1audit~1censorship'
+  /files/audit/censorship/{runID}/items:
+    $ref: '#/paths/~1api~1audit~1censorship~1{runID}~1items'
+  /files/audit/censorship/{runID}/{action}:
+    $ref: '#/paths/~1api~1audit~1censorship~1{runID}~1{action}'
+  /files/audit/censorship-items/{itemID}/decision:
+    $ref: '#/paths/~1api~1audit~1censorship-items~1{itemID}~1decision'
+  /files/audit/censorship-items/{itemID}/audio:
+    $ref: '#/paths/~1api~1audit~1censorship-items~1{itemID}~1audio'

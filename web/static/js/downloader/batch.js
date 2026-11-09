@@ -54,7 +54,7 @@ window.DownloaderBatch = {
 
         downloader.isSubmitting = true;
         try {
-            const response = await fetch('/downloads/batch', {
+            const response = await window.api.raw('/downloads/batch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

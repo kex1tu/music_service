@@ -3,10 +3,11 @@ package organizer
 import (
 	"context"
 	"io/fs"
-	"os"
+
 	"path/filepath"
 	"strings"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
@@ -22,7 +23,7 @@ type NavidromeFixReport struct {
 
 // FixLibraryPermissions рекурсивно обходит медиатеку и гарантирует права 0755 для папок и 0644 для файлов.
 func FixLibraryPermissions(musicRootDir string) (dirsFixed, filesFixed int, err error) {
-	err = filepath.WalkDir(musicRootDir, func(path string, d fs.DirEntry, walkErr error) error {
+	err = safefs.WalkDir(musicRootDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil // пропускаем недоступные единичные элементы без падения
 		}
@@ -33,13 +34,13 @@ func FixLibraryPermissions(musicRootDir string) (dirsFixed, filesFixed int, err 
 
 		if d.IsDir() {
 			if info.Mode().Perm() != 0755 {
-				if err := os.Chmod(path, 0755); err == nil {
+				if err := safefs.Chmod(path, 0755); err == nil {
 					dirsFixed++
 				}
 			}
 		} else {
 			if info.Mode().Perm() != 0644 {
-				if err := os.Chmod(path, 0644); err == nil {
+				if err := safefs.Chmod(path, 0644); err == nil {
 					filesFixed++
 				}
 			}
@@ -55,7 +56,7 @@ func (s *Service) NormalizeNavidromeLibrary(ctx context.Context, onTrackNormaliz
 	report := &NavidromeFixReport{}
 	musicRoot := s.musicSandbox.Root()
 
-	err := filepath.WalkDir(musicRoot, func(fullPath string, d fs.DirEntry, walkErr error) error {
+	err := safefs.WalkDir(musicRoot, func(fullPath string, d fs.DirEntry, walkErr error) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -76,7 +77,7 @@ func (s *Service) NormalizeNavidromeLibrary(ctx context.Context, onTrackNormaliz
 		// 1. Проверка и нормализация прав
 		if d.IsDir() {
 			if info.Mode().Perm() != 0755 {
-				if err := os.Chmod(fullPath, 0755); err == nil {
+				if err := safefs.Chmod(fullPath, 0755); err == nil {
 					report.DirectoriesFixed++
 				}
 			}
@@ -84,7 +85,7 @@ func (s *Service) NormalizeNavidromeLibrary(ctx context.Context, onTrackNormaliz
 		}
 
 		if info.Mode().Perm() != 0644 {
-			if err := os.Chmod(fullPath, 0644); err == nil {
+			if err := safefs.Chmod(fullPath, 0644); err == nil {
 				report.FilesPermsFixed++
 			}
 		}

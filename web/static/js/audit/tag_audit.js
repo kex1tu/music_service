@@ -87,7 +87,7 @@ window.AuditTagAudit = {
     this.selectedPaths = [];
     try {
       const filterParam = encodeURIComponent(this.tagIssuesFilter || 'all');
-      const res = await fetch(
+      const res = await window.api.raw(
           `/files/audit/tag-issues?filter=${filterParam}&_t=${Date.now()}`);
       if (res.ok) {
         const data = await res.json();
@@ -112,7 +112,7 @@ window.AuditTagAudit = {
     this.isFixingTagIssue = {...this.isFixingTagIssue, [key]: true};
 
     try {
-      const res = await fetch('/files/audit/tag-issues/fix', {
+      const res = await window.api.raw('/files/audit/tag-issues/fix', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
@@ -159,7 +159,7 @@ window.AuditTagAudit = {
     }
 
     try {
-      const res = await fetch(`/files?path=${encodeURIComponent(item.file_path)}`, {
+      const res = await window.api.raw(`/files?path=${encodeURIComponent(item.file_path)}`, {
         method: 'DELETE',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({path: item.file_path}),
@@ -195,7 +195,7 @@ window.AuditTagAudit = {
 
     try {
       const res =
-          await fetch('/files/audit/tag-issues/fix-safe', {method: 'POST'});
+          await window.api.raw('/files/audit/tag-issues/fix-safe', {method: 'POST'});
       if (res.ok) {
         const data = await res.json();
         Alpine.store('app').toast(
@@ -235,7 +235,7 @@ window.AuditTagAudit = {
                                  })),
       };
 
-      const res = await fetch('/files/audit/tag-issues/fix-selected', {
+      const res = await window.api.raw('/files/audit/tag-issues/fix-selected', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload),
@@ -270,7 +270,7 @@ window.AuditTagAudit = {
 
     try {
       const res =
-          await fetch('/files/audit/tag-issues/fix-all', {method: 'POST'});
+          await window.api.raw('/files/audit/tag-issues/fix-all', {method: 'POST'});
       if (res.ok) {
         const data = await res.json();
         Alpine.store('app').toast(
@@ -306,7 +306,7 @@ window.AuditTagAudit = {
         title: item.title,
         artist: item.artist,
       });
-      const res = await fetch(`/files/audit/tag-issues/catalog-match?${
+      const res = await window.api.raw(`/files/audit/tag-issues/catalog-match?${
           queryParams.toString()}&_t=${Date.now()}`);
       if (res.ok) {
         const data = await res.json();
@@ -330,7 +330,7 @@ window.AuditTagAudit = {
     this.isApplyingCatalog = true;
 
     try {
-      const res = await fetch('/files/audit/tag-issues/apply-catalog', {
+      const res = await window.api.raw('/files/audit/tag-issues/apply-catalog', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
@@ -388,7 +388,7 @@ window.AuditTagAudit = {
       if (albumTitle) queryParams.set('album', albumTitle);
       if (artistName) queryParams.set('artist', artistName);
 
-      const res = await fetch(`/files/audit/tag-issues/catalog-match-album?${
+      const res = await window.api.raw(`/files/audit/tag-issues/catalog-match-album?${
           queryParams.toString()}&_t=${Date.now()}`);
       if (res.ok) {
         this.albumDiffData = await res.json();
@@ -445,7 +445,7 @@ window.AuditTagAudit = {
             })),
       };
 
-      const res = await fetch('/files/audit/tag-issues/apply-catalog-album', {
+      const res = await window.api.raw('/files/audit/tag-issues/apply-catalog-album', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload),

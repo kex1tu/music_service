@@ -3,7 +3,6 @@ package resolver
 import (
 	"context"
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 	"unicode"
@@ -22,59 +21,41 @@ func ContainsCyrillic(s string) bool {
 // ReleaseCandidateItem представляет отдельного кандидата цельного релиза (альбом/сет/плейлист)
 // со статусом цензуры, соответствием треклиста и детализированным маппингом.
 type ReleaseCandidateItem struct {
-	ID           string                `json:"id"`
-	Source       string                `json:"source"` // "ytmusic_album", "soundcloud_set", "direct_url"
-	Title        string                `json:"title"`
-	Artist       string                `json:"artist"`
-	URL          string                `json:"url"`
-	TrackCount   int                   `json:"track_count"`
-	CoverURL     string                `json:"cover_url"`
-	Tracks       []AlbumTrackCandidate `json:"tracks"`
-	MatchedCount int                   `json:"matched_count"`
-	TotalCount   int                   `json:"total_count"`
-	MatchedRatio float64               `json:"matched_ratio"` // 0.0 - 1.0
-	TrackMapping map[int]string        `json:"track_mapping"` // targetIdx -> candidateURL
-	IsCyrillic   bool                  `json:"is_cyrillic"`
-	CensorStatus string                `json:"censor_status"` // "red_flag" | "recommended" | "clean" | "neutral"
-	CensorBadge  string                `json:"censor_badge"`  // e.g. "🚩 Офиц. релиз (возможна цензура)" | "⭐ SoundCloud (оригинал)" | "⭐ Официальный релиз"
-	Score        int                   `json:"score"`
+	MappingLimited    bool                    `json:"mapping_limited"`
+	Policy            VersionPolicy           `json:"version_policy"`
+	Evaluation        MatchEvaluation         `json:"evaluation"`
+	TrackEvaluations  map[int]MatchEvaluation `json:"track_evaluations"`
+	MeanTrackScore    int                     `json:"mean_track_score"`
+	WeakestTrackScore int                     `json:"weakest_track_score"`
+	MissingTracks     int                     `json:"missing_tracks"`
+	ExtraTracks       int                     `json:"extra_tracks"`
+	ID                string                  `json:"id"`
+	Source            string                  `json:"source"` // "ytmusic_album", "soundcloud_set", "direct_url"
+	Title             string                  `json:"title"`
+	Artist            string                  `json:"artist"`
+	URL               string                  `json:"url"`
+	TrackCount        int                     `json:"track_count"`
+	CoverURL          string                  `json:"cover_url"`
+	Tracks            []AlbumTrackCandidate   `json:"tracks"`
+	MatchedCount      int                     `json:"matched_count"`
+	TotalCount        int                     `json:"total_count"`
+	MatchedRatio      float64                 `json:"matched_ratio"` // 0.0 - 1.0
+	TrackMapping      map[int]string          `json:"track_mapping"` // targetIdx -> candidateURL
+	IsCyrillic        bool                    `json:"is_cyrillic"`
+	CensorStatus      string                  `json:"censor_status"` // "red_flag" | "recommended" | "clean" | "neutral"
+	CensorBadge       string                  `json:"censor_badge"`  // e.g. "🚩 Офиц. релиз (возможна цензура)" | "⭐ SoundCloud (оригинал)" | "⭐ Официальный релиз"
+	Score             int                     `json:"score"`
 }
 
 // ScoreReleaseCandidate вычисляет оценку кандидата с учетом контекста языка (RU vs Зарубежный) и совпадения треклиста.
-func ScoreReleaseCandidate(source string, isCyrillic bool, matchedRatio float64) (score int, censorStatus string, censorBadge string) {
-	score = int(matchedRatio * 60) // до 60 баллов за совпадение треклиста
-
-	if isCyrillic {
-		// Для русскоязычных артистов официальные релизы в РФ стримингах цензурируются
-		if source == "ytmusic_album" || strings.Contains(source, "official") {
-			censorStatus = "red_flag"
-			censorBadge = "🚩 Офиц. релиз (возможна цензура)"
-			score -= 30
-		} else if source == "soundcloud_set" || strings.Contains(source, "soundcloud") {
-			censorStatus = "recommended"
-			censorBadge = "⭐ SoundCloud (оригинал без цензуры)"
-			score += 35
-		} else {
-			censorStatus = "neutral"
-			censorBadge = "Альтернативный источник"
-		}
-	} else {
-		// Для зарубежных артистов официальный релиз — золотой стандарт
-		if source == "ytmusic_album" || strings.Contains(source, "official") {
-			censorStatus = "recommended"
-			censorBadge = "⭐ Официальный релиз (студийное качество)"
-			score += 40
-		} else {
-			censorStatus = "neutral"
-			censorBadge = "Неофициальный источник"
-			score -= 15
-		}
+func ScoreReleaseCandidate(source string, isCyrillic bool, matchedRatio float64) (int, string, string) {
+	if matchedRatio < 0 {
+		matchedRatio = 0
 	}
-
-	if score < 0 {
-		score = 0
+	if matchedRatio > 1 {
+		matchedRatio = 1
 	}
-	return score, censorStatus, censorBadge
+	return int(matchedRatio * 100), "unknown", "Цензура не проверена"
 }
 
 // FullReleaseMatchResult представляет результаты сопоставления цельного релиза.
@@ -113,73 +94,7 @@ func NewFullReleaseMatcher(ytMusic *YouTubeMusicClient, scSearcher ...*SoundClou
 // MatchTracklists сопоставляет треклист целевого альбома с треклистом кандидата.
 // Возвращает маппинг индексов целевых треков на прямые URL и количество успешно сопоставленных треков.
 func (m *FullReleaseMatcher) MatchTracklists(targetTracks []ResolvedTrack, candTracks []AlbumTrackCandidate) (map[int]string, int) {
-	urls := make(map[int]string)
-	matched := 0
-	usedCandidates := make(map[int]bool)
-
-	for targetIdx, target := range targetTracks {
-		normTarget := strings.ToLower(NormalizeTrackTitleForMatching(target.Title))
-
-		bestCandIdx := -1
-		bestScore := 0.0
-
-		for candIdx, cand := range candTracks {
-			if usedCandidates[candIdx] {
-				continue
-			}
-
-			// Проверка дельты длительности: не более 12 секунд
-			if target.Duration > 0 && cand.Duration > 0 {
-				delta := math.Abs(float64(target.Duration - cand.Duration))
-				if delta > 12.0 {
-					continue
-				}
-			}
-
-			normCand := strings.ToLower(NormalizeTrackTitleForMatching(cand.Title))
-
-			sim := LevenshteinRatio(normTarget, normCand)
-			if (normTarget != "" && strings.Contains(normCand, normTarget)) || (normCand != "" && strings.Contains(normTarget, normCand)) {
-				if sim < 0.75 {
-					sim = 0.75
-				}
-			}
-
-			// Бонус за близкую длительность
-			durBonus := 0.0
-			if target.Duration > 0 && cand.Duration > 0 {
-				diff := math.Abs(float64(target.Duration - cand.Duration))
-				if diff <= 2.0 {
-					durBonus = 0.15
-				} else if diff <= 5.0 {
-					durBonus = 0.08
-				}
-			}
-
-			score := sim + durBonus
-			if sim >= 0.65 && score > bestScore {
-				bestScore = score
-				bestCandIdx = candIdx
-			}
-		}
-
-		if bestCandIdx != -1 {
-			usedCandidates[bestCandIdx] = true
-			trackURL := candTracks[bestCandIdx].DirectURL
-			if trackURL == "" {
-				vid := candTracks[bestCandIdx].VideoID
-				if strings.HasPrefix(vid, "http://") || strings.HasPrefix(vid, "https://") {
-					trackURL = vid
-				} else if vid != "" {
-					trackURL = fmt.Sprintf("https://music.youtube.com/watch?v=%s", vid)
-				}
-			}
-			urls[targetIdx] = trackURL
-			matched++
-		}
-	}
-
-	return urls, matched
+	return assignTracklists(targetTracks, candTracks)
 }
 
 // MatchFullRelease ищет официальный релиз в каталоге YouTube Music и при совпадении треклиста >= 85% возвращает результат.
@@ -319,7 +234,7 @@ func (m *FullReleaseMatcher) SearchReleaseCandidates(ctx context.Context, target
 		return items[i].MatchedCount > items[j].MatchedCount
 	})
 
-	return items, isCyrillic, nil
+	return RankReleaseItems(items, targetArtist, targetAlbum, targetTracks, PolicyRelease), isCyrillic, nil
 }
 
 // ParseAndMatchReleaseURL разбирает произвольную прямую ссылку на сет/альбом и сопоставляет её с целевыми треками.

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"music-manager/internal/core/mediaexec"
 )
 
 type songrecResult struct {
@@ -70,7 +72,8 @@ func (h *TagHandler) RecognizeAudio(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, songrecBin, "audio-file-to-recognized-song", fullPath)
+	cmd := mediaexec.CommandContext(ctx, songrecBin, "audio-file-to-recognized-song", fullPath)
+	defer cmd.Close()
 	out, err := cmd.Output()
 	if err != nil {
 		_ = json.NewEncoder(w).Encode(recognizeAudioResponse{Recognized: false})

@@ -3,10 +3,11 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"os"
+
 	"path/filepath"
 	"strings"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/db"
 )
 
@@ -75,7 +76,7 @@ func (h *FileHandler) RenamePattern(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Проверяем существование исходного файла
-		stCurrent, err := os.Stat(currentFull)
+		stCurrent, err := safefs.Stat(currentFull)
 		if err != nil {
 			results = append(results, RenamePatternResult{
 				CurrentPath: item.CurrentPath,
@@ -129,7 +130,7 @@ func (h *FileHandler) RenamePattern(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 4. Проверка коллизий
-		if _, err := os.Stat(targetFull); err == nil {
+		if _, err := safefs.Stat(targetFull); err == nil {
 			results = append(results, RenamePatternResult{
 				CurrentPath: item.CurrentPath,
 				NewPath:     targetRel,
@@ -162,7 +163,7 @@ func (h *FileHandler) RenamePattern(w http.ResponseWriter, r *http.Request) {
 
 		// 6. Убеждаемся, что целевая директория существует
 		targetDir := filepath.Dir(targetFull)
-		if err := os.MkdirAll(targetDir, 0755); err != nil {
+		if err := safefs.MkdirAll(targetDir, 0755); err != nil {
 			results = append(results, RenamePatternResult{
 				CurrentPath: item.CurrentPath,
 				NewPath:     targetRel,
@@ -173,7 +174,7 @@ func (h *FileHandler) RenamePattern(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 7. Выполняем переименование основного файла
-		if err := os.Rename(currentFull, targetFull); err != nil {
+		if err := safefs.Rename(currentFull, targetFull); err != nil {
 			results = append(results, RenamePatternResult{
 				CurrentPath: item.CurrentPath,
 				NewPath:     targetRel,
@@ -189,8 +190,8 @@ func (h *FileHandler) RenamePattern(w http.ResponseWriter, r *http.Request) {
 		for _, lyricsExt := range []string{".lrc", ".txt"} {
 			curLyr := currentBase + lyricsExt
 			tarLyr := targetBase + lyricsExt
-			if _, err := os.Stat(curLyr); err == nil {
-				_ = os.Rename(curLyr, tarLyr)
+			if _, err := safefs.Stat(curLyr); err == nil {
+				_ = safefs.Rename(curLyr, tarLyr)
 			}
 		}
 

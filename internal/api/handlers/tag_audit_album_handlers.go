@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
+
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
@@ -41,12 +42,12 @@ type AlbumCatalogMatchResponse struct {
 }
 
 type ApplyCatalogAlbumRequest struct {
-	FolderPath  string                     `json:"folder_path"`
-	Album       string                     `json:"album"`
-	AlbumArtist string                     `json:"album_artist"`
-	Year        int                        `json:"year,omitempty"`
-	Genre       string                     `json:"genre,omitempty"`
-	CoverURL    string                     `json:"cover_url,omitempty"`
+	FolderPath  string                       `json:"folder_path"`
+	Album       string                       `json:"album"`
+	AlbumArtist string                       `json:"album_artist"`
+	Year        int                          `json:"year,omitempty"`
+	Genre       string                       `json:"genre,omitempty"`
+	CoverURL    string                       `json:"cover_url,omitempty"`
 	Tracks      []ApplyCatalogAlbumTrackItem `json:"tracks"`
 }
 
@@ -80,7 +81,7 @@ func (h *FileHandler) CatalogMatchAlbum(w http.ResponseWriter, r *http.Request) 
 		trackNumber int
 	}
 
-	entries, err := os.ReadDir(fullDir)
+	entries, err := safefs.ReadDir(fullDir)
 	if err != nil {
 		http.Error(w, `{"error":"failed to read folder"}`, http.StatusInternalServerError)
 		return
@@ -274,8 +275,8 @@ func (h *FileHandler) ApplyCatalogAlbum(w http.ResponseWriter, r *http.Request) 
 				MimeType: mime,
 				Data:     data,
 			}
-			_ = os.WriteFile(filepath.Join(fullDir, "cover.jpg"), data, 0644)
-			_ = os.Chmod(filepath.Join(fullDir, "cover.jpg"), 0644)
+			_ = safefs.WriteFile(filepath.Join(fullDir, "cover.jpg"), data, 0644)
+			_ = safefs.Chmod(filepath.Join(fullDir, "cover.jpg"), 0644)
 		}
 	}
 

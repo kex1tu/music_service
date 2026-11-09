@@ -51,13 +51,13 @@ window.TagLyrics = {
                         params.append('duration', track.duration);
                     }
 
-                    const res = await fetch(`/lyrics/search?${params.toString()}`);
+                    const res = await window.api.raw(`/lyrics/search?${params.toString()}`);
                     if (res.ok) {
                         const data = await res.json();
                         const text = data.lyrics || data.content;
                         if (data.source && data.source !== 'none' && text) {
                             const kind = data.synced ? 'lrc' : 'txt';
-                            const saveRes = await fetch('/lyrics', {
+                            const saveRes = await window.api.raw('/lyrics', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
@@ -138,13 +138,13 @@ window.TagLyrics = {
                         params.append('duration', track.duration);
                     }
 
-                    const res = await fetch(`/lyrics/search?${params.toString()}`);
+                    const res = await window.api.raw(`/lyrics/search?${params.toString()}`);
                     if (res.ok) {
                         const data = await res.json();
                         const text = data.lyrics || data.content;
                         if (data.source && data.source !== 'none' && text) {
                             const kind = data.synced ? 'lrc' : 'txt';
-                            const saveRes = await fetch('/lyrics', {
+                            const saveRes = await window.api.raw('/lyrics', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
