@@ -1,0 +1,133 @@
+web/static/js/player.js:365:                    const res = await fetch('/api/radio/stream/now-playing');
+web/static/js/player.js:708:                const res = await fetch(`/lyrics?path=${encodeURIComponent(trackPath)}`);
+web/static/js/player.js:789:                const res = await fetch(`/api/tracks/${encodeURIComponent(id)}/metadata`);
+web/static/js/header_search.js:22:                const res = await fetch('/files/search?query=' + encodeURIComponent(q));
+web/static/js/tag_editor/recognition.js:12:            const res = await fetch('/tags/recognize-audio', {
+web/static/js/tag_editor/recognition.js:67:                    const res = await fetch('/tags/recognize-audio', {
+web/static/js/tag_editor/covers.js:36:            const res = await fetch(url);
+web/static/js/tag_editor/covers.js:142:                    const res = await fetch(
+web/static/js/tag_editor/covers.js:178:            const res = await fetch(
+web/static/js/tag_editor/lyrics.js:54:                    const res = await fetch(`/lyrics/search?${params.toString()}`);
+web/static/js/tag_editor/lyrics.js:60:                            const saveRes = await fetch('/lyrics', {
+web/static/js/tag_editor/lyrics.js:141:                    const res = await fetch(`/lyrics/search?${params.toString()}`);
+web/static/js/tag_editor/lyrics.js:147:                            const saveRes = await fetch('/lyrics', {
+web/static/js/tag_editor/deezer.js:104:            const res = await fetch(endpoint);
+web/static/js/tag_editor/deezer.js:129:            const res = await fetch(endpoint);
+web/static/js/tag_editor/deezer.js:153:            const res = await fetch(endpoint);
+web/static/js/tag_editor/deezer.js:220:            const res = await fetch(endpoint);
+web/static/js/tag_editor/saver.js:107:            const res = await fetch('/tags/batch', {
+web/static/js/tag_editor/saver.js:131:                        component.jobIds.map((jid) => fetch(`/downloads/${jid}`, { method: 'DELETE' }))
+web/static/js/radio/radio.js:38:                const res = await fetch('/api/radio/stream/now-playing');
+web/static/js/radio/radio.js:69:                const res = await fetch('/api/radio/wave/stats');
+web/static/js/radio/radio.js:84:                const res = await fetch('/api/radio/wave/queue?limit=25');
+web/static/js/radio/radio.js:98:                const res = await fetch('/api/radio/genres');
+web/static/js/radio/radio.js:145:                const res = await fetch('/api/radio/m3u/generate', { method: 'POST' });
+web/static/js/radio/radio.js:167:                const res = await fetch('/api/radio/navidrome/sync-radio', {
+web/static/js/store/queue_editor_bridge.js:13:            const res = await fetch(`/downloads/${jobId}/tracks`);
+web/static/js/store/queue_editor_bridge.js:116:            const res = await fetch(`/files/audit/incomplete-albums/editor-data?path=${encodeURIComponent(albumPath)}&job_id=${encodeURIComponent(job.id)}`);
+web/static/js/store/queue_editor_bridge.js:176:                            const r = await fetch(`/files/audit/incomplete-albums/editor-data?path=${encodeURIComponent(j.target_album_path)}&job_id=${encodeURIComponent(j.id)}`);
+web/static/js/store/queue_editor_bridge.js:185:                    const r = await fetch(`/downloads/${j.id}/tracks`);
+web/static/js/store/queue_editor_bridge.js:190:                                const bRes = await fetch(`/files/audit/incomplete-albums/editor-data?path=${encodeURIComponent(dData.target_album_path)}&job_id=${encodeURIComponent(j.id)}`);
+web/static/js/puddletag/sources.js:39:        const resp = await fetch(`/api/catalog/search?${params.toString()}`, {
+web/static/js/puddletag/sources.js:77:        const resp = await fetch(endpoint, {
+web/static/js/puddletag/sources.js:343:            const resp = await fetch('/api/auth/musicbrainz/status', {
+web/static/js/puddletag/sources.js:360:            const resp = await fetch('/api/auth/musicbrainz/disconnect', {
+web/static/js/store/queue_manager.js:73:                        fetch('/downloads/queue/summary'),
+web/static/js/store/queue_manager.js:74:                        fetch('/downloads'),
+web/static/js/store/queue_manager.js:179:                    : await fetch('/downloads/clear-completed', { method: 'POST' }).then(r => r.json());
+web/static/js/store/queue_manager.js:192:                    await fetch('/downloads/pause', { method: 'POST' });
+web/static/js/store/queue_manager.js:206:                    await fetch('/downloads/resume', { method: 'POST' });
+web/static/js/store/queue_manager.js:219:                    : await fetch('/downloads/retry-failed', { method: 'POST' }).then(r => r.json());
+web/static/js/store/queue_manager.js:232:                    await fetch(`/downloads/${jobId}`, { method: 'DELETE' });
+web/static/js/store/queue_manager.js:246:                    await fetch(`/downloads/${jobId}/retry`, { method: 'POST' });
+web/static/js/login_modal.js:19:                const res = await fetch('/login', {
+web/static/js/api/client.js:27:        const res = await fetch(url, {
+web/static/js/store/app_store.js:30:                const data = window.api ? await window.api.auth.me() : await fetch('/api/auth/me').then(r => r.json());
+web/static/js/store/app_store.js:46:                    await fetch('/logout', { method: 'POST' });
+web/static/js/store/app_store.js:63:                        const res = await fetch('/files', {
+web/static/js/store/app_store.js:77:                        const res = await fetch(`/files?path=${encodeURIComponent(item.path)}`, { method: 'DELETE' });
+web/static/js/store/app_store.js:111:                    const res = await fetch('/files/redownload', {
+web/static/js/lyrics_modal.js:31:                const res = await fetch(`/lyrics?path=${encodeURIComponent(this.track.path)}`);
+web/static/js/lyrics_modal.js:64:                const res = await fetch(`/lyrics/search?${params.toString()}`);
+web/static/js/lyrics_modal.js:175:                const res = await fetch('/lyrics', {
+web/static/js/lyrics_modal.js:223:                const res = await fetch(`/lyrics?path=${encodeURIComponent(this.track.path)}`, {
+web/static/js/puddletag/puddletag_workstation.js:342:                const res = await fetch(url);
+web/static/js/puddletag/puddletag_workstation.js:801:                    : await fetch(`/tags/covers/search?query=${encodeURIComponent(q)}&limit=24`).then(r => r.json());
+web/static/js/puddletag/puddletag_workstation.js:854:                const res = await fetch(url);
+web/static/js/puddletag/puddletag_workstation.js:944:                    const res = await fetch('/files/rename-pattern', {
+web/static/js/puddletag/puddletag_workstation.js:1102:                            const res = await fetch('/tags/batch', {
+web/static/js/puddletag/puddletag_workstation.js:1134:                        const res = await fetch('/tags/batch', {
+web/static/js/puddletag/puddletag_workstation.js:1170:                            await Promise.allSettled(jobIdsToClean.map(jid => fetch(`/downloads/${jid}`, { method: 'DELETE' })));
+web/static/js/puddletag/puddletag_workstation.js:1182:                    const res = await fetch('/tags/batch', {
+web/static/js/downloader/downloader.js:123:                    const preResp = await fetch('/downloads/preflight', {
+web/static/js/downloader/downloader.js:156:                const response = await fetch('/downloads', {
+web/static/js/downloader/downloader.js:214:                const response = await fetch(`/downloads/${targetId}/retry`, {
+web/static/js/downloader/downloader.js:241:                await fetch(`/downloads/${this.job.id}`, { method: 'DELETE' });
+web/static/js/downloader/release_source_picker.js:101:                const res = await fetch(`/api/downloads/release-candidates?${params.toString()}`);
+web/static/js/downloader/release_source_picker.js:217:                const res = await fetch('/api/downloads/release-candidates/parse-url', {
+web/static/js/downloader/release_source_picker.js:271:                const res = await fetch('/api/downloads/releases/switch-source', {
+web/static/js/downloader/discography.js:27:            const resp = await fetch(`/downloads/discography?url=${encodeURIComponent(cleanUrl)}`);
+web/static/js/downloader/discography.js:107:            const resp = await fetch('/downloads/batch', {
+web/static/js/radar/radar.js:54:                const res = await fetch('/api/radar/unread-count');
+web/static/js/radar/radar.js:74:                const res = await fetch(`/api/radar/feed?${params.toString()}`);
+web/static/js/radar/radar.js:101:                const res = await fetch(`/api/radar/feed?${params.toString()}`);
+web/static/js/radar/radar.js:136:                const res = await fetch(`/api/radar/artists?${params.toString()}`);
+web/static/js/radar/radar.js:159:                const res = await fetch('/api/radar/artists', {
+web/static/js/radar/radar.js:178:                const res = await fetch(`/api/radar/artists/${encodeURIComponent(artist.name)}/follow`, {
+web/static/js/radar/radar.js:195:                const res = await fetch(`/api/radar/artists/${encodeURIComponent(artist.name)}/auto-download`, {
+web/static/js/radar/radar.js:212:                const res = await fetch('/api/radar/scan', {
+web/static/js/radar/radar.js:244:                    const res = await fetch('/api/radar/progress');
+web/static/js/radar/radar.js:273:                await fetch('/api/radar/cancel', { method: 'POST' });
+web/static/js/radar/radar.js:284:                const res = await fetch(`/api/radar/releases/${release.id}/status`, {
+web/static/js/radar/radar.js:311:                const res = await fetch('/downloads', {
+web/static/js/radar/radar.js:339:                const res = await fetch(`/api/radar/artists/${encodeURIComponent(targetArtist)}/discography`);
+web/static/js/radar/radar.js:361:                const res = await fetch(`/api/radar/artists/${encodeURIComponent(this.selectedArtist)}/custom-links`, {
+web/static/js/downloader/versions.js:41:            const res = await fetch(`/api/downloads/tracks/${encodeURIComponent(track.track_id)}/switch-version`, {
+web/static/js/downloader/torrent.js:25:            const response = await fetch('/downloads/torrent', {
+web/static/js/downloader/preflight.js:68:                const resp = await fetch('/downloads/preflight', {
+web/static/js/downloader/preflight.js:182:                const resp = await fetch('/downloads', {
+web/static/js/downloader/polling.js:7:            const res = await fetch(`/downloads/${jobId}`);
+web/static/js/downloader/polling.js:59:            const res = await fetch(`/downloads/${jobId}/tracks`);
+web/static/js/downloader/polling.js:143:            const res = await fetch(`/downloads/${jobId}/tracks`);
+web/static/js/downloader/polling.js:182:            const saveRes = await fetch('/tags/batch', {
+web/static/js/downloader/polling.js:200:            await fetch(`/downloads/${jobId}`, { method: 'DELETE' });
+web/static/js/downloader/source_picker.js:119:                const res = await fetch(`/api/downloads/candidates?${params.toString()}`);
+web/static/js/downloader/source_picker.js:199:                    const res = await fetch('/api/downloads/backfill/bind-source', {
+web/static/js/downloader/source_picker.js:215:                    const res = await fetch(`/api/downloads/tracks/${encodeURIComponent(this.context.trackId)}/bind-source`, {
+web/static/js/downloader/batch.js:57:            const response = await fetch('/downloads/batch', {
+web/static/js/audit/fixes.js:17:            const res = await fetch('/files/audit/reorganize', { method: 'POST' });
+web/static/js/audit/fixes.js:54:            const res = await fetch('/files/audit/retag-genres', { method: 'POST' });
+web/static/js/audit/fixes.js:84:            const res = await fetch('/files/audit/fix-path', {
+web/static/js/audit/fixes.js:116:            const res = await fetch('/files/audit/fix-all-paths', {
+web/static/js/audit/fixes.js:155:            const res = await fetch('/files/audit/duplicates/fix', {
+web/static/js/audit/fixes.js:187:            const res = await fetch('/files/audit/duplicates/fix-all', {
+web/static/js/audit/fixes.js:232:            const res = await fetch('/files/audit/normalize-navidrome', { method: 'POST' });
+web/static/js/audit/lyrics_batch.js:8:            const res = await fetch('/files/audit/missing-lyrics/fetch-all', { method: 'POST' });
+web/static/js/audit/lyrics_batch.js:21:            const res = await fetch('/files/audit/missing-lyrics/progress');
+web/static/js/audit/lyrics_batch.js:38:                const res = await fetch('/files/audit/missing-lyrics/progress');
+web/static/js/audit/tag_audit.js:90:      const res = await fetch(
+web/static/js/audit/tag_audit.js:115:      const res = await fetch('/files/audit/tag-issues/fix', {
+web/static/js/audit/tag_audit.js:162:      const res = await fetch(`/files?path=${encodeURIComponent(item.file_path)}`, {
+web/static/js/audit/tag_audit.js:198:          await fetch('/files/audit/tag-issues/fix-safe', {method: 'POST'});
+web/static/js/audit/tag_audit.js:238:      const res = await fetch('/files/audit/tag-issues/fix-selected', {
+web/static/js/audit/tag_audit.js:273:          await fetch('/files/audit/tag-issues/fix-all', {method: 'POST'});
+web/static/js/audit/tag_audit.js:309:      const res = await fetch(`/files/audit/tag-issues/catalog-match?${
+web/static/js/audit/tag_audit.js:333:      const res = await fetch('/files/audit/tag-issues/apply-catalog', {
+web/static/js/audit/tag_audit.js:391:      const res = await fetch(`/files/audit/tag-issues/catalog-match-album?${
+web/static/js/audit/tag_audit.js:448:      const res = await fetch('/files/audit/tag-issues/apply-catalog-album', {
+web/static/js/audit/library_audit.js:114:                        await fetch('/files/audit/refresh', { method: 'POST' });
+web/static/js/audit/library_audit.js:136:                const res = await fetch(`/files/audit/summary?_t=${Date.now()}`);
+web/static/js/audit/library_audit.js:147:                const res = await fetch(`/files/audit/missing-lyrics?_t=${Date.now()}`);
+web/static/js/audit/library_audit.js:158:                const res = await fetch(`/files/audit/missing-covers?_t=${Date.now()}`);
+web/static/js/audit/library_audit.js:169:                const res = await fetch(`/files/audit/duplicates?_t=${Date.now()}`);
+web/static/js/audit/library_audit.js:180:                const res = await fetch(`/files/audit/invalid-paths?_t=${Date.now()}`);
+web/static/js/audit/library_audit.js:191:                const res = await fetch(`/files/audit/non-en-genres?_t=${Date.now()}`);
+web/static/js/audit/covers_batch.js:22:            const res = await fetch('/files/audit/missing-covers/backfill-all', { method: 'POST' });
+web/static/js/audit/covers_batch.js:40:            const res = await fetch(`/files/audit/missing-covers/progress?_t=${Date.now()}`);
+web/static/js/audit/covers_batch.js:73:                const res = await fetch(`/files/audit/missing-covers/progress?_t=${Date.now()}`);
+web/static/js/audit/covers_batch.js:98:            const res = await fetch('/files/audit/missing-covers/cancel', { method: 'POST' });
+web/static/js/audit/covers_batch.js:121:            const res = await fetch('/files/audit/missing-covers/backfill', {
+web/static/js/audit/catalog_matcher.js:38:            const res = await fetch(`/files/audit/incomplete-albums?_t=${Date.now()}`);
+web/static/js/audit/catalog_matcher.js:65:            const res = await fetch(url);
+web/static/js/audit/catalog_matcher.js:133:            const res = await fetch('/files/audit/incomplete-albums/download-missing', {
+web/static/js/audit/catalog_matcher.js:190:                const res = await fetch(`/files/audit/incomplete-albums/editor-data?path=${encodeURIComponent(albumPath)}`);

@@ -1,0 +1,5 @@
+ok  	music-manager/internal/core/auth	4.416s
+ok  	music-manager/internal/core/sandbox	1.017s
+ok  	music-manager/internal/id3	5.779s
+ok  	music-manager/internal/services/organizer	1.055s
+ok  	music-manager/web	1.878s

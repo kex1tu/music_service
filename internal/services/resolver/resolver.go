@@ -18,12 +18,13 @@ var allowedDomains = []string{
 	"deezer.com", "deezer.page.link", "link.deezer.com",
 	"spotify.com", "spotify.link",
 	"music.yandex.ru", "music.yandex.com",
+	"music.yandex.kz", "music.yandex.by", "music.yandex.uz",
 	"music.apple.com",
 }
 
 // IsAllowedURL проверяет, принадлежит ли URL белому списку разрешенных доменов.
 func IsAllowedURL(rawURL string) bool {
-	cleanURL := strings.TrimSpace(rawURL)
+	cleanURL := ExtractURLFromInput(rawURL)
 	if !strings.HasPrefix(cleanURL, "http://") && !strings.HasPrefix(cleanURL, "https://") {
 		cleanURL = "https://" + cleanURL
 	}
@@ -53,6 +54,7 @@ type AudioQualityTelemetry struct {
 type ResolvedTrack struct {
 	VersionPolicy    VersionPolicy                 `json:"version_policy,omitempty"`
 	TrackID          string                        `json:"track_id"`
+	CatalogTrackID   string                        `json:"catalog_track_id,omitempty"`
 	TrackNumber      int                           `json:"track_number"`
 	TrackTotal       *int                          `json:"track_total,omitempty"`
 	DiscNumber       int                           `json:"disc_number"`
@@ -80,13 +82,16 @@ type ResolvedTrack struct {
 
 // ReleaseMetadata holds album-level metadata.
 type ReleaseMetadata struct {
-	AlbumTitle  string
-	AlbumArtist string
-	CoverURL    string
-	Year        int
-	Genre       string
-	TotalTracks int
-	DiscTotal   int
+	AlbumTitle    string
+	AlbumArtist   string
+	CoverURL      string
+	Year          int
+	Genre         string
+	TotalTracks   int
+	DiscTotal     int
+	FetchedTracks int
+	SkippedTracks int
+	IsPlaylist    bool
 }
 
 // SourceResolver coordinates URL detection and metadata extraction.
@@ -122,12 +127,13 @@ func NewSourceResolver(deezer *DeezerClient, matcher *AudioMatcher, cookiesPath 
 		matcher.SetYtMusicClient(ytmusic)
 	}
 	return &SourceResolver{
-		deezerClient:  deezer,
-		yandexClient:  yandex,
-		ytmusicClient: ytmusic,
-		featEnricher:  NewFeatEnricher(yandex, ytmusic),
-		audioMatcher:  matcher,
-		cookiesPath:   cookiesPath,
+		deezerClient:       deezer,
+		yandexClient:       yandex,
+		ytmusicClient:      ytmusic,
+		featEnricher:       NewFeatEnricher(yandex, ytmusic),
+		audioMatcher:       matcher,
+		fullReleaseMatcher: NewFullReleaseMatcher(ytmusic, NewSoundCloudSetSearcher(cookiesPath)),
+		cookiesPath:        cookiesPath,
 	}
 }
 
@@ -168,7 +174,7 @@ func (r *SourceResolver) YtMusicClient() *YouTubeMusicClient {
 
 // DetectSource identifies the source platform from a URL or torrent string.
 func (r *SourceResolver) DetectSource(rawURL string) (string, error) {
-	cleanURL := strings.TrimSpace(rawURL)
+	cleanURL := ExtractURLFromInput(rawURL)
 	lower := strings.ToLower(cleanURL)
 
 	if strings.HasPrefix(lower, "magnet:") || strings.HasSuffix(lower, ".torrent") || strings.Contains(lower, ".torrent?") {
@@ -224,9 +230,10 @@ func (r *SourceResolver) DetectSource(rawURL string) (string, error) {
 
 // Resolve extracts track metadata and audio streams from a source URL.
 func (r *SourceResolver) Resolve(ctx context.Context, rawURL, explicitSource string) (*ReleaseMetadata, []ResolvedTrack, error) {
+	cleanURL := ExtractURLFromInput(rawURL)
 	source := explicitSource
 	if source == "" || source == "auto" || source == "radar" {
-		detected, err := r.DetectSource(rawURL)
+		detected, err := r.DetectSource(cleanURL)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -235,13 +242,13 @@ func (r *SourceResolver) Resolve(ctx context.Context, rawURL, explicitSource str
 
 	switch source {
 	case "deezer":
-		return r.resolveDeezer(ctx, rawURL)
+		return r.resolveDeezer(ctx, cleanURL)
 	case "yandex":
-		return r.resolveYandex(ctx, rawURL)
+		return r.resolveYandex(ctx, cleanURL)
 	case "youtube", "soundcloud", "bandcamp":
-		return r.resolveYtDlp(ctx, rawURL)
+		return r.resolveYtDlp(ctx, cleanURL)
 	case "torrent":
-		return r.resolveTorrentOrDeezer(ctx, rawURL)
+		return r.resolveTorrentOrDeezer(ctx, cleanURL)
 	default:
 		return nil, nil, fmt.Errorf("source %q is not fully supported for direct download yet", source)
 	}

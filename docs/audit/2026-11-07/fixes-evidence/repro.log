@@ -1,0 +1,5 @@
+redownload: queue_error=ошибка постановки задачи в очередь загрузчика: injected queue failure original_missing=false
+delete_root_alias: error=invalid file path root_missing=false
+resolve_then_swap: outside_read=false error=попытка выхода за пределы песочницы (path traversal): симлинк '/tmp/music-audit-repro-221458825/music/dir/secret' ведет за пределы корня ('/tmp/music-audit-repro-221458825/outside/secret')
+companion_collision: source_missing=true destination="old-lyrics" retained_lyrics="unique-new-lyrics"
+session_cookie: configured=fixture-token; Path=/; Max-Age=120; HttpOnly; Secure; SameSite=Strict

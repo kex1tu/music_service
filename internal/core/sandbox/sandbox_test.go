@@ -3,7 +3,9 @@ package sandbox
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestPathSandbox_Resolve(t *testing.T) {
@@ -107,6 +109,32 @@ func TestSanitizeFilename(t *testing.T) {
 			t.Errorf("SanitizeFilename('%s'): expected '%s', got '%s'", tc.input, tc.expected, got)
 		}
 	}
+
+	t.Run("long Cyrillic truncated to 255 bytes", func(t *testing.T) {
+		input := strings.Repeat("ДлинныйФайл", 30) // 330 runes, 660 bytes
+		got := SanitizeFilename(input, "Unknown")
+		if len(got) > 255 {
+			t.Errorf("len(got) = %d > 255", len(got))
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("result is not valid UTF-8")
+		}
+	})
+
+	t.Run("SanitizeFilenameWithBudget", func(t *testing.T) {
+		got := SanitizeFilenameWithBudget("Привет Мир", "Fallback", 10)
+		if len(got) > 10 {
+			t.Errorf("len(got) = %d > 10", len(got))
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("result is not valid UTF-8")
+		}
+
+		got0 := SanitizeFilenameWithBudget("Привет", "Fallback", 0)
+		if got0 != "" {
+			t.Errorf("budget 0 should return empty, got %q", got0)
+		}
+	})
 }
 
 func TestPathSandbox_SymlinkEscape(t *testing.T) {

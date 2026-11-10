@@ -409,6 +409,7 @@ type AlbumTrackCandidate struct {
 
 // AlbumReleaseCandidate представляет метаданные найденного альбома и его треклист.
 type AlbumReleaseCandidate struct {
+	ResultType  string                `json:"result_type,omitempty"`
 	BrowseID    string                `json:"browse_id"`
 	PlaylistID  string                `json:"playlist_id"`
 	Title       string                `json:"title"`

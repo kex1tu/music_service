@@ -31,9 +31,17 @@ type CandidateTrackItem struct {
 // SearchMultiCandidates выполняет параллельный Fast Fan-Out поиск кандидатов
 // по YouTube Music (нативный API), SoundCloud (scsearch) и YouTube (ytsearch).
 func (m *AudioMatcher) SearchMultiCandidates(ctx context.Context, artist, title string, expectedDuration int, customQuery ...string) ([]CandidateTrackItem, error) {
-	q := strings.TrimSpace(fmt.Sprintf("%s - %s", artist, title))
+	query := ""
 	if len(customQuery) > 0 && strings.TrimSpace(customQuery[0]) != "" {
-		q = strings.TrimSpace(customQuery[0])
+		query = customQuery[0]
+	}
+	return m.SearchMultiCandidatesWithLimit(ctx, artist, title, expectedDuration, query, 30)
+}
+
+func (m *AudioMatcher) SearchMultiCandidatesWithLimit(ctx context.Context, artist, title string, expectedDuration int, query string, soundCloudLimit int) ([]CandidateTrackItem, error) {
+	q := strings.TrimSpace(fmt.Sprintf("%s - %s", artist, title))
+	if strings.TrimSpace(query) != "" {
+		q = strings.TrimSpace(query)
 	}
 	if q == "" || q == "-" {
 		return nil, fmt.Errorf("empty query for candidate search")
@@ -53,7 +61,7 @@ func (m *AudioMatcher) SearchMultiCandidates(ctx context.Context, artist, title 
 		mu.Lock()
 		defer mu.Unlock()
 		for _, item := range items {
-			key:=item.Source+":"+candidateKey(item.URL)
+			key := item.Source + ":" + candidateKey(item.URL)
 			if item.URL == "" || seenURLs[key] {
 				continue
 			}
@@ -110,7 +118,7 @@ func (m *AudioMatcher) SearchMultiCandidates(ctx context.Context, artist, title 
 		if cleanQ == "" {
 			cleanQ = q
 		}
-		scQuery := fmt.Sprintf("scsearch10:%s", cleanQ)
+		scQuery := fmt.Sprintf("scsearch%d:%s", SoundCloudCandidateLimit(soundCloudLimit), cleanQ)
 		scCandidates, err := m.runSearch(searchCtx, scQuery)
 		if err != nil {
 			markIncomplete()

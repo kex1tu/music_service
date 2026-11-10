@@ -415,8 +415,13 @@ trackLoop:
 			job.SetStepAndStatus(fmt.Sprintf("Конвертация трека %d/%d: %s в MP3 320k", trackIdx, total, track.Title), StatusConverting)
 
 			cleanTitle := id3.CleanTitle(track.Title, fmt.Sprintf("Track_%02d", trackIdx))
-			safeTitle := sandbox.SanitizeFilename(cleanTitle, fmt.Sprintf("Track_%02d", trackIdx))
-			mp3Filename := fmt.Sprintf("%02d. %s.mp3", track.TrackNumber, safeTitle)
+			trackPrefix := fmt.Sprintf("%02d. ", track.TrackNumber)
+			maxTitleBytes := 255 - len(trackPrefix) - len(".mp3")
+			if maxTitleBytes <= 0 {
+				maxTitleBytes = 1
+			}
+			safeTitle := sandbox.SanitizeFilenameWithBudget(cleanTitle, fmt.Sprintf("Track_%02d", trackIdx), maxTitleBytes)
+			mp3Filename := fmt.Sprintf("%s%s.mp3", trackPrefix, safeTitle)
 			mp3Path := filepath.Join(convertedDir, mp3Filename)
 
 			if cErr := s.transcodeToMP3(ctx, rawAudioFile, mp3Path); cErr != nil {

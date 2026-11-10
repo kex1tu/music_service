@@ -93,6 +93,18 @@ function downloaderComponent() {
                 return;
             }
 
+            // Извлечение src из iframe-кода шеринга плейлистов
+            if (cleanUrl.toLowerCase().includes('<iframe')) {
+                const match = cleanUrl.match(/src\s*=\s*["']?([^"'>\s]+)["']?/i);
+                if (match && match[1]) {
+                    cleanUrl = match[1].trim();
+                    if (cleanUrl.startsWith('//')) {
+                        cleanUrl = 'https:' + cleanUrl;
+                    }
+                    this.url = cleanUrl;
+                }
+            }
+
             if (cleanUrl.includes('\n') || cleanUrl.split(/https?:\/\/|magnet:/i).length > 2) {
                 this.batchUrlsText = cleanUrl;
                 this.url = '';

@@ -360,7 +360,7 @@ func (m *Module) GetCandidates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	candidates, err := m.service.GetCandidates(r.Context(), artist, title, dur, customQ, r.URL.Query().Get("isrc"))
+	candidates, err := m.service.GetCandidatesWithLimit(r.Context(), artist, title, dur, customQ, r.URL.Query().Get("isrc"), httputil.QueryInt(r, "soundcloud_limit", 30))
 	if err != nil {
 		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1091,7 +1091,7 @@ func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
 	}
 
 	matcher := m.service.Resolver().FullReleaseMatcher()
-	cands, isCyrillic, err := matcher.SearchReleaseCandidates(r.Context(), artist, album, targetTracks)
+	cands, isCyrillic, err := matcher.SearchReleaseCandidates(r.Context(), artist, album, targetTracks, httputil.QueryInt(r, "soundcloud_limit", 30))
 	policy := resolver.VersionPolicy(r.URL.Query().Get("version_policy"))
 	if policy == "" {
 		policy = resolver.PolicyRelease

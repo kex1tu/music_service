@@ -1,0 +1,11 @@
+{
+  "date": "2026-11-08",
+  "go_test": "PASS",
+  "go_test_race": "PASS (GOFLAGS=-p=1; all packages, intra-package concurrency retained)",
+  "go_vet": "PASS",
+  "static_build": "PASS (CGO_ENABLED=0)",
+  "diff_check": "PASS",
+  "deploy": "not performed",
+  "runtime_provisioning": "documented and enforced; system tools not replaced",
+  "browser": "login/files/redownload dialog/cancel; 1280x800 and 375x812; temporary server stopped"
+}

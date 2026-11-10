@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestSanitizeComponent(t *testing.T) {
@@ -202,4 +203,308 @@ func TestComputeTargetPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTruncateToByteBudget(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		maxBytes int
+		expected string
+	}{
+		{"empty string", "", 10, ""},
+		{"zero budget", "Hello", 0, ""},
+		{"negative budget", "Hello", -5, ""},
+		{"ascii within budget", "Hello", 10, "Hello"},
+		{"ascii exact budget", "Hello", 5, "Hello"},
+		{"ascii truncated", "Hello World", 5, "Hello"},
+		{"cyrillic within budget", "Привет", 12, "Привет"},
+		{"cyrillic exact budget", "Привет", 12, "Привет"},
+		{"cyrillic odd budget (do not split rune)", "Привет", 3, "П"},
+		{"cyrillic even budget truncated", "Привет", 4, "Пр"},
+		{"cyrillic budget 1 byte (cannot fit 2-byte rune)", "Привет", 1, ""},
+		{"emoji 4-byte within budget", "🎧🔥", 8, "🎧🔥"},
+		{"emoji 4-byte partial budget (3 bytes)", "🎧", 3, ""},
+		{"emoji 4-byte exact budget (4 bytes)", "🎧", 4, "🎧"},
+		{"emoji 4-byte + ascii truncated", "🎧Music", 6, "🎧Mu"},
+		{"mixed ascii cyrillic emoji", "Hi Привет 🎵 Rock", 11, "Hi Прив"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TruncateToByteBudget(tt.input, tt.maxBytes)
+			if got != tt.expected {
+				t.Errorf("TruncateToByteBudget(%q, %d) = %q (len %d); want %q (len %d)",
+					tt.input, tt.maxBytes, got, len(got), tt.expected, len(tt.expected))
+			}
+			if len(got) > tt.maxBytes && tt.maxBytes > 0 {
+				t.Errorf("len(got) = %d > maxBytes = %d", len(got), tt.maxBytes)
+			}
+			if !utf8.ValidString(got) {
+				t.Errorf("result is not valid UTF-8: %x", got)
+			}
+		})
+	}
+}
+
+func TestSanitizeComponent_UTF8ByteLimit(t *testing.T) {
+	t.Run("long Cyrillic truncated to 255 bytes", func(t *testing.T) {
+		input := strings.Repeat("ОченьДлинноеНазваниеАльбомаИлиТрека", 15) // 525 runes, 1050 bytes
+		got := SanitizeComponent(input, "Fallback", 180)
+		if len(got) > MaxComponentBytes {
+			t.Errorf("len(got) = %d > %d", len(got), MaxComponentBytes)
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("result is not valid UTF-8")
+		}
+		if strings.HasSuffix(got, ".") || strings.HasSuffix(got, " ") {
+			t.Errorf("result has trailing dot or space: %q", got)
+		}
+	})
+
+	t.Run("long Emoji truncated to 255 bytes", func(t *testing.T) {
+		input := strings.Repeat("🎧🔥🎵🚀✨", 25) // 125 emojis = 500 bytes
+		got := SanitizeComponent(input, "Fallback", 180)
+		if len(got) > MaxComponentBytes {
+			t.Errorf("len(got) = %d > %d", len(got), MaxComponentBytes)
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("result is not valid UTF-8")
+		}
+	})
+
+	t.Run("long ASCII truncated to 180 runes and 255 bytes", func(t *testing.T) {
+		input := strings.Repeat("VeryLongTrackName", 20) // 340 chars
+		got := SanitizeComponent(input, "Fallback", 180)
+		if len(got) > 180 {
+			t.Errorf("len(got) = %d > 180 runes", len(got))
+		}
+		if len(got) > MaxComponentBytes {
+			t.Errorf("len(got) = %d > %d bytes", len(got), MaxComponentBytes)
+		}
+	})
+
+	t.Run("empty input with long fallback", func(t *testing.T) {
+		longFallback := strings.Repeat("ДлинныйФолбэк", 30) // 390 runes, 780 bytes
+		got := SanitizeComponent("", longFallback, 180)
+		if len(got) > MaxComponentBytes {
+			t.Errorf("len(got) = %d > %d", len(got), MaxComponentBytes)
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("result is not valid UTF-8")
+		}
+	})
+
+	t.Run("small and boundary budgets", func(t *testing.T) {
+		got0 := SanitizeComponentWithBudget("Привет Мир", "Fallback", 100, 0)
+		if got0 != "" {
+			t.Errorf("budget 0 should return empty string, got %q", got0)
+		}
+
+		gotNeg := SanitizeComponentWithBudget("Привет Мир", "Fallback", 100, -10)
+		if gotNeg != "" {
+			t.Errorf("negative budget should return empty string, got %q", gotNeg)
+		}
+
+		gotSmall := SanitizeComponentWithBudget("Привет Мир", "Fallback", 100, 5)
+		if len(gotSmall) > 5 {
+			t.Errorf("len(gotSmall) = %d > 5", len(gotSmall))
+		}
+		if !utf8.ValidString(gotSmall) {
+			t.Errorf("result is not valid UTF-8: %x", gotSmall)
+		}
+	})
+
+	t.Run("trailing dots and spaces trimmed after truncation", func(t *testing.T) {
+		input := "Привет Мир.....   "
+		got := SanitizeComponent(input, "Fallback", 180)
+		if got != "Привет Мир" {
+			t.Errorf("got %q; want %q", got, "Привет Мир")
+		}
+	})
+}
+
+func TestComputeAlbumDir_LongPartsAndBudget(t *testing.T) {
+	t.Run("catalog of two long parts (both album and artist long)", func(t *testing.T) {
+		longAlbum := strings.Repeat("ДлинныйАльбомНомерОдин", 15) // 330 runes, 660 bytes
+		longArtist := strings.Repeat("ОченьДлинныйИсполнитель", 15) // 345 runes, 690 bytes
+
+		dir := ComputeAlbumDir(longArtist, longAlbum)
+
+		if len(dir) > MaxComponentBytes {
+			t.Errorf("len(dir) = %d > MaxComponentBytes = %d", len(dir), MaxComponentBytes)
+		}
+		if !utf8.ValidString(dir) {
+			t.Errorf("dir is not valid UTF-8")
+		}
+		if !strings.Contains(dir, " - ") {
+			t.Errorf("dir missing separator ' - ': %q", dir)
+		}
+		if strings.HasSuffix(dir, ".") || strings.HasSuffix(dir, " ") {
+			t.Errorf("dir has trailing dot or space: %q", dir)
+		}
+
+		// Verify both parts are represented
+		parts := strings.Split(dir, " - ")
+		if len(parts) < 2 {
+			t.Fatalf("expected 2 parts split by ' - ', got %d: %q", len(parts), dir)
+		}
+		if !strings.HasPrefix(parts[0], "ДлинныйАльбом") {
+			t.Errorf("album part should start with 'ДлинныйАльбом', got %q", parts[0])
+		}
+		if !strings.HasPrefix(parts[1], "ОченьДлинный") {
+			t.Errorf("artist part should start with 'ОченьДлинный', got %q", parts[1])
+		}
+	})
+
+	t.Run("catalog of two long parts with emoji", func(t *testing.T) {
+		longAlbum := strings.Repeat("🎧Album🔥", 20) // 160 runes, 480 bytes
+		longArtist := strings.Repeat("🎵Artist🚀", 20) // 180 runes, 520 bytes
+
+		dir := ComputeAlbumDir(longArtist, longAlbum)
+		if len(dir) > MaxComponentBytes {
+			t.Errorf("len(dir) = %d > MaxComponentBytes = %d", len(dir), MaxComponentBytes)
+		}
+		if !utf8.ValidString(dir) {
+			t.Errorf("dir is not valid UTF-8")
+		}
+		if !strings.Contains(dir, " - ") {
+			t.Errorf("dir missing separator ' - ': %q", dir)
+		}
+	})
+
+	t.Run("short album and artist remain unchanged", func(t *testing.T) {
+		dir := ComputeAlbumDir("The Beatles", "Abbey Road")
+		want := "Abbey Road - The Beatles"
+		if dir != want {
+			t.Errorf("ComputeAlbumDir() = %q; want %q", dir, want)
+		}
+	})
+
+	t.Run("one long part and one short part", func(t *testing.T) {
+		shortArtist := "Кино"
+		longAlbum := strings.Repeat("ЗвездаПоИмениСолнце", 20) // 400 runes, 800 bytes
+
+		dir := ComputeAlbumDir(shortArtist, longAlbum)
+		if len(dir) > MaxComponentBytes {
+			t.Errorf("len(dir) = %d > MaxComponentBytes = %d", len(dir), MaxComponentBytes)
+		}
+		if !strings.HasSuffix(dir, " - Кино") {
+			t.Errorf("short artist should be preserved in full: %q", dir)
+		}
+	})
+
+	t.Run("boundary budgets for ComputeAlbumDirWithBudget", func(t *testing.T) {
+		dir0 := ComputeAlbumDirWithBudget("Artist", "Album", 0)
+		if dir0 != "" {
+			t.Errorf("budget 0 should return empty, got %q", dir0)
+		}
+
+		dirSmall := ComputeAlbumDirWithBudget("Artist", "Album", 4)
+		if len(dirSmall) > 4 {
+			t.Errorf("len(dirSmall) = %d > 4", len(dirSmall))
+		}
+		if !utf8.ValidString(dirSmall) {
+			t.Errorf("dirSmall is not valid UTF-8")
+		}
+
+		dir15 := ComputeAlbumDirWithBudget("Artist", "Album", 15)
+		if len(dir15) > 15 {
+			t.Errorf("len(dir15) = %d > 15", len(dir15))
+		}
+		if !utf8.ValidString(dir15) {
+			t.Errorf("dir15 is not valid UTF-8")
+		}
+	})
+}
+
+func TestComputeTargetPath_UTF8Budget(t *testing.T) {
+	t.Run("very long Cyrillic title", func(t *testing.T) {
+		longTitle := strings.Repeat("ОченьДлинноеНазваниеТрекаНаКириллице", 15) // 540 runes, 1080 bytes
+		albumDir, trackRel := ComputeTargetPath("Исполнитель", "Альбом", 1, longTitle, "1.mp3")
+
+		filename := filepath.Base(trackRel)
+		if len(filename) > MaxComponentBytes {
+			t.Errorf("len(filename) = %d > MaxComponentBytes = %d", len(filename), MaxComponentBytes)
+		}
+		if len(albumDir) > MaxComponentBytes {
+			t.Errorf("len(albumDir) = %d > MaxComponentBytes = %d", len(albumDir), MaxComponentBytes)
+		}
+		if !strings.HasSuffix(filename, ".mp3") {
+			t.Errorf("filename should end with .mp3, got %q", filename)
+		}
+		if !strings.HasPrefix(filename, "01. ") {
+			t.Errorf("filename should start with '01. ', got %q", filename)
+		}
+		if !utf8.ValidString(filename) {
+			t.Errorf("filename is not valid UTF-8: %x", filename)
+		}
+	})
+
+	t.Run("very long Emoji title", func(t *testing.T) {
+		longEmojiTitle := strings.Repeat("🎧🔥🎵🚀💥", 30) // 150 emojis, 600 bytes
+		albumDir, trackRel := ComputeTargetPath("Artist", "Album", 5, longEmojiTitle, "5.mp3")
+
+		filename := filepath.Base(trackRel)
+		if len(filename) > MaxComponentBytes {
+			t.Errorf("len(filename) = %d > MaxComponentBytes = %d", len(filename), MaxComponentBytes)
+		}
+		if len(albumDir) > MaxComponentBytes {
+			t.Errorf("len(albumDir) = %d > MaxComponentBytes = %d", len(albumDir), MaxComponentBytes)
+		}
+		if !strings.HasSuffix(filename, ".mp3") {
+			t.Errorf("filename should end with .mp3, got %q", filename)
+		}
+		if !utf8.ValidString(filename) {
+			t.Errorf("filename is not valid UTF-8")
+		}
+	})
+
+	t.Run("title ending in .mp3 does not create duplicate extension", func(t *testing.T) {
+		_, trackRel := ComputeTargetPath("Artist", "Album", 1, "Song Title.mp3", "1.mp3")
+		filename := filepath.Base(trackRel)
+		if filename != "01. Song Title.mp3" {
+			t.Errorf("filename = %q; want '01. Song Title.mp3'", filename)
+		}
+	})
+
+	t.Run("title ending in uppercase .MP3", func(t *testing.T) {
+		_, trackRel := ComputeTargetPath("Artist", "Album", 2, "Song Title.MP3", "2.mp3")
+		filename := filepath.Base(trackRel)
+		if filename != "02. Song Title.mp3" {
+			t.Errorf("filename = %q; want '02. Song Title.mp3'", filename)
+		}
+	})
+
+	t.Run("both long album, long artist, and long title", func(t *testing.T) {
+		longArtist := strings.Repeat("Артист", 30)
+		longAlbum := strings.Repeat("Альбом", 30)
+		longTitle := strings.Repeat("Песня", 40)
+
+		albumDir, trackRel := ComputeTargetPath(longArtist, longAlbum, 10, longTitle, "10.mp3")
+		filename := filepath.Base(trackRel)
+
+		if len(albumDir) > MaxComponentBytes {
+			t.Errorf("albumDir len = %d > 255", len(albumDir))
+		}
+		if len(filename) > MaxComponentBytes {
+			t.Errorf("filename len = %d > 255", len(filename))
+		}
+		if !utf8.ValidString(albumDir) || !utf8.ValidString(filename) {
+			t.Errorf("path components must be valid UTF-8")
+		}
+	})
+
+	t.Run("boundary budgets in ComputeTargetPathWithBudget", func(t *testing.T) {
+		_, rel0 := ComputeTargetPathWithBudget("Artist", "Album", 1, "Title", "1.mp3", 0)
+		if rel0 != "" {
+			t.Errorf("expected empty relPath for budget 0, got %q", rel0)
+		}
+
+		_, relSmall := ComputeTargetPathWithBudget("Artist", "Album", 1, "Title", "1.mp3", 10)
+		filenameSmall := filepath.Base(relSmall)
+		if len(filenameSmall) > 10 {
+			t.Errorf("len(filenameSmall) = %d > 10", len(filenameSmall))
+		}
+	})
 }

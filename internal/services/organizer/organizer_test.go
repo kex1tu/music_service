@@ -3,7 +3,9 @@ package organizer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
@@ -380,5 +382,186 @@ func TestOrganizer_RemoveIfEmpty(t *testing.T) {
 func dirExists(path string) bool {
 	st, err := os.Stat(path)
 	return err == nil && st.IsDir()
+}
+
+func TestOrganizer_Component_LongCyrillicAndEmojiWithCompanions(t *testing.T) {
+	tempDir := t.TempDir()
+	musicDir := filepath.Join(tempDir, "music")
+	tmpDir := filepath.Join(tempDir, "tmp")
+	_ = os.MkdirAll(musicDir, 0755)
+	_ = os.MkdirAll(tmpDir, 0755)
+
+	musicSb, err := sandbox.NewPathSandbox(musicDir)
+	if err != nil {
+		t.Fatalf("failed to create music sandbox: %v", err)
+	}
+	tmpSb, err := sandbox.NewPathSandbox(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create tmp sandbox: %v", err)
+	}
+
+	svc := NewService(musicSb, tmpSb)
+
+	jobDir := filepath.Join(tmpDir, "job-long", "converted")
+	_ = os.MkdirAll(jobDir, 0755)
+
+	longArtist := strings.Repeat("ОченьДлинныйИсполнительРусскогоРока", 10) // 350 runes, 700 bytes
+	longAlbum := strings.Repeat("НевероятноДлинноеНазваниеАльбома", 10)      // 320 runes, 640 bytes
+	longTitle1 := strings.Repeat("ДлиннейшаяПесняНаКириллице", 12)          // 300 runes, 600 bytes
+	longTitle2 := strings.Repeat("🎧🔥МузыкаБудущего🎵🚀", 15)                // 210 runes, 540 bytes
+
+	// Staging files
+	track1Path := filepath.Join(jobDir, "1.mp3")
+	track1LRC := filepath.Join(jobDir, "1.lrc")
+	track1JPG := filepath.Join(jobDir, "1.jpeg")
+	_ = os.WriteFile(track1Path, []byte("audio-content-1"), 0644)
+	_ = os.WriteFile(track1LRC, []byte("[00:01.00] lyrics for track 1"), 0644)
+	_ = os.WriteFile(track1JPG, []byte("jpeg-cover-data-1"), 0644)
+
+	track2Path := filepath.Join(jobDir, "2.mp3")
+	track2LRC := filepath.Join(jobDir, "2.lrc")
+	_ = os.WriteFile(track2Path, []byte("audio-content-2"), 0644)
+	_ = os.WriteFile(track2LRC, []byte("[00:01.00] lyrics for track 2"), 0644)
+
+	// Track 3 is a duplicate title / same track number with different content (collision after truncation)
+	track3Path := filepath.Join(jobDir, "3.mp3")
+	track3LRC := filepath.Join(jobDir, "3.lrc")
+	_ = os.WriteFile(track3Path, []byte("audio-content-3-duplicate-title"), 0644)
+	_ = os.WriteFile(track3LRC, []byte("[00:01.00] lyrics for track 3"), 0644)
+
+	req := BatchSaveRequest{
+		SourceDir: "tmp_downloads/job-long/converted",
+		Album: AlbumMeta{
+			AlbumArtist: longArtist,
+			Album:       longAlbum,
+		},
+		Tracks: []id3.TrackTags{
+			{
+				Path:        "tmp_downloads/job-long/converted/1.mp3",
+				Title:       longTitle1,
+				Artist:      longArtist,
+				Album:       longAlbum,
+				AlbumArtist: longArtist,
+				TrackNumber: 1,
+			},
+			{
+				Path:        "tmp_downloads/job-long/converted/2.mp3",
+				Title:       longTitle2,
+				Artist:      longArtist,
+				Album:       longAlbum,
+				AlbumArtist: longArtist,
+				TrackNumber: 2,
+			},
+			{
+				Path:        "tmp_downloads/job-long/converted/3.mp3",
+				Title:       longTitle1, // Same title and track number to force collision
+				Artist:      longArtist,
+				Album:       longAlbum,
+				AlbumArtist: longArtist,
+				TrackNumber: 1,
+			},
+		},
+	}
+
+	res, err := svc.SaveBatch(req)
+	if err != nil {
+		t.Fatalf("SaveBatch failed: %v", err)
+	}
+
+	if res == nil {
+		t.Fatal("expected non-nil OrganizerResult")
+	}
+
+	// 1. Destination directory must exist and length <= 255 bytes
+	destDirFullPath := filepath.Join(musicDir, res.DestinationDir)
+	if !dirExists(destDirFullPath) {
+		t.Fatalf("destination directory not created: %s", destDirFullPath)
+	}
+	if len(res.DestinationDir) > MaxComponentBytes {
+		t.Errorf("DestinationDir len = %d > %d", len(res.DestinationDir), MaxComponentBytes)
+	}
+	if !utf8.ValidString(res.DestinationDir) {
+		t.Errorf("DestinationDir is not valid UTF-8: %s", res.DestinationDir)
+	}
+
+	// 2. All files in destination directory must have valid names <= 255 bytes
+	entries, err := os.ReadDir(destDirFullPath)
+	if err != nil {
+		t.Fatalf("failed to read destDir: %v", err)
+	}
+
+	mp3Count := 0
+	lrcCount := 0
+	jpegCount := 0
+	for _, e := range entries {
+		name := e.Name()
+		if len(name) > MaxComponentBytes {
+			t.Errorf("entry name %q exceeds MaxComponentBytes: %d > %d", name, len(name), MaxComponentBytes)
+		}
+		if !utf8.ValidString(name) {
+			t.Errorf("entry name %q is not valid UTF-8", name)
+		}
+		if strings.HasSuffix(name, ".mp3") {
+			mp3Count++
+		}
+		if strings.HasSuffix(name, ".lrc") {
+			lrcCount++
+		}
+		if strings.HasSuffix(name, ".jpeg") {
+			jpegCount++
+		}
+	}
+
+	// We expect 3 MP3 files (track 1, track 2, and track 3 suffixed)
+	if mp3Count != 3 {
+		t.Errorf("expected 3 MP3 files, found %d", mp3Count)
+	}
+	// We expect 3 LRC files (one for each track, including suffixed for track 3)
+	if lrcCount != 3 {
+		t.Errorf("expected 3 LRC files, found %d", lrcCount)
+	}
+	// We expect 1 JPEG file (companion of track 1)
+	if jpegCount < 1 {
+		t.Errorf("expected at least 1 JPEG companion file, found %d", jpegCount)
+	}
+
+	// Verify all 3 tracks in res.Tracks are accounted for
+	if len(res.Tracks) != 3 {
+		t.Fatalf("expected 3 returned tracks, got %d", len(res.Tracks))
+	}
+
+	t.Logf("Track 0 path: %s", res.Tracks[0].Path)
+	t.Logf("Track 1 path: %s", res.Tracks[1].Path)
+	t.Logf("Track 2 path: %s", res.Tracks[2].Path)
+
+	// Verify audio file contents are intact and not overwritten
+	track1MovedFull := filepath.Join(musicDir, res.Tracks[0].Path)
+	track3MovedFull := filepath.Join(musicDir, res.Tracks[2].Path)
+	if track1MovedFull == track3MovedFull {
+		t.Fatalf("track 1 and track 3 have identical paths: %s", track1MovedFull)
+	}
+
+	content1, _ := os.ReadFile(track1MovedFull)
+	content3, _ := os.ReadFile(track3MovedFull)
+	t.Logf("content1 len: %d, endsWith: %s", len(content1), string(content1[max(0, len(content1)-50):]))
+	t.Logf("content3 len: %d, endsWith: %s", len(content3), string(content3[max(0, len(content3)-50):]))
+	if !strings.Contains(string(content1), "audio-content-1") {
+		t.Errorf("track 1 content mismatch: %q", string(content1))
+	}
+	if !strings.Contains(string(content3), "audio-content-3-duplicate-title") {
+		t.Errorf("track 3 content mismatch: %q", string(content3))
+	}
+
+	// Verify companion LRC contents are intact
+	lrc1Path := strings.TrimSuffix(track1MovedFull, ".mp3") + ".lrc"
+	lrc3Path := strings.TrimSuffix(track3MovedFull, ".mp3") + ".lrc"
+	lrcContent1, _ := os.ReadFile(lrc1Path)
+	lrcContent3, _ := os.ReadFile(lrc3Path)
+	if string(lrcContent1) != "[00:01.00] lyrics for track 1" {
+		t.Errorf("track 1 lyrics mismatch: %q", string(lrcContent1))
+	}
+	if string(lrcContent3) != "[00:01.00] lyrics for track 3" {
+		t.Errorf("track 3 lyrics mismatch: %q", string(lrcContent3))
+	}
 }
 

@@ -421,12 +421,15 @@ type PreflightTrackItem struct {
 
 // PreflightReleaseInfo содержит сводные метаданные релиза для предполетного окна.
 type PreflightReleaseInfo struct {
-	Title       string `json:"title"`
-	Artist      string `json:"artist"`
-	Year        int    `json:"year"`
-	Genre       string `json:"genre"`
-	CoverURL    string `json:"cover_url"`
-	TotalTracks int    `json:"total_tracks"`
+	Title         string `json:"title"`
+	Artist        string `json:"artist"`
+	Year          int    `json:"year"`
+	Genre         string `json:"genre"`
+	CoverURL      string `json:"cover_url"`
+	TotalTracks   int    `json:"total_tracks"`
+	FetchedTracks int    `json:"fetched_tracks,omitempty"`
+	SkippedTracks int    `json:"skipped_tracks,omitempty"`
+	IsPlaylist    bool   `json:"is_playlist,omitempty"`
 }
 
 // PreflightSummary содержит статистику релиза для быстрых фильтров.
@@ -435,6 +438,8 @@ type PreflightSummary struct {
 	NewTracksCount           int `json:"new_tracks_count"`
 	ExistingHighQualityCount int `json:"existing_high_quality_count"`
 	UpgradeAvailableCount    int `json:"upgrade_available_count"`
+	FetchedTracksCount       int `json:"fetched_tracks_count,omitempty"`
+	SkippedTracksCount       int `json:"skipped_tracks_count,omitempty"`
 }
 
 // PreflightResponse — ответ эндпоинта POST /api/downloads/preflight.

@@ -126,7 +126,7 @@
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
                         </svg>
-                        <p class="text-xs">Поиск релизов на YouTube Music и SoundCloud...</p>
+                        <p class="text-xs">Поиск альбомов и плейлистов на SoundCloud и релизов на YouTube Music...</p>
                     </div>
                 </template>
 
@@ -151,9 +151,13 @@
                             <span x-text="`Кандидатов: ${$store.releaseSourcePicker.candidates.length}`"></span>
                         </div>
 
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                            <template x-for="(cand, idx) in $store.releaseSourcePicker.candidates" :key="cand.id || idx">
+                        <template x-for="group in $store.releaseSourcePicker.candidateGroups()" :key="group.type">
+                          <section class="space-y-2">
+                            <h3 class="text-sm font-semibold text-content-primary" x-text="group.label"></h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            <template x-for="entry in group.items" :key="entry.candidate.id || entry.index">
                                 <div
+                                    x-data="{ cand: entry.candidate, idx: entry.index }"
                                     @click="$store.releaseSourcePicker.selectCandidate(idx)"
                                     class="p-3.5 rounded-xl border cursor-pointer transition flex flex-col justify-between space-y-3"
                                     :class="$store.releaseSourcePicker.selectedCandidateIndex === idx ?
@@ -161,12 +165,15 @@
                                         'bg-surface-base border-surface-border hover:bg-surface-elevated/50 hover:border-surface-borderSubtle'">
 
                                     <div class="space-y-1.5">
-                                        <div class="flex items-center justify-between gap-2">
+                                        <div class="flex flex-wrap items-center justify-between gap-2">
                                             <!-- Источник -->
                                             <span class="text-[11px] font-bold uppercase tracking-wider font-mono"
                                                 :class="cand.source.includes('soundcloud') ? 'text-amber-400' : 'text-red-400'"
                                                 x-text="cand.source.includes('soundcloud') ? 'SoundCloud' : 'YouTube Music'">
                                             </span>
+
+                                            <span x-show="cand.result_type" class="text-[11px] text-content-secondary"
+                                                x-text="cand.result_type === 'album' ? 'Альбом' : 'Плейлист'"></span>
 
                                             <!-- Совпадение треков -->
                                             <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold"
@@ -181,7 +188,7 @@
                                     </div>
 
                                     <!-- Бейдж цензуры и качества -->
-                                    <div class="pt-1 border-t border-surface-border/50 flex items-center justify-between">
+                                    <div class="pt-1 border-t border-surface-border/50 flex flex-wrap gap-2 items-center justify-between">
                                         <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold"
                                             :class="{
                                                 'bg-rose-500/15 text-rose-300 border border-rose-500/30': cand.censor_status === 'red_flag',
@@ -198,9 +205,15 @@
                                     </div>
                                 </div>
                             </template>
-                        </div>
+                            </div>
+                          </section>
+                        </template>
                     </div>
                 </template>
+
+                <button type="button" x-show="$store.releaseSourcePicker.hasMoreSoundCloud" :disabled="$store.releaseSourcePicker.isLoading"
+                    @click="$store.releaseSourcePicker.loadMoreCandidates()"
+                    class="min-h-[44px] px-4 rounded-md bg-surface-elevated hover:bg-surface-hover text-sm text-content-primary disabled:opacity-50">Больше альбомов и плейлистов SoundCloud</button>
 
                 <!-- 4. ТАБЛИЦА СРАВНЕНИЯ «БОК О БОК» (SIDE-BY-SIDE) -->
                 <template x-if="!$store.releaseSourcePicker.isLoading && $store.releaseSourcePicker.currentCandidate()">

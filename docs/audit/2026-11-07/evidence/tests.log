@@ -1,0 +1,416 @@
+=== RUN   TestAuth_HashAndCheck
+--- PASS: TestAuth_HashAndCheck (0.27s)
+=== RUN   TestAuth_SessionTokens
+--- PASS: TestAuth_SessionTokens (0.00s)
+=== RUN   TestAuth_FutureAndExpiredTimestamps
+--- PASS: TestAuth_FutureAndExpiredTimestamps (0.00s)
+=== RUN   TestAuth_UsernameSanitization
+--- PASS: TestAuth_UsernameSanitization (0.00s)
+=== RUN   TestAuth_Cookies
+--- PASS: TestAuth_Cookies (0.00s)
+=== RUN   TestAuth_Middleware
+--- PASS: TestAuth_Middleware (0.00s)
+PASS
+ok  	music-manager/internal/core/auth	0.282s
+=== RUN   TestAdversarial_DecodeJSON_ExceedingLimit
+=== RUN   TestAdversarial_DecodeJSON_ExceedingLimit/huge_string_exceeds_10MB
+=== RUN   TestAdversarial_DecodeJSON_ExceedingLimit/huge_array_exceeds_10MB
+=== RUN   TestAdversarial_DecodeJSON_ExceedingLimit/boundary_10MB_exact
+=== RUN   TestAdversarial_DecodeJSON_ExceedingLimit/boundary_10MB_plus_one
+--- PASS: TestAdversarial_DecodeJSON_ExceedingLimit (0.61s)
+    --- PASS: TestAdversarial_DecodeJSON_ExceedingLimit/huge_string_exceeds_10MB (0.15s)
+    --- PASS: TestAdversarial_DecodeJSON_ExceedingLimit/huge_array_exceeds_10MB (0.30s)
+    --- PASS: TestAdversarial_DecodeJSON_ExceedingLimit/boundary_10MB_exact (0.10s)
+    --- PASS: TestAdversarial_DecodeJSON_ExceedingLimit/boundary_10MB_plus_one (0.07s)
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/nil_request
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/nil_request_body
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/nil_target
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/truncated_cut_in_number
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/truncated_cut_in_array
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/truncated_cut_in_nested_object
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/truncated_open_brace_only
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/truncated_open_bracket_only
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/truncated_cut_in_key
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/truncated_cut_after_colon
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/truncated_cut_in_string_value
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/syntax_nan_value
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/syntax_infinity_value
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/syntax_trailing_comma_obj
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/syntax_trailing_comma_arr
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/syntax_missing_colon
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/syntax_control_character
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/syntax_unquoted_key
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/syntax_single_quotes
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/syntax_double_colon
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/syntax_colon_without_key
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_root_scalar_string
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_string_for_int
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_object_for_string
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_array_for_bool
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_number_for_nested
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_root_array_instead
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_root_scalar_bool
+=== RUN   TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_root_scalar_number
+--- PASS: TestAdversarial_DecodeJSON_NilAndMalformed (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/nil_request (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/nil_request_body (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/nil_target (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/truncated_cut_in_number (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/truncated_cut_in_array (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/truncated_cut_in_nested_object (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/truncated_open_brace_only (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/truncated_open_bracket_only (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/truncated_cut_in_key (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/truncated_cut_after_colon (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/truncated_cut_in_string_value (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/syntax_nan_value (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/syntax_infinity_value (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/syntax_trailing_comma_obj (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/syntax_trailing_comma_arr (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/syntax_missing_colon (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/syntax_control_character (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/syntax_unquoted_key (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/syntax_single_quotes (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/syntax_double_colon (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/syntax_colon_without_key (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_root_scalar_string (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_string_for_int (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_object_for_string (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_array_for_bool (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_number_for_nested (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_root_array_instead (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_root_scalar_bool (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_NilAndMalformed/type_mismatch_root_scalar_number (0.00s)
+=== RUN   TestAdversarial_DecodeJSON_UnicodeNullBytes
+=== RUN   TestAdversarial_DecodeJSON_UnicodeNullBytes/escaped_unicode_null_in_string
+=== RUN   TestAdversarial_DecodeJSON_UnicodeNullBytes/single_escaped_null
+=== RUN   TestAdversarial_DecodeJSON_UnicodeNullBytes/escaped_null_in_map_key
+=== RUN   TestAdversarial_DecodeJSON_UnicodeNullBytes/raw_unescaped_null_byte
+--- PASS: TestAdversarial_DecodeJSON_UnicodeNullBytes (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_UnicodeNullBytes/escaped_unicode_null_in_string (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_UnicodeNullBytes/single_escaped_null (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_UnicodeNullBytes/escaped_null_in_map_key (0.00s)
+    --- PASS: TestAdversarial_DecodeJSON_UnicodeNullBytes/raw_unescaped_null_byte (0.00s)
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/max_int64
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/min_int64
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/max_int64_minus_1
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/min_int64_plus_1
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/overflow_positive_by_1
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/underflow_negative_by_1
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/massive_positive_overflow
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/massive_negative_underflow
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/max_uint64_overflow
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/hex_lowercase
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/hex_uppercase
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/hex_max_int64
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/hex_without_prefix_a_f
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/binary_prefix
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/octal_leading_zero
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/octal_prefix
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/zero
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/negative_zero
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/explicit_positive_sign
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/explicit_positive_max
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/double_plus
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/double_minus
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/plus_minus
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/leading_space
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/trailing_space
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/surrounding_space
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/tab_character
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/newline_character
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/empty_string
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/space_only
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/null_string
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/nan_string
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/infinity_string
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/float_simple
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/float_sub_one
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/scientific_notation
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/unicode_digits
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/embedded_null_byte
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/missing_key
+=== RUN   TestAdversarial_QueryInt64_ExtremeValues/nil_request_and_url
+--- PASS: TestAdversarial_QueryInt64_ExtremeValues (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/max_int64 (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/min_int64 (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/max_int64_minus_1 (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/min_int64_plus_1 (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/overflow_positive_by_1 (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/underflow_negative_by_1 (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/massive_positive_overflow (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/massive_negative_underflow (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/max_uint64_overflow (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/hex_lowercase (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/hex_uppercase (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/hex_max_int64 (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/hex_without_prefix_a_f (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/binary_prefix (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/octal_leading_zero (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/octal_prefix (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/zero (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/negative_zero (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/explicit_positive_sign (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/explicit_positive_max (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/double_plus (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/double_minus (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/plus_minus (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/leading_space (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/trailing_space (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/surrounding_space (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/tab_character (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/newline_character (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/empty_string (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/space_only (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/null_string (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/nan_string (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/infinity_string (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/float_simple (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/float_sub_one (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/scientific_notation (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/unicode_digits (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/embedded_null_byte (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/missing_key (0.00s)
+    --- PASS: TestAdversarial_QueryInt64_ExtremeValues/nil_request_and_url (0.00s)
+=== RUN   TestAdversarial_ErrorResponse_Contract
+=== RUN   TestAdversarial_ErrorResponse_Contract/Bad_Request
+=== RUN   TestAdversarial_ErrorResponse_Contract/Unauthorized
+=== RUN   TestAdversarial_ErrorResponse_Contract/Forbidden
+=== RUN   TestAdversarial_ErrorResponse_Contract/Not_Found
+=== RUN   TestAdversarial_ErrorResponse_Contract/Method_Not_Allowed
+=== RUN   TestAdversarial_ErrorResponse_Contract/Conflict
+=== RUN   TestAdversarial_ErrorResponse_Contract/Internal_Server_Error
+=== RUN   TestAdversarial_ErrorResponse_Contract/Bad_Gateway
+=== RUN   TestAdversarial_ErrorResponse_Contract/Service_Unavailable
+=== RUN   TestAdversarial_ErrorResponse_Contract/special_control_characters
+=== RUN   TestAdversarial_ErrorResponse_Contract/special_quotes_and_slashes
+=== RUN   TestAdversarial_ErrorResponse_Contract/special_html_tags
+=== RUN   TestAdversarial_ErrorResponse_Contract/special_unicode_multilingual
+=== RUN   TestAdversarial_ErrorResponse_Contract/empty_message_behavior
+    httputil_adversarial_test.go:484: When message is empty, 'detail' present: false (omitempty behavior)
+--- PASS: TestAdversarial_ErrorResponse_Contract (0.00s)
+    --- PASS: TestAdversarial_ErrorResponse_Contract/Bad_Request (0.00s)
+    --- PASS: TestAdversarial_ErrorResponse_Contract/Unauthorized (0.00s)
+    --- PASS: TestAdversarial_ErrorResponse_Contract/Forbidden (0.00s)
+    --- PASS: TestAdversarial_ErrorResponse_Contract/Not_Found (0.00s)
+    --- PASS: TestAdversarial_ErrorResponse_Contract/Method_Not_Allowed (0.00s)
+    --- PASS: TestAdversarial_ErrorResponse_Contract/Conflict (0.00s)
+    --- PASS: TestAdversarial_ErrorResponse_Contract/Internal_Server_Error (0.00s)
+    --- PASS: TestAdversarial_ErrorResponse_Contract/Bad_Gateway (0.00s)
+    --- PASS: TestAdversarial_ErrorResponse_Contract/Service_Unavailable (0.00s)
+    --- PASS: TestAdversarial_ErrorResponse_Contract/special_control_characters (0.00s)
+    --- PASS: TestAdversarial_ErrorResponse_Contract/special_quotes_and_slashes (0.00s)
+    --- PASS: TestAdversarial_ErrorResponse_Contract/special_html_tags (0.00s)
+    --- PASS: TestAdversarial_ErrorResponse_Contract/special_unicode_multilingual (0.00s)
+    --- PASS: TestAdversarial_ErrorResponse_Contract/empty_message_behavior (0.00s)
+=== RUN   TestDecodeJSON
+=== RUN   TestDecodeJSON/valid_payload
+=== RUN   TestDecodeJSON/invalid_json
+=== RUN   TestDecodeJSON/nil_body
+=== RUN   TestDecodeJSON/nil_request
+=== RUN   TestDecodeJSON/nil_target
+=== RUN   TestDecodeJSON/empty_body
+=== RUN   TestDecodeJSON/payload_exceeds_max_body_limit
+--- PASS: TestDecodeJSON (0.07s)
+    --- PASS: TestDecodeJSON/valid_payload (0.00s)
+    --- PASS: TestDecodeJSON/invalid_json (0.00s)
+    --- PASS: TestDecodeJSON/nil_body (0.00s)
+    --- PASS: TestDecodeJSON/nil_request (0.00s)
+    --- PASS: TestDecodeJSON/nil_target (0.00s)
+    --- PASS: TestDecodeJSON/empty_body (0.00s)
+    --- PASS: TestDecodeJSON/payload_exceeds_max_body_limit (0.07s)
+=== RUN   TestRespondJSON
+=== RUN   TestRespondJSON/struct_payload
+=== RUN   TestRespondJSON/nil_data
+--- PASS: TestRespondJSON (0.00s)
+    --- PASS: TestRespondJSON/struct_payload (0.00s)
+    --- PASS: TestRespondJSON/nil_data (0.00s)
+=== RUN   TestRespondError
+--- PASS: TestRespondError (0.00s)
+=== RUN   TestQueryString
+--- PASS: TestQueryString (0.00s)
+=== RUN   TestQueryInt
+--- PASS: TestQueryInt (0.00s)
+=== RUN   TestQueryInt64
+--- PASS: TestQueryInt64 (0.00s)
+=== RUN   TestQueryBool
+--- PASS: TestQueryBool (0.00s)
+PASS
+ok  	music-manager/internal/core/httputil	0.711s
+=== RUN   TestPathSandbox_Resolve
+--- PASS: TestPathSandbox_Resolve (0.00s)
+=== RUN   TestSanitizeFilename
+--- PASS: TestSanitizeFilename (0.00s)
+=== RUN   TestPathSandbox_SymlinkEscape
+--- PASS: TestPathSandbox_SymlinkEscape (0.00s)
+PASS
+ok  	music-manager/internal/core/sandbox	0.014s
+=== RUN   TestSyncAlbumArtistAndTrackArtists_EmptyAlbumArtistUniformTracks
+--- PASS: TestSyncAlbumArtistAndTrackArtists_EmptyAlbumArtistUniformTracks (0.00s)
+=== RUN   TestSyncAlbumArtistAndTrackArtists_IncorporateAlbumArtistIntoGuestTrack
+--- PASS: TestSyncAlbumArtistAndTrackArtists_IncorporateAlbumArtistIntoGuestTrack (0.00s)
+=== RUN   TestSyncAlbumArtistAndTrackArtists_CompilationSoundtrack
+--- PASS: TestSyncAlbumArtistAndTrackArtists_CompilationSoundtrack (0.00s)
+=== RUN   TestCleanReleaseTitle
+--- PASS: TestCleanReleaseTitle (0.00s)
+=== RUN   TestOptimizeCoverForID3_LargeImageDownscaling
+--- PASS: TestOptimizeCoverForID3_LargeImageDownscaling (0.47s)
+=== RUN   TestOptimizeCoverForID3_PNGConversion
+--- PASS: TestOptimizeCoverForID3_PNGConversion (0.12s)
+=== RUN   TestOptimizeCoverForID3_FallbackOnCorrupt
+--- PASS: TestOptimizeCoverForID3_FallbackOnCorrupt (0.00s)
+=== RUN   TestOptimizeCoverForID3_EmptyInput
+--- PASS: TestOptimizeCoverForID3_EmptyInput (0.00s)
+=== RUN   TestResizeBilinear_SmallCases
+--- PASS: TestResizeBilinear_SmallCases (0.00s)
+=== RUN   TestAnalyzeAndNormalizeGenre
+=== RUN   TestAnalyzeAndNormalizeGenre/Russian_rap
+=== RUN   TestAnalyzeAndNormalizeGenre/Russian_rock
+=== RUN   TestAnalyzeAndNormalizeGenre/Multiple_Russian_genres_with_slash
+=== RUN   TestAnalyzeAndNormalizeGenre/Canonical_English_Hip-Hop
+=== RUN   TestAnalyzeAndNormalizeGenre/Lower_english_genre
+=== RUN   TestAnalyzeAndNormalizeGenre/Empty_string
+--- PASS: TestAnalyzeAndNormalizeGenre (0.00s)
+    --- PASS: TestAnalyzeAndNormalizeGenre/Russian_rap (0.00s)
+    --- PASS: TestAnalyzeAndNormalizeGenre/Russian_rock (0.00s)
+    --- PASS: TestAnalyzeAndNormalizeGenre/Multiple_Russian_genres_with_slash (0.00s)
+    --- PASS: TestAnalyzeAndNormalizeGenre/Canonical_English_Hip-Hop (0.00s)
+    --- PASS: TestAnalyzeAndNormalizeGenre/Lower_english_genre (0.00s)
+    --- PASS: TestAnalyzeAndNormalizeGenre/Empty_string (0.00s)
+=== RUN   TestCleanTitle
+--- PASS: TestCleanTitle (0.00s)
+=== RUN   TestParseGenresAndMultiValue
+--- PASS: TestParseGenresAndMultiValue (0.00s)
+=== RUN   TestWriteAndReadTags_Roundtrip
+--- PASS: TestWriteAndReadTags_Roundtrip (0.00s)
+=== RUN   TestWriteTags_AlbumArtistMultiValue_NullSeparated
+--- PASS: TestWriteTags_AlbumArtistMultiValue_NullSeparated (0.00s)
+=== RUN   TestWriteTags_FiltersConflictingTXXX
+--- PASS: TestWriteTags_FiltersConflictingTXXX (0.00s)
+=== RUN   TestWriteTags_PreservesUnknownFrames
+--- PASS: TestWriteTags_PreservesUnknownFrames (0.00s)
+=== RUN   TestWriteAndReadTags_MultiGenre_NullSeparated
+--- PASS: TestWriteAndReadTags_MultiGenre_NullSeparated (0.00s)
+=== RUN   FuzzParseAPIC
+=== RUN   FuzzParseAPIC/seed#0
+=== RUN   FuzzParseAPIC/seed#1
+=== RUN   FuzzParseAPIC/seed#2
+=== RUN   FuzzParseAPIC/seed#3
+=== RUN   FuzzParseAPIC/seed#4
+--- PASS: FuzzParseAPIC (0.00s)
+    --- PASS: FuzzParseAPIC/seed#0 (0.00s)
+    --- PASS: FuzzParseAPIC/seed#1 (0.00s)
+    --- PASS: FuzzParseAPIC/seed#2 (0.00s)
+    --- PASS: FuzzParseAPIC/seed#3 (0.00s)
+    --- PASS: FuzzParseAPIC/seed#4 (0.00s)
+=== RUN   FuzzDecodeText
+=== RUN   FuzzDecodeText/seed#0
+=== RUN   FuzzDecodeText/seed#1
+=== RUN   FuzzDecodeText/seed#2
+=== RUN   FuzzDecodeText/seed#3
+=== RUN   FuzzDecodeText/seed#4
+--- PASS: FuzzDecodeText (0.00s)
+    --- PASS: FuzzDecodeText/seed#0 (0.00s)
+    --- PASS: FuzzDecodeText/seed#1 (0.00s)
+    --- PASS: FuzzDecodeText/seed#2 (0.00s)
+    --- PASS: FuzzDecodeText/seed#3 (0.00s)
+    --- PASS: FuzzDecodeText/seed#4 (0.00s)
+=== RUN   FuzzReadTags
+=== RUN   FuzzReadTags/seed#0
+=== RUN   FuzzReadTags/seed#1
+=== RUN   FuzzReadTags/seed#2
+--- PASS: FuzzReadTags (0.00s)
+    --- PASS: FuzzReadTags/seed#0 (0.00s)
+    --- PASS: FuzzReadTags/seed#1 (0.00s)
+    --- PASS: FuzzReadTags/seed#2 (0.00s)
+PASS
+ok  	music-manager/internal/id3	0.602s
+=== RUN   TestFileSHA256
+--- PASS: TestFileSHA256 (0.00s)
+=== RUN   TestMoveTrackWithCompanions_BasicAndLyrics
+--- PASS: TestMoveTrackWithCompanions_BasicAndLyrics (0.00s)
+=== RUN   TestMoveTrackWithCompanions_CollisionIdentical
+--- PASS: TestMoveTrackWithCompanions_CollisionIdentical (0.00s)
+=== RUN   TestMoveTrackWithCompanions_CollisionDifferentContent
+--- PASS: TestMoveTrackWithCompanions_CollisionDifferentContent (0.00s)
+=== RUN   TestMoveTrackWithCompanions_ImageAndLyrics
+--- PASS: TestMoveTrackWithCompanions_ImageAndLyrics (0.00s)
+=== RUN   TestMoveAlbum_Base64Cover
+--- PASS: TestMoveAlbum_Base64Cover (0.00s)
+=== RUN   TestMoveAlbum_Single_TrackNamedCover
+--- PASS: TestMoveAlbum_Single_TrackNamedCover (0.00s)
+=== RUN   TestMoveAlbum_Single_EmbeddedCoverExtraction
+--- PASS: TestMoveAlbum_Single_EmbeddedCoverExtraction (0.00s)
+=== RUN   TestFixLibraryPermissions
+--- PASS: TestFixLibraryPermissions (0.00s)
+=== RUN   TestNormalizeNavidromeLibrary
+--- PASS: TestNormalizeNavidromeLibrary (0.00s)
+=== RUN   TestNormalizeNavidromeLibrary_SingleTrackPromotion
+--- PASS: TestNormalizeNavidromeLibrary_SingleTrackPromotion (0.00s)
+=== RUN   TestNormalizeNavidromeLibrary_MultiTrackUntouched
+--- PASS: TestNormalizeNavidromeLibrary_MultiTrackUntouched (0.00s)
+=== RUN   TestMoveAlbum_MultipleReleasesSeparation
+--- PASS: TestMoveAlbum_MultipleReleasesSeparation (0.01s)
+=== RUN   TestMoveAlbum_SingleTrackAlbumEqualsTitle
+--- PASS: TestMoveAlbum_SingleTrackAlbumEqualsTitle (0.00s)
+=== RUN   TestSaveBatch
+--- PASS: TestSaveBatch (0.00s)
+=== RUN   TestSaveBatch_SingleTrackMetadataPropagationToRelease
+--- PASS: TestSaveBatch_SingleTrackMetadataPropagationToRelease (0.00s)
+=== RUN   TestOrganizer_EmptyDirCleanup
+--- PASS: TestOrganizer_EmptyDirCleanup (0.00s)
+=== RUN   TestOrganizer_RemoveIfEmpty
+--- PASS: TestOrganizer_RemoveIfEmpty (0.00s)
+=== RUN   TestSanitizeComponent
+=== RUN   TestSanitizeComponent/clean_normal_name
+=== RUN   TestSanitizeComponent/replace_forbidden_characters
+=== RUN   TestSanitizeComponent/replace_backslash_and_null_byte_with_ampersand
+=== RUN   TestSanitizeComponent/trim_trailing_dots_and_spaces
+=== RUN   TestSanitizeComponent/empty_input_returns_fallback
+=== RUN   TestSanitizeComponent/truncate_long_title_safely_without_breaking_unicode
+--- PASS: TestSanitizeComponent (0.00s)
+    --- PASS: TestSanitizeComponent/clean_normal_name (0.00s)
+    --- PASS: TestSanitizeComponent/replace_forbidden_characters (0.00s)
+    --- PASS: TestSanitizeComponent/replace_backslash_and_null_byte_with_ampersand (0.00s)
+    --- PASS: TestSanitizeComponent/trim_trailing_dots_and_spaces (0.00s)
+    --- PASS: TestSanitizeComponent/empty_input_returns_fallback (0.00s)
+    --- PASS: TestSanitizeComponent/truncate_long_title_safely_without_breaking_unicode (0.00s)
+=== RUN   TestComputeTargetPath
+=== RUN   TestComputeTargetPath/normal_album_and_track
+=== RUN   TestComputeTargetPath/single_with_empty_album
+=== RUN   TestComputeTargetPath/single_with_album_named_Single
+=== RUN   TestComputeTargetPath/single_with_album_named_Singles_(case-insensitive)
+=== RUN   TestComputeTargetPath/dangerous_characters_in_album_and_title
+=== RUN   TestComputeTargetPath/track_title_starting_with_numbers_(21_Guns)
+=== RUN   TestComputeTargetPath/track_title_starting_with_year_(1979)
+=== RUN   TestComputeTargetPath/track_title_with_number_prefix_and_digits_title_(01._505)
+=== RUN   TestComputeTargetPath/artist_and_track_title_starting_with_digit_and_dot_(1.Kla$)
+=== RUN   TestComputeTargetPath/single_with_1.Kla$_and_empty_album
+=== RUN   TestComputeTargetPath/artist_and_track_title_starting_with_1.Царь
+--- PASS: TestComputeTargetPath (0.00s)
+    --- PASS: TestComputeTargetPath/normal_album_and_track (0.00s)
+    --- PASS: TestComputeTargetPath/single_with_empty_album (0.00s)
+    --- PASS: TestComputeTargetPath/single_with_album_named_Single (0.00s)
+    --- PASS: TestComputeTargetPath/single_with_album_named_Singles_(case-insensitive) (0.00s)
+    --- PASS: TestComputeTargetPath/dangerous_characters_in_album_and_title (0.00s)
+    --- PASS: TestComputeTargetPath/track_title_starting_with_numbers_(21_Guns) (0.00s)
+    --- PASS: TestComputeTargetPath/track_title_starting_with_year_(1979) (0.00s)
+    --- PASS: TestComputeTargetPath/track_title_with_number_prefix_and_digits_title_(01._505) (0.00s)
+    --- PASS: TestComputeTargetPath/artist_and_track_title_starting_with_digit_and_dot_(1.Kla$) (0.00s)
+    --- PASS: TestComputeTargetPath/single_with_1.Kla$_and_empty_album (0.00s)
+    --- PASS: TestComputeTargetPath/artist_and_track_title_starting_with_1.Царь (0.00s)
+PASS
+ok  	music-manager/internal/services/organizer	0.023s
+=== RUN   TestTemplates_AllXForHaveKey
+--- PASS: TestTemplates_AllXForHaveKey (0.00s)
+=== RUN   TestTemplates_ClickHandlersIntegrity
+    template_validator_test.go:136: Обнаружено 449 объявленных JS-методов в static/js/
+--- PASS: TestTemplates_ClickHandlersIntegrity (0.04s)
+=== RUN   TestTemplates_PuddletagSaveButtonNotBlockedInDownloaderMode
+--- PASS: TestTemplates_PuddletagSaveButtonNotBlockedInDownloaderMode (0.00s)
+=== RUN   TestTemplates_NoInlineFetch
+--- PASS: TestTemplates_NoInlineFetch (0.02s)
+PASS
+ok  	music-manager/web	0.074s

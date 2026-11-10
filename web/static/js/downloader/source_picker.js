@@ -27,6 +27,8 @@ document.addEventListener('alpine:init', () => {
         searchQuery: '',
         versionPolicy: "release",
         searchSerial: 0,
+        soundCloudLimit: 30,
+        hasMoreSoundCloud: false,
         explain(e) {
             const names = { title_mismatch: 'Другое название', artist_mismatch: 'Другой исполнитель', version_mismatch: 'Другая версия записи', duration_mismatch: 'Существенное отличие длительности', short_title_mismatch: 'Короткое название не совпало', remix_identity_unknown: 'Не подтверждён тот же ремикс', version_detail_mismatch: 'Другая редакция версии' };
             return (e?.conflicts || []).map(v => names[v] || v).join(' · ');
@@ -96,6 +98,8 @@ document.addEventListener('alpine:init', () => {
         },
 
         reset() {
+            this.soundCloudLimit = 30;
+            this.hasMoreSoundCloud = false;
             this.searchSerial++;
             this.versionPolicy = 'release';
             this.directUrl = '';
@@ -110,14 +114,21 @@ document.addEventListener('alpine:init', () => {
             this.submitSuccess = false;
         },
 
-        async searchCandidates() {
+        loadMoreCandidates() {
+            if (this.isLoadingCandidates || !this.hasMoreSoundCloud) return;
+            this.soundCloudLimit = Math.min(100, this.soundCloudLimit + 30);
+            this.searchCandidates(true);
+        },
+
+        async searchCandidates(expand = false) {
             const serial=++this.searchSerial;
+            if (!expand) this.soundCloudLimit = 30;
             const q = this.searchQuery.trim();
             if (!q && !this.context.title) return;
 
             this.isLoadingCandidates = true;
             this.candidatesError = null;
-            this.candidates = [];
+            if (!expand) this.candidates = [];
             this.stopPreview();
 
             try {
@@ -128,6 +139,7 @@ document.addEventListener('alpine:init', () => {
                     version_policy: this.versionPolicy,
                     isrc: this.context.isrc || '',
                     q: q,
+                    soundcloud_limit: String(this.soundCloudLimit),
                 });
 
                 const res = await window.api.raw(`/api/downloads/candidates?${params.toString()}`);
@@ -139,10 +151,12 @@ document.addEventListener('alpine:init', () => {
                 const data = await res.json();
                 if (serial !== this.searchSerial) return;
                 this.candidates = data.candidates || [];
+                this.hasMoreSoundCloud = this.soundCloudLimit < 100 && this.candidates.filter(candidate => candidate.source === 'soundcloud').length >= this.soundCloudLimit;
                 if (this.candidates.length === 0) {
                     this.candidatesError = 'По запросу кандидатов не найдено. Попробуйте уточнить поисковый запрос.';
                 }
             } catch (err) {
+                if (serial !== this.searchSerial) return;
                 console.error('[SourcePicker] Ошибка поиска:', err);
                 this.candidatesError = err.message || 'Сбой выполнения мульти-поиска';
             } finally {

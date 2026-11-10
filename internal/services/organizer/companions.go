@@ -31,6 +31,16 @@ func FileSHA256(path string) (string, error) {
 
 var companionExtensions = []string{".lrc", ".txt", ".jpg", ".jpeg", ".png", ".webp"}
 
+func maxCompanionExtLen(primaryExt string) int {
+	maxLen := len(primaryExt)
+	for _, ext := range companionExtensions {
+		if len(ext) > maxLen {
+			maxLen = len(ext)
+		}
+	}
+	return maxLen
+}
+
 // MoveTrackWithCompanions moves an audio track and any accompanying lyrics (.lrc, .txt) and images (.jpg, .png).
 // If destMP3 already exists and overwrite is false:
 // - If identical (size and SHA-256 match), srcMP3 is safely removed (deduplication) and destMP3 is returned.
@@ -45,6 +55,19 @@ func MoveTrackWithCompanions(srcMP3, destMP3 string, overwrite bool) (string, er
 	}
 
 	targetMP3 := destMP3
+	baseName := filepath.Base(targetMP3)
+	if len(baseName) > MaxComponentBytes {
+		dir := filepath.Dir(targetMP3)
+		ext := filepath.Ext(targetMP3)
+		maxExt := maxCompanionExtLen(ext)
+		base := strings.TrimSuffix(baseName, ext)
+		maxBaseBytes := MaxComponentBytes - maxExt
+		candBase := strings.TrimRight(TruncateToByteBudget(base, maxBaseBytes), ". ")
+		if candBase == "" {
+			candBase = "Track"
+		}
+		targetMP3 = filepath.Join(dir, candBase+ext)
+	}
 
 	if fileExists(targetMP3) && !overwrite {
 		// Compare size and hash
@@ -70,10 +93,22 @@ func MoveTrackWithCompanions(srcMP3, destMP3 string, overwrite bool) (string, er
 		dir := filepath.Dir(destMP3)
 		ext := filepath.Ext(destMP3)
 		base := strings.TrimSuffix(filepath.Base(destMP3), ext)
+		maxExt := maxCompanionExtLen(ext)
 
 		found := false
 		for n := 1; n < 1000; n++ {
-			candidate := filepath.Join(dir, fmt.Sprintf("%s (%d)%s", base, n, ext))
+			suffix := fmt.Sprintf(" (%d)", n)
+			// Recalculate byte budget so base + suffix + longest companion extension <= MaxComponentBytes (255)
+			maxBaseBytes := MaxComponentBytes - len(suffix) - maxExt
+			if maxBaseBytes <= 0 {
+				maxBaseBytes = 1
+			}
+			candBase := strings.TrimRight(TruncateToByteBudget(base, maxBaseBytes), ". ")
+			if candBase == "" {
+				candBase = "Track"
+				candBase = strings.TrimRight(TruncateToByteBudget(candBase, maxBaseBytes), ". ")
+			}
+			candidate := filepath.Join(dir, fmt.Sprintf("%s%s%s", candBase, suffix, ext))
 			if !fileExists(candidate) {
 				targetMP3 = candidate
 				found = true

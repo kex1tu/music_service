@@ -1,0 +1,18 @@
+=== RUN   TestFullReleaseMatcher_MatchTracklists_Perfect
+--- PASS: TestFullReleaseMatcher_MatchTracklists_Perfect (0.00s)
+=== RUN   TestFullReleaseMatcher_IntroOrBonusMissing_Threshold85
+--- PASS: TestFullReleaseMatcher_IntroOrBonusMissing_Threshold85 (0.00s)
+=== RUN   TestFullReleaseMatcher_RejectWrongAlbum
+--- PASS: TestFullReleaseMatcher_RejectWrongAlbum (0.00s)
+=== RUN   TestFullReleaseMatcher_DurationMismatchReject
+--- PASS: TestFullReleaseMatcher_DurationMismatchReject (0.00s)
+=== RUN   TestFullReleaseMatcher_MatchFullRelease_Success
+--- PASS: TestFullReleaseMatcher_MatchFullRelease_Success (0.00s)
+=== RUN   TestFullReleaseMatcher_SearchReleaseCandidates
+--- PASS: TestFullReleaseMatcher_SearchReleaseCandidates (0.00s)
+=== RUN   TestFullReleaseMatcher_CensorshipRanking_SoundCloudVsYTM
+--- PASS: TestFullReleaseMatcher_CensorshipRanking_SoundCloudVsYTM (0.00s)
+=== RUN   TestMatchTracklists_DirectURL
+--- PASS: TestMatchTracklists_DirectURL (0.00s)
+PASS
+ok  	music-manager/internal/services/resolver	0.008s

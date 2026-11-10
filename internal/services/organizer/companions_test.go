@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestFileSHA256(t *testing.T) {
@@ -240,5 +241,132 @@ func TestCompanionFailurePreservesAudio(t *testing.T) {
 	b, err = os.ReadFile(filepath.Join(dir, "src.lrc"))
 	if err != nil || string(b) != "lyrics" {
 		t.Fatalf("lyrics lost: %q %v", b, err)
+	}
+}
+
+func TestMoveTrackWithCompanions_LongCyrillicCollisionRecalculatesBudget(t *testing.T) {
+	tempDir := t.TempDir()
+	srcDir := filepath.Join(tempDir, "src")
+	destDir := filepath.Join(tempDir, "dest")
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 120 Cyrillic characters = 240 bytes. With prefix "01. " (4 bytes) = 244 bytes base, + ".mp3" (4 bytes) = 248 bytes.
+	longTitle := strings.Repeat("ДлинныйТрек", 22) // 242 bytes
+	longFilename := BuildTrackFilename(1, longTitle, "Track", MaxComponentBytes)
+	destMP3 := filepath.Join(destDir, longFilename)
+
+	// Prepare track 1
+	src1MP3 := filepath.Join(srcDir, "track1.mp3")
+	src1LRC := filepath.Join(srcDir, "track1.lrc")
+	src1JPG := filepath.Join(srcDir, "track1.jpeg")
+	if err := os.WriteFile(src1MP3, []byte("audio-content-track-1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src1LRC, []byte("[00:01.00] track 1 lyrics"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src1JPG, []byte("jpeg-image-track-1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Move track 1 to destMP3
+	dest1, err := MoveTrackWithCompanions(src1MP3, destMP3, false)
+	if err != nil {
+		t.Fatalf("failed to move track 1: %v", err)
+	}
+	if len(filepath.Base(dest1)) > MaxComponentBytes {
+		t.Errorf("dest1 len = %d > %d", len(filepath.Base(dest1)), MaxComponentBytes)
+	}
+	if !fileExists(dest1) {
+		t.Fatalf("dest1 does not exist: %s", dest1)
+	}
+	dest1LRC := strings.TrimSuffix(dest1, ".mp3") + ".lrc"
+	dest1JPG := strings.TrimSuffix(dest1, ".mp3") + ".jpeg"
+	if !fileExists(dest1LRC) || !fileExists(dest1JPG) {
+		t.Fatalf("expected track 1 companions to exist at %s and %s", dest1LRC, dest1JPG)
+	}
+
+	// Prepare track 2 (different content, same destination path to force collision)
+	src2MP3 := filepath.Join(srcDir, "track2.mp3")
+	src2LRC := filepath.Join(srcDir, "track2.lrc")
+	src2JPG := filepath.Join(srcDir, "track2.jpeg")
+	if err := os.WriteFile(src2MP3, []byte("audio-content-track-2-different"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src2LRC, []byte("[00:01.00] track 2 lyrics"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src2JPG, []byte("jpeg-image-track-2"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Move track 2 to same destMP3
+	dest2, err := MoveTrackWithCompanions(src2MP3, destMP3, false)
+	if err != nil {
+		t.Fatalf("failed to move track 2: %v", err)
+	}
+	if dest2 == dest1 {
+		t.Fatalf("track 2 should not overwrite track 1, got same path: %s", dest2)
+	}
+	if len(filepath.Base(dest2)) > MaxComponentBytes {
+		t.Errorf("dest2 len = %d > %d", len(filepath.Base(dest2)), MaxComponentBytes)
+	}
+	if !utf8.ValidString(filepath.Base(dest2)) {
+		t.Errorf("dest2 basename is not valid UTF-8: %s", filepath.Base(dest2))
+	}
+	if !strings.Contains(dest2, " (1).mp3") {
+		t.Errorf("dest2 should contain suffix ' (1).mp3', got %s", dest2)
+	}
+
+	// Verify track 2 companions exist with matching suffix
+	dest2LRC := strings.TrimSuffix(dest2, ".mp3") + ".lrc"
+	dest2JPG := strings.TrimSuffix(dest2, ".mp3") + ".jpeg"
+	if !fileExists(dest2LRC) {
+		t.Fatalf("expected track 2 companion LRC to exist: %s", dest2LRC)
+	}
+	if !fileExists(dest2JPG) {
+		t.Fatalf("expected track 2 companion JPEG to exist: %s", dest2JPG)
+	}
+	if len(filepath.Base(dest2JPG)) > MaxComponentBytes {
+		t.Errorf("dest2 companion JPEG len = %d > %d", len(filepath.Base(dest2JPG)), MaxComponentBytes)
+	}
+
+	// Verify content integrity: track 1 content was not overwritten
+	data1, _ := os.ReadFile(dest1)
+	if string(data1) != "audio-content-track-1" {
+		t.Errorf("track 1 audio content corrupted: %s", string(data1))
+	}
+	data2, _ := os.ReadFile(dest2)
+	if string(data2) != "audio-content-track-2-different" {
+		t.Errorf("track 2 audio content corrupted: %s", string(data2))
+	}
+	lrcData1, _ := os.ReadFile(dest1LRC)
+	if string(lrcData1) != "[00:01.00] track 1 lyrics" {
+		t.Errorf("track 1 lyrics corrupted: %s", string(lrcData1))
+	}
+	lrcData2, _ := os.ReadFile(dest2LRC)
+	if string(lrcData2) != "[00:01.00] track 2 lyrics" {
+		t.Errorf("track 2 lyrics corrupted: %s", string(lrcData2))
+	}
+
+	// Track 3 collision: third track with different content
+	src3MP3 := filepath.Join(srcDir, "track3.mp3")
+	if err := os.WriteFile(src3MP3, []byte("audio-content-track-3"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dest3, err := MoveTrackWithCompanions(src3MP3, destMP3, false)
+	if err != nil {
+		t.Fatalf("failed to move track 3: %v", err)
+	}
+	if !strings.Contains(dest3, " (2).mp3") {
+		t.Errorf("dest3 should contain suffix ' (2).mp3', got %s", dest3)
+	}
+	if len(filepath.Base(dest3)) > MaxComponentBytes {
+		t.Errorf("dest3 len = %d > %d", len(filepath.Base(dest3)), MaxComponentBytes)
 	}
 }

@@ -1,0 +1,133 @@
+=== RUN   TestFileManager_ListFiles
+--- PASS: TestFileManager_ListFiles (0.02s)
+=== RUN   TestFileManager_StreamAudio_RFC7233Range
+--- PASS: TestFileManager_StreamAudio_RFC7233Range (0.01s)
+=== RUN   TestFileManager_StreamTrack_AndMetadata
+--- PASS: TestFileManager_StreamTrack_AndMetadata (0.01s)
+=== RUN   TestFileManager_RenameFile_AndCompanion
+--- PASS: TestFileManager_RenameFile_AndCompanion (0.01s)
+=== RUN   TestFileManager_DeleteFile_AndCleanup
+--- PASS: TestFileManager_DeleteFile_AndCleanup (0.01s)
+=== RUN   TestFileManager_PathTraversal_Security
+=== RUN   TestFileManager_PathTraversal_Security/List_../../etc/passwd
+=== RUN   TestFileManager_PathTraversal_Security/Stream_../../etc/passwd
+=== RUN   TestFileManager_PathTraversal_Security/List_../../../root/.bashrc
+=== RUN   TestFileManager_PathTraversal_Security/Stream_../../../root/.bashrc
+=== RUN   TestFileManager_PathTraversal_Security/List_/etc/shadow
+=== RUN   TestFileManager_PathTraversal_Security/Stream_/etc/shadow
+=== RUN   TestFileManager_PathTraversal_Security/List_folder/../../outside.mp3
+=== RUN   TestFileManager_PathTraversal_Security/Stream_folder/../../outside.mp3
+=== RUN   TestFileManager_PathTraversal_Security/List_folder/safe.mp3%00.exe
+=== RUN   TestFileManager_PathTraversal_Security/Stream_folder/safe.mp3%00.exe
+--- PASS: TestFileManager_PathTraversal_Security (0.01s)
+    --- PASS: TestFileManager_PathTraversal_Security/List_../../etc/passwd (0.00s)
+    --- PASS: TestFileManager_PathTraversal_Security/Stream_../../etc/passwd (0.00s)
+    --- PASS: TestFileManager_PathTraversal_Security/List_../../../root/.bashrc (0.00s)
+    --- PASS: TestFileManager_PathTraversal_Security/Stream_../../../root/.bashrc (0.00s)
+    --- PASS: TestFileManager_PathTraversal_Security/List_/etc/shadow (0.00s)
+    --- PASS: TestFileManager_PathTraversal_Security/Stream_/etc/shadow (0.00s)
+    --- PASS: TestFileManager_PathTraversal_Security/List_folder/../../outside.mp3 (0.00s)
+    --- PASS: TestFileManager_PathTraversal_Security/Stream_folder/../../outside.mp3 (0.00s)
+    --- PASS: TestFileManager_PathTraversal_Security/List_folder/safe.mp3%00.exe (0.00s)
+    --- PASS: TestFileManager_PathTraversal_Security/Stream_folder/safe.mp3%00.exe (0.00s)
+=== RUN   TestFileManager_SearchLibrary
+--- PASS: TestFileManager_SearchLibrary (0.01s)
+=== RUN   TestFileManager_ListLibraryTracks
+--- PASS: TestFileManager_ListLibraryTracks (0.01s)
+=== RUN   TestFileManager_Redownload_Track
+--- PASS: TestFileManager_Redownload_Track (0.01s)
+=== RUN   TestFileManager_Redownload_Album
+--- PASS: TestFileManager_Redownload_Album (0.01s)
+=== RUN   TestFileManager_Redownload_PathTraversalSecurity
+--- PASS: TestFileManager_Redownload_PathTraversalSecurity (0.01s)
+PASS
+ok  	music-manager/internal/features/filemanager	0.135s
+=== RUN   TestScanner_ScanAll
+--- PASS: TestScanner_ScanAll (0.01s)
+=== RUN   TestScanner_GenreAndCompleteness
+--- PASS: TestScanner_GenreAndCompleteness (0.01s)
+=== RUN   TestScanner_InvalidPathDetection
+--- PASS: TestScanner_InvalidPathDetection (0.01s)
+=== RUN   TestScanner_MultiArtistAlbum_Completeness
+--- PASS: TestScanner_MultiArtistAlbum_Completeness (0.01s)
+=== RUN   TestScanner_RemoveFile
+--- PASS: TestScanner_RemoveFile (0.01s)
+=== RUN   TestScanner_SymlinkEscape
+--- PASS: TestScanner_SymlinkEscape (0.01s)
+=== RUN   TestScanner_EmptyAlbumFolder
+--- PASS: TestScanner_EmptyAlbumFolder (0.01s)
+=== RUN   TestScanner_Concurrent
+--- PASS: TestScanner_Concurrent (0.01s)
+=== RUN   TestScanner_DeleteMissingFiles
+--- PASS: TestScanner_DeleteMissingFiles (0.01s)
+=== RUN   TestScanner_CheckIncompleteAlbums_MockDeezer
+--- PASS: TestScanner_CheckIncompleteAlbums_MockDeezer (0.01s)
+=== RUN   TestSelectBestDeezerAlbumScanner
+--- PASS: TestSelectBestDeezerAlbumScanner (0.00s)
+=== RUN   TestScanner_IndexFile_SingleNoAlbum
+--- PASS: TestScanner_IndexFile_SingleNoAlbum (0.01s)
+=== RUN   TestScanner_StartWatcher
+--- PASS: TestScanner_StartWatcher (0.01s)
+PASS
+ok  	music-manager/internal/services/scanner	0.126s
+=== RUN   TestNavidromeReaderAndSubsonicClient
+--- PASS: TestNavidromeReaderAndSubsonicClient (0.01s)
+=== RUN   TestWaveSelectorAndM3UGenerator
+--- PASS: TestWaveSelectorAndM3UGenerator (0.01s)
+=== RUN   TestIcyMetadataBlock
+--- PASS: TestIcyMetadataBlock (0.00s)
+=== RUN   TestNavidromeStatsMatching
+--- PASS: TestNavidromeStatsMatching (0.00s)
+=== RUN   TestIcyStreamerOptionsAndHeaders
+--- PASS: TestIcyStreamerOptionsAndHeaders (0.01s)
+=== RUN   TestWaveSelector_GeneratePlaylist
+--- PASS: TestWaveSelector_GeneratePlaylist (0.02s)
+=== RUN   TestNavidromeSubsonicClient_Errors
+--- PASS: TestNavidromeSubsonicClient_Errors (0.00s)
+=== RUN   TestNavidromeReader_NotAvailable
+--- PASS: TestNavidromeReader_NotAvailable (0.00s)
+=== RUN   TestIcyStreamer_ServeHTTP_LiveStreamWithMetadata
+2026/11/07 09:08:34 [Radio] Client connected from 192.0.2.1:1234 (station: wave, ICY-meta: true)
+2026/11/07 09:08:34 [Radio] Now streaming: The Weeknd - Starboy
+2026/11/07 09:08:34 [Radio] Client disconnected: 192.0.2.1:1234
+--- PASS: TestIcyStreamer_ServeHTTP_LiveStreamWithMetadata (0.01s)
+=== RUN   TestIcyStreamer_ServeHTTP_CleanAudioStreamNoIcy
+2026/11/07 09:08:34 [Radio] Client connected from 192.0.2.1:1234 (station: wave, ICY-meta: false)
+2026/11/07 09:08:34 [Radio] Now streaming: The Weeknd - Starboy
+2026/11/07 09:08:34 [Radio] Client disconnected: 192.0.2.1:1234
+--- PASS: TestIcyStreamer_ServeHTTP_CleanAudioStreamNoIcy (0.01s)
+=== RUN   TestIcyStreamer_ServeHTTP_HEAD_Method
+--- PASS: TestIcyStreamer_ServeHTTP_HEAD_Method (0.01s)
+=== RUN   TestIcyStreamer_ServeHTTP_EmptyLibrary
+--- PASS: TestIcyStreamer_ServeHTTP_EmptyLibrary (0.01s)
+=== RUN   TestIcyStreamer_TokenValidation
+--- PASS: TestIcyStreamer_TokenValidation (0.01s)
+PASS
+ok  	music-manager/internal/services/radio	0.113s
+=== RUN   TestRadarService
+2026/11/07 09:08:34 [Radar] Ошибка получения списка артистов: context canceled
+--- PASS: TestRadarService (0.01s)
+=== RUN   TestRadar_GetRadarFeed_ExcludesDownloadedAndInLibrary
+2026/11/07 09:08:34 [Radar] Сканирование завершено (триггер: manual_test, найдено новинок: 0)
+--- PASS: TestRadar_GetRadarFeed_ExcludesDownloadedAndInLibrary (0.01s)
+=== RUN   TestRadar_MultiArtist_Deduplication
+--- PASS: TestRadar_MultiArtist_Deduplication (0.01s)
+=== RUN   TestRadar_Reconcile_RemovesExistingReleases
+--- PASS: TestRadar_Reconcile_RemovesExistingReleases (0.01s)
+=== RUN   TestRadar_ValidationAndConcurrency
+--- PASS: TestRadar_ValidationAndConcurrency (0.01s)
+=== RUN   TestRadar_ScanArtist_AutoDownload
+2026/11/07 09:08:34 [Radar] Автозагрузка нового релиза: AutoArtist — Brand New Release (https://www.deezer.com/album/2001)
+2026/11/07 09:08:34 [Downloader] Job 07716a894719432895f5a0752627afe6 failed: Ошибка разрешения метаданных: deezer client is not initialized
+--- PASS: TestRadar_ScanArtist_AutoDownload (0.01s)
+=== RUN   TestRadar_ScanAll_AlreadyRunning
+2026/11/07 09:08:34 [Radar] Ошибка получения списка артистов: sql: database is closed
+2026/11/07 09:08:34 [Radar] Сканирование завершено (триггер: first_run, найдено новинок: 0)
+--- PASS: TestRadar_ScanAll_AlreadyRunning (0.01s)
+=== RUN   TestRadar_ScanAll_NoArtists
+2026/11/07 09:08:34 [Radar] Сканирование завершено (триггер: empty_run, найдено новинок: 0)
+--- PASS: TestRadar_ScanAll_NoArtists (0.02s)
+=== RUN   TestRadar_ScanAll_ProgressUpdate
+--- PASS: TestRadar_ScanAll_ProgressUpdate (0.03s)
+PASS
+ok  	music-manager/internal/services/radar	0.126s

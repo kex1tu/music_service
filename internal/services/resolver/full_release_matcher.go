@@ -21,6 +21,7 @@ func ContainsCyrillic(s string) bool {
 // ReleaseCandidateItem представляет отдельного кандидата цельного релиза (альбом/сет/плейлист)
 // со статусом цензуры, соответствием треклиста и детализированным маппингом.
 type ReleaseCandidateItem struct {
+	ResultType        string                  `json:"result_type,omitempty"`
 	MappingLimited    bool                    `json:"mapping_limited"`
 	Policy            VersionPolicy           `json:"version_policy"`
 	Evaluation        MatchEvaluation         `json:"evaluation"`
@@ -138,7 +139,11 @@ func (m *FullReleaseMatcher) MatchFullRelease(ctx context.Context, targetArtist,
 
 // SearchReleaseCandidates выполняет мульти-поиск кандидатов релиза (YouTube Music и SoundCloud)
 // и возвращает отранжированный список кандидатов с маппингом треков и контекстными бейджами цензуры.
-func (m *FullReleaseMatcher) SearchReleaseCandidates(ctx context.Context, targetArtist, targetAlbum string, targetTracks []ResolvedTrack) ([]ReleaseCandidateItem, bool, error) {
+func (m *FullReleaseMatcher) SearchReleaseCandidates(ctx context.Context, targetArtist, targetAlbum string, targetTracks []ResolvedTrack, soundCloudLimit ...int) ([]ReleaseCandidateItem, bool, error) {
+	limit := 30
+	if len(soundCloudLimit) > 0 {
+		limit = SoundCloudCandidateLimit(soundCloudLimit[0])
+	}
 	isCyrillic := ContainsCyrillic(targetArtist) || ContainsCyrillic(targetAlbum)
 	if !isCyrillic {
 		for _, t := range targetTracks {
@@ -194,7 +199,7 @@ func (m *FullReleaseMatcher) SearchReleaseCandidates(ctx context.Context, target
 
 	// 2. Поиск кандидатов на SoundCloud
 	if m.scSearcher != nil {
-		scCands, err := m.scSearcher.SearchSoundCloudSets(ctx, targetArtist, targetAlbum, 3)
+		scCands, err := m.scSearcher.SearchSoundCloudSets(ctx, targetArtist, targetAlbum, limit)
 		if err == nil {
 			for idx, cand := range scCands {
 				mapping, matched := m.MatchTracklists(targetTracks, cand.Tracks)
@@ -207,6 +212,7 @@ func (m *FullReleaseMatcher) SearchReleaseCandidates(ctx context.Context, target
 				items = append(items, ReleaseCandidateItem{
 					ID:           fmt.Sprintf("sc_%d_%s", idx, cand.BrowseID),
 					Source:       "soundcloud_set",
+					ResultType:   cand.ResultType,
 					Title:        cand.Title,
 					Artist:       cand.Artist,
 					URL:          cand.PlaylistID,

@@ -22,6 +22,8 @@ document.addEventListener('alpine:init', () => {
         selectedCandidateIndex: -1,
  versionPolicy: "release",
         searchSerial: 0,
+        soundCloudLimit: 30,
+        hasMoreSoundCloud: false,
         manualOverrides: {}, // targetIdx -> candTrack object
         activeRemapTargetIdx: null,
 
@@ -68,6 +70,8 @@ document.addEventListener('alpine:init', () => {
         },
 
         reset() {
+            this.soundCloudLimit = 30;
+            this.hasMoreSoundCloud = false;
             this.searchSerial++;
             this.versionPolicy = 'release';
             this.isLoading = false;
@@ -89,19 +93,41 @@ document.addEventListener('alpine:init', () => {
             this.errorMessage = '';
         },
 
-        async loadCandidates() {
+        candidateGroups() {
+            return [
+                { type: 'album', label: 'Альбомы', items: [] },
+                { type: 'playlist', label: 'Плейлисты', items: [] },
+            ].map(group => ({
+                ...group,
+                items: this.candidates.map((candidate, index) => ({ candidate, index }))
+                    .filter(entry => (entry.candidate.result_type || (entry.candidate.source === 'soundcloud_set' ? 'playlist' : 'album')) === group.type),
+            })).filter(group => group.items.length > 0);
+        },
+
+        loadMoreCandidates() {
+            if (this.isLoading || !this.hasMoreSoundCloud) return;
+            this.soundCloudLimit = Math.min(100, this.soundCloudLimit + 30);
+            this.loadCandidates(true);
+        },
+
+        async loadCandidates(expand = false) {
             const serial=++this.searchSerial;
+            const selectedURL = expand ? this.currentCandidate()?.url : null;
+            if (!expand) this.soundCloudLimit = 30;
             this.isLoading = true;
             this.errorMessage = '';
-            this.candidates = [];
-            this.selectedCandidateIndex = -1;
-            this.manualOverrides = {};
+            if (!expand) {
+                this.candidates = [];
+                this.selectedCandidateIndex = -1;
+                this.manualOverrides = {};
+            }
 
             try {
                 const params = new URLSearchParams();
                 if (this.artist) params.append('artist', this.artist);
                 if (this.album) params.append('album', this.album);
                 params.append("version_policy",this.versionPolicy);
+                params.append('soundcloud_limit', this.soundCloudLimit);
                 if (this.jobId) params.append('job_id', this.jobId);
                 if (this.targetPath) params.append('path', this.targetPath);
 
@@ -120,10 +146,13 @@ document.addEventListener('alpine:init', () => {
                     this.targetTracks = data.target_tracks;
                 }
                 this.candidates = data.candidates || [];
+                if (expand) this.selectedCandidateIndex = this.candidates.findIndex(candidate => candidate.url === selectedURL);
+                this.hasMoreSoundCloud = this.soundCloudLimit < 100 && this.candidates.filter(candidate => candidate.source === 'soundcloud_set').length >= this.soundCloudLimit;
                 if (this.candidates.length === 0) {
                     this.errorMessage = 'Кандидатов цельного релиза не найдено. Вы можете вставить прямую ссылку на сет или альбом.';
                 }
             } catch (err) {
+                if (serial !== this.searchSerial) return;
                 console.error('[ReleaseSourcePicker] loadCandidates error:', err);
                 this.errorMessage = err.message || 'Сбой загрузки кандидатов релиза';
             } finally {

@@ -226,15 +226,20 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 			convertedDir, _ := s.tmpSandbox.Resolve(filepath.Join(foundJob.ID, "converted"), true)
 			_ = safefs.MkdirAll(convertedDir, 0755)
 			cleanTitle := id3.CleanTitle(title, "Track")
-			safeTitle := sandbox.SanitizeFilename(cleanTitle, "Track")
 			trackNum := 1
 			if foundIdx >= 0 && foundIdx < len(foundJob.Tracks) && foundJob.Tracks[foundIdx].TrackNumber > 0 {
 				trackNum = foundJob.Tracks[foundIdx].TrackNumber
 			}
-			destPath = filepath.Join(convertedDir, fmt.Sprintf("%02d. %s.mp3", trackNum, safeTitle))
+			trackPrefix := fmt.Sprintf("%02d. ", trackNum)
+			maxTitleBytes := 255 - len(trackPrefix) - len(".mp3")
+			if maxTitleBytes <= 0 {
+				maxTitleBytes = 1
+			}
+			safeTitle := sandbox.SanitizeFilenameWithBudget(cleanTitle, "Track", maxTitleBytes)
+			destPath = filepath.Join(convertedDir, fmt.Sprintf("%s%s.mp3", trackPrefix, safeTitle))
 		} else {
 			cleanTitle := id3.CleanTitle(title, "Track")
-			safeName := sandbox.SanitizeFilename(fmt.Sprintf("%s - %s.mp3", artist, cleanTitle), "Track.mp3")
+			safeName := sandbox.SanitizeFilenameWithBudget(fmt.Sprintf("%s - %s.mp3", artist, cleanTitle), "Track.mp3", 255)
 			destPath, _ = s.musicSandbox.Resolve(safeName, false)
 		}
 	}

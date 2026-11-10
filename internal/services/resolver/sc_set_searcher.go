@@ -41,6 +41,8 @@ type scAPITrackItem struct {
 }
 
 type scAPIAlbumItem struct {
+	ResultType   string           `json:"-"`
+	Duration     int64            `json:"duration"`
 	ID           int64            `json:"id"`
 	Title        string           `json:"title"`
 	PermalinkURL string           `json:"permalink_url"`
@@ -357,42 +359,48 @@ func (s *SoundCloudSetSearcher) ParseSetURL(ctx context.Context, setURL string) 
 }
 
 func (s *SoundCloudSetSearcher) querySetsEndpoint(ctx context.Context, endpoint, query, clientID string, limit int) ([]scAPIAlbumItem, error) {
+	page, err := s.querySearchPage(ctx, endpoint, query, clientID, limit, 0)
+	return page.Collection, err
+}
+
+func (s *SoundCloudSetSearcher) querySearchPage(ctx context.Context, endpoint, query, clientID string, limit, offset int) (scAPISearchResponse, error) {
+	var root scAPISearchResponse
 	baseURL := s.apiBaseURL
 	if baseURL == "" {
 		baseURL = "https://api-v2.soundcloud.com"
 	}
 
-	reqURL := fmt.Sprintf("%s/%s?q=%s&client_id=%s&limit=%d",
+	reqURL := fmt.Sprintf("%s/%s?q=%s&client_id=%s&limit=%d&offset=%d&linked_partitioning=1",
 		baseURL,
 		endpoint,
 		url.QueryEscape(query),
 		url.QueryEscape(clientID),
 		limit,
+		offset,
 	)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return nil, err
+		return root, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return root, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("SoundCloud API error: status %d", resp.StatusCode)
+		return root, fmt.Errorf("SoundCloud API error: status %d", resp.StatusCode)
 	}
 
-	var root scAPISearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&root); err != nil {
-		return nil, err
+		return root, err
 	}
 
-	return root.Collection, nil
+	return root, nil
 }
 
 // HydrateTracks запрашивает полную информацию о треках по их ID через батчевый эндпоинт SoundCloud API /tracks?ids=...
@@ -505,6 +513,7 @@ func (s *SoundCloudSetSearcher) convertAlbumToCandidate(album scAPIAlbumItem, hy
 	}
 
 	return AlbumReleaseCandidate{
+		ResultType:  album.ResultType,
 		BrowseID:    fmt.Sprintf("sc_%d", album.ID),
 		PlaylistID:  album.PermalinkURL,
 		Title:       albumTitle,
@@ -517,39 +526,49 @@ func (s *SoundCloudSetSearcher) convertAlbumToCandidate(album scAPIAlbumItem, hy
 
 // SearchSetsAPI выполняет прямой поиск альбомов и сетов через SoundCloud API v2.
 func (s *SoundCloudSetSearcher) SearchSetsAPI(ctx context.Context, query string, limit int) ([]AlbumReleaseCandidate, error) {
-	if limit <= 0 {
-		limit = 5
-	}
+	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+	limit = SoundCloudCandidateLimit(limit)
 
 	clientID, err := s.GetClientID(ctx)
 	if err != nil || clientID == "" {
 		clientID = defaultSoundCloudClientID
 	}
 
-	albums, err := s.querySetsEndpoint(ctx, "search/albums", query, clientID, limit)
-	if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403")) {
-		s.InvalidateClientID()
-		if newID, nErr := s.GetClientID(ctx); nErr == nil && newID != "" {
-			clientID = newID
-			albums, _ = s.querySetsEndpoint(ctx, "search/albums", query, clientID, limit)
+	search := func(endpoint, resultType string) ([]scAPIAlbumItem, error) {
+		items, err := s.querySetsEndpoint(ctx, endpoint, query, clientID, limit)
+		if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403")) {
+			s.InvalidateClientID()
+			if newID, nErr := s.GetClientID(ctx); nErr == nil && newID != "" {
+				clientID = newID
+				items, err = s.querySetsEndpoint(ctx, endpoint, query, clientID, limit)
+			}
 		}
+		for i := range items {
+			items[i].ResultType = resultType
+		}
+		return items, err
 	}
-
-	playlists, _ := s.querySetsEndpoint(ctx, "search/playlists_without_albums", query, clientID, limit)
+	albums, albumErr := search("search/albums", "album")
+	playlists, playlistErr := search("search/playlists_without_albums", "playlist")
+	if albumErr != nil && playlistErr != nil {
+		return nil, fmt.Errorf("SoundCloud search failed: albums: %v; playlists: %w", albumErr, playlistErr)
+	}
 
 	var allItems []scAPIAlbumItem
 	seenURLs := make(map[string]bool)
 
-	for _, it := range albums {
-		if it.PermalinkURL != "" && !seenURLs[it.PermalinkURL] && it.TrackCount > 0 {
-			seenURLs[it.PermalinkURL] = true
-			allItems = append(allItems, it)
-		}
-	}
-	for _, it := range playlists {
-		if it.PermalinkURL != "" && !seenURLs[it.PermalinkURL] && it.TrackCount > 0 {
-			seenURLs[it.PermalinkURL] = true
-			allItems = append(allItems, it)
+	// Alternate provider ranks so albums cannot exhaust the limit before playlists.
+	for i := 0; i < len(albums) || i < len(playlists); i++ {
+		for _, group := range [][]scAPIAlbumItem{albums, playlists} {
+			if i >= len(group) {
+				continue
+			}
+			it := group[i]
+			if it.PermalinkURL != "" && !seenURLs[it.PermalinkURL] && it.TrackCount > 0 {
+				seenURLs[it.PermalinkURL] = true
+				allItems = append(allItems, it)
+			}
 		}
 	}
 
@@ -557,18 +576,16 @@ func (s *SoundCloudSetSearcher) SearchSetsAPI(ctx context.Context, query string,
 		return nil, nil
 	}
 
-	maxProcess := limit
-	if maxProcess > 5 {
-		maxProcess = 5
-	}
-	if len(allItems) > maxProcess {
-		allItems = allItems[:maxProcess]
+	if len(allItems) > limit {
+		allItems = allItems[:limit]
 	}
 
 	var stubIDs []int64
+	seenIDs := make(map[int64]bool)
 	for _, it := range allItems {
 		for _, tr := range it.Tracks {
-			if tr.Title == "" && tr.ID > 0 {
+			if tr.Title == "" && tr.ID > 0 && !seenIDs[tr.ID] {
+				seenIDs[tr.ID] = true
 				stubIDs = append(stubIDs, tr.ID)
 			}
 		}
@@ -605,7 +622,7 @@ func (s *SoundCloudSetSearcher) SearchSoundCloudSets(ctx context.Context, artist
 
 	cleanArt := strings.TrimSpace(artist)
 	cleanAlb := strings.TrimSpace(album)
-	if cleanArt == "" || cleanAlb == "" {
+	if cleanArt == "" && cleanAlb == "" {
 		return nil, nil
 	}
 
@@ -615,5 +632,5 @@ func (s *SoundCloudSetSearcher) SearchSoundCloudSets(ctx context.Context, artist
 		return candidates, nil
 	}
 
-	return nil, nil
+	return nil, err
 }

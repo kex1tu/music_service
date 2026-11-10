@@ -25,6 +25,9 @@
                     <h2 id="preflight-modal-title" class="text-sm sm:text-base font-bold text-white tracking-tight flex items-center gap-2">
                         <span>Предпросмотр релиза</span>
                         <span class="font-mono text-xs text-content-muted uppercase tracking-wider bg-surface-input px-1.5 py-0.5 rounded border border-surface-border">Pre-Flight</span>
+                        <template x-if="$store.preflight.release && $store.preflight.release.is_playlist">
+                            <span class="font-mono text-xs text-amber-400 uppercase tracking-wider bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20">Плейлист</span>
+                        </template>
                     </h2>
                     <p class="text-xs text-content-secondary truncate max-w-xs sm:max-w-md" x-text="$store.preflight.url"></p>
                 </div>
@@ -84,14 +87,29 @@
                             <template x-if="$store.preflight.release.genre">
                                 <span>• <span x-text="$store.preflight.release.genre"></span></span>
                             </template>
+                            <template x-if="$store.preflight.summary && $store.preflight.summary.skipped_tracks_count > 0">
+                                <span class="text-amber-400 font-medium" x-text="`• ${$store.preflight.summary.fetched_tracks_count || $store.preflight.tracks.length} получено, ${$store.preflight.summary.skipped_tracks_count} пропущено`"></span>
+                            </template>
                         </div>
 
                         <!-- Сводка статистики (на Desktop подробная, на мобилке скрыта для разгрузки) -->
                         <div class="hidden md:block pt-3 border-t border-surface-borderSubtle w-full space-y-1.5 text-xs">
                             <div class="flex items-center justify-between text-content-secondary">
                                 <span>Всего треков:</span>
-                                <span class="font-mono text-white font-semibold" x-text="$store.preflight.tracks.length"></span>
+                                <span class="font-mono text-white font-semibold" x-text="$store.preflight.release && $store.preflight.release.total_tracks ? $store.preflight.release.total_tracks : $store.preflight.tracks.length"></span>
                             </div>
+                            <template x-if="$store.preflight.summary && $store.preflight.summary.fetched_tracks_count > 0">
+                                <div class="flex items-center justify-between text-content-secondary">
+                                    <span>Получено:</span>
+                                    <span class="font-mono text-emerald-400 font-semibold" x-text="$store.preflight.summary.fetched_tracks_count"></span>
+                                </div>
+                            </template>
+                            <template x-if="$store.preflight.summary && $store.preflight.summary.skipped_tracks_count > 0">
+                                <div class="flex items-center justify-between text-rose-400">
+                                    <span>Пропущено (нет в каталоге):</span>
+                                    <span class="font-mono font-semibold" x-text="$store.preflight.summary.skipped_tracks_count"></span>
+                                </div>
+                            </template>
                             <div class="flex items-center justify-between text-emerald-400">
                                 <span class="flex items-center gap-1">
                                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>

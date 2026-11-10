@@ -1,0 +1,46 @@
+{{ define "downloader_soundcloud_search" }}
+<details class="border-t border-surface-borderSubtle pt-3.5">
+    <summary class="min-h-[44px] flex items-center cursor-pointer text-sm font-medium text-content-primary">Поиск SoundCloud</summary>
+    <div class="space-y-4 pt-2" x-data>
+        <form @submit.prevent="$store.soundCloudSearch.search()" class="flex flex-col sm:flex-row gap-2">
+            <input type="search" x-model="$store.soundCloudSearch.query" maxlength="200" required
+                aria-label="Поиск треков, альбомов и плейлистов SoundCloud" placeholder="Исполнитель, трек, альбом или плейлист"
+                class="min-h-[44px] min-w-0 flex-1 rounded-md bg-surface-input border border-surface-border px-3 text-sm text-content-primary">
+            <button type="submit" :disabled="$store.soundCloudSearch.loading"
+                class="min-h-[44px] px-4 rounded-md bg-surface-elevated hover:bg-surface-hover text-content-primary text-sm disabled:opacity-50">Найти</button>
+        </form>
+        <p class="text-xs text-content-muted">До 30 результатов за раз: треки, альбомы и плейлисты. Перед скачиванием можно проверить треклист.</p>
+        <p x-show="$store.soundCloudSearch.loading" role="status" class="text-sm text-content-secondary">Поиск SoundCloud…</p>
+        <p x-show="$store.soundCloudSearch.error" x-text="$store.soundCloudSearch.error" role="alert" class="text-sm text-rose-300"></p>
+        <template x-for="group in $store.soundCloudSearch.groups" :key="group.type">
+            <section class="space-y-2">
+                <h3 class="text-sm font-semibold text-content-primary">
+                    <span x-text="$store.soundCloudSearch.labels[group.type]"></span>
+                    <span class="font-mono tabular-nums text-xs text-content-muted" x-text="group.items.length"></span>
+                </h3>
+                <p x-show="group.error" x-text="group.error" role="status" class="text-xs text-amber-300"></p>
+                <p x-show="!group.error && group.items.length === 0" class="text-xs text-content-muted">Ничего не найдено</p>
+                <ul class="divide-y divide-white/[0.06]">
+                    <template x-for="item in group.items" :key="item.url">
+                        <li class="flex flex-col sm:flex-row sm:items-center gap-2 py-2">
+                            <div class="min-w-0 flex-1">
+                                <p class="text-sm text-content-primary break-words" x-text="item.title"></p>
+                                <p class="text-xs text-content-secondary break-words" x-text="item.artist"></p>
+                                <span class="font-mono tabular-nums text-xs text-content-muted"
+                                    x-text="group.type === 'track' ? (item.duration ? item.duration + ' с' : '') : item.track_count + ' треков'"></span>
+                            </div>
+                            <button type="button" @click="$store.soundCloudSearch.preview(item)"
+                                class="min-h-[44px] shrink-0 px-3 rounded-md text-xs text-content-primary bg-surface-elevated hover:bg-surface-hover">Предпросмотр и скачивание</button>
+                        </li>
+                    </template>
+                </ul>
+            </section>
+        </template>
+        <div x-show="$store.soundCloudSearch.groups.length" class="flex flex-wrap items-center justify-between gap-2">
+            <span class="font-mono tabular-nums text-xs text-content-muted" x-text="'Показано: ' + $store.soundCloudSearch.total()"></span>
+            <button type="button" x-show="$store.soundCloudSearch.hasMore()" :disabled="$store.soundCloudSearch.loading"
+                @click="$store.soundCloudSearch.search(true)" class="min-h-[44px] px-4 rounded-md text-sm text-content-primary bg-surface-elevated hover:bg-surface-hover disabled:opacity-50">Загрузить ещё</button>
+        </div>
+    </div>
+</details>
+{{ end }}

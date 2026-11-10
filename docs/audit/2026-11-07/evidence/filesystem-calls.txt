@@ -1,0 +1,139 @@
+internal/config/config.go:167:	if err := os.WriteFile(probeFile, []byte("probe_rw_test"), 0600); err != nil {
+internal/config/config.go:170:	_ = os.Remove(probeFile)
+internal/id3/writer.go:19:	file, err := os.Open(filePath)
+internal/id3/writer.go:133:	tmpFile, err := os.CreateTemp(dir, "tag_write_*.tmp")
+internal/id3/writer.go:138:	defer os.Remove(tmpName)
+internal/id3/writer.go:180:	if err := os.Rename(tmpName, filePath); err != nil {
+internal/id3/reader.go:20:	file, err := os.Open(filePath)
+internal/id3/reader.go:74:	file, err := os.Open(filePath)
+internal/id3/reader.go:193:	file, err := os.Open(filePath)
+internal/api/handlers/tag_cover_handlers.go:78:		if data, err := os.ReadFile(candPath); err == nil {
+internal/api/handlers/tag_audit_album_handlers.go:83:	entries, err := os.ReadDir(fullDir)
+internal/api/handlers/tag_audit_album_handlers.go:277:			_ = os.WriteFile(filepath.Join(fullDir, "cover.jpg"), data, 0644)
+internal/api/handlers/stream_handlers.go:270:		if data, err := os.ReadFile(candPath); err == nil {
+internal/api/handlers/duplicate_handlers.go:139:		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+internal/api/handlers/duplicate_handlers.go:145:			_ = os.Remove(baseNoExt + ".lrc")
+internal/api/handlers/duplicate_handlers.go:146:			_ = os.Remove(baseNoExt + ".txt")
+internal/api/handlers/duplicate_handlers.go:258:			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+internal/api/handlers/duplicate_handlers.go:263:				_ = os.Remove(baseNoExt + ".lrc")
+internal/api/handlers/duplicate_handlers.go:264:				_ = os.Remove(baseNoExt + ".txt")
+internal/features/tageditor/service.go:277:	err := filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
+internal/features/tageditor/service.go:537:		if data, err := os.ReadFile(candPath); err == nil {
+internal/features/tageditor/service.go:1909:		if err := os.Rename(currentFull, targetFull); err != nil {
+internal/features/tageditor/service.go:1926:				_ = os.Rename(curLyr, tarLyr)
+internal/api/handlers/catalog_match_handlers.go:134:			entries, _ := os.ReadDir(fullPath)
+internal/api/handlers/tag_audit_handlers.go:437:			_ = os.WriteFile(coverFile, coverInfo.Data, 0644)
+internal/api/handlers/file_handlers.go:247:		_ = filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
+internal/api/handlers/file_handlers.go:349:	entries, err := os.ReadDir(fullPath)
+internal/api/handlers/file_handlers.go:394:				subEntries, _ := os.ReadDir(itemFull)
+internal/api/handlers/file_handlers.go:497:				_ = os.RemoveAll(fPath)
+internal/api/handlers/file_handlers.go:499:				_ = os.Remove(fPath)
+internal/api/handlers/file_handlers.go:502:				_ = os.Remove(base + ".lrc")
+internal/api/handlers/file_handlers.go:503:				_ = os.Remove(base + ".txt")
+internal/api/handlers/file_handlers.go:541:		if err := os.RemoveAll(fullPath); err != nil {
+internal/api/handlers/file_handlers.go:578:		if err := os.Remove(fullPath); err != nil {
+internal/api/handlers/file_handlers.go:586:			_ = os.Remove(base + ".lrc")
+internal/api/handlers/file_handlers.go:587:			_ = os.Remove(base + ".txt")
+internal/api/handlers/file_handlers.go:588:			_ = os.Remove(base + ".jpg")
+internal/api/handlers/file_handlers.go:589:			_ = os.Remove(base + ".jpeg")
+internal/api/handlers/file_handlers.go:590:			_ = os.Remove(base + ".png")
+internal/api/handlers/file_handlers.go:591:			_ = os.Remove(base + ".webp")
+internal/services/resolver/cookies.go:26:	f, err := os.Open(cleanPath)
+internal/api/handlers/backfill_handlers.go:25:			entries, _ := os.ReadDir(fullPath)
+internal/api/handlers/backfill_handlers.go:103:			entries, _ := os.ReadDir(fullJobDir)
+internal/api/handlers/file_rename_handlers.go:176:		if err := os.Rename(currentFull, targetFull); err != nil {
+internal/api/handlers/file_rename_handlers.go:193:				_ = os.Rename(curLyr, tarLyr)
+internal/api/handlers/batch_covers_handlers.go:339:	if err := os.WriteFile(coverPath, coverBytes, 0644); err != nil {
+internal/api/handlers/batch_covers_handlers.go:345:	entries, err := os.ReadDir(fullDir)
+internal/api/handlers/batch_covers_handlers.go:363:		_ = os.WriteFile(trackCoverPath, coverBytes, 0644)
+internal/api/handlers/reorganize_handlers.go:53:			entries, _ := os.ReadDir(fullPath)
+internal/api/handlers/reorganize_handlers.go:371:	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+internal/api/handlers/reorganize_handlers.go:385:	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+internal/api/handlers/tag_handlers.go:130:		err := filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
+internal/features/audit/service.go:262:	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+internal/features/audit/service.go:273:			_ = os.Remove(companionFull)
+internal/features/audit/service.go:934:	if err := os.WriteFile(coverPath, coverBytes, 0644); err != nil {
+internal/features/audit/service.go:939:	entries, err := os.ReadDir(fullDir)
+internal/features/audit/service.go:957:		_ = os.WriteFile(trackCoverPath, coverBytes, 0644)
+internal/features/audit/service.go:1311:			entries, _ := os.ReadDir(fullPath)
+internal/features/audit/service.go:1351:			entries, _ := os.ReadDir(fullJobDir)
+internal/features/audit/service.go:1933:	entries, err := os.ReadDir(fullDir)
+internal/features/audit/service.go:2187:			_ = os.WriteFile(coverFile, coverInfo.Data, 0644)
+internal/features/audit/service.go:2212:			_ = os.WriteFile(filepath.Join(fullDir, "cover.jpg"), data, 0644)
+internal/features/downloader/handlers.go:1022:			if entries, err := os.ReadDir(realPath); err == nil {
+internal/services/scanner/scanner.go:67:	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+internal/services/scanner/scanner.go:201:	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+internal/features/filemanager/service.go:227:		err = filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
+internal/features/filemanager/service.go:305:		entries, rErr := os.ReadDir(fullPath)
+internal/features/filemanager/service.go:347:					subEntries, _ := os.ReadDir(itemPath)
+internal/features/filemanager/service.go:516:		if err := os.RemoveAll(fullPath); err != nil {
+internal/features/filemanager/service.go:534:	if err := os.Remove(fullPath); err != nil {
+internal/features/filemanager/service.go:541:			_ = os.Remove(baseName + ".lrc")
+internal/features/filemanager/service.go:542:			_ = os.Remove(baseName + ".txt")
+internal/features/filemanager/service.go:543:			_ = os.Remove(baseName + ".jpg")
+internal/features/filemanager/service.go:613:		entries, err := os.ReadDir(dir)
+internal/features/filemanager/service.go:617:		if err := os.Remove(dir); err != nil {
+internal/features/filemanager/service.go:660:		if err := os.Rename(oldFull, newFull); err != nil {
+internal/features/filemanager/service.go:670:				_ = os.Rename(oldBase+companionExt, newBase+companionExt)
+internal/features/filemanager/service.go:709:	file, err := os.Open(fullPath)
+internal/features/filemanager/service.go:858:		if data, rErr := os.ReadFile(candPath); rErr == nil && len(data) > 0 {
+internal/features/filemanager/service.go:951:			_ = filepath.WalkDir(fullPath, func(path string, d os.DirEntry, wErr error) error {
+internal/features/downloader/service.go:604:			_ = os.RemoveAll(jobDir)
+internal/features/downloader/service.go:664:			_ = os.RemoveAll(jobDir)
+internal/features/downloader/service.go:977:						if entries, err := os.ReadDir(fullPath); err == nil {
+internal/features/downloader/service.go:1056:				_ = os.WriteFile(filepath.Join(rawDir, "cover.jpg"), cBytes, 0644)
+internal/features/downloader/service.go:1059:				_ = os.WriteFile(filepath.Join(convertedDir, "cover.jpg"), cBytes, 0644)
+internal/features/downloader/service.go:1432:				_ = os.WriteFile(lrcPath, []byte(lrcRes.Lyrics), 0644)
+internal/features/downloader/service.go:1438:				_ = os.WriteFile(txtPath, []byte(lrcRes.Lyrics), 0644)
+internal/features/downloader/service.go:1745:				coverBytes, _ = os.ReadFile(filepath.Join(convertedDir, "cover.jpg"))
+internal/features/downloader/service.go:1793:	entries, err := os.ReadDir(root)
+internal/features/downloader/service.go:1808:			_ = os.RemoveAll(dirPath)
+internal/features/downloader/service.go:1943:			_ = os.RemoveAll(rawDir)
+internal/features/downloader/service.go:1946:			_ = os.RemoveAll(convDir)
+internal/services/organizer/covers.go:23:	entries, err := os.ReadDir(dir)
+internal/services/organizer/covers.go:40:				_ = os.WriteFile(coverPath, cover.Data, 0644)
+internal/services/organizer/covers.go:44:				_ = os.WriteFile(trackCoverPath, cover.Data, 0644)
+internal/services/organizer/covers.go:62:	entries, err := os.ReadDir(dir)
+internal/services/organizer/covers.go:98:					_ = os.WriteFile(filepath.Join(dir, trackBase+ext), cover.Data, 0644)
+internal/services/organizer/covers.go:101:						_ = os.WriteFile(dirCoverPath, cover.Data, 0644)
+internal/services/organizer/covers.go:198:	return os.WriteFile(targetCoverPath, data, 0644)
+internal/services/organizer/companions.go:15:	f, err := os.Open(path)
+internal/services/organizer/companions.go:54:				_ = os.Remove(srcMP3)
+internal/services/organizer/companions.go:101:				_ = os.Remove(srcComp)
+internal/services/organizer/organizer.go:370:			_ = os.RemoveAll(jobFull)
+internal/services/lyrics/lyrics.go:201:	if data, err := os.ReadFile(lrcPath); err == nil {
+internal/services/lyrics/lyrics.go:212:	if data, err := os.ReadFile(txtPath); err == nil {
+internal/services/lyrics/lyrics.go:263:	if err := os.WriteFile(targetPath, []byte(content), 0644); err != nil {
+internal/services/lyrics/lyrics.go:269:		_ = os.Remove(base + ".txt")
+internal/services/lyrics/lyrics.go:271:		_ = os.Remove(base + ".lrc")
+internal/services/lyrics/lyrics.go:290:		if err := os.Remove(lrcPath); err == nil {
+internal/services/lyrics/lyrics.go:295:		if err := os.Remove(txtPath); err == nil {
+internal/services/downloader/cleaner.go:25:	entries, err := os.ReadDir(root)
+internal/services/downloader/cleaner.go:44:			_ = os.RemoveAll(dirPath)
+internal/services/downloader/media_processor.go:119:		_ = os.Remove(rawFile)
+internal/services/downloader/switch_version.go:147:	defer os.Remove(rawFile)
+internal/services/downloader/switch_version.go:154:	defer os.Remove(tmpMP3File)
+internal/services/downloader/switch_version.go:242:	if err := os.Rename(tmpMP3File, destPath); err != nil {
+internal/services/downloader/switch_version.go:246:		_ = os.Remove(tmpMP3File)
+internal/services/downloader/switch_version.go:313:	in, err := os.Open(src)
+internal/services/downloader/switch_version.go:323:	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+internal/services/organizer/navidrome_fixer.go:25:	err = filepath.WalkDir(musicRootDir, func(path string, d fs.DirEntry, walkErr error) error {
+internal/services/organizer/navidrome_fixer.go:58:	err := filepath.WalkDir(musicRoot, func(fullPath string, d fs.DirEntry, walkErr error) error {
+internal/services/downloader/downloader.go:228:		_ = os.RemoveAll(jobDir)
+internal/services/downloader/downloader.go:251:		_ = os.RemoveAll(jobDir)
+internal/services/downloader/downloader.go:311:			_ = os.RemoveAll(jobDir)
+internal/services/organizer/fs_utils.go:33:	if err := os.Rename(src, dest); err == nil {
+internal/services/organizer/fs_utils.go:42:	return os.Remove(src)
+internal/services/organizer/fs_utils.go:46:	in, err := os.Open(src)
+internal/services/organizer/fs_utils.go:52:	out, err := os.Create(dest)
+internal/services/organizer/fs_utils.go:67:	entries, err := os.ReadDir(dir)
+internal/services/organizer/fs_utils.go:69:		_ = os.Remove(dir)
+internal/services/organizer/fs_utils.go:86:		entries, err := os.ReadDir(curr)
+internal/services/organizer/fs_utils.go:93:		if err := os.Remove(curr); err != nil {
+internal/services/downloader/pipeline.go:336:			_ = os.WriteFile(filepath.Join(rawDir, "cover.jpg"), coverBytes, 0644)
+internal/services/downloader/pipeline.go:337:			_ = os.WriteFile(filepath.Join(convertedDir, "cover.jpg"), coverBytes, 0644)
+internal/services/downloader/pipeline.go:579:			defer os.Remove(rawAudioFile)
+internal/services/radio/m3u.go:77:	if err := os.WriteFile(tmpTarget, []byte(sb.String()), 0644); err != nil {
+internal/services/radio/m3u.go:82:	if err := os.Rename(tmpTarget, absTarget); err != nil {
+internal/services/radio/m3u.go:83:		_ = os.Remove(tmpTarget)
+internal/services/radio/streamer.go:302:	f, err := os.Open(absPath)

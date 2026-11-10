@@ -266,7 +266,8 @@ func (h *DownloadHandler) GetCandidates(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	candidates, err := h.service.Resolver().Matcher().SearchMultiCandidates(r.Context(), artist, title, dur, customQ)
+	soundCloudLimit, _ := strconv.Atoi(r.URL.Query().Get("soundcloud_limit"))
+	candidates, err := h.service.Resolver().Matcher().SearchMultiCandidatesWithLimit(r.Context(), artist, title, dur, customQ, soundCloudLimit)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)

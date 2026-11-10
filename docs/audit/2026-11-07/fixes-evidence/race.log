@@ -1,0 +1,30 @@
+?   	music-manager/cmd/passwordhash	[no test files]
+?   	music-manager/cmd/server	[no test files]
+?   	music-manager/docs/audit/2026-11-07/repro	[no test files]
+ok  	music-manager/internal/api	(cached)
+ok  	music-manager/internal/api/handlers	(cached)
+ok  	music-manager/internal/config	(cached)
+ok  	music-manager/internal/core/auth	(cached)
+ok  	music-manager/internal/core/httputil	(cached)
+ok  	music-manager/internal/core/mediaexec	(cached)
+ok  	music-manager/internal/core/safefs	(cached)
+ok  	music-manager/internal/core/sandbox	(cached)
+ok  	music-manager/internal/db	5.213s
+ok  	music-manager/internal/features/audit	(cached)
+ok  	music-manager/internal/features/downloader	(cached)
+ok  	music-manager/internal/features/filemanager	(cached)
+ok  	music-manager/internal/features/radar	(cached)
+ok  	music-manager/internal/features/radio	(cached)
+ok  	music-manager/internal/features/tageditor	(cached)
+ok  	music-manager/internal/id3	(cached)
+ok  	music-manager/internal/services/censorcheck	(cached)
+ok  	music-manager/internal/services/downloader	(cached)
+ok  	music-manager/internal/services/lyrics	(cached)
+ok  	music-manager/internal/services/organizer	(cached)
+ok  	music-manager/internal/services/radar	(cached)
+ok  	music-manager/internal/services/radio	(cached)
+ok  	music-manager/internal/services/resolver	(cached)
+ok  	music-manager/internal/services/scanner	(cached)
+ok  	music-manager/internal/testkit	(cached)
+?   	music-manager/scratch/audit_audio	[no test files]
+ok  	music-manager/web	(cached)

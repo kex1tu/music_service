@@ -372,7 +372,7 @@ func (s *Service) resolveURL(ctx context.Context, rawURL, source string) (*resol
 
 // PreflightRelease выполняет предварительное разрешение релиза и проверку наличия каждого трека в медиатеке.
 func (s *Service) PreflightRelease(ctx context.Context, rawURL, source string) (*PreflightResponse, error) {
-	cleanURL := strings.TrimSpace(rawURL)
+	cleanURL := resolver.ExtractURLFromInput(rawURL)
 	if cleanURL == "" {
 		return nil, errors.New("URL cannot be empty")
 	}
@@ -447,14 +447,23 @@ func (s *Service) PreflightRelease(ctx context.Context, rawURL, source string) (
 	genre := id3.CanonicalizeGenre(meta.Genre)
 	coverURL := meta.CoverURL
 
+	fetchedTracks := total
+	if meta.FetchedTracks > 0 {
+		fetchedTracks = meta.FetchedTracks
+	}
+	skippedTracks := meta.SkippedTracks
+
 	return &PreflightResponse{
 		Release: PreflightReleaseInfo{
-			Title:       meta.AlbumTitle,
-			Artist:      meta.AlbumArtist,
-			Year:        meta.Year,
-			Genre:       genre,
-			CoverURL:    coverURL,
-			TotalTracks: total,
+			Title:         meta.AlbumTitle,
+			Artist:        meta.AlbumArtist,
+			Year:          meta.Year,
+			Genre:         genre,
+			CoverURL:      coverURL,
+			TotalTracks:   total,
+			FetchedTracks: fetchedTracks,
+			SkippedTracks: skippedTracks,
+			IsPlaylist:    meta.IsPlaylist,
 		},
 		Tracks: preflightTracks,
 		Summary: PreflightSummary{
@@ -462,13 +471,15 @@ func (s *Service) PreflightRelease(ctx context.Context, rawURL, source string) (
 			NewTracksCount:           newCount,
 			ExistingHighQualityCount: highQualityCount,
 			UpgradeAvailableCount:    upgradeCount,
+			FetchedTracksCount:       fetchedTracks,
+			SkippedTracksCount:       skippedTracks,
 		},
 	}, nil
 }
 
 // CreateJobWithOptions создает и ставит в очередь новую задачу загрузки с дополнительными опциями.
 func (s *Service) CreateJobWithOptions(ctx context.Context, rawURL, source string, opts JobOptions) (*Job, error) {
-	cleanURL := strings.TrimSpace(rawURL)
+	cleanURL := resolver.ExtractURLFromInput(rawURL)
 	if cleanURL == "" {
 		return nil, errors.New("URL cannot be empty")
 	}
@@ -1191,8 +1202,13 @@ func (s *Service) processSingleTrack(
 	// Конвертация в MP3 320 kbps CBR
 	job.SetStepAndStatus(fmt.Sprintf("Конвертация трека %d/%d: %s в MP3 320k", trackIdx, total, track.Title), StatusConverting)
 	cleanTitle := id3.CleanTitle(track.Title, fmt.Sprintf("Track_%02d", trackIdx))
-	safeTitle := sandbox.SanitizeFilename(cleanTitle, fmt.Sprintf("Track_%02d", trackIdx))
-	mp3Filename := fmt.Sprintf("%02d. %s.mp3", track.TrackNumber, safeTitle)
+	trackPrefix := fmt.Sprintf("%02d. ", track.TrackNumber)
+	maxTitleBytes := 255 - len(trackPrefix) - len(".mp3")
+	if maxTitleBytes <= 0 {
+		maxTitleBytes = 1
+	}
+	safeTitle := sandbox.SanitizeFilenameWithBudget(cleanTitle, fmt.Sprintf("Track_%02d", trackIdx), maxTitleBytes)
+	mp3Filename := fmt.Sprintf("%s%s.mp3", trackPrefix, safeTitle)
 	mp3Path := filepath.Join(convertedDir, mp3Filename)
 
 	if err := s.transcodeToMP3(ctx, rawAudioFile, mp3Path); err != nil {
@@ -1211,10 +1227,16 @@ func (s *Service) processSingleTrack(
 	albArt := strings.TrimSpace(track.AlbumArtist)
 	alb := strings.TrimSpace(track.Album)
 	if alb == "" {
-		alb = meta.AlbumTitle
+		if meta.IsPlaylist {
+			alb = track.Title
+		} else {
+			alb = meta.AlbumTitle
+		}
 	}
 	if albArt == "" {
-		albArt = meta.AlbumArtist
+		if !meta.IsPlaylist {
+			albArt = meta.AlbumArtist
+		}
 	}
 	if albArt == "" && art != "" {
 		albArt = art
@@ -1252,15 +1274,23 @@ func (s *Service) processSingleTrack(
 	_, syncedTracks := id3.SyncAlbumArtistAndTrackArtists(albArt, []id3.TrackTags{tagData})
 	tagData = syncedTracks[0]
 
+	// Индивидуальная обложка трека для плейлистов или релизов с разными обложками
+	trackCoverBytes := coverBytes
+	if track.CoverURL != nil && *track.CoverURL != "" && (meta.IsPlaylist || len(coverBytes) == 0) {
+		if tcBytes, err := s.downloadCover(ctx, *track.CoverURL); err == nil && len(tcBytes) > 0 {
+			trackCoverBytes = tcBytes
+		}
+	}
+
 	var cover *id3.CoverInfo
-	if len(coverBytes) > 0 {
+	if len(trackCoverBytes) > 0 {
 		mime := "image/jpeg"
-		if bytes.HasPrefix(coverBytes, []byte("\x89PNG")) {
+		if bytes.HasPrefix(trackCoverBytes, []byte("\x89PNG")) {
 			mime = "image/png"
 		}
 		cover = &id3.CoverInfo{
 			MimeType: mime,
-			Data:     coverBytes,
+			Data:     trackCoverBytes,
 		}
 	}
 
@@ -1271,19 +1301,23 @@ func (s *Service) processSingleTrack(
 	var spots []censorcheck.QuickListenSpot
 	if s.lyrics != nil {
 		primaryArt := resolver.ExtractPrimaryArtist(track.Artist)
-		lrcRes, _ := s.lyrics.SearchLyrics(ctx, primaryArt, track.Title, meta.AlbumTitle, track.Duration)
+		lyricsAlbum := alb
+		if lyricsAlbum == "" && !meta.IsPlaylist {
+			lyricsAlbum = meta.AlbumTitle
+		}
+		lrcRes, _ := s.lyrics.SearchLyrics(ctx, primaryArt, track.Title, lyricsAlbum, track.Duration)
 		if (lrcRes == nil || lrcRes.Lyrics == "") && primaryArt != track.Artist {
-			lrcRes, _ = s.lyrics.SearchLyrics(ctx, track.Artist, track.Title, meta.AlbumTitle, track.Duration)
+			lrcRes, _ = s.lyrics.SearchLyrics(ctx, track.Artist, track.Title, lyricsAlbum, track.Duration)
 		}
 		if lrcRes != nil && lrcRes.Lyrics != "" {
 			if lrcRes.Synced {
-				lrcFilename := fmt.Sprintf("%02d. %s.lrc", track.TrackNumber, safeTitle)
+				lrcFilename := fmt.Sprintf("%s%s.lrc", trackPrefix, safeTitle)
 				lrcPath := filepath.Join(convertedDir, lrcFilename)
 				_ = safefs.WriteFile(lrcPath, []byte(lrcRes.Lyrics), 0644)
 
 				spots = censorcheck.ExtractSpots(lrcRes.Lyrics, 3)
 			} else {
-				txtFilename := fmt.Sprintf("%02d. %s.txt", track.TrackNumber, safeTitle)
+				txtFilename := fmt.Sprintf("%s%s.txt", trackPrefix, safeTitle)
 				txtPath := filepath.Join(convertedDir, txtFilename)
 				_ = safefs.WriteFile(txtPath, []byte(lrcRes.Lyrics), 0644)
 			}
@@ -1632,14 +1666,18 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 
 // GetCandidates выполняет поиск кандидатов для ручной привязки.
 func (s *Service) GetCandidates(ctx context.Context, artist, title string, duration int, query string, isrc ...string) ([]resolver.CandidateTrackItem, error) {
-	if s.matcher == nil {
-		return nil, errors.New("audio matcher is not available")
-	}
-	items, err := s.matcher.SearchMultiCandidates(ctx, artist, title, duration, query)
 	code := ""
 	if len(isrc) > 0 {
 		code = isrc[0]
 	}
+	return s.GetCandidatesWithLimit(ctx, artist, title, duration, query, code, 30)
+}
+
+func (s *Service) GetCandidatesWithLimit(ctx context.Context, artist, title string, duration int, query, code string, limit int) ([]resolver.CandidateTrackItem, error) {
+	if s.matcher == nil {
+		return nil, errors.New("audio matcher is not available")
+	}
+	items, err := s.matcher.SearchMultiCandidatesWithLimit(ctx, artist, title, duration, query, limit)
 	if s.repo != nil {
 		if pin, e := s.repo.GetPinnedSource(ctx, resolver.BuildCacheKey(code, artist, title)); e == nil && pin != nil && resolver.IsAllowedURL(pin.PinnedURL) {
 			found := false

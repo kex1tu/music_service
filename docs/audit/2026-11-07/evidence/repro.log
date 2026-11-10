@@ -1,0 +1,5 @@
+redownload: queue_error=ошибка постановки задачи в очередь загрузчика: injected queue failure original_missing=true
+delete_root_alias: error=<nil> root_missing=true
+resolve_then_swap: outside_read=true error=<nil>
+companion_collision: source_missing=true destination="old-lyrics"
+session_cookie: session_token=fixture-token; Path=/; Max-Age=604800; HttpOnly; SameSite=Strict

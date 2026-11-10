@@ -1,0 +1,34 @@
+?   	music-manager/cmd/server	[no test files]
+?   	music-manager/docs/audit/2026-11-07/repro	[no test files]
+ok  	music-manager/internal/api	40.174s
+ok  	music-manager/internal/api/handlers	7.267s
+ok  	music-manager/internal/config	2.235s
+ok  	music-manager/internal/core/auth	4.824s
+ok  	music-manager/internal/core/httputil	7.850s
+ok  	music-manager/internal/core/mediaexec	1.281s
+ok  	music-manager/internal/core/safefs	1.020s
+ok  	music-manager/internal/core/sandbox	1.017s
+--- FAIL: TestSQLite_HighConcurrencyWAL (5.41s)
+    concurrency_stress_test.go:157: Completed 500 mixed operations across 50 concurrent goroutines in 5.135721804s
+    concurrency_stress_test.go:169: expected 500 operations to complete within 5 seconds, took 5.135721804s
+FAIL
+FAIL	music-manager/internal/db	12.401s
+ok  	music-manager/internal/features/audit	13.252s
+ok  	music-manager/internal/features/downloader	26.047s
+ok  	music-manager/internal/features/filemanager	2.750s
+ok  	music-manager/internal/features/radar	1.937s
+ok  	music-manager/internal/features/radio	2.165s
+ok  	music-manager/internal/features/tageditor	8.859s
+ok  	music-manager/internal/id3	8.749s
+ok  	music-manager/internal/services/censorcheck	1.068s
+ok  	music-manager/internal/services/downloader	6.218s
+ok  	music-manager/internal/services/lyrics	1.048s
+ok  	music-manager/internal/services/organizer	1.284s
+ok  	music-manager/internal/services/radar	2.999s
+ok  	music-manager/internal/services/radio	2.867s
+ok  	music-manager/internal/services/resolver	2.339s
+ok  	music-manager/internal/services/scanner	4.247s
+ok  	music-manager/internal/testkit	5.869s
+?   	music-manager/scratch/audit_audio	[no test files]
+ok  	music-manager/web	4.658s
+FAIL

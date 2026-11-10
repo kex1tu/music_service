@@ -1,0 +1,1 @@
+internal/services/downloader/job.go:98:9: return copies lock value: music-manager/internal/services/downloader.DownloadJob contains sync.RWMutex

@@ -1,0 +1,6 @@
+go version go1.26.0 linux/amd64
+1
+/home/kex1tu/.local/bin/yt-dlp: Python script, ASCII text executable
+ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023 the FFmpeg developers
+aria2 version 1.37.0
+songrec 0.7.4

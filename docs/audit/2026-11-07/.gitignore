@@ -1,0 +1,3 @@
+# Keep reproducible audit logs available when the report is committed.
+!evidence/*.log
+!fixes-evidence/*.log

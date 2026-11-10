@@ -1,0 +1,7 @@
+Статическая проверка .github/workflows/deploy.yml:
+- У каждого из 6 deploy steps установлен один и тот же if по event/target/matrix.server.id.
+- push: обе цели.
+- workflow_dispatch target=all: обе цели.
+- workflow_dispatch target=nl_music: только nl_music.
+- workflow_dispatch target=server2: только server2.
+SSH, upload, restart и rollback на реальных серверах не выполнялись.

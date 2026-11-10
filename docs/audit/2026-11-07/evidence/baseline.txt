@@ -1,0 +1,7 @@
+ PROGRESS.md                                        |  22 +
+ .../services/resolver/full_release_matcher_test.go | 146 +++++++
+ internal/services/resolver/sc_set_searcher.go      | 468 ++++++++++++++++++---
+ internal/services/resolver/sc_set_searcher_test.go | 229 ++++++++++
+ 4 files changed, 802 insertions(+), 63 deletions(-)
+be3a3c89e1adb352727232f4d1abc062cda3db5b
+go version go1.26.0 linux/amd64

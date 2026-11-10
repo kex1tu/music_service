@@ -1,0 +1,140 @@
+=== RUN   TestFileManager_ListFiles
+--- FAIL: TestFileManager_ListFiles (0.02s)
+panic: httptest: failed to listen on a port: listen tcp6 [::1]:0: socket: operation not permitted [recovered, repanicked]
+
+goroutine 8 [running]:
+testing.tRunner.func1.2({0x9e7320, 0x312e170f0160})
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:1974 +0x232
+testing.tRunner.func1()
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:1977 +0x349
+panic({0x9e7320?, 0x312e170f0160?})
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/runtime/panic.go:860 +0x13a
+net/http/httptest.newLocalListener()
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/net/http/httptest/server.go:72 +0xda
+net/http/httptest.NewUnstartedServer(...)
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/net/http/httptest/server.go:120
+net/http/httptest.NewServer({0xac2440, 0x312e16ec63c0})
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/net/http/httptest/server.go:107 +0x25
+music-manager/internal/testkit.(*TestEnv).Mount(0x312e1704e120, {0xac2440, 0x312e16ec63c0})
+	/home/kex1tu/Рабочий стол/music download/music-manager/internal/testkit/testenv.go:136 +0x85
+music-manager/internal/features/filemanager_test.setupFileManagerEnv(0x312e16f6c488)
+	/home/kex1tu/Рабочий стол/music download/music-manager/internal/features/filemanager/feature_test.go:83 +0x347
+music-manager/internal/features/filemanager_test.TestFileManager_ListFiles(0x312e16f6c488)
+	/home/kex1tu/Рабочий стол/music download/music-manager/internal/features/filemanager/feature_test.go:90 +0x2a
+testing.tRunner(0x312e16f6c488, 0xaba220)
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:2036 +0xea
+created by testing.(*T).Run in goroutine 1
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:2101 +0x4c5
+FAIL	music-manager/internal/features/filemanager	0.024s
+=== RUN   TestSQLite_HighConcurrencyWAL
+    concurrency_stress_test.go:157: Completed 500 mixed operations across 50 concurrent goroutines in 327.459262ms
+--- PASS: TestSQLite_HighConcurrencyWAL (0.35s)
+=== RUN   TestDB_OpenAndQueries
+--- PASS: TestDB_OpenAndQueries (0.01s)
+=== RUN   TestAppSettings
+--- PASS: TestAppSettings (0.01s)
+=== RUN   TestSoundCloudCache
+--- PASS: TestSoundCloudCache (0.02s)
+=== RUN   TestDB_SearchLibrary
+--- PASS: TestDB_SearchLibrary (0.02s)
+=== RUN   TestDB_ConcurrentWALStress
+--- PASS: TestDB_ConcurrentWALStress (0.37s)
+=== RUN   TestDB_GetTracksMetadataCache
+--- PASS: TestDB_GetTracksMetadataCache (0.01s)
+=== RUN   TestDB_PinnedSources
+--- PASS: TestDB_PinnedSources (0.01s)
+=== RUN   TestRadarAndRadioQueries
+--- PASS: TestRadarAndRadioQueries (0.01s)
+PASS
+ok  	music-manager/internal/db	0.822s
+=== RUN   TestScanner_ScanAll
+--- PASS: TestScanner_ScanAll (0.01s)
+=== RUN   TestScanner_GenreAndCompleteness
+--- PASS: TestScanner_GenreAndCompleteness (0.01s)
+=== RUN   TestScanner_InvalidPathDetection
+--- PASS: TestScanner_InvalidPathDetection (0.03s)
+=== RUN   TestScanner_MultiArtistAlbum_Completeness
+--- PASS: TestScanner_MultiArtistAlbum_Completeness (0.03s)
+=== RUN   TestScanner_RemoveFile
+--- PASS: TestScanner_RemoveFile (0.02s)
+=== RUN   TestScanner_SymlinkEscape
+--- PASS: TestScanner_SymlinkEscape (0.02s)
+=== RUN   TestScanner_EmptyAlbumFolder
+--- PASS: TestScanner_EmptyAlbumFolder (0.02s)
+=== RUN   TestScanner_Concurrent
+--- PASS: TestScanner_Concurrent (0.02s)
+=== RUN   TestScanner_DeleteMissingFiles
+--- PASS: TestScanner_DeleteMissingFiles (0.02s)
+=== RUN   TestScanner_CheckIncompleteAlbums_MockDeezer
+--- FAIL: TestScanner_CheckIncompleteAlbums_MockDeezer (0.00s)
+panic: httptest: failed to listen on a port: listen tcp6 [::1]:0: socket: operation not permitted [recovered, repanicked]
+
+goroutine 101 [running]:
+testing.tRunner.func1.2({0x9d18c0, 0x12e65401e9a0})
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:1974 +0x232
+testing.tRunner.func1()
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:1977 +0x349
+panic({0x9d18c0?, 0x12e65401e9a0?})
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/runtime/panic.go:860 +0x13a
+net/http/httptest.newLocalListener()
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/net/http/httptest/server.go:72 +0xda
+net/http/httptest.NewUnstartedServer(...)
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/net/http/httptest/server.go:120
+net/http/httptest.NewServer({0xaa8720, 0xaa06d0})
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/net/http/httptest/server.go:107 +0x25
+music-manager/internal/services/scanner.TestScanner_CheckIncompleteAlbums_MockDeezer(0x12e6542ec008)
+	/home/kex1tu/Рабочий стол/music download/music-manager/internal/services/scanner/scanner_test.go:556 +0x49
+testing.tRunner(0x12e6542ec008, 0xaa05b8)
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:2036 +0xea
+created by testing.(*T).Run in goroutine 1
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:2101 +0x4c5
+FAIL	music-manager/internal/services/scanner	0.180s
+=== RUN   TestNavidromeReaderAndSubsonicClient
+--- FAIL: TestNavidromeReaderAndSubsonicClient (0.02s)
+panic: httptest: failed to listen on a port: listen tcp6 [::1]:0: socket: operation not permitted [recovered, repanicked]
+
+goroutine 21 [running]:
+testing.tRunner.func1.2({0x9b6a20, 0xfcc6aa7ce0})
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:1974 +0x232
+testing.tRunner.func1()
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:1977 +0x349
+panic({0x9b6a20?, 0xfcc6aa7ce0?})
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/runtime/panic.go:860 +0x13a
+net/http/httptest.newLocalListener()
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/net/http/httptest/server.go:72 +0xda
+net/http/httptest.NewUnstartedServer(...)
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/net/http/httptest/server.go:120
+net/http/httptest.NewServer({0xa89da0, 0xa81c70})
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/net/http/httptest/server.go:107 +0x25
+music-manager/internal/services/radio.TestNavidromeReaderAndSubsonicClient(0xfcc6ae4488)
+	/home/kex1tu/Рабочий стол/music download/music-manager/internal/services/radio/radio_test.go:121 +0x43a
+testing.tRunner(0xfcc6ae4488, 0xa81b90)
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:2036 +0xea
+created by testing.(*T).Run in goroutine 1
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:2101 +0x4c5
+FAIL	music-manager/internal/services/radio	0.025s
+=== RUN   TestRadarService
+--- FAIL: TestRadarService (0.02s)
+panic: httptest: failed to listen on a port: listen tcp6 [::1]:0: socket: operation not permitted [recovered, repanicked]
+
+goroutine 8 [running]:
+testing.tRunner.func1.2({0xa0f160, 0x41082701cd0})
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:1974 +0x232
+testing.tRunner.func1()
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:1977 +0x349
+panic({0xa0f160?, 0x41082701cd0?})
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/runtime/panic.go:860 +0x13a
+net/http/httptest.newLocalListener()
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/net/http/httptest/server.go:72 +0xda
+net/http/httptest.NewUnstartedServer(...)
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/net/http/httptest/server.go:120
+net/http/httptest.NewServer({0xafd340, 0xaf4df8})
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/net/http/httptest/server.go:107 +0x25
+music-manager/internal/services/radar.TestRadarService(0x41082838488)
+	/home/kex1tu/Рабочий стол/music download/music-manager/internal/services/radar/radar_test.go:49 +0x65
+testing.tRunner(0x41082838488, 0xaf4cf8)
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:2036 +0xea
+created by testing.(*T).Run in goroutine 1
+	/home/kex1tu/dev/tools/gop/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/src/testing/testing.go:2101 +0x4c5
+FAIL	music-manager/internal/services/radar	0.024s
+FAIL

@@ -181,6 +181,9 @@
                 </template>
 
                 <!-- Список кандидатов -->
+                <button type="button" x-show="$store.sourcePicker.hasMoreSoundCloud" :disabled="$store.sourcePicker.isLoadingCandidates"
+                    @click="$store.sourcePicker.loadMoreCandidates()"
+                    class="min-h-[44px] px-4 rounded-md bg-surface-elevated hover:bg-surface-hover text-sm text-content-primary disabled:opacity-50">Больше треков SoundCloud</button>
                 <template x-if="!$store.sourcePicker.isLoadingCandidates && $store.sourcePicker.candidates.length > 0">
                     <div class="space-y-2 max-h-[380px] overflow-y-auto pr-1">
                         <template x-for="(cand, idx) in $store.sourcePicker.candidates" :key="cand.url || idx">

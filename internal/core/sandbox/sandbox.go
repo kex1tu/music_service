@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 var (
@@ -142,11 +143,35 @@ func (s *PathSandbox) ToRelative(absPath string) (string, error) {
 	return filepath.ToSlash(rel), nil
 }
 
-// SanitizeFilename очищает имя файла от опасных системных символов и разделителей.
-func SanitizeFilename(name string, fallback string) string {
+// TruncateUTF8Bytes усекает строку до maxBytes байт без повреждения multi-byte UTF-8 рун.
+func TruncateUTF8Bytes(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	lastValid := 0
+	for i := 0; i < len(s); {
+		_, size := utf8.DecodeRuneInString(s[i:])
+		if i+size > maxBytes {
+			break
+		}
+		i += size
+		lastValid = i
+	}
+	return s[:lastValid]
+}
+
+// SanitizeFilenameWithBudget очищает имя файла от опасных системных символов и разделителей
+// и ограничивает длину до maxBytes без повреждения UTF-8 рун.
+func SanitizeFilenameWithBudget(name string, fallback string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
 	clean := strings.TrimSpace(name)
 	if clean == "" {
-		return fallback
+		clean = strings.TrimSpace(fallback)
 	}
 
 	// Замена разделителей на ' & '
@@ -154,8 +179,24 @@ func SanitizeFilename(name string, fallback string) string {
 	clean = dangerousFilenameChars.ReplaceAllString(clean, "_")
 	clean = strings.Trim(clean, ". ")
 
+	if len(clean) > maxBytes {
+		clean = strings.TrimRight(TruncateUTF8Bytes(clean, maxBytes), ". ")
+	}
+
 	if clean == "" {
-		return fallback
+		fallbackClean := strings.TrimSpace(fallback)
+		fallbackClean = multiSeparatorRegex.ReplaceAllString(fallbackClean, " & ")
+		fallbackClean = dangerousFilenameChars.ReplaceAllString(fallbackClean, "_")
+		fallbackClean = strings.Trim(fallbackClean, ". ")
+		if len(fallbackClean) > maxBytes {
+			fallbackClean = strings.TrimRight(TruncateUTF8Bytes(fallbackClean, maxBytes), ". ")
+		}
+		clean = fallbackClean
 	}
 	return clean
+}
+
+// SanitizeFilename очищает имя файла от опасных системных символов и разделителей (до 255 байт).
+func SanitizeFilename(name string, fallback string) string {
+	return SanitizeFilenameWithBudget(name, fallback, 255)
 }

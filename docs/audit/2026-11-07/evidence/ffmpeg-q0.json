@@ -1,0 +1,12 @@
+{
+    "programs": [
+
+    ],
+    "streams": [
+        {
+            "codec_name": "mp3",
+            "sample_rate": "44100",
+            "bit_rate": "100268"
+        }
+    ]
+}
