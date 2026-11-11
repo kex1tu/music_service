@@ -1,3 +1,23 @@
+# План реализации: Надёжная обработка обложек и оригиналы Яндекса — 2026-11-11
+
+- **Статус:** `IMPLEMENTED`
+- **Основная область:** `internal/id3/` (`cover_optimize.go`, `writer.go`, `cover_optimize_test.go`).
+- **Обоснование изменений смежных областей:**
+  - `internal/services/resolver/` (`client_yandex.go`, `client_yandex_test.go`): Добавление методов `OriginalCoverURL()` для структур `YandexAlbum`, `YandexPlaylist` и `YandexArtistMeta` (формирование разрешения `orig`) при сохранении 100% обратной совместимости метода `BestCoverURL()` (`1000x1000`). Добавление функции `YandexCoverCandidateURLs(coverURL)` для разделения URL на пару `(origURL, fallbackURL)` (где `origURL` использует `orig`, а `fallbackURL` — `1000x1000`). Изменение необходимо, чтобы клиенты и загрузчик могли безопасно запрашивать максимальное качество с гарантированным fallback.
+  - `internal/features/downloader/` (`service.go`) и `internal/services/downloader/` (`media_processor.go`, `pipeline.go`): Внедрение безопасной двухэтапной загрузки обложек: лимит сетевого ответа (`MaxCoverDownloadBytes = 15 МБ`), проверка `Content-Length`, `io.LimitReader`, удаление заголовка `Authorization` при запросах к CDN, автоматический fallback с `orig` на `1000x1000` для Яндекс Музыки. При ошибке скачивания обложек сохраняется штатная возможность продолжения загрузки и конвертации треков без обложки, с понятным логированием и строгим соблюдением отмены контекста (`ctx.Err() != nil`).
+  - `internal/api/handlers/` (`batch_covers_handlers.go`, `tag_audit_handlers.go`) и `internal/features/audit/` (`service.go`): Защита сетевых запросов `downloadImageWithMime` лимитом байтов, проверкой `Content-Length` и удалением `Authorization`.
+- **Ограничения и инварианты:**
+  - Pure Go, отсутствие ImageMagick/pingo/Python в runtime.
+  - Сохранение единого механизма оптимизации APIC в `internal/id3/cover_optimize.go` (`OptimizeCoverForID3`).
+  - Контроль входных параметров до полного декодирования через `image.DecodeConfig`: лимиты измерений `MaxCoverDimension` (8192 px) и суммарных пикселей `MaxCoverPixels` (36 Мп) с защитой от переполнения при вычислении площади.
+  - Жёсткий бюджет результирующего фрейма APIC `MaxAPICSizeBytes = 1024 * 1024` (1 МиБ) с адаптивным снижением качества/размеров при необходимости.
+  - Возврат `nil, ""` (вместо исходного огромного/поврежденного среза) при поврежденном или неподдерживаемом изображении.
+  - Разделение оригинального файла `cover.jpg` (сохраняемого в staging и переносимого через `organizer`) и оптимизированного APIC-фрейма в MP3.
+  - Отсутствие передачи заголовков авторизации на сторонние CDN хосты.
+  - Отсутствие массового изменения существующих файлов медиатеки.
+
+---
+
 # Интеграция задач 3, 6, 7 и 8 — 2026-11-11
 
 - **№3. Тексты Яндекс Музыки.** Resolver передаёт точный ID в оба downloader-пайплайна. Сервис текстов обращается к Яндексу, затем к LRCLIB. При отмене запроса поиск прекращается. Тексты сохраняются в staging через `safefs` отдельными `.lrc` / `.txt`.

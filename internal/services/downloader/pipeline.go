@@ -333,12 +333,18 @@ func (s *Service) processTracksPipeline(
 	var coverBytes []byte
 	if meta.CoverURL != "" {
 		cBytes, cErr := s.downloadCover(ctx, meta.CoverURL)
+		if ctx.Err() != nil {
+			s.failJob(job, "Загрузка отменена")
+			return
+		}
 		if cErr == nil && len(cBytes) > 0 {
 			coverBytes = cBytes
 			_ = safefs.WriteFile(filepath.Join(rawDir, "cover.jpg"), coverBytes, 0644)
 			_ = safefs.WriteFile(filepath.Join(convertedDir, "cover.jpg"), coverBytes, 0644)
 			relCover, _ := s.tmpSandbox.ToRelative(filepath.Join(convertedDir, "cover.jpg"))
 			job.SetCoverPath(relCover)
+		} else if cErr != nil {
+			log.Printf("[Downloader] Job %s: failed to download album cover (%s): %v, continuing without cover", job.ID, meta.CoverURL, cErr)
 		}
 	}
 

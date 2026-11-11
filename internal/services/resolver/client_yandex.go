@@ -125,6 +125,22 @@ func (a *YandexArtistMeta) AvatarURL() string {
 	return uri
 }
 
+// OriginalAvatarURL возвращает прямую ссылку на оригинальный аватар артиста ('orig').
+func (a *YandexArtistMeta) OriginalAvatarURL() string {
+	uri := a.Cover.URI
+	if uri == "" {
+		uri = a.Cover.Prefix
+	}
+	if uri == "" {
+		return ""
+	}
+	uri = strings.Replace(uri, "%%", "orig", 1)
+	if !strings.HasPrefix(uri, "http://") && !strings.HasPrefix(uri, "https://") {
+		uri = "https://" + uri
+	}
+	return uri
+}
+
 // YandexAlbum представляет метаданные альбома или сингла.
 type YandexAlbum struct {
 	ID          int64              `json:"id"`
@@ -144,6 +160,18 @@ func (alb *YandexAlbum) BestCoverURL() string {
 		return ""
 	}
 	uri := strings.Replace(alb.CoverURI, "%%", "1000x1000", 1)
+	if !strings.HasPrefix(uri, "http://") && !strings.HasPrefix(uri, "https://") {
+		uri = "https://" + uri
+	}
+	return uri
+}
+
+// OriginalCoverURL возвращает ссылку на оригинальное изображение обложки альбома (разрешение 'orig').
+func (alb *YandexAlbum) OriginalCoverURL() string {
+	if alb.CoverURI == "" {
+		return ""
+	}
+	uri := strings.Replace(alb.CoverURI, "%%", "orig", 1)
 	if !strings.HasPrefix(uri, "http://") && !strings.HasPrefix(uri, "https://") {
 		uri = "https://" + uri
 	}
@@ -322,6 +350,73 @@ func (p *YandexPlaylist) BestCoverURL() string {
 		uri = "https://" + uri
 	}
 	return uri
+}
+
+// OriginalCoverURL возвращает ссылку на оригинальное изображение обложки плейлиста (разрешение 'orig').
+func (p *YandexPlaylist) OriginalCoverURL() string {
+	uri := p.Cover.URI
+	if uri == "" {
+		uri = p.Cover.Prefix
+	}
+	if uri == "" {
+		uri = p.OGImage
+	}
+	if uri == "" {
+		return ""
+	}
+	uri = strings.Replace(uri, "%%", "orig", 1)
+	if !strings.HasPrefix(uri, "http://") && !strings.HasPrefix(uri, "https://") {
+		uri = "https://" + uri
+	}
+	return uri
+}
+
+var yandexCoverDimRegex = regexp.MustCompile(`/(?:[0-9]+x[0-9]+|%%|orig)(?:[/?#]|$)`)
+
+// YandexCoverCandidateURLs возвращает пару URL (original, fallback) для обложки Яндекс Музыки.
+// Если переданный URL относится к сервису аватаров/контента Яндекса, первым кандидатом будет оригинал ('orig'),
+// а вторым — проверенное студийное разрешение '1000x1000'.
+// Если переданный URL не относится к Яндекс Музыке, возвращается (coverURL, "").
+func YandexCoverCandidateURLs(coverURL string) (origURL string, fallbackURL string) {
+	trimmed := strings.TrimSpace(coverURL)
+	if trimmed == "" {
+		return "", ""
+	}
+
+	isYandex := false
+	parsed, err := url.Parse(trimmed)
+	if err == nil {
+		host := strings.ToLower(parsed.Host)
+		if strings.Contains(host, "yandex.net") || strings.Contains(host, "yandex.ru") || strings.Contains(host, "yastatic.net") {
+			isYandex = true
+		} else if strings.Contains(parsed.Path, "get-music-content") || strings.Contains(parsed.Path, "get-music-user-playlist") {
+			isYandex = true
+		}
+	} else if strings.Contains(trimmed, "get-music-content") || strings.Contains(trimmed, "get-music-user-playlist") {
+		isYandex = true
+	}
+
+	if !isYandex {
+		return trimmed, ""
+	}
+
+	if strings.Contains(trimmed, "%%") {
+		orig := strings.Replace(trimmed, "%%", "orig", 1)
+		fallback := strings.Replace(trimmed, "%%", "1000x1000", 1)
+		return orig, fallback
+	}
+
+	if loc := yandexCoverDimRegex.FindStringIndex(trimmed); loc != nil {
+		trailing := trimmed[loc[1]:]
+		if loc[1] > 0 && (trimmed[loc[1]-1] == '?' || trimmed[loc[1]-1] == '/' || trimmed[loc[1]-1] == '#') {
+			trailing = trimmed[loc[1]-1:]
+		}
+		orig := trimmed[:loc[0]] + "/orig" + trailing
+		fallback := trimmed[:loc[0]] + "/1000x1000" + trailing
+		return orig, fallback
+	}
+
+	return trimmed, ""
 }
 
 // OwnerName возвращает имя владельца или логин плейлиста.

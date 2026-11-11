@@ -1,5 +1,38 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
+## Надёжная обработка обложек и оригиналы Яндекса (Промпт 5) — 2026-11-11
+
+- **Реализовано:**
+  - `internal/id3/cover_optimize.go`:
+    - Зафиксированы документированные константы: жесткий бюджет фрейма APIC `MaxAPICSizeBytes = 1024 * 1024` (1 MiB), максимальное геометрическое измерение `MaxCoverDimension = 8192` px, максимальное суммарное число пикселей `MaxCoverPixels = 36_000_000` (36 Мп), порог быстрого пропуска без рекодинга `FastJPEGPassSizeBytes = 300 * 1024` (300 КиБ), лимит сетевой загрузки `MaxCoverDownloadBytes = 15 * 1024 * 1024` (15 MiB).
+    - Добавлена функция `ValidateCoverImage(rawCover []byte) (*image.Config, string, error)`, выполняющая парсинг заголовков (`image.DecodeConfig`) без аллокации растра, валидацию геометрии и проверку бюджета пикселей с защитой от переполнения целочисленных типов (`int64(w) * int64(h)`).
+    - Обновлена функция `OptimizeCoverForID3`: сохранен единый механизм оптимизации APIC в проекте. Введен адаптивный цикл кодирования для гарантированного соблюдения бюджета `MaxAPICSizeBytes` (снижение качества JPEG до 50, затем пропорциональное уменьшение размеров). Запрещен возврат исходного среза при превышении бюджета `MaxAPICSizeBytes` или обнаружении декомпрессионных бомб (возвращается `nil, ""`).
+  - `internal/id3/writer.go`:
+    - Запись фрейма `APIC` (`writeAPICFrame`) выполняется только при `len(optData) > 0`, исключая создание поврежденных или пустых фреймов при сбое оптимизации.
+  - `internal/services/resolver/client_yandex.go`:
+    - Подтверждена поддержка оригинальных изображений в сервисе аватаров Яндекс Музыки (разрешение `orig`).
+    - Добавлены методы `OriginalCoverURL()` для `YandexAlbum` и `YandexPlaylist`, а также `OriginalAvatarURL()` для `YandexArtistMeta` (формирование URL с суффиксом `orig`). Сохранена 100% обратная совместимость существующих методов `BestCoverURL()` (`1000x1000`).
+    - Добавлена функция `YandexCoverCandidateURLs(coverURL string) (origURL string, fallbackURL string)` для извлечения пары адресов (оригинал `orig` и fallback `1000x1000`).
+  - `internal/services/downloader/` (`media_processor.go`, `pipeline.go`) и `internal/features/downloader/` (`service.go`):
+    - В функцию `downloadCover` интегрирована ограниченная загрузка оригинала Яндекс Музыки с автоматическим fallback на `1000x1000` при HTTP 404 или ошибке сети.
+    - Введена функция `fetchCoverData` с проверкой `Content-Length > MaxCoverDownloadBytes`, ограничением чтения через `io.LimitReader`, и обязательным удалением заголовка `Authorization` (`req.Header.Del("Authorization")`) при обращении к CDN-хостам обложек.
+    - Реализовано штатное продолжение загрузки, конвертации и тегирования треков без обложки при сбое обоих источников, если контекст не был отменен, с информативным логированием. При отмене контекста (`ctx.Err() != nil`) операция прерывается немедленно.
+    - Разделено сохранение оригинального `cover.jpg` в staging (`tmp_downloads/{job_id}/converted/cover.jpg`) и оптимизированного фрейма APIC внутри MP3.
+  - `internal/api/handlers/` (`batch_covers_handlers.go`, `tag_audit_handlers.go`) и `internal/features/audit/` (`service.go`):
+    - Вспомогательная функция `downloadImageWithMime` защищена лимитом `MaxCoverDownloadBytes`, проверкой `Content-Length` и очисткой `Authorization`.
+- **Проверено:**
+  - `internal/id3/cover_optimize_test.go`: юнит-тесты на валидный JPEG и PNG, большой JPEG (downscaling с сохранением пропорций), маленький JPEG без лишнего перекодирования (pass-through идентичных байтов), отсечение декомпрессионных бомб (завышенные размеры 50000x50000, суммарные пиксели 7000x7000), соблюдение жесткого байтового бюджета APIC `MaxAPICSizeBytes`, защита от обхода лимитов возвратом огромного поврежденного среза.
+  - `internal/services/resolver/client_yandex_test.go`: проверка `OriginalCoverURL()`, `BestCoverURL()`, а также матрицы вариантов `YandexCoverCandidateURLs` (1000x1000, orig, 400x400, %%, mock-сервер, сторонний URL, пустой ввод).
+  - `internal/services/downloader/media_processor_test.go` и `internal/features/downloader/covers_test.go`: mock-тесты сетевой загрузки с превышением `Content-Length`, превышением потокового тела без `Content-Length`, удалением `Authorization`, fallback оригинал → 1000x1000, отказом обеих ссылок и отменой контекста.
+  - `go test -v ./...`: 100% PASS (все пакеты репозитория).
+  - `go test -race -p 1 ./...`: 100% PASS (все 25 пакетов, 0 data races).
+  - `go vet ./...`: 100% PASS (0 замечаний).
+  - `CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go`: успешная статическая сборка бинарника.
+  - `git diff --check`: 0 замечаний по форматированию и пробелам.
+- **Заблокировано / ограничения:**
+  - Тестирование сетевых вызовов проводилось строго на mock-серверах (`httptest.NewServer`). Успешные mock-тесты не гарантируют доступность внешних эндпоинтов `orig` в боевой инфраструктуре Яндекса без авторизации или в случае изменений на стороне CDN.
+  - Коммиты, push и деплой на production-серверы не производились в соответствии с правилами задачи.
+
 ## Интеграция задач 3, 6, 7 и 8 — 2026-11-11
 
 - **№3. Тексты Яндекс Музыки.** Точный каталожный ID проходит через оба пути загрузки и сериализацию очереди. При недоступности Яндекса срабатывает LRCLIB. Текст хранится рядом с MP3 как `.lrc` или `.txt`. Ревью закрыло произвольные адреса хранилища и редиректы, потерю fallback при таймауте и перезапись существующих сопутствующих файлов. Ключ подписи задаётся в `YANDEX_LYRICS_SIGN_KEY`. API Яндекса проверен на mock-ответах, доступ с реальным аккаунтом не проверялся.

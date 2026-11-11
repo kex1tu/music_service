@@ -1087,6 +1087,11 @@ func (s *Service) processTracks(
 				_ = safefs.WriteFile(filepath.Join(convertedDir, "cover.jpg"), cBytes, 0644)
 				job.SetCoverPath(filepath.Join(job.ID, "converted", "cover.jpg"))
 			}
+		} else if ctx.Err() != nil {
+			job.SetError("Загрузка отменена")
+			return
+		} else if err != nil {
+			log.Printf("[Downloader] Job %s: failed to download album cover (%s): %v, continuing without cover", job.ID, meta.CoverURL, err)
 		}
 	}
 
@@ -1279,6 +1284,10 @@ func (s *Service) processSingleTrack(
 	if track.CoverURL != nil && *track.CoverURL != "" && (meta.IsPlaylist || len(coverBytes) == 0) {
 		if tcBytes, err := s.downloadCover(ctx, *track.CoverURL); err == nil && len(tcBytes) > 0 {
 			trackCoverBytes = tcBytes
+		} else if ctx.Err() != nil {
+			return false
+		} else if err != nil {
+			log.Printf("[Downloader] Job %s: failed to download track cover (%s): %v, continuing without track cover", job.ID, *track.CoverURL, err)
 		}
 	}
 
@@ -1466,11 +1475,47 @@ func (s *Service) transcodeToMP3(ctx context.Context, inputRaw, outputMP3 string
 }
 
 func (s *Service) downloadCover(ctx context.Context, coverURL string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, coverURL, nil)
+	if strings.TrimSpace(coverURL) == "" {
+		return nil, errors.New("empty cover URL")
+	}
+
+	origURL, fallbackURL := resolver.YandexCoverCandidateURLs(coverURL)
+
+	data, err := s.fetchCoverData(ctx, origURL)
+	if err == nil && len(data) > 0 {
+		return data, nil
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	if fallbackURL != "" && fallbackURL != origURL {
+		fallbackData, fallbackErr := s.fetchCoverData(ctx, fallbackURL)
+		if fallbackErr == nil && len(fallbackData) > 0 {
+			return fallbackData, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("failed to download original (%v) and fallback 1000x1000 (%w)", err, fallbackErr)
+	}
+
+	return nil, err
+}
+
+func (s *Service) fetchCoverData(ctx context.Context, urlStr string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s.client.Do(req)
+	req.Header.Del("Authorization")
+
+	client := s.client
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1480,7 +1525,23 @@ func (s *Service) downloadCover(ctx context.Context, coverURL string) ([]byte, e
 		return nil, fmt.Errorf("failed to download cover: status %d", resp.StatusCode)
 	}
 
-	return io.ReadAll(resp.Body)
+	if resp.ContentLength > int64(id3.MaxCoverDownloadBytes) {
+		return nil, fmt.Errorf("cover Content-Length %d exceeds maximum allowed %d bytes", resp.ContentLength, id3.MaxCoverDownloadBytes)
+	}
+
+	limitReader := io.LimitReader(resp.Body, int64(id3.MaxCoverDownloadBytes)+1)
+	data, err := io.ReadAll(limitReader)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > int64(id3.MaxCoverDownloadBytes) {
+		return nil, fmt.Errorf("cover size exceeds maximum allowed %d bytes", id3.MaxCoverDownloadBytes)
+	}
+	if len(data) == 0 {
+		return nil, errors.New("empty cover response")
+	}
+
+	return data, nil
 }
 
 func (s *Service) analyzeAudioQuality(ctx context.Context, inputRaw string) *resolver.AudioQualityTelemetry {

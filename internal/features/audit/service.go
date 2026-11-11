@@ -989,6 +989,11 @@ func downloadImageWithMime(ctx context.Context, client *http.Client, urlStr stri
 	if err != nil {
 		return nil, "", err
 	}
+	req.Header.Del("Authorization")
+
+	if client == nil {
+		client = http.DefaultClient
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -1000,9 +1005,20 @@ func downloadImageWithMime(ctx context.Context, client *http.Client, urlStr stri
 		return nil, "", fmt.Errorf("status %d", resp.StatusCode)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	if resp.ContentLength > int64(id3.MaxCoverDownloadBytes) {
+		return nil, "", fmt.Errorf("cover Content-Length %d exceeds limit of %d bytes", resp.ContentLength, id3.MaxCoverDownloadBytes)
+	}
+
+	limitReader := io.LimitReader(resp.Body, int64(id3.MaxCoverDownloadBytes)+1)
+	data, err := io.ReadAll(limitReader)
 	if err != nil {
 		return nil, "", err
+	}
+	if int64(len(data)) > int64(id3.MaxCoverDownloadBytes) {
+		return nil, "", fmt.Errorf("cover size exceeds limit of %d bytes", id3.MaxCoverDownloadBytes)
+	}
+	if len(data) == 0 {
+		return nil, "", errors.New("empty cover body")
 	}
 
 	mime := resp.Header.Get("Content-Type")
