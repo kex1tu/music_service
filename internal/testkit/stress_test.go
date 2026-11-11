@@ -3,6 +3,8 @@ package testkit
 import (
 	"bytes"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -547,7 +549,11 @@ func TestStress_CreateDummyMP3WithTags_ExtendedAndOverwriting(t *testing.T) {
 	}
 
 	// 2. Перезаписываем тот же файл с новыми тегами и обложкой
-	fakeCover := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xD9}
+	var artwork bytes.Buffer
+	if err := jpeg.Encode(&artwork, image.NewRGBA(image.Rect(0, 0, 16, 16)), nil); err != nil {
+		t.Fatal(err)
+	}
+	fakeCover := artwork.Bytes()
 	cover := &id3.CoverInfo{
 		MimeType: "image/jpeg",
 		Data:     fakeCover,

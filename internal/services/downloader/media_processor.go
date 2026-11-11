@@ -207,7 +207,9 @@ func (s *Service) fetchCoverData(ctx context.Context, urlStr string) ([]byte, er
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Del("Authorization")
+	if req.URL.User != nil {
+		return nil, fmt.Errorf("cover URL must not contain user credentials")
+	}
 
 	client := s.client
 	if client == nil {
@@ -251,8 +253,10 @@ type ffprobeFormatDurationOutput struct {
 	} `json:"format"`
 }
 
-// validateDownloadedStreamAudio проверяет, что скачанный файл не является урезанным превью (сниппетом из-за гео-блокировки).
+// validateDownloadedStreamAudio проверяет длительность скачанного файла по порогам короткого превью.
 func validateDownloadedStreamAudio(ctx context.Context, rawFilePath string, expectedDurationSec int) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -293,7 +297,7 @@ func validateDownloadedStreamAudio(ctx context.Context, rawFilePath string, expe
 		return nil // Нечисловое значение, NaN/Inf или некорректная длительность: не блокируем пайплайн
 	}
 
-	// Если файл длится менее 35 секунд, а ожидаемый трек длиннее 60 секунд — это 30-секундный гео-сниппет
+	// Файл короче 35 секунд при ожидаемых более 60 считаем вероятным превью.
 	if actualDuration < 35.0 && expectedDurationSec > 60 {
 		return fmt.Errorf("detected 30s preview snippet (actual: %.1fs, expected: %ds)", actualDuration, expectedDurationSec)
 	}

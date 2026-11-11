@@ -1,8 +1,11 @@
 package testkit
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -274,12 +277,11 @@ func TestCreateDummyMP3_PathTraversalProtection(t *testing.T) {
 func TestCreateDummyMP3WithTags_CoverAndMultiValues(t *testing.T) {
 	env := NewEnv(t)
 
-	// Минимальный JPEG заголовок для фикстуры обложки
-	fakeJPEG := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xD9}
-	cover := &id3.CoverInfo{
-		MimeType: "image/jpeg",
-		Data:     fakeJPEG,
+	var artwork bytes.Buffer
+	if err := jpeg.Encode(&artwork, image.NewRGBA(image.Rect(0, 0, 16, 16)), nil); err != nil {
+		t.Fatal(err)
 	}
+	cover := &id3.CoverInfo{MimeType: "image/jpeg", Data: artwork.Bytes()}
 
 	tags := id3.TrackTags{
 		Title:       "Under Pressure",

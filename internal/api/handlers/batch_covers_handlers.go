@@ -404,7 +404,9 @@ func downloadImageWithMime(ctx context.Context, client *http.Client, urlStr stri
 	if err != nil {
 		return nil, "", err
 	}
-	req.Header.Del("Authorization")
+	if req.URL.User != nil {
+		return nil, "", fmt.Errorf("cover URL must not contain user credentials")
+	}
 
 	if client == nil {
 		client = http.DefaultClient

@@ -2,6 +2,8 @@ package tageditor_test
 
 import (
 	"bytes"
+	"image"
+	"image/jpeg"
 	"net/http"
 	"net/url"
 	"os"
@@ -413,7 +415,11 @@ func TestTagEditor_Puddletag_RenamePattern_DryRun(t *testing.T) {
 func TestTagEditor_CoverArt_Extraction(t *testing.T) {
 	env, _ := setupTagEditorTest(t)
 
-	dummyCoverBytes := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00}
+	var artwork bytes.Buffer
+	if err := jpeg.Encode(&artwork, image.NewRGBA(image.Rect(0, 0, 16, 16)), nil); err != nil {
+		t.Fatal(err)
+	}
+	dummyCoverBytes := artwork.Bytes()
 	cover := &id3.CoverInfo{
 		MimeType: "image/jpeg",
 		Data:     dummyCoverBytes,

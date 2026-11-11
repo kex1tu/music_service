@@ -344,7 +344,7 @@ func (s *Service) processTracksPipeline(
 			relCover, _ := s.tmpSandbox.ToRelative(filepath.Join(convertedDir, "cover.jpg"))
 			job.SetCoverPath(relCover)
 		} else if cErr != nil {
-			log.Printf("[Downloader] Job %s: failed to download album cover (%s): %v, continuing without cover", job.ID, meta.CoverURL, cErr)
+			log.Printf("[Downloader] Job %s: failed to download album cover, continuing without cover", job.ID)
 		}
 	}
 

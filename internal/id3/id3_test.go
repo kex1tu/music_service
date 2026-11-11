@@ -130,7 +130,7 @@ func TestWriteAndReadTags_Roundtrip(t *testing.T) {
 
 	cover := &CoverInfo{
 		MimeType: "image/jpeg",
-		Data:     []byte("\xFF\xD8\xFF\xE0fake_jpeg_data"),
+		Data:     generateTestImage(16, 16, false),
 	}
 
 	if err := WriteTags(filePath, writeTags, cover); err != nil {
@@ -324,4 +324,3 @@ func TestWriteTags_FiltersConflictingTXXX(t *testing.T) {
 		t.Errorf("TXXX:CUSTOM_INFO should have been preserved, but was lost")
 	}
 }
-

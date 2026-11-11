@@ -1,63 +1,11 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
-## Проверка защиты от коротких аудиопревью — 2026-11-11
+## Интеграция задач 4, 5 и 9 — 2026-11-11
 
-- **Реализовано:**
-  - `internal/services/downloader/media_processor.go`:
-    - В `validateDownloadedStreamAudio` добавлена строгая проверка контекста (`ctx.Err()`) перед и после выполнения probe с возвратом `context.Canceled` / `context.DeadlineExceeded`.
-    - Добавлена очистка пробелов и валидация числового значения длительности: пустые строки, нечисловые значения, `NaN`, `+Inf`, `-Inf` и неположительные значения (`<= 0`) явно трактуются как неизвестная длительность и не блокируют пайплайн.
-    - Сохранены неизменными пороговые значения эвристики: `actualDuration < 35.0 && expectedDurationSec > 60` возвращает ошибку превью (`detected 30s preview snippet (actual: %.1fs, expected: %ds)`). Легитимные короткие треки (`expectedDurationSec <= 60`) и треки с неизвестной ожидаемой длительностью (`expectedDurationSec <= 0`) не блокируются.
-  - `internal/services/downloader/switch_version.go`:
-    - Исправлен критический дефект маскировки превью: при смене версии источника для валидации скачанного файла в `downloadAndValidateRawStream` передаётся длительность ожидаемой композиции `expectedDuration` (из исходного трека очереди `tr.Duration`, базы данных `entity.Duration` или замера существующего файла в библиотеке), а не длительность найденного кандидата `candDuration`. Ранее 30-секундный кандидат SoundCloud в кэше с `candDuration = 30` маскировал проверку (`30 > 60 == false`), пропуская гео-сниппеты.
-    - При обнаружении превью невалидный временный файл удаляется из staging, трек в очереди переходит в статус `waiting_source` с сохранением ссылки ручного выбора (`AudioSourceURL = targetURL`, `VersionStatus = "manual"`), трек не становится `ready`, автоматическая смена источника заблокирована.
-  - `internal/features/downloader/service.go`:
-    - В активный вертикальный feature slice загрузчика добавлены методы `downloadAndValidateRawStream` и `validateDownloadedStreamAudio` с единой логикой валидации превью.
-    - В `processSingleTrack` скачивание переведено на `downloadAndValidateRawStream(ctx, streamURL, outTemplate, track.Duration, ...)`: превью-сниппеты отсекаются до этапа конвертации ffmpeg в MP3 320k и тегирования ID3v2.4 как при первичной загрузке, так и при ручной смене версии и бэкфилле.
-  - Тестирование:
-    - `internal/services/downloader/media_processor_test.go`: добавлены тесты матрицы порогов `TestValidateDownloadedStreamAudio_Matrix` (actual ниже/на/выше 35с, expected ниже/на/выше 60с, короткий легитимный трек 20с, неизвестная ожидаемая длительность 0с и -1с), тесты ошибок `TestValidateDownloadedStreamAudio_ProbeErrorsAndContext` (отсутствующий файл, повреждённый файл, отмена контекста, таймаут контекста) и `TestValidateDownloadedStreamAudio_MalformedAndNonNumericJSON` (невалидный JSON, пустая строка, N/A, NaN, Inf, -Inf, 0.0).
-    - `internal/services/downloader/switch_version_test.go`: добавлен регрессионный тест `TestSwitchTrackVersion_PreviewSnippetRegression`, доказывающий, что 30-секундный кандидат в кэше не маскирует проверку превью при ожидаемой длительности 180с, файл удаляется, трек не переходит в `ready`, ссылка ручного выбора сохраняется, а при передаче полноразмерного трека смена версии завершается успешно.
-    - `internal/features/downloader/preview_validation_test.go`: добавлены тесты валидации превью и изоляции пайплайна в feature-слайсе `TestFeaturesDownloader_ValidateDownloadedStreamAudio_Snippet`, `TestFeaturesDownloader_ValidateDownloadedStreamAudio_ProbeErrorsAndContext`, `TestFeaturesDownloader_ProcessSingleTrack_PreviewSnippetBlocked`.
-- **Проверено:**
-  - `go test -v ./...` — 100% PASS (все 26 пакетов).
-  - `go test -race -p 1 ./...` — 100% PASS (0 data races во всех пакетах).
-  - `go vet ./...` — 100% PASS.
-  - `CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешная статическая сборка бинарника (18 МБ).
-  - `git diff --check` — 0 замечаний.
-- **Заблокировано / ограничения:**
-  - Деплой на боевые серверы, git commit, git push и изменение рабочей медиатеки не производились в соответствии с правилами промпта.
-  - Тесты используют синтетический звук (ffmpeg lavfi sine) и моки, реальная доступность внешних API в production не проверялась.
-## Надёжная обработка обложек и оригиналы Яндекса (Промпт 5) — 2026-11-11
-
-- **Реализовано:**
-  - `internal/id3/cover_optimize.go`:
-    - Зафиксированы документированные константы: жесткий бюджет фрейма APIC `MaxAPICSizeBytes = 1024 * 1024` (1 MiB), максимальное геометрическое измерение `MaxCoverDimension = 8192` px, максимальное суммарное число пикселей `MaxCoverPixels = 36_000_000` (36 Мп), порог быстрого пропуска без рекодинга `FastJPEGPassSizeBytes = 300 * 1024` (300 КиБ), лимит сетевой загрузки `MaxCoverDownloadBytes = 15 * 1024 * 1024` (15 MiB).
-    - Добавлена функция `ValidateCoverImage(rawCover []byte) (*image.Config, string, error)`, выполняющая парсинг заголовков (`image.DecodeConfig`) без аллокации растра, валидацию геометрии и проверку бюджета пикселей с защитой от переполнения целочисленных типов (`int64(w) * int64(h)`).
-    - Обновлена функция `OptimizeCoverForID3`: сохранен единый механизм оптимизации APIC в проекте. Введен адаптивный цикл кодирования для гарантированного соблюдения бюджета `MaxAPICSizeBytes` (снижение качества JPEG до 50, затем пропорциональное уменьшение размеров). Запрещен возврат исходного среза при превышении бюджета `MaxAPICSizeBytes` или обнаружении декомпрессионных бомб (возвращается `nil, ""`).
-  - `internal/id3/writer.go`:
-    - Запись фрейма `APIC` (`writeAPICFrame`) выполняется только при `len(optData) > 0`, исключая создание поврежденных или пустых фреймов при сбое оптимизации.
-  - `internal/services/resolver/client_yandex.go`:
-    - Подтверждена поддержка оригинальных изображений в сервисе аватаров Яндекс Музыки (разрешение `orig`).
-    - Добавлены методы `OriginalCoverURL()` для `YandexAlbum` и `YandexPlaylist`, а также `OriginalAvatarURL()` для `YandexArtistMeta` (формирование URL с суффиксом `orig`). Сохранена 100% обратная совместимость существующих методов `BestCoverURL()` (`1000x1000`).
-    - Добавлена функция `YandexCoverCandidateURLs(coverURL string) (origURL string, fallbackURL string)` для извлечения пары адресов (оригинал `orig` и fallback `1000x1000`).
-  - `internal/services/downloader/` (`media_processor.go`, `pipeline.go`) и `internal/features/downloader/` (`service.go`):
-    - В функцию `downloadCover` интегрирована ограниченная загрузка оригинала Яндекс Музыки с автоматическим fallback на `1000x1000` при HTTP 404 или ошибке сети.
-    - Введена функция `fetchCoverData` с проверкой `Content-Length > MaxCoverDownloadBytes`, ограничением чтения через `io.LimitReader`, и обязательным удалением заголовка `Authorization` (`req.Header.Del("Authorization")`) при обращении к CDN-хостам обложек.
-    - Реализовано штатное продолжение загрузки, конвертации и тегирования треков без обложки при сбое обоих источников, если контекст не был отменен, с информативным логированием. При отмене контекста (`ctx.Err() != nil`) операция прерывается немедленно.
-    - Разделено сохранение оригинального `cover.jpg` в staging (`tmp_downloads/{job_id}/converted/cover.jpg`) и оптимизированного фрейма APIC внутри MP3.
-  - `internal/api/handlers/` (`batch_covers_handlers.go`, `tag_audit_handlers.go`) и `internal/features/audit/` (`service.go`):
-    - Вспомогательная функция `downloadImageWithMime` защищена лимитом `MaxCoverDownloadBytes`, проверкой `Content-Length` и очисткой `Authorization`.
-- **Проверено:**
-  - `internal/id3/cover_optimize_test.go`: юнит-тесты на валидный JPEG и PNG, большой JPEG (downscaling с сохранением пропорций), маленький JPEG без лишнего перекодирования (pass-through идентичных байтов), отсечение декомпрессионных бомб (завышенные размеры 50000x50000, суммарные пиксели 7000x7000), соблюдение жесткого байтового бюджета APIC `MaxAPICSizeBytes`, защита от обхода лимитов возвратом огромного поврежденного среза.
-  - `internal/services/resolver/client_yandex_test.go`: проверка `OriginalCoverURL()`, `BestCoverURL()`, а также матрицы вариантов `YandexCoverCandidateURLs` (1000x1000, orig, 400x400, %%, mock-сервер, сторонний URL, пустой ввод).
-  - `internal/services/downloader/media_processor_test.go` и `internal/features/downloader/covers_test.go`: mock-тесты сетевой загрузки с превышением `Content-Length`, превышением потокового тела без `Content-Length`, удалением `Authorization`, fallback оригинал → 1000x1000, отказом обеих ссылок и отменой контекста.
-  - `go test -v ./...`: 100% PASS (все пакеты репозитория).
-  - `go test -race -p 1 ./...`: 100% PASS (все 25 пакетов, 0 data races).
-  - `go vet ./...`: 100% PASS (0 замечаний).
-  - `CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go`: успешная статическая сборка бинарника.
-  - `git diff --check`: 0 замечаний по форматированию и пробелам.
-- **Заблокировано / ограничения:**
-  - Тестирование сетевых вызовов проводилось строго на mock-серверах (`httptest.NewServer`). Успешные mock-тесты не гарантируют доступность внешних эндпоинтов `orig` в боевой инфраструктуре Яндекса без авторизации или в случае изменений на стороне CDN.
-  - Коммиты, push и деплой на production-серверы не производились в соответствии с правилами задачи.
+- **№4. Короткие превью.** Оба загрузчика проверяют длительность перед конвертацией. Ручная смена источника сверяется с длительностью ожидаемой композиции. При отказе выбранная ссылка сохраняется для повторной попытки.
+- **№5. Обложки.** Загрузка ограничена по байтам, декодирование по размерам изображения, а изображение в APIC по размеру. Повреждённые данные в APIC пропускаются. Для обложек Яндекса предусмотрен переход с оригинала на 1000×1000.
+- **№9. SoundCloud.** В выборе источника трека и релиза доступен прямой поиск с независимыми страницами по категориям. Закрытие сохраняет родительский выбор и восстанавливает фокус. Ответы закрытого поиска игнорируются.
+- **Проверки интеграции.** Прошли полный прогон Go-тестов, полный прогон с `-race`, `go vet`, статическая сборка и `git diff --check`. Chrome и Playwright на 360, 390, 412, 430 и 1920 CSS px подтвердили выбор трека и релиза, параллельную догрузку вкладок, Escape, фокус и обработку запоздавшего ответа. Сетевые сценарии проверены на моках.
 
 ## Интеграция задач 3, 6, 7 и 8 — 2026-11-11
 

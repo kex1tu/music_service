@@ -77,14 +77,14 @@ func TestOptimizeCoverForID3_PNGConversion(t *testing.T) {
 	}
 }
 
-func TestOptimizeCoverForID3_FallbackOnCorrupt(t *testing.T) {
-	corruptData := []byte("not an image at all")
-	res, mime := OptimizeCoverForID3(corruptData, 1000, 85)
-	if !bytes.Equal(res, corruptData) {
-		t.Errorf("expected original bytes on decode failure for small data")
-	}
-	if mime != "image/jpeg" {
-		t.Errorf("expected fallback mime image/jpeg, got %s", mime)
+func TestOptimizeCoverForID3_RejectCorruptInput(t *testing.T) {
+	for _, data := range [][]byte{
+		[]byte("not an image at all"),
+		createJPEGWithDimensions(50, 50),
+	} {
+		if result, mime := OptimizeCoverForID3(data, 1000, 85); result != nil || mime != "" {
+			t.Errorf("accepted corrupt cover: %d bytes, MIME %q", len(result), mime)
+		}
 	}
 }
 

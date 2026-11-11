@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"image"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -128,16 +129,12 @@ func TestDownloader_YandexCoverFallback(t *testing.T) {
 }
 
 func TestDownloader_CoverOptimization_Integration(t *testing.T) {
-	// Создаем тестовое изображение большого размера (2000x2000)
-	raw := make([]byte, 100) // fake small
-	opt, mime := id3.OptimizeCoverForID3(raw, 1000, 85)
-	if !bytes.Equal(opt, raw) || mime != "image/jpeg" {
-		t.Errorf("expected pass through for small raw test data")
+	var fixture bytes.Buffer
+	if err := jpeg.Encode(&fixture, image.NewRGBA(image.Rect(0, 0, 16, 16)), nil); err != nil {
+		t.Fatal(err)
 	}
-
-	// Проверяем, что OptimizeCoverForID3 гарантирует декодируемость APIC для реальных изображений
-	img := image.NewRGBA(image.Rect(0, 0, 1500, 1500))
-	var buf bytes.Buffer
-	_, _ = id3.OptimizeCoverForID3(buf.Bytes(), 1000, 85)
-	_ = img
+	optimized, mime := id3.OptimizeCoverForID3(fixture.Bytes(), 1000, 85)
+	if !bytes.Equal(optimized, fixture.Bytes()) || mime != "image/jpeg" {
+		t.Fatalf("expected unchanged small JPEG, got %d bytes, MIME %q", len(optimized), mime)
+	}
 }

@@ -35,6 +35,7 @@ document.addEventListener('alpine:init', () => {
         },
         isLoadingCandidates: false,
         candidates: [],
+        manualSoundCloudCandidate: null,
         candidatesError: null,
         previewingUrl: null,
 
@@ -98,6 +99,8 @@ document.addEventListener('alpine:init', () => {
         },
 
         reset() {
+            const picker = Alpine.store('soundCloudPicker');
+            if (picker?.mode === 'track') picker.close(false);
             this.soundCloudLimit = 30;
             this.hasMoreSoundCloud = false;
             this.searchSerial++;
@@ -106,12 +109,50 @@ document.addEventListener('alpine:init', () => {
             this.searchQuery = '';
             this.isLoadingCandidates = false;
             this.candidates = [];
+            this.manualSoundCloudCandidate = null;
             this.candidatesError = null;
             this.previewingUrl = null;
             this.isSubmitting = false;
             this.submitStep = '';
             this.submitError = null;
             this.submitSuccess = false;
+        },
+
+        openSoundCloudSearch() {
+            const scp = Alpine.store('soundCloudPicker');
+            if (scp) {
+                scp.openForTrack(this.context, document.getElementById('btn-source-picker-sc-search'));
+            }
+        },
+
+        addCustomSoundCloudTrack(item) {
+            if (!item || !item.url) return;
+            const dur = item.duration || 0;
+            const delta = (this.context.expectedDuration > 0 && dur > 0) ? (dur - this.context.expectedDuration) : 0;
+            const cand = {
+                id: item.id || ('sc_' + Math.random().toString(36).slice(2, 8)),
+                source: 'soundcloud',
+                title: item.title,
+                uploader: item.uploader || item.artist || 'SoundCloud',
+                url: item.url,
+                duration: dur,
+                delta_seconds: delta,
+                is_topic: false,
+                score: 100,
+                saved_selection: false,
+                search_incomplete: false,
+            };
+            const existingIdx = this.candidates.findIndex(c => c.url === cand.url);
+            if (existingIdx >= 0) {
+                this.candidates.splice(existingIdx, 1);
+            }
+            this.manualSoundCloudCandidate = cand;
+            this.candidates.unshift(cand);
+            this.activeTab = 'search';
+            this.candidatesError = null;
+            if (Alpine.store('app') && typeof Alpine.store('app').toast === 'function') {
+                Alpine.store('app').toast('Трек SoundCloud добавлен в список кандидатов', 'info');
+            }
         },
 
         loadMoreCandidates() {
@@ -152,6 +193,8 @@ document.addEventListener('alpine:init', () => {
                 if (serial !== this.searchSerial) return;
                 this.candidates = data.candidates || [];
                 this.hasMoreSoundCloud = this.soundCloudLimit < 100 && this.candidates.filter(candidate => candidate.source === 'soundcloud').length >= this.soundCloudLimit;
+                const manual = this.manualSoundCloudCandidate;
+                if (manual) this.candidates = [manual, ...this.candidates.filter(candidate => candidate.url !== manual.url)];
                 if (this.candidates.length === 0) {
                     this.candidatesError = 'По запросу кандидатов не найдено. Попробуйте уточнить поисковый запрос.';
                 }

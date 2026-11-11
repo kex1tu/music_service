@@ -76,9 +76,7 @@ func ValidateCoverImage(rawCover []byte) (*image.Config, string, error) {
 // Уменьшает большие изображения до maxDimension (по умолчанию 1000px) и сжимает в JPEG с качеством quality (по умолчанию 85).
 // Если изображение уже меньше maxDimension и весит до 300 КБ, возвращает исходные байты без лишнего рекодинга.
 // Гарантирует соблюдение жесткого лимита MaxAPICSizeBytes (1 MiB).
-// При поврежденных данных, неподдерживаемом формате или ошибках декодирования возврат исходного среза
-// допускается только для компактных данных в пределах жесткого бюджета MaxAPICSizeBytes;
-// чрезмерно большие срезы (> MaxAPICSizeBytes) и декомпрессионные бомбы отсекаются с возвратом (nil, "").
+// Поврежденные, неподдерживаемые и чрезмерно большие изображения пропускаются.
 func OptimizeCoverForID3(rawCover []byte, maxDimension int, quality int) ([]byte, string) {
 	if len(rawCover) == 0 {
 		return nil, ""
@@ -92,47 +90,23 @@ func OptimizeCoverForID3(rawCover []byte, maxDimension int, quality int) ([]byte
 
 	cfg, format, err := ValidateCoverImage(rawCover)
 	if err != nil {
-		// Если данные превышают жесткий бюджет фрейма APIC или обнаружена декомпрессионная бомба,
-		// возврат среза строго запрещен (возвращаем nil, "")
-		if len(rawCover) > MaxAPICSizeBytes || errors.Is(err, ErrOversizedDimension) || errors.Is(err, ErrOversizedPixels) {
-			return nil, ""
-		}
-		// Для компактных поврежденных/неподдерживаемых срезов (в пределах бюджета)
-		mime := "image/jpeg"
-		if bytes.HasPrefix(rawCover, []byte("\x89PNG")) {
-			mime = "image/png"
-		}
-		return rawCover, mime
-	}
-
-	// Быстрый путь для небольших JPEG (до 300 КБ и в пределах MaxAPICSizeBytes),
-	// если размеры уже не превышают maxDimension. Сохраняем исходное качество без рекодинга.
-	if format == "jpeg" && len(rawCover) <= FastJPEGPassSizeBytes && len(rawCover) <= MaxAPICSizeBytes {
-		if cfg.Width <= maxDimension && cfg.Height <= maxDimension {
-			return rawCover, "image/jpeg"
-		}
+		return nil, ""
 	}
 
 	src, _, err := image.Decode(bytes.NewReader(rawCover))
 	if err != nil {
-		if len(rawCover) > MaxAPICSizeBytes {
-			return nil, ""
-		}
-		mime := "image/jpeg"
-		if bytes.HasPrefix(rawCover, []byte("\x89PNG")) {
-			mime = "image/png"
-		}
-		return rawCover, mime
+		return nil, ""
+	}
+	if format == "jpeg" && len(rawCover) <= FastJPEGPassSizeBytes &&
+		cfg.Width <= maxDimension && cfg.Height <= maxDimension {
+		return rawCover, "image/jpeg"
 	}
 
 	bounds := src.Bounds()
 	w := bounds.Dx()
 	h := bounds.Dy()
 	if w <= 0 || h <= 0 {
-		if len(rawCover) > MaxAPICSizeBytes {
-			return nil, ""
-		}
-		return rawCover, "image/jpeg"
+		return nil, ""
 	}
 
 	targetW := w
@@ -169,9 +143,6 @@ func OptimizeCoverForID3(rawCover []byte, maxDimension int, quality int) ([]byte
 	for attempts := 0; attempts < 5; attempts++ {
 		var buf bytes.Buffer
 		if err := jpeg.Encode(&buf, currentDst, &jpeg.Options{Quality: currentQuality}); err != nil {
-			if len(rawCover) <= MaxAPICSizeBytes {
-				return rawCover, "image/jpeg"
-			}
 			return nil, ""
 		}
 
