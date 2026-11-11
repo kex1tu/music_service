@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"music-manager/internal/db"
@@ -55,6 +56,7 @@ type ResolvedTrack struct {
 	VersionPolicy    VersionPolicy                 `json:"version_policy,omitempty"`
 	TrackID          string                        `json:"track_id"`
 	CatalogTrackID   string                        `json:"catalog_track_id,omitempty"`
+	YandexTrackID    int64                         `json:"yandex_track_id,omitempty"`
 	TrackNumber      int                           `json:"track_number"`
 	TrackTotal       *int                          `json:"track_total,omitempty"`
 	DiscNumber       int                           `json:"disc_number"`
@@ -78,6 +80,40 @@ type ResolvedTrack struct {
 	QuickListenSpots []censorcheck.QuickListenSpot `json:"quick_listen_spots,omitempty"`
 	MatchScore       float64                       `json:"match_score,omitempty"`
 	IsLowMatch       bool                          `json:"is_low_match,omitempty"`
+}
+
+// GetYandexTrackID возвращает числовой идентификатор Яндекс Музыки, если трек получен из Яндекса.
+func (t *ResolvedTrack) GetYandexTrackID() (int64, bool) {
+	if t.YandexTrackID > 0 {
+		return t.YandexTrackID, true
+	}
+	return ExtractYandexTrackID(t.CatalogTrackID, t.TrackID)
+}
+
+// ExtractYandexTrackID извлекает точный числовой идентификатор трека Яндекс Музыки
+// из каталожного ID (CatalogTrackID) или ключа очереди (TrackID).
+// Возвращает (id, true) только если идентификатор явно принадлежит каталогу Яндекс Музыки (префикс "ya_").
+// Идентификаторы сторонних каталогов (например "dz_123", "sc_456", "yt_789", "12345") строго игнорируются.
+func ExtractYandexTrackID(catalogTrackID, trackID string) (int64, bool) {
+	candidate := strings.TrimSpace(catalogTrackID)
+	if candidate == "" || !strings.HasPrefix(candidate, "ya_") {
+		candidate = strings.TrimSpace(trackID)
+	}
+	if !strings.HasPrefix(candidate, "ya_") {
+		return 0, false
+	}
+
+	rawID := strings.TrimPrefix(candidate, "ya_")
+	// Если это составной ключ слота очереди (например "ya_101_1"), отсекаем суффикс слота
+	if idx := strings.Index(rawID, "_"); idx != -1 {
+		rawID = rawID[:idx]
+	}
+
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
 }
 
 // ReleaseMetadata holds album-level metadata.

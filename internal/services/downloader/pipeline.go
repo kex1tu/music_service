@@ -14,6 +14,7 @@ import (
 	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
+	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/resolver"
 )
 
@@ -493,6 +494,31 @@ trackLoop:
 			}
 
 			_ = id3.WriteTags(mp3Path, tagData, cover)
+
+			// Поиск текста песни через Яндекс Музыку / LRCLIB (синхронизированного .lrc или обычного .txt)
+			// ВАЖНО: Тексты песен сохраняются строго во внешние файлы рядом с треком, никогда в ID3-тег
+			if s.lyrics != nil {
+				primaryArt := resolver.ExtractPrimaryArtist(track.Artist)
+				lyricsAlbum := alb
+				if lyricsAlbum == "" && (meta == nil || !meta.IsPlaylist) {
+					if meta != nil && meta.AlbumTitle != "" {
+						lyricsAlbum = meta.AlbumTitle
+					}
+				}
+				var searchOpts []lyrics.SearchOption
+				if yandexID, ok := track.GetYandexTrackID(); ok {
+					searchOpts = append(searchOpts, lyrics.WithYandexTrackID(yandexID))
+				}
+				lrcRes, _ := s.lyrics.SearchLyricsWithOptions(ctx, primaryArt, track.Title, lyricsAlbum, track.Duration, searchOpts...)
+				if (lrcRes == nil || lrcRes.Lyrics == "") && primaryArt != track.Artist && ctx.Err() == nil {
+					lrcRes, _ = s.lyrics.SearchLyrics(ctx, track.Artist, track.Title, lyricsAlbum, track.Duration)
+				}
+				if lrcRes != nil && lrcRes.Lyrics != "" {
+					if err := lyrics.SaveDownloadedLyrics(s.tmpSandbox, mp3Path, lrcRes); err != nil {
+						log.Printf("[Downloader] Failed to save lyrics companion: %v", err)
+					}
+				}
+			}
 
 			relConverted, _ := s.tmpSandbox.ToRelative(mp3Path)
 			job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {

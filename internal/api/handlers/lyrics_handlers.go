@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"music-manager/internal/services/lyrics"
+	"music-manager/internal/services/resolver"
 )
 
 type LyricsHandler struct {
@@ -46,7 +47,18 @@ func (h *LyricsHandler) SearchLyrics(w http.ResponseWriter, r *http.Request) {
 		duration, _ = strconv.Atoi(durationStr)
 	}
 
-	res, err := h.service.SearchLyrics(r.Context(), artist, title, album, duration)
+	var opts []lyrics.SearchOption
+	yandexIDStr := r.URL.Query().Get("yandex_id")
+	if yandexIDStr == "" {
+		yandexIDStr = r.URL.Query().Get("catalog_track_id")
+	}
+	if yandexIDStr != "" {
+		if id, ok := resolver.ExtractYandexTrackID(yandexIDStr, yandexIDStr); ok {
+			opts = append(opts, lyrics.WithYandexTrackID(id))
+		}
+	}
+
+	res, err := h.service.SearchLyricsWithOptions(r.Context(), artist, title, album, duration, opts...)
 	if err != nil {
 		http.Error(w, `{"error":"search failed"}`, http.StatusInternalServerError)
 		return

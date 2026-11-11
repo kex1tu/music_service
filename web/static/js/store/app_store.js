@@ -184,6 +184,42 @@ document.addEventListener('alpine:init', () => {
             if (this.activeModal === 'login') {
                 this.activeModal = null;
             }
+        },
+
+        mobileMoreOpen: false,
+
+        toggleMobileMore() {
+            this.mobileMoreOpen = !this.mobileMoreOpen;
+        },
+
+        closeMobileMore() {
+            this.mobileMoreOpen = false;
+        },
+
+        openTabFromMobileMore(tab) {
+            this.activeTab = tab;
+            this.mobileMoreOpen = false;
+            if (tab === 'audit') {
+                window.dispatchEvent(new CustomEvent('refresh-audit'));
+            } else if (tab === 'radar' && Alpine.store('radar')) {
+                Alpine.store('radar').fetchFeed(1);
+                Alpine.store('radar').fetchUnreadCount();
+            } else if (tab === 'radio' && Alpine.store('radio')) {
+                Alpine.store('radio').fetchStats();
+                Alpine.store('radio').fetchQueue();
+            } else if (tab === 'player' && Alpine.store('player')) {
+                Alpine.store('player').onTabOpened();
+            }
+        },
+
+        isMobileSearchOpen: false,
+
+        toggleMobileSearch() {
+            this.isMobileSearchOpen = !this.isMobileSearchOpen;
+        },
+
+        closeMobileSearch() {
+            this.isMobileSearchOpen = false;
         }
     });
 });

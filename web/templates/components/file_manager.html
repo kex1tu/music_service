@@ -42,8 +42,46 @@
 
     <!-- Основная рабочая область: Боковая Tag Panel + Центральный Data Grid -->
     <div class="flex flex-col lg:flex-row gap-3 items-stretch min-w-0">
-        {{ template "puddletag_tag_panel" . }}
-        {{ template "puddletag_grid" . }}
+        <!-- Панель тегов: на десктопе боковая панель, на мобильных скрыта в потоке и выдвигается снизу/в модале по showMobileTagInspector -->
+        <div
+            :class="showMobileTagInspector ? 'fixed inset-0 z-50 flex flex-col justify-end lg:static lg:z-auto lg:block lg:w-72 xl:w-80 shrink-0' : 'hidden lg:block lg:w-72 xl:w-80 shrink-0'">
+
+            <!-- Мобильный затемняющий фон -->
+            <div x-show="showMobileTagInspector"
+                 x-transition.opacity.duration.200ms
+                 @click="closeMobileTagInspector()"
+                 class="fixed inset-0 bg-black/75 backdrop-blur-sm lg:hidden"
+                 x-cloak></div>
+
+            <!-- Контейнер инспектора: на десктопе обычный, на мобилке выезжающая панель -->
+            <div
+                :class="showMobileTagInspector ? 'relative w-full bg-surface-panel border-t border-surface-border p-4 flex flex-col max-h-[85vh] rounded-t-2xl z-10 shadow-2xl overflow-y-auto pb-safe lg:p-0 lg:border-0 lg:max-h-none lg:rounded-none lg:shadow-none' : ''">
+
+                <!-- Мобильная шапка панели -->
+                <div x-show="showMobileTagInspector" class="flex items-center justify-between pb-2 mb-2 border-b border-surface-borderSubtle lg:hidden" x-cloak>
+                    <div class="flex items-center space-x-2">
+                        <span class="w-2 h-2 rounded-full bg-white" :class="hasDirtyChanges ? 'animate-pulse' : ''"></span>
+                        <h3 class="text-xs font-semibold uppercase tracking-wider text-white">Инспектор тегов</h3>
+                        <template x-if="selectedTracksCount > 0">
+                            <span class="text-xs font-mono text-content-muted" x-text="`(${selectedTracksCount})`"></span>
+                        </template>
+                    </div>
+                    <button type="button"
+                            @click="closeMobileTagInspector()"
+                            aria-label="Закрыть инспектор тегов"
+                            class="touch-target-44 p-2 text-content-muted hover:text-white rounded-md flex items-center justify-center">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="m12 13.4l-4.9 4.9q-.275.275-.7.275t-.7-.275t-.275-.7t.275-.7l4.9-4.9l-4.9-4.9q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l4.9 4.9l4.9-4.9q.275-.275.7-.275t.7.275t.275.7t-.275.7L13.4 12l4.9 4.9q.275.275.275.7t-.275.7t-.7.275t-.7-.275z"/></svg>
+                    </button>
+                </div>
+
+                {{ template "puddletag_tag_panel" . }}
+            </div>
+        </div>
+
+        <!-- Центральная таблица-сетка треков -->
+        <div class="flex-1 min-w-0">
+            {{ template "puddletag_grid" . }}
+        </div>
     </div>
 
     <!-- Модальные окна предпросмотра Diff, быстрых действий, баз тегов и обложек -->

@@ -70,6 +70,7 @@ func (r *SourceResolver) resolveYandex(ctx context.Context, rawURL string) (*Rel
 			tr := ResolvedTrack{
 				TrackID:        fmt.Sprintf("ya_%d", t.ID),
 				CatalogTrackID: fmt.Sprintf("ya_%d", t.ID),
+				YandexTrackID:  t.ID,
 				TrackNumber:    pos,
 				TrackTotal:     &trackTot,
 				DiscNumber:     discNum,
@@ -148,6 +149,7 @@ func (r *SourceResolver) resolveYandex(ctx context.Context, rawURL string) (*Rel
 		resolvedTr := ResolvedTrack{
 			TrackID:        fmt.Sprintf("ya_%d", tr.ID),
 			CatalogTrackID: fmt.Sprintf("ya_%d", tr.ID),
+			YandexTrackID:  tr.ID,
 			TrackNumber:    1,
 			TrackTotal:     &tot,
 			DiscNumber:     1,
@@ -290,6 +292,7 @@ func (r *SourceResolver) resolveYandex(ctx context.Context, rawURL string) (*Rel
 			tr := ResolvedTrack{
 				TrackID:        trackIDStr,
 				CatalogTrackID: catalogIDStr,
+				YandexTrackID:  t.ID,
 				TrackNumber:    pos,
 				TrackTotal:     &totalInPlaylist,
 				DiscNumber:     discNum,
