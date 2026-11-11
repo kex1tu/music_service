@@ -221,3 +221,95 @@ func TestYandexMusicClient_ProxyConfiguration(t *testing.T) {
 		t.Errorf("expected tr.Proxy to be set when proxyURL is provided")
 	}
 }
+
+func TestYandexCoverURLs_OriginalAndCandidates(t *testing.T) {
+	// 1. Проверяем OriginalCoverURL на альбоме
+	album := &YandexAlbum{
+		CoverURI: "avatars.yandex.net/get-music-content/5678/cover-%%",
+	}
+	if album.BestCoverURL() != "https://avatars.yandex.net/get-music-content/5678/cover-1000x1000" {
+		t.Errorf("BestCoverURL = %q, want 1000x1000", album.BestCoverURL())
+	}
+	if album.OriginalCoverURL() != "https://avatars.yandex.net/get-music-content/5678/cover-orig" {
+		t.Errorf("OriginalCoverURL = %q, want orig", album.OriginalCoverURL())
+	}
+
+	// 2. Проверяем OriginalCoverURL на плейлисте
+	playlist := &YandexPlaylist{
+		Cover: YandexCover{
+			URI: "avatars.yandex.net/get-music-user-playlist/123/%%",
+		},
+	}
+	if playlist.BestCoverURL() != "https://avatars.yandex.net/get-music-user-playlist/123/1000x1000" {
+		t.Errorf("playlist BestCoverURL = %q, want 1000x1000", playlist.BestCoverURL())
+	}
+	if playlist.OriginalCoverURL() != "https://avatars.yandex.net/get-music-user-playlist/123/orig" {
+		t.Errorf("playlist OriginalCoverURL = %q, want orig", playlist.OriginalCoverURL())
+	}
+
+	// 3. Проверяем OriginalAvatarURL на артисте
+	artist := &YandexArtistMeta{
+		Cover: struct {
+			URI    string `json:"uri"`
+			Prefix string `json:"prefix"`
+		}{
+			URI: "avatars.yandex.net/get-music-content/999/avatar-%%",
+		},
+	}
+	if artist.AvatarURL() != "https://avatars.yandex.net/get-music-content/999/avatar-1000x1000" {
+		t.Errorf("artist AvatarURL = %q, want 1000x1000", artist.AvatarURL())
+	}
+	if artist.OriginalAvatarURL() != "https://avatars.yandex.net/get-music-content/999/avatar-orig" {
+		t.Errorf("artist OriginalAvatarURL = %q, want orig", artist.OriginalAvatarURL())
+	}
+
+	// 4. Проверяем YandexCoverCandidateURLs
+	testCases := []struct {
+		input        string
+		wantOrig     string
+		wantFallback string
+	}{
+		{
+			input:        "https://avatars.yandex.net/get-music-content/456/1000x1000",
+			wantOrig:     "https://avatars.yandex.net/get-music-content/456/orig",
+			wantFallback: "https://avatars.yandex.net/get-music-content/456/1000x1000",
+		},
+		{
+			input:        "https://avatars.yandex.net/get-music-content/456/orig",
+			wantOrig:     "https://avatars.yandex.net/get-music-content/456/orig",
+			wantFallback: "https://avatars.yandex.net/get-music-content/456/1000x1000",
+		},
+		{
+			input:        "https://avatars.yandex.net/get-music-content/456/400x400",
+			wantOrig:     "https://avatars.yandex.net/get-music-content/456/orig",
+			wantFallback: "https://avatars.yandex.net/get-music-content/456/1000x1000",
+		},
+		{
+			input:        "https://avatars.yandex.net/get-music-content/456/%%",
+			wantOrig:     "https://avatars.yandex.net/get-music-content/456/orig",
+			wantFallback: "https://avatars.yandex.net/get-music-content/456/1000x1000",
+		},
+		{
+			input:        "http://127.0.0.1:8080/get-music-content/456/1000x1000",
+			wantOrig:     "http://127.0.0.1:8080/get-music-content/456/orig",
+			wantFallback: "http://127.0.0.1:8080/get-music-content/456/1000x1000",
+		},
+		{
+			input:        "https://e-cdns-images.dzcdn.net/images/cover/123/1000x1000.jpg",
+			wantOrig:     "https://e-cdns-images.dzcdn.net/images/cover/123/1000x1000.jpg",
+			wantFallback: "",
+		},
+		{
+			input:        "",
+			wantOrig:     "",
+			wantFallback: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		orig, fallback := YandexCoverCandidateURLs(tc.input)
+		if orig != tc.wantOrig || fallback != tc.wantFallback {
+			t.Errorf("YandexCoverCandidateURLs(%q) = (%q, %q), want (%q, %q)", tc.input, orig, fallback, tc.wantOrig, tc.wantFallback)
+		}
+	}
+}

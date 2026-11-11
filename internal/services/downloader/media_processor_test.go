@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -180,31 +182,116 @@ func TestTranscodeToMP3_RealFFmpeg(t *testing.T) {
 	}
 }
 
-func TestDownloadCover(t *testing.T) {
-	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestDownloadCover_LimitsAndSecurity(t *testing.T) {
+	// 1. Проверка отсечения по Content-Length > MaxCoverDownloadBytes (15 МБ)
+	oversizedCLServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "20971520") // 20 МБ
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("minimal-body"))
+	}))
+	defer oversizedCLServer.Close()
+
+	svc := &Service{client: oversizedCLServer.Client()}
+	_, err := svc.downloadCover(context.Background(), oversizedCLServer.URL+"/huge.jpg")
+	if err == nil || !strings.Contains(err.Error(), "exceeds maximum allowed") {
+		t.Errorf("expected error for oversized Content-Length, got: %v", err)
+	}
+
+	// 2. Проверка отсечения при потоковом превышении (сервер не шлет Content-Length, но шлет 16 МБ)
+	streamingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("fake-jpeg-cover-data"))
+		chunk := bytes.Repeat([]byte("A"), 1024*1024) // 1 МБ
+		for i := 0; i < 16; i++ {
+			_, _ = w.Write(chunk)
+		}
+	}))
+	defer streamingServer.Close()
+
+	_, streamErr := svc.downloadCover(context.Background(), streamingServer.URL+"/stream.jpg")
+	if streamErr == nil || !strings.Contains(streamErr.Error(), "exceeds maximum allowed") {
+		t.Errorf("expected error for streaming body exceeding budget, got: %v", streamErr)
+	}
+
+	// 3. Проверка того, что заголовок Authorization не передается
+	var receivedAuthHeader string
+	authCheckServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuthHeader = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("valid-cover-payload"))
+	}))
+	defer authCheckServer.Close()
+
+	authSvc := &Service{client: authCheckServer.Client()}
+	_, _ = authSvc.downloadCover(context.Background(), authCheckServer.URL+"/art.jpg")
+	if receivedAuthHeader != "" {
+		t.Errorf("Authorization header leaked to image host: %q", receivedAuthHeader)
+	}
+}
+
+func TestDownloadCover_YandexFallback(t *testing.T) {
+	var requestedPaths []string
+	var mu sync.Mutex
+
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requestedPaths = append(requestedPaths, r.URL.Path)
+		mu.Unlock()
+
+		if strings.HasSuffix(r.URL.Path, "/orig") {
+			// Оригинал недоступен (404)
+			http.NotFound(w, r)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/1000x1000") {
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write([]byte("fallback-1000x1000-image-data"))
+			return
+		}
+		http.NotFound(w, r)
 	}))
 	defer mockServer.Close()
 
-	svc := &Service{
-		client: mockServer.Client(),
-	}
+	svc := &Service{client: mockServer.Client()}
 
-	data, err := svc.downloadCover(context.Background(), mockServer.URL+"/cover.jpg")
+	// URL в стиле Яндекс Музыки (путь get-music-content)
+	yandexCoverURL := mockServer.URL + "/get-music-content/12345/1000x1000"
+
+	data, err := svc.downloadCover(context.Background(), yandexCoverURL)
 	if err != nil {
-		t.Fatalf("unexpected error downloading cover: %v", err)
+		t.Fatalf("expected successful fallback, got error: %v", err)
 	}
-	if string(data) != "fake-jpeg-cover-data" {
-		t.Errorf("expected cover data 'fake-jpeg-cover-data', got %q", string(data))
+	if string(data) != "fallback-1000x1000-image-data" {
+		t.Errorf("got unexpected cover data: %q", string(data))
 	}
 
-	// Error case: 404
-	_, err = svc.downloadCover(context.Background(), mockServer.URL+"/not-found")
-	// handler doesn't check path so returns 200, but test invalid URL:
-	_, err = svc.downloadCover(context.Background(), "http://127.0.0.1:0/invalid")
-	if err == nil {
-		t.Errorf("expected error for unreachable URL, got nil")
+	mu.Lock()
+	if len(requestedPaths) != 2 {
+		t.Fatalf("expected 2 requests (orig -> 1000x1000), got %v", requestedPaths)
+	}
+	if requestedPaths[0] != "/get-music-content/12345/orig" || requestedPaths[1] != "/get-music-content/12345/1000x1000" {
+		t.Errorf("unexpected request sequence: %v", requestedPaths)
+	}
+	mu.Unlock()
+
+	// Сценарий отказа обеих ссылок
+	bothFailServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer bothFailServer.Close()
+
+	svcBothFail := &Service{client: bothFailServer.Client()}
+	failURL := bothFailServer.URL + "/get-music-content/999/1000x1000"
+	_, failErr := svcBothFail.downloadCover(context.Background(), failURL)
+	if failErr == nil || !strings.Contains(failErr.Error(), "failed to download original") || !strings.Contains(failErr.Error(), "fallback 1000x1000") {
+		t.Errorf("expected combined error for both links failure, got: %v", failErr)
+	}
+
+	// Сценарий отмены контекста: не должен пытаться делать fallback при отмене
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancel() // Отменяем сразу
+	_, cancelErr := svc.downloadCover(cancelCtx, yandexCoverURL)
+	if cancelErr == nil || !errors.Is(cancelErr, context.Canceled) {
+		t.Errorf("expected context.Canceled, got: %v", cancelErr)
 	}
 }
 
