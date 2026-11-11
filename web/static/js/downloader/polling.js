@@ -2,9 +2,10 @@
  * Модуль опроса прогресса задачи загрузки (Polling) и передачи в TagEditor.
  */
 window.DownloaderPolling = {
-    async poll(downloader, jobId) {
+    async poll(downloader, jobId, interval = downloader.pollInterval) {
         try {
             const res = await window.api.raw(`/downloads/${jobId}`);
+            if (downloader.pollInterval !== interval || downloader.job?.id !== jobId) return;
             if (!res.ok) {
                 if (res.status === 404) {
                     if (downloader.pollInterval) {
@@ -17,6 +18,8 @@ window.DownloaderPolling = {
             }
 
             const currentJob = await res.json();
+            if (downloader.pollInterval !== interval || downloader.job?.id !== jobId) return;
+            downloader.job = currentJob;
             if (currentJob.status === 'READY' || currentJob.status === 'PARTIAL_READY') {
                 if (downloader.pollInterval) {
                     clearInterval(downloader.pollInterval);
@@ -41,6 +44,9 @@ window.DownloaderPolling = {
                     `Ошибка загрузки: ${currentJob.error || 'Неизвестная ошибка'}`,
                     'error'
                 );
+            } else if (currentJob.status === 'CANCELLED') {
+                clearInterval(downloader.pollInterval);
+                downloader.pollInterval = null;
             }
         } catch (e) {
             console.error('Сбой опроса задачи загрузки:', e);
@@ -48,10 +54,20 @@ window.DownloaderPolling = {
     },
 
     startPolling(downloader, jobId) {
-        this.poll(downloader, jobId);
-        downloader.pollInterval = setInterval(() => {
-            this.poll(downloader, jobId);
-        }, 1000);
+        clearInterval(downloader.pollInterval);
+        let inFlight = false;
+        const tick = async () => {
+            if (inFlight) return;
+            inFlight = true;
+            try {
+                await this.poll(downloader, jobId, interval);
+            } finally {
+                inFlight = false;
+            }
+        };
+        const interval = setInterval(tick, 1000);
+        downloader.pollInterval = interval;
+        tick();
     },
 
     async openTagEditorForJob(jobId) {

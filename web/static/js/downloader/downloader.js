@@ -219,7 +219,7 @@ function downloaderComponent() {
 
         async retryJob(jobId) {
             const targetId = jobId || (this.job ? this.job.id : null);
-            if (!targetId) return;
+            if (!targetId || this.isSubmitting) return;
 
             this.isSubmitting = true;
             try {
@@ -266,6 +266,74 @@ function downloaderComponent() {
             }
             this.job = null;
             this.url = '';
+        },
+
+        getPipelineStep(job) {
+            if (!job) return 0;
+            switch (job.status) {
+                case 'RESOLVING':
+                    return 1;
+                case 'WAITING_SOURCE':
+                    return 2;
+                case 'DOWNLOADING':
+                case 'CONVERTING':
+                    return 3;
+                case 'TAGGING':
+                    return 4;
+                case 'READY':
+                    return 5;
+                default:
+                    return 0;
+            }
+        },
+
+        getPipelineStepState(job, stepIdx) {
+            if (!job) return 'pending';
+            const current = this.getPipelineStep(job);
+            if (!current) return 'pending';
+            if (stepIdx < current) return 'completed';
+            if (stepIdx === current) {
+                if (job.status === 'WAITING_SOURCE') return 'waiting';
+                return 'active';
+            }
+            return 'pending';
+        },
+
+        getHumanStatus(status) {
+            switch (status) {
+                case 'QUEUED': return 'В очереди';
+                case 'RESOLVING': return 'Поиск релиза';
+                case 'WAITING_SOURCE': return 'Ожидание источника';
+                case 'DOWNLOADING': return 'Скачивание';
+                case 'CONVERTING': return 'Конвертация MP3';
+                case 'TAGGING': return 'Проверка тегов';
+                case 'READY': return 'Готово к сохранению';
+                case 'PARTIAL_READY': return 'Готово частично';
+                case 'CANCELLED': return 'Отменено';
+                case 'ERROR': return 'Ошибка';
+                default: return status || '—';
+            }
+        },
+
+        getHumanError(errorText) {
+            if (!errorText) return 'Произошла непредвиденная ошибка при обработке релиза.';
+            const err = String(errorText).toLowerCase();
+            if (err.includes('geo') || err.includes('country') || err.includes('region') || err.includes('not available in your country')) {
+                return 'Трек или видео заблокировано в текущем регионе сервиса. Выберите альтернативный источник из списка релизов или укажите другую прямую ссылку.';
+            }
+            if (err.includes('timeout') || err.includes('timed out') || err.includes('context deadline exceeded')) {
+                return 'Превышено время ожидания ответа от сервера источника. Возможно, сетевые ограничения или перегрузка внешнего сервиса. Попробуйте нажать «Повторить».';
+            }
+            if (err.includes('private') || err.includes('login') || err.includes('sign in') || err.includes('member-only')) {
+                return 'Доступ к аудиозаписи ограничен автором (приватный трек, релиз для спонсоров или требуется авторизация).';
+            }
+            if (err.includes('404') || err.includes('not found') || err.includes('does not exist')) {
+                return 'Аудиозапись не найдена по указанному адресу либо была удалена правообладателем.';
+            }
+            if (err.includes('ffmpeg') || err.includes('conversion failed')) {
+                return 'Сбой декодирования/конвертации аудиопотока в MP3 320 kbps. Рекомендуется повторить или выбрать другой источник.';
+            }
+            return errorText;
         }
     };
 }

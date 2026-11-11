@@ -11,7 +11,7 @@
  * - Стейджинг изменений (Dirty State) и сохранение (Ctrl+S)
  */
 
-function puddletagWorkstationComponent() {
+function puddletagWorkstationComponent(isTagEditor = false) {
     return {
         // Данные треков
         tracks: [],
@@ -45,6 +45,27 @@ function puddletagWorkstationComponent() {
 
         // Инлайн-редактирование ячеек
         editingCell: null, // { index, field, value }
+
+        // Мобильный инспектор тегов и меню трека
+        showMobileTagInspector: false,
+        mobileTrackMenuIndex: null,
+
+        // Плотность сетки и ширина колонок (ПК & Mobile)
+        gridDensity: (function() {
+            try {
+                return localStorage.getItem('mm_grid_density') || 'normal';
+            } catch (e) {
+                return 'normal';
+            }
+        })(),
+        colWidths: (function() {
+            try {
+                return JSON.parse(localStorage.getItem('mm_col_widths') || '{}');
+            } catch (e) {
+                return {};
+            }
+        })(),
+        resizingCol: null,
 
         // Состояние левой панели тегов (Tag Panel)
         tagPanel: {
@@ -139,6 +160,7 @@ function puddletagWorkstationComponent() {
 
         // Сохранение
         isSaving: false,
+        saveStatus: 'idle', // 'idle' | 'saving' | 'saved' | 'error'
 
         // Геттер отфильтрованных и отсортированных треков
         get displayTracks() {
@@ -260,15 +282,27 @@ function puddletagWorkstationComponent() {
         },
 
         init() {
+            // Предупреждение о потере данных при закрытии/перезагрузке страницы
+            window.addEventListener('beforeunload', (e) => {
+                if (this.hasDirtyChanges && (!isTagEditor || Alpine.store('app').tagEditorData)) {
+                    e.preventDefault();
+                    e.returnValue = '';
+                    return '';
+                }
+            });
+
             // Перехват глобальной комбинации клавиш Ctrl+S / Cmd+S и Delete
             window.addEventListener('keydown', (e) => {
                 if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-                    // Если активна вкладка файлов или открыто модальное окно Puddletag
-                    if (Alpine.store('app').activeTab === 'files' || Alpine.store('app').activeModal === 'tag_editor') {
+                    const app = Alpine.store('app');
+                    const isActive = isTagEditor
+                        ? app.activeModal === 'tag_editor'
+                        : app.activeTab === 'files' && !app.activeModal;
+                    if (isActive) {
                         e.preventDefault();
                         this.saveAllChanges();
                     }
-                } else if (e.key === 'Delete' || e.key === 'Del') {
+                } else if (!isTagEditor && (e.key === 'Delete' || e.key === 'Del')) {
                     // Удаление выбранных файлов клавишей Delete при активной вкладке файлов
                     const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
                     if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') {
@@ -283,48 +317,28 @@ function puddletagWorkstationComponent() {
                 }
             });
 
-            // Слушаем событие обновления данных из File Manager или Downloader
-            window.addEventListener('puddletag-load-path', (e) => {
-                const path = typeof e.detail === 'string' ? e.detail : (e.detail?.path || '');
-                this.loadDirectory(path);
-            });
-
-            window.addEventListener('refresh-file-manager', (e) => {
-                let targetPath = this.currentPath || '';
-                if (typeof e?.detail === 'string' && e.detail !== '') {
-                    targetPath = e.detail;
-                } else if (e?.detail && typeof e.detail.path === 'string' && e.detail.path !== '') {
-                    targetPath = e.detail.path;
-                }
-                this.loadDirectory(targetPath);
-            });
-
-            window.addEventListener('puddletag-load-job', (e) => {
-                if (e.detail) {
-                    this.loadJobData(e.detail);
-                }
-            });
-
-            // Реактивная связь с хранилищем при открытии модального окна тегов
-            if (this.$watch) {
-                this.$watch('$store.app.tagEditorData', (newData) => {
-                    if (newData) {
-                        this.loadJobData(newData);
-                    }
+            if (isTagEditor) {
+                this.$watch('$store.app.tagEditorData', (data) => {
+                    if (data) this.loadJobData(data);
+                });
+                const data = Alpine.store('app').tagEditorData;
+                if (data) this.loadJobData(data);
+            } else {
+                window.addEventListener('puddletag-load-path', (e) => {
+                    const path = typeof e.detail === 'string' ? e.detail : (e.detail?.path || '');
+                    this.loadDirectory(path);
+                });
+                window.addEventListener('refresh-file-manager', (e) => {
+                    const path = typeof e.detail === 'string' ? e.detail : e.detail?.path;
+                    this.loadDirectory(path || this.currentPath || '');
                 });
                 this.$watch('$store.app.activeTab', (tab) => {
                     if (tab === 'files' && this.tracks.length === 0 && !this.isLoading) {
                         this.loadDirectory(this.currentPath || '');
                     }
                 });
-                this.$watch('searchFilter', () => {
-                    this.currentPage = 1;
-                });
             }
-
-            if (window.Alpine && Alpine.store('app')?.tagEditorData) {
-                this.loadJobData(Alpine.store('app').tagEditorData);
-            }
+            this.$watch('searchFilter', () => { this.currentPage = 1; });
         },
 
         /**
@@ -431,6 +445,7 @@ function puddletagWorkstationComponent() {
         loadJobData(payload) {
             if (!payload) return;
             this.isDownloaderMode = true;
+            this.saveStatus = 'idle';
             this.jobIds = payload.jobIds || payload.job_ids || (payload.jobId ? [payload.jobId] : (payload.job_id ? [payload.job_id] : []));
             this.jobId = payload.jobId || payload.job_id || (this.jobIds && this.jobIds[0]) || null;
             this.releases = payload.releases || [];
@@ -488,6 +503,13 @@ function puddletagWorkstationComponent() {
                 this.selectedIndices = this.displayTracks.map(t => t._trackIndex);
                 this._selectedSet = new Set(this.selectedIndices);
             }
+            this.syncTagPanel();
+        },
+
+        clearTrackSelection() {
+            this.selectedIndices = [];
+            this._selectedSet = new Set();
+            this.lastClickedIndex = null;
             this.syncTagPanel();
         },
 
@@ -1057,6 +1079,7 @@ function puddletagWorkstationComponent() {
         },
 
         async saveAllChanges() {
+            if (this.isSaving) return;
             if (!this.isDownloaderMode && this.dirtyIndices.size === 0) {
                 Alpine.store('app').toast('Нет несохраненных изменений', 'info');
                 return;
@@ -1067,6 +1090,7 @@ function puddletagWorkstationComponent() {
             }
 
             this.isSaving = true;
+            this.saveStatus = 'saving';
             try {
                 // В зависимости от режима отправляем сохранение
                 if (this.isDownloaderMode) {
@@ -1176,6 +1200,8 @@ function puddletagWorkstationComponent() {
                         }
                     }
                     window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
+                    this.saveStatus = 'saved';
+                    setTimeout(() => { if (this.saveStatus === 'saved') this.saveStatus = 'idle'; }, 4000);
                 } else {
                     const dirtyTracksList = Array.from(this.dirtyIndices).map(idx => this.tracks[idx]);
                     // Режим медиатеки: атомарно перезаписываем ID3v2.4 теги
@@ -1206,8 +1232,11 @@ function puddletagWorkstationComponent() {
                     this.dirtyIndices.clear();
                     this.originalTracks = JSON.parse(JSON.stringify(this.tracks));
                     window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
+                    this.saveStatus = 'saved';
+                    setTimeout(() => { if (this.saveStatus === 'saved') this.saveStatus = 'idle'; }, 4000);
                 }
             } catch (err) {
+                this.saveStatus = 'error';
                 Alpine.store('app').toast(`Ошибка: ${err.message}`, 'error');
             } finally {
                 this.isSaving = false;
@@ -1220,6 +1249,84 @@ function puddletagWorkstationComponent() {
             this.dirtyIndices.clear();
             this.syncTagPanel();
             Alpine.store('app').toast('Все изменения отменены', 'info');
+        },
+
+        openMobileTagInspector() {
+            this.showMobileTagInspector = true;
+        },
+
+        closeMobileTagInspector() {
+            this.showMobileTagInspector = false;
+        },
+
+        toggleMobileTrackMenu(trackIndex) {
+            if (this.mobileTrackMenuIndex === trackIndex) {
+                this.mobileTrackMenuIndex = null;
+            } else {
+                this.mobileTrackMenuIndex = trackIndex;
+            }
+        },
+
+        closeMobileTrackMenu() {
+            this.mobileTrackMenuIndex = null;
+        },
+
+        openTrackInInspector(trackIndex, event) {
+            this.selectRow(trackIndex, event);
+            this.showMobileTagInspector = true;
+            this.mobileTrackMenuIndex = null;
+        },
+
+        setGridDensity(density) {
+            this.gridDensity = density;
+            try {
+                localStorage.setItem('mm_grid_density', density);
+            } catch (e) {}
+        },
+
+        toggleGridDensity() {
+            this.setGridDensity(this.gridDensity === 'compact' ? 'normal' : 'compact');
+        },
+
+        saveColWidths() {
+            try {
+                localStorage.setItem('mm_col_widths', JSON.stringify(this.colWidths));
+            } catch (e) {}
+        },
+
+        startColResize(colKey, event) {
+            event.preventDefault();
+            event.stopPropagation();
+            this.resizingCol = colKey;
+            const startX = event.pageX;
+            const th = event.target.closest('th');
+            const startWidth = th ? th.offsetWidth : 120;
+
+            const onMouseMove = (moveEvent) => {
+                const delta = moveEvent.pageX - startX;
+                const newWidth = Math.max(40, startWidth + delta);
+                this.colWidths[colKey] = newWidth + 'px';
+            };
+
+            const onMouseUp = () => {
+                window.removeEventListener('mousemove', onMouseMove);
+                window.removeEventListener('mouseup', onMouseUp);
+                this.resizingCol = null;
+                this.saveColWidths();
+            };
+
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mouseup', onMouseUp);
+        },
+
+        promptCloseTagEditor() {
+            if (Alpine.store('app').activeModal !== 'tag_editor' || this.isSaving) return;
+            if (this.hasDirtyChanges) {
+                if (!confirm(`Есть несохранённые изменения (${this.dirtyIndices.size} файлов). Закрыть без сохранения?`)) {
+                    return;
+                }
+            }
+            Alpine.store('app').closeTagEditor();
         },
 
         // ==================== МУЛЬТИ-ИСТОЧНИКОВЫЙ ПОИСК РЕЛИЗОВ (DEEZER, MUSICBRAINZ, SHAZAM) ====================
@@ -1719,5 +1826,5 @@ function fileManagerComponent() {
 }
 
 function tagEditorComponent() {
-    return puddletagWorkstationComponent();
+    return puddletagWorkstationComponent(true);
 }

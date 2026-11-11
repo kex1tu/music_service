@@ -61,7 +61,7 @@
             <button
                 type="button"
                 @click="openCoverGallery()"
-                class="px-2 py-0.5 bg-brand hover:bg-brand-hover text-zinc-950 font-semibold rounded-sm text-xs font-mono transition flex items-center space-x-1 shadow-xs"
+                class="px-2.5 sm:px-2 py-1.5 sm:py-0.5 bg-brand hover:bg-brand-hover text-zinc-950 font-semibold rounded-sm text-xs font-mono transition flex items-center space-x-1 shadow-xs touch-target-44 sm:h-auto"
                 title="Поиск обложки высокого разрешения в онлайн-базах">
                 <svg class="w-3 h-3 text-zinc-950" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M9.5 16q-2.725 0-4.612-1.888T3 9.5t1.888-4.612T9.5 3t4.613 1.888T16 9.5q0 1.1-.35 2.075T14.7 13.3l5.6 5.6q.275.275.275.7t-.275.7t-.7.275t-.7-.275l-5.6-5.6q-.75.6-1.725.95T9.5 16m0-2q1.875 0 3.188-1.312T14 9.5t-1.312-3.187T9.5 5T6.313 6.313T5 9.5t1.313 3.188T9.5 14"/>
@@ -71,7 +71,7 @@
             <button
                 type="button"
                 @click="$refs.coverFileInput.click()"
-                class="px-2 py-0.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white rounded-sm text-xs font-mono border border-surface-border transition"
+                class="px-2.5 sm:px-2 py-1.5 sm:py-0.5 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-white rounded-sm text-xs font-mono border border-surface-border transition touch-target-44 sm:h-auto"
                 title="Загрузить изображение с диска">
                 Загрузить
             </button>
@@ -79,7 +79,7 @@
                 <button
                     type="button"
                     @click="removeCover()"
-                    class="px-2 py-0.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 rounded-sm text-xs font-mono border border-rose-500/25 transition"
+                    class="px-2.5 sm:px-2 py-1.5 sm:py-0.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 rounded-sm text-xs font-mono border border-rose-500/25 transition touch-target-44 sm:h-auto"
                     title="Удалить обложку">
                     Удалить
                 </button>
@@ -99,7 +99,7 @@
                 @input="onTagPanelInput('title', $event.target.value)"
                 :placeholder="tagPanelDiff.title ? '<Разные значения>' : 'Название композиции'"
                 aria-label="Название трека"
-                class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs"
+                class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1.5 sm:py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-base sm:text-xs"
                 :class="tagPanelDiff.title ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
         </div>
 
@@ -113,7 +113,7 @@
                 @input="onTagPanelInput('artist', $event.target.value)"
                 :placeholder="tagPanelDiff.artist ? '<Разные значения>' : 'Исполнитель'"
                 aria-label="Исполнитель"
-                class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs"
+                class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1.5 sm:py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-base sm:text-xs"
                 :class="tagPanelDiff.artist ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
         </div>
 
@@ -127,7 +127,7 @@
                 @input="onTagPanelInput('album_artist', $event.target.value)"
                 :placeholder="tagPanelDiff.album_artist ? '<Разные значения>' : 'Основной автор релиза'"
                 aria-label="Альбомный артист"
-                class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs"
+                class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1.5 sm:py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-base sm:text-xs"
                 :class="tagPanelDiff.album_artist ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
         </div>
 
@@ -141,7 +141,7 @@
                 @input="onTagPanelInput('album', $event.target.value)"
                 :placeholder="tagPanelDiff.album ? '<Разные значения>' : 'Название альбома'"
                 aria-label="Альбом"
-                class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs"
+                class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1.5 sm:py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-base sm:text-xs"
                 :class="tagPanelDiff.album ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
         </div>
 
@@ -156,7 +156,7 @@
                     @input="onTagPanelInput('year', $event.target.value)"
                     :placeholder="tagPanelDiff.year ? '<Разные>' : 'ГГГГ'"
                     aria-label="Год выпуска"
-                    class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs font-mono tabular-nums"
+                    class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1.5 sm:py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-base sm:text-xs font-mono tabular-nums"
                     :class="tagPanelDiff.year ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
             </div>
             <div>
@@ -168,7 +168,7 @@
                     @input="onTagPanelInput('genre', $event.target.value)"
                     :placeholder="tagPanelDiff.genre ? '<Разные>' : 'Жанр'"
                     aria-label="Жанр"
-                    class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs"
+                    class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1.5 sm:py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-base sm:text-xs"
                     :class="tagPanelDiff.genre ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
             </div>
         </div>
@@ -184,7 +184,7 @@
                     @input="onTagPanelInput('track_number', $event.target.value)"
                     :placeholder="tagPanelDiff.track_number ? '<Разные>' : '1'"
                     aria-label="Номер дорожки"
-                    class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs font-mono tabular-nums"
+                    class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1.5 sm:py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-base sm:text-xs font-mono tabular-nums"
                     :class="tagPanelDiff.track_number ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
             </div>
             <div>
@@ -196,7 +196,7 @@
                     @input="onTagPanelInput('track_total', $event.target.value)"
                     :placeholder="tagPanelDiff.track_total ? '<Разные>' : 'Всего'"
                     aria-label="Всего треков"
-                    class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs font-mono tabular-nums"
+                    class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1.5 sm:py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-base sm:text-xs font-mono tabular-nums"
                     :class="tagPanelDiff.track_total ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
             </div>
         </div>
@@ -212,7 +212,7 @@
                     @input="onTagPanelInput('disc_number', $event.target.value)"
                     :placeholder="tagPanelDiff.disc_number ? '<Разные>' : '1'"
                     aria-label="Номер диска"
-                    class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs font-mono tabular-nums"
+                    class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1.5 sm:py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-base sm:text-xs font-mono tabular-nums"
                     :class="tagPanelDiff.disc_number ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
             </div>
             <div>
@@ -224,7 +224,7 @@
                     @input="onTagPanelInput('disc_total', $event.target.value)"
                     :placeholder="tagPanelDiff.disc_total ? '<Разные>' : '1'"
                     aria-label="Всего дисков"
-                    class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-xs font-mono tabular-nums"
+                    class="w-full bg-surface-input border border-surface-border rounded-sm px-2 py-1.5 sm:py-1 text-content-primary focus:border-white/30 focus:ring-1 focus:ring-white/20 outline-none transition text-base sm:text-xs font-mono tabular-nums"
                     :class="tagPanelDiff.disc_total ? 'placeholder:text-amber-400/80 italic' : 'placeholder:text-content-muted'">
             </div>
         </div>

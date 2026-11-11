@@ -1,7 +1,7 @@
 {{ define "queue_drawer" }}
 <!-- ==================== ПЛАВАЮЩИЙ МЕНЕДЖЕР ОЧЕРЕДЕЙ (QUEUE WIDGET) ==================== -->
     <div class="fixed right-4 z-40 flex flex-col items-end pointer-events-none transition-all duration-300"
-         :class="$store.player?.isVisible ? 'bottom-24' : 'bottom-4'"
+         :class="$store.player?.isVisible ? 'bottom-[calc(9.5rem+env(safe-area-inset-bottom,0px))] md:bottom-24' : 'bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] md:bottom-4'"
          x-data>
         <!-- Развернутая панель очереди (Drawer) -->
         <div

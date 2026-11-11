@@ -134,8 +134,8 @@
             </div>
         </div>
 
-        <!-- Вкладки навигации (Studio Nav Strip) -->
-        <nav aria-label="Основная навигация" class="flex items-center space-x-0.5 overflow-x-auto no-scrollbar py-0.5 px-0.5 max-w-[calc(100vw-110px)] sm:max-w-none bg-surface-input border border-surface-border rounded-md shrink">
+        <!-- Вкладки навигации (Studio Nav Strip на десктопе, скрыты на мобильных для исключения дублирования с нижней навигацией) -->
+        <nav aria-label="Основная навигация" class="hidden md:flex items-center space-x-0.5 overflow-x-auto no-scrollbar py-0.5 px-0.5 bg-surface-input border border-surface-border rounded-md shrink">
             <button
                 @click="$store.app.activeTab = 'downloader'"
                 :aria-current="$store.app.activeTab === 'downloader' ? 'page' : false"
@@ -152,7 +152,7 @@
                 :class="$store.app.activeTab === 'files' ? 'bg-white text-zinc-950 font-semibold shadow-xs' : 'text-content-secondary hover:text-white hover:bg-white/[0.04]'"
                 class="h-8 px-2.5 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0 focus-visible:ring-2 focus-visible:ring-white/30">
                 <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M4 20q-.825 0-1.412-.587T2 18V6q0-.825.588-1.412T4 4h5.175q.4 0 .763.15t.637.425L12 6h8q.825 0 1.413.588T22 8v10q0 .825-.587 1.413T20 20zm0-2h16V8h-8.825l-2-2H4zm0 0V6z"/>
+                    <path d="M4 20q-.825 0-1.412-.587T2 18V6q-.425 0-.712-.288T4 4h5.175q.4 0 .763.15t.637.425L12 6h8q.825 0 1.413.588T22 8v10q0 .825-.587 1.413T20 20zm0-2h16V8h-8.825l-2-2H4zm0 0V6z"/>
                 </svg>
                 <span>Файлы</span>
             </button>
@@ -202,8 +202,18 @@
             </button>
         </nav>
 
-        <!-- Пользователь / Вход -->
-        <div class="flex items-center space-x-2 shrink-0">
+        <!-- Кнопка мобильного поиска и Пользователь / Вход -->
+        <div class="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
+            <!-- Мобильная кнопка поиска -->
+            <button
+                type="button"
+                @click="$store.app.toggleMobileSearch()"
+                aria-label="Поиск по медиатеке"
+                class="md:hidden touch-target-44 p-2 rounded-md bg-surface-elevated text-content-secondary hover:text-white border border-surface-border flex items-center justify-center transition">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                </svg>
+            </button>
             <template x-if="$store.app.user">
                 <div class="flex items-center space-x-1.5">
                     <div class="flex items-center space-x-1 text-xs text-content-secondary bg-surface-elevated px-2 py-1 rounded-md border border-surface-border">
@@ -237,6 +247,100 @@
             </template>
         </div>
 
+    </div>
+
+    <!-- Мобильная полоса глобального поиска (< md) -->
+    <div
+        x-show="$store.app.isMobileSearchOpen"
+        x-transition
+        class="md:hidden px-3 py-2 bg-surface-panel border-t border-surface-border shadow-md"
+        x-data="headerSearchComponent()"
+        @keydown.escape="$store.app.closeMobileSearch()"
+        @click.outside="$store.app.closeMobileSearch()"
+        x-cloak>
+        <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-content-muted" aria-hidden="true">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            </div>
+            <input
+                type="text"
+                x-ref="globalSearchInput"
+                x-model="searchQuery"
+                aria-label="Мобильный поиск по медиатеке"
+                @input.debounce.250ms="performSearch()"
+                placeholder="Поиск по исполнителям, альбомам, трекам..."
+                class="w-full bg-surface-input border border-surface-border rounded-md pl-8 pr-8 py-2 text-base text-content-primary placeholder-content-muted focus:outline-none focus:border-white/30">
+            <button
+                type="button"
+                x-show="searchQuery"
+                @click="searchQuery = ''; isOpen = false"
+                class="absolute inset-y-0 right-0 pr-2.5 flex items-center text-content-muted hover:text-white touch-target-44">
+                ✕
+            </button>
+        </div>
+
+        <!-- Выпадающие мобильные результаты -->
+        <div
+            x-show="isOpen && searchQuery.trim().length > 0"
+            x-transition
+            class="mt-2 bg-surface-panel border border-surface-border rounded-lg shadow-panel max-h-80 overflow-y-auto divide-y divide-surface-borderSubtle p-1.5 text-xs">
+            <template x-if="results.artists && results.artists.length > 0">
+                <div class="py-1">
+                    <span class="text-xs font-mono font-bold text-content-muted uppercase tracking-wider px-2">Исполнители</span>
+                    <div class="mt-0.5 space-y-0.5">
+                        <template x-for="art in results.artists" :key="art.name || art.title">
+                            <button
+                                @click="navigateToDir(art.folder_path || art.first_path || ''); $store.app.closeMobileSearch()"
+                                class="w-full text-left px-2 py-1.5 rounded-sm hover:bg-surface-hover flex items-center justify-between text-content-secondary hover:text-white">
+                                <span class="font-medium truncate mr-2" x-text="art.name || art.title"></span>
+                                <span class="text-xs font-mono text-content-muted shrink-0" x-text="`${art.track_count || 0} тр.`"></span>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+            </template>
+            <template x-if="results.albums && results.albums.length > 0">
+                <div class="py-1">
+                    <span class="text-xs font-mono font-bold text-content-muted uppercase tracking-wider px-2">Альбомы</span>
+                    <div class="mt-0.5 space-y-0.5">
+                        <template x-for="alb in results.albums" :key="alb.path || alb.id">
+                            <button
+                                @click="navigateToDir(alb.path); $store.app.closeMobileSearch()"
+                                class="w-full text-left px-2 py-1.5 rounded-sm hover:bg-surface-hover flex items-center justify-between text-content-secondary hover:text-white">
+                                <div class="truncate mr-2">
+                                    <span class="font-medium text-white" x-text="alb.album || alb.title"></span>
+                                    <span class="text-content-muted text-xs" x-text="(alb.album_artist || alb.artist) ? ` — ${alb.album_artist || alb.artist}` : ''"></span>
+                                </div>
+                                <span class="text-xs font-mono text-content-muted shrink-0" x-text="alb.year || ''"></span>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+            </template>
+            <template x-if="results.tracks && results.tracks.length > 0">
+                <div class="py-1">
+                    <span class="text-xs font-mono font-bold text-content-muted uppercase tracking-wider px-2">Треки</span>
+                    <div class="mt-0.5 space-y-0.5">
+                        <template x-for="trk in results.tracks" :key="trk.path || trk.id">
+                            <button
+                                @click="navigateToDir(getTrackDir(trk.path)); $store.app.closeMobileSearch()"
+                                class="w-full text-left px-2 py-1.5 rounded-sm hover:bg-surface-hover flex items-center justify-between text-content-secondary hover:text-white">
+                                <div class="truncate mr-2">
+                                    <span class="font-medium text-content-primary" x-text="trk.title"></span>
+                                    <span class="text-content-muted text-xs" x-text="trk.artist ? ` • ${trk.artist}` : ''"></span>
+                                </div>
+                                <span class="text-xs font-mono text-content-muted shrink-0" x-text="trk.duration ? `${Math.floor(trk.duration/60)}:${String(trk.duration%60).padStart(2,'0')}` : ''"></span>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+            </template>
+            <template x-if="!isLoading && results.total_matches === 0">
+                <div class="py-3 text-center text-content-muted text-xs">
+                    <span>Ничего не найдено</span>
+                </div>
+            </template>
+        </div>
     </div>
 </header>
 {{ end }}
