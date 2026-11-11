@@ -1091,7 +1091,18 @@ func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
 	}
 
 	matcher := m.service.Resolver().FullReleaseMatcher()
-	cands, isCyrillic, err := matcher.SearchReleaseCandidates(r.Context(), artist, album, targetTracks, httputil.QueryInt(r, "soundcloud_limit", 30))
+	albumOffset := httputil.QueryInt(r, "album_offset", 0)
+	playlistOffset := httputil.QueryInt(r, "playlist_offset", 0)
+	albumToken := strings.TrimSpace(r.URL.Query().Get("album_token"))
+	playlistToken := strings.TrimSpace(r.URL.Query().Get("playlist_token"))
+	limit := httputil.QueryInt(r, "soundcloud_limit", 30)
+
+	pageRes, err := matcher.SearchReleaseCandidatesPaged(r.Context(), artist, album, targetTracks, albumOffset, playlistOffset, albumToken, playlistToken, limit)
+	if err != nil {
+		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	policy := resolver.VersionPolicy(r.URL.Query().Get("version_policy"))
 	if policy == "" {
 		policy = resolver.PolicyRelease
@@ -1100,19 +1111,21 @@ func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, 400, "invalid version_policy")
 		return
 	}
-	cands = resolver.RankReleaseItems(cands, artist, album, targetTracks, policy)
-	if err != nil {
-		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	cands := resolver.RankReleaseItems(pageRes.Candidates, artist, album, targetTracks, policy)
 
 	httputil.RespondJSON(w, http.StatusOK, ReleaseCandidatesResponse{
-		VersionPolicy: policy, Selection: "manual",
-		Artist:       artist,
-		Album:        album,
-		IsCyrillic:   isCyrillic,
-		TargetTracks: targetTracks,
-		Candidates:   cands,
+		VersionPolicy:     policy,
+		Selection:         "manual",
+		Artist:            artist,
+		Album:             album,
+		IsCyrillic:        pageRes.IsCyrillic,
+		TargetTracks:      targetTracks,
+		Candidates:        cands,
+		HasMoreSoundCloud: pageRes.HasMoreSoundCloud,
+		AlbumOffset:       pageRes.AlbumOffset,
+		PlaylistOffset:    pageRes.PlaylistOffset,
+		AlbumToken:        pageRes.AlbumToken,
+		PlaylistToken:     pageRes.PlaylistToken,
 	})
 }
 

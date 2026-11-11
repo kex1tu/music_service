@@ -114,6 +114,43 @@ document.addEventListener('alpine:init', () => {
             this.submitSuccess = false;
         },
 
+        openSoundCloudSearch() {
+            const scp = Alpine.store('soundCloudPicker');
+            if (scp) {
+                scp.openForTrack(this.context, document.getElementById('btn-source-picker-sc-search'));
+            }
+        },
+
+        addCustomSoundCloudTrack(item) {
+            if (!item || !item.url) return;
+            const dur = item.duration || 0;
+            const delta = (this.context.expectedDuration > 0 && dur > 0) ? (dur - this.context.expectedDuration) : 0;
+            const cand = {
+                id: item.id || ('sc_' + Math.random().toString(36).slice(2, 8)),
+                source: 'soundcloud',
+                title: item.title,
+                uploader: item.artist || item.uploader || 'SoundCloud',
+                url: item.url,
+                duration: dur,
+                delta_seconds: delta,
+                bitrate_info: 'MP3 128k',
+                is_topic: false,
+                score: 100,
+                saved_selection: false,
+                search_incomplete: false,
+            };
+            const existingIdx = this.candidates.findIndex(c => c.url === cand.url);
+            if (existingIdx >= 0) {
+                this.candidates.splice(existingIdx, 1);
+            }
+            this.candidates.unshift(cand);
+            this.activeTab = 'search';
+            this.candidatesError = null;
+            if (Alpine.store('app') && typeof Alpine.store('app').toast === 'function') {
+                Alpine.store('app').toast('Трек SoundCloud добавлен в список кандидатов', 'info');
+            }
+        },
+
         loadMoreCandidates() {
             if (this.isLoadingCandidates || !this.hasMoreSoundCloud) return;
             this.soundCloudLimit = Math.min(100, this.soundCloudLimit + 30);

@@ -1,5 +1,43 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
+## Прямой поиск SoundCloud в окне выбора источника (треки и цельные релизы) — 2026-11-11
+
+- **Реализовано:**
+  - `internal/services/resolver/sc_set_searcher.go`:
+    - Добавлены структуры `scAPIUser` (с полями `Verified` и `AvatarURL`) и `scAPITrackItem` (`ArtworkURL`).
+    - Безопасная валидация `next_href`: проверка точного совпадения схемы (`https`), хоста и порта с `apiBaseURL`, совпадения пути (`/search/albums`, `/search/playlists_without_albums`), запрет `userinfo`, циклических ссылок и переход на внешние домены.
+    - Введена безопасная система токенов продолжения пагинации с HMAC-SHA256 подписью на случайном ключе сессии (`createContinuationToken`, `parseContinuationToken`), предотвращающая подделку и SSRF.
+    - Реализован метод `SearchSetsAPIPaged`: флаг наличия следующих страниц (`HasMoreSoundCloud`) вычисляется непосредственно по наличию валидного `next_href` от upstream API SoundCloud до этапа гидратации треклистов и сопоставления. Устранён искусственный потолок 100 элементов и исключено преждевременное скрытие кнопки «Больше».
+    - Защита сетевого транспорта: `CheckRedirect` с блокировкой перенаправлений между хостами и утечки авторизационных заголовков, ограничение размера ответа `io.LimitReader` (до 5 МБ).
+  - `internal/services/resolver/soundcloud_catalog.go`:
+    - Расширен `SoundCloudSearchItem`: добавлены поля `Uploader`, `Verified`, `ArtworkURL`, `AvatarURL`.
+    - Добавлены методы `SearchCatalogWithTokens` и `SearchSoundCloudWithTokens` с поддержкой криптографических токенов пагинации для треков, альбомов и плейлистов, обработкой 401 с однократным обновлением `client_id`, 429 rate limit, сохранением оригинального порядка выдачи без искусственного отсева.
+  - `internal/services/resolver/full_release_matcher.go`:
+    - Реализован `SearchReleaseCandidatesPaged`: при догрузке страниц пропускает повторный запрос YouTube Music, запрашивает следующую страницу SoundCloud по токенам, возвращает обновлённые смещения и `has_more_soundcloud`.
+  - `internal/features/downloader/`:
+    - `types.go`: в `ReleaseCandidatesResponse` добавлены поля `has_more_soundcloud`, `album_offset`, `playlist_offset`, `album_token`, `playlist_token`.
+    - `soundcloud_search.go`: маршрут `GET /api/downloads/soundcloud/search` расширен поддержкой параметров `track_token`, `album_token`, `playlist_token` и `type` ("track", "album", "playlist").
+    - `handlers.go`: `GetReleaseCandidates` принимает токены пагинации и вызывает `SearchReleaseCandidatesPaged`.
+  - `web/static/js/downloader/`:
+    - `soundcloud_search.js`: реализован модальный store `soundCloudPicker` с поддержкой раздельных категорий (Треки, Альбомы, Плейлисты), поиском по Enter/кнопке, постраничной догрузкой активной вкладки («Загрузить ещё»), сохранением позиции скролла, защитой от параллельных запросов через `searchSerial` и отменой/обесцениванием запросов при закрытии.
+    - `source_picker.js`: добавлено действие «Искать в SoundCloud», открытие `soundCloudPicker` в режиме трека с предзаполнением запроса, выбор трека без запуска автоматического скачивания (`addCustomSoundCloudTrack`).
+    - `release_source_picker.js`: добавлено действие «Искать в SoundCloud», открытие `soundCloudPicker` в режиме релиза, подгрузка деталей через `/api/downloads/release-candidates/parse-url` без запуска загрузки, сопоставление треклиста «бок о бок» и сохранение ручного ремапа (`applyCustomCandidate`). Догрузка «Больше альбомов и плейлистов SoundCloud» переведена на токенную пагинацию с конкатенацией и дедупликацией без сброса выбранного кандидата.
+  - `web/templates/components/`:
+    - `downloader_soundcloud_picker_modal.html`: новый компонент диалога прямого поиска с категориями, карточками, бейджами верификации автора, обложками, пагинацией и состояниями ошибок/загрузки.
+    - `downloader_source_picker_modal.html`: добавлена кнопка «Искать в SoundCloud» (`btn-source-picker-sc-search`).
+    - `downloader_release_source_picker_modal.html`: добавлена кнопка «Искать в SoundCloud» (`btn-release-picker-sc-search`) и действие поиска в пустом состоянии.
+- **Проверено:**
+  - `go test -v ./internal/services/resolver`: 100% PASS (юнит-тесты на токенную пагинацию, независимость размера страницы, проверку вредоносных `next_href`, детектирование циклов, защиту от подделки HMAC токенов, повтор 401 и ошибки 429, независимость `HasMoreSoundCloud` от отсева треклистов и пагинацию свыше 100).
+  - `go test -v ./internal/features/downloader`: 100% PASS (проверка токенов пагинации и фильтра по типам в `GET /api/downloads/soundcloud/search`, постраничной догрузки кандидатов релиза).
+  - `go test -v ./web`: 100% PASS (проверка целостности HTML-шаблонов, уникальности `:key` в `x-for`, отсутствия inline fetch и валидации 494 JS-методов).
+  - `go test -race ./internal/services/resolver/... ./internal/features/downloader/...`: 100% PASS (0 data races).
+  - `go test -v ./...`: 100% PASS по всему проекту.
+  - `go vet ./...`: 100% PASS (0 предупреждений).
+  - `go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go`: успешная статическая сборка бинарного файла.
+  - `git diff --check`: 0 замечаний по пробелам и форматированию.
+- **Ограничения / не выполнялось:**
+  - Деплой, коммиты, push и модификация боевой медиатеки не выполнялись в соответствии с правилами промпта.
+
 ## Интеграция задач 3, 6, 7 и 8 — 2026-11-11
 
 - **№3. Тексты Яндекс Музыки.** Точный каталожный ID проходит через оба пути загрузки и сериализацию очереди. При недоступности Яндекса срабатывает LRCLIB. Текст хранится рядом с MP3 как `.lrc` или `.txt`. Ревью закрыло произвольные адреса хранилища и редиректы, потерю fallback при таймауте и перезапись существующих сопутствующих файлов. Ключ подписи задаётся в `YANDEX_LYRICS_SIGN_KEY`. API Яндекса проверен на mock-ответах, доступ с реальным аккаунтом не проверялся.

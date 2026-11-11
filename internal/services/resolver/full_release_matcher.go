@@ -137,13 +137,44 @@ func (m *FullReleaseMatcher) MatchFullRelease(ctx context.Context, targetArtist,
 	return nil, nil
 }
 
+// ReleaseCandidatesPageResult содержит список кандидатов цельного релиза и состояние постраничной пагинации.
+type ReleaseCandidatesPageResult struct {
+	Candidates        []ReleaseCandidateItem `json:"candidates"`
+	IsCyrillic        bool                   `json:"is_cyrillic"`
+	HasMoreSoundCloud bool                   `json:"has_more_soundcloud"`
+	AlbumOffset       int                    `json:"album_offset"`
+	PlaylistOffset    int                    `json:"playlist_offset"`
+	AlbumToken        string                 `json:"album_token,omitempty"`
+	PlaylistToken     string                 `json:"playlist_token,omitempty"`
+}
+
 // SearchReleaseCandidates выполняет мульти-поиск кандидатов релиза (YouTube Music и SoundCloud)
 // и возвращает отранжированный список кандидатов с маппингом треков и контекстными бейджами цензуры.
 func (m *FullReleaseMatcher) SearchReleaseCandidates(ctx context.Context, targetArtist, targetAlbum string, targetTracks []ResolvedTrack, soundCloudLimit ...int) ([]ReleaseCandidateItem, bool, error) {
 	limit := 30
 	if len(soundCloudLimit) > 0 {
-		limit = SoundCloudCandidateLimit(soundCloudLimit[0])
+		limit = soundCloudLimit[0]
 	}
+	res, err := m.SearchReleaseCandidatesPaged(ctx, targetArtist, targetAlbum, targetTracks, 0, 0, "", "", limit)
+	return res.Candidates, res.IsCyrillic, err
+}
+
+// SearchReleaseCandidatesPaged выполняет постраничный мульти-поиск кандидатов релиза.
+// При запросе продолжения (albumOffset > 0, playlistOffset > 0 или передаче токенов)
+// опрос YouTube Music пропускается, чтобы не дублировать и не перезатирать уже найденные YT Music релизы.
+func (m *FullReleaseMatcher) SearchReleaseCandidatesPaged(
+	ctx context.Context,
+	targetArtist, targetAlbum string,
+	targetTracks []ResolvedTrack,
+	albumOffset, playlistOffset int,
+	albumToken, playlistToken string,
+	soundCloudLimit int,
+) (ReleaseCandidatesPageResult, error) {
+	if soundCloudLimit <= 0 {
+		soundCloudLimit = 30
+	}
+	soundCloudLimit = SoundCloudCandidateLimit(soundCloudLimit)
+
 	isCyrillic := ContainsCyrillic(targetArtist) || ContainsCyrillic(targetAlbum)
 	if !isCyrillic {
 		for _, t := range targetTracks {
@@ -154,10 +185,11 @@ func (m *FullReleaseMatcher) SearchReleaseCandidates(ctx context.Context, target
 		}
 	}
 
+	isContinuation := albumOffset > 0 || playlistOffset > 0 || albumToken != "" || playlistToken != ""
 	var items []ReleaseCandidateItem
 
-	// 1. Поиск кандидатов на YouTube Music
-	if m.ytMusic != nil {
+	// 1. Поиск кандидатов на YouTube Music — ТОЛЬКО на первой странице (не при догрузке SoundCloud)
+	if !isContinuation && m.ytMusic != nil {
 		ytCands, err := m.ytMusic.SearchAlbumReleaseCandidates(ctx, targetArtist, targetAlbum, 4)
 		if err == nil {
 			for idx, cand := range ytCands {
@@ -198,10 +230,16 @@ func (m *FullReleaseMatcher) SearchReleaseCandidates(ctx context.Context, target
 	}
 
 	// 2. Поиск кандидатов на SoundCloud
+	var scRes SoundCloudSetsPageResult
 	if m.scSearcher != nil {
-		scCands, err := m.scSearcher.SearchSoundCloudSets(ctx, targetArtist, targetAlbum, limit)
+		var err error
+		if isContinuation {
+			scRes, err = m.scSearcher.SearchSoundCloudSetsPaged(ctx, targetArtist, targetAlbum, albumOffset, playlistOffset, albumToken, playlistToken, soundCloudLimit)
+		} else {
+			scRes, err = m.scSearcher.SearchSoundCloudSetsPaged(ctx, targetArtist, targetAlbum, 0, 0, "", "", soundCloudLimit)
+		}
 		if err == nil {
-			for idx, cand := range scCands {
+			for idx, cand := range scRes.Candidates {
 				mapping, matched := m.MatchTracklists(targetTracks, cand.Tracks)
 				ratio := 0.0
 				if len(targetTracks) > 0 {
@@ -240,7 +278,15 @@ func (m *FullReleaseMatcher) SearchReleaseCandidates(ctx context.Context, target
 		return items[i].MatchedCount > items[j].MatchedCount
 	})
 
-	return RankReleaseItems(items, targetArtist, targetAlbum, targetTracks, PolicyRelease), isCyrillic, nil
+	return ReleaseCandidatesPageResult{
+		Candidates:        RankReleaseItems(items, targetArtist, targetAlbum, targetTracks, PolicyRelease),
+		IsCyrillic:        isCyrillic,
+		HasMoreSoundCloud: scRes.HasMoreSoundCloud,
+		AlbumOffset:       scRes.AlbumOffset,
+		PlaylistOffset:    scRes.PlaylistOffset,
+		AlbumToken:        scRes.AlbumToken,
+		PlaylistToken:     scRes.PlaylistToken,
+	}, nil
 }
 
 // ParseAndMatchReleaseURL разбирает произвольную прямую ссылку на сет/альбом и сопоставляет её с целевыми треками.

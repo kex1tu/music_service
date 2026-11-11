@@ -635,13 +635,18 @@ type SoundCloudCacheDTO struct {
 
 // ReleaseCandidatesResponse — ответ поиска цельных источников релиза.
 type ReleaseCandidatesResponse struct {
-	VersionPolicy resolver.VersionPolicy          `json:"version_policy"`
-	Selection     string                          `json:"selection"`
-	Artist        string                          `json:"artist"`
-	Album         string                          `json:"album"`
-	IsCyrillic    bool                            `json:"is_cyrillic"`
-	TargetTracks  []resolver.ResolvedTrack        `json:"target_tracks"`
-	Candidates    []resolver.ReleaseCandidateItem `json:"candidates"`
+	VersionPolicy     resolver.VersionPolicy          `json:"version_policy"`
+	Selection         string                          `json:"selection"`
+	Artist            string                          `json:"artist"`
+	Album             string                          `json:"album"`
+	IsCyrillic        bool                            `json:"is_cyrillic"`
+	TargetTracks      []resolver.ResolvedTrack        `json:"target_tracks"`
+	Candidates        []resolver.ReleaseCandidateItem `json:"candidates"`
+	HasMoreSoundCloud bool                            `json:"has_more_soundcloud"`
+	AlbumOffset       int                             `json:"album_offset"`
+	PlaylistOffset    int                             `json:"playlist_offset"`
+	AlbumToken        string                          `json:"album_token,omitempty"`
+	PlaylistToken     string                          `json:"playlist_token,omitempty"`
 }
 
 // ParseReleaseURLRequest — запрос разбора произвольной ссылки на релиз.
