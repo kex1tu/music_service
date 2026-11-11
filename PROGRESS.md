@@ -1,5 +1,32 @@
 # PROGRESS.md — Матрица статусов и дашборд реализации
 
+## Проверка защиты от коротких аудиопревью — 2026-11-11
+
+- **Реализовано:**
+  - `internal/services/downloader/media_processor.go`:
+    - В `validateDownloadedStreamAudio` добавлена строгая проверка контекста (`ctx.Err()`) перед и после выполнения probe с возвратом `context.Canceled` / `context.DeadlineExceeded`.
+    - Добавлена очистка пробелов и валидация числового значения длительности: пустые строки, нечисловые значения, `NaN`, `+Inf`, `-Inf` и неположительные значения (`<= 0`) явно трактуются как неизвестная длительность и не блокируют пайплайн.
+    - Сохранены неизменными пороговые значения эвристики: `actualDuration < 35.0 && expectedDurationSec > 60` возвращает ошибку превью (`detected 30s preview snippet (actual: %.1fs, expected: %ds)`). Легитимные короткие треки (`expectedDurationSec <= 60`) и треки с неизвестной ожидаемой длительностью (`expectedDurationSec <= 0`) не блокируются.
+  - `internal/services/downloader/switch_version.go`:
+    - Исправлен критический дефект маскировки превью: при смене версии источника для валидации скачанного файла в `downloadAndValidateRawStream` передаётся длительность ожидаемой композиции `expectedDuration` (из исходного трека очереди `tr.Duration`, базы данных `entity.Duration` или замера существующего файла в библиотеке), а не длительность найденного кандидата `candDuration`. Ранее 30-секундный кандидат SoundCloud в кэше с `candDuration = 30` маскировал проверку (`30 > 60 == false`), пропуская гео-сниппеты.
+    - При обнаружении превью невалидный временный файл удаляется из staging, трек в очереди переходит в статус `waiting_source` с сохранением ссылки ручного выбора (`AudioSourceURL = targetURL`, `VersionStatus = "manual"`), трек не становится `ready`, автоматическая смена источника заблокирована.
+  - `internal/features/downloader/service.go`:
+    - В активный вертикальный feature slice загрузчика добавлены методы `downloadAndValidateRawStream` и `validateDownloadedStreamAudio` с единой логикой валидации превью.
+    - В `processSingleTrack` скачивание переведено на `downloadAndValidateRawStream(ctx, streamURL, outTemplate, track.Duration, ...)`: превью-сниппеты отсекаются до этапа конвертации ffmpeg в MP3 320k и тегирования ID3v2.4 как при первичной загрузке, так и при ручной смене версии и бэкфилле.
+  - Тестирование:
+    - `internal/services/downloader/media_processor_test.go`: добавлены тесты матрицы порогов `TestValidateDownloadedStreamAudio_Matrix` (actual ниже/на/выше 35с, expected ниже/на/выше 60с, короткий легитимный трек 20с, неизвестная ожидаемая длительность 0с и -1с), тесты ошибок `TestValidateDownloadedStreamAudio_ProbeErrorsAndContext` (отсутствующий файл, повреждённый файл, отмена контекста, таймаут контекста) и `TestValidateDownloadedStreamAudio_MalformedAndNonNumericJSON` (невалидный JSON, пустая строка, N/A, NaN, Inf, -Inf, 0.0).
+    - `internal/services/downloader/switch_version_test.go`: добавлен регрессионный тест `TestSwitchTrackVersion_PreviewSnippetRegression`, доказывающий, что 30-секундный кандидат в кэше не маскирует проверку превью при ожидаемой длительности 180с, файл удаляется, трек не переходит в `ready`, ссылка ручного выбора сохраняется, а при передаче полноразмерного трека смена версии завершается успешно.
+    - `internal/features/downloader/preview_validation_test.go`: добавлены тесты валидации превью и изоляции пайплайна в feature-слайсе `TestFeaturesDownloader_ValidateDownloadedStreamAudio_Snippet`, `TestFeaturesDownloader_ValidateDownloadedStreamAudio_ProbeErrorsAndContext`, `TestFeaturesDownloader_ProcessSingleTrack_PreviewSnippetBlocked`.
+- **Проверено:**
+  - `go test -v ./...` — 100% PASS (все 26 пакетов).
+  - `go test -race -p 1 ./...` — 100% PASS (0 data races во всех пакетах).
+  - `go vet ./...` — 100% PASS.
+  - `CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/music-manager cmd/server/main.go` — успешная статическая сборка бинарника (18 МБ).
+  - `git diff --check` — 0 замечаний.
+- **Заблокировано / ограничения:**
+  - Деплой на боевые серверы, git commit, git push и изменение рабочей медиатеки не производились в соответствии с правилами промпта.
+  - Тесты используют синтетический звук (ffmpeg lavfi sine) и моки, реальная доступность внешних API в production не проверялась.
+
 ## Интеграция задач 3, 6, 7 и 8 — 2026-11-11
 
 - **№3. Тексты Яндекс Музыки.** Точный каталожный ID проходит через оба пути загрузки и сериализацию очереди. При недоступности Яндекса срабатывает LRCLIB. Текст хранится рядом с MP3 как `.lrc` или `.txt`. Ревью закрыло произвольные адреса хранилища и редиректы, потерю fallback при таймауте и перезапись существующих сопутствующих файлов. Ключ подписи задаётся в `YANDEX_LYRICS_SIGN_KEY`. API Яндекса проверен на mock-ответах, доступ с реальным аккаунтом не проверялся.

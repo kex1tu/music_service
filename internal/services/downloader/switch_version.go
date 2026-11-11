@@ -69,6 +69,7 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 	var artist, title, isrc, relFilePath, absFilePath string
 	var foundJob *DownloadJob
 	var foundIdx int = -1
+	var expectedDuration int
 
 	// 1. Поиск трека в активных и недавних задачах загрузчика
 	for _, job := range s.jobs.GetAll() {
@@ -77,6 +78,7 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 			if tr.TrackID == trackID {
 				artist = tr.Artist
 				title = tr.Title
+				expectedDuration = tr.Duration
 				if tr.ISRC != nil {
 					isrc = *tr.ISRC
 				}
@@ -102,6 +104,9 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 			title = entity.Title
 			relFilePath = entity.FilePath
 			dbTrackID = entity.ID
+			if entity.Duration > 0 && expectedDuration <= 0 {
+				expectedDuration = int(entity.Duration)
+			}
 		}
 	}
 
@@ -125,6 +130,12 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 		}
 	}
 
+	if expectedDuration <= 0 && absFilePath != "" {
+		if measured, ffErr := measureAudioDuration(absFilePath); ffErr == nil && measured > 0 {
+			expectedDuration = measured
+		}
+	}
+
 	// 4. Определение канонического ключа и длительности кандидата
 	cacheKey := resolver.BuildCacheKey(isrc, artist, title)
 	candDuration := 0
@@ -141,8 +152,17 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 
 	// 5. Скачивание аудиопотока во временный каталог через yt-dlp
 	tmpOutTemplate := filepath.Join(s.tmpSandbox.Root(), fmt.Sprintf("switch_%d_%%(ext)s", time.Now().UnixNano()))
-	rawFile, dErr := s.downloadAndValidateRawStream(ctx, targetURL, tmpOutTemplate, candDuration, nil)
+	rawFile, dErr := s.downloadAndValidateRawStream(ctx, targetURL, tmpOutTemplate, expectedDuration, nil)
 	if dErr != nil {
+		if foundJob != nil && foundIdx >= 0 {
+			errStr := dErr.Error()
+			foundJob.UpdateTrack(foundIdx, func(tr *resolver.ResolvedTrack) {
+				tr.Status = "waiting_source"
+				tr.Error = &errStr
+				tr.AudioSourceURL = targetURL
+				tr.VersionStatus = "manual"
+			})
+		}
 		return nil, fmt.Errorf("failed to download audio from target URL: %w", dErr)
 	}
 	defer safefs.Remove(rawFile)
@@ -158,6 +178,8 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 	if candDuration <= 0 {
 		if measured, ffErr := measureAudioDuration(tmpMP3File); ffErr == nil && measured > 0 {
 			candDuration = measured
+		} else if expectedDuration > 0 {
+			candDuration = expectedDuration
 		} else {
 			candDuration = 180
 		}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 
 	"path/filepath"
@@ -198,6 +199,10 @@ type ffprobeFormatDurationOutput struct {
 
 // validateDownloadedStreamAudio проверяет, что скачанный файл не является урезанным превью (сниппетом из-за гео-блокировки).
 func validateDownloadedStreamAudio(ctx context.Context, rawFilePath string, expectedDurationSec int) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	args := []string{
 		"-v", "quiet",
 		"-print_format", "json",
@@ -209,7 +214,14 @@ func validateDownloadedStreamAudio(ctx context.Context, rawFilePath string, expe
 	defer cmd.Close()
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return fmt.Errorf("ffprobe probe failed: %w", err)
+	}
+
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	var data ffprobeFormatDurationOutput
@@ -217,9 +229,14 @@ func validateDownloadedStreamAudio(ctx context.Context, rawFilePath string, expe
 		return fmt.Errorf("failed to parse ffprobe json: %w", err)
 	}
 
-	actualDuration, err := strconv.ParseFloat(data.Format.Duration, 64)
-	if err != nil {
-		return nil // Если парсинг длительности не удался, не блокируем пайплайн
+	durationStr := strings.TrimSpace(data.Format.Duration)
+	if durationStr == "" {
+		return nil // Неизвестная/пустая длительность: не блокируем пайплайн
+	}
+
+	actualDuration, err := strconv.ParseFloat(durationStr, 64)
+	if err != nil || math.IsNaN(actualDuration) || math.IsInf(actualDuration, 0) || actualDuration <= 0 {
+		return nil // Нечисловое значение, NaN/Inf или некорректная длительность: не блокируем пайплайн
 	}
 
 	// Если файл длится менее 35 секунд, а ожидаемый трек длиннее 60 секунд — это 30-секундный гео-сниппет

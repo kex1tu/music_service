@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 
@@ -1180,7 +1181,7 @@ func (s *Service) processSingleTrack(
 	job.SetStepAndStatus(fmt.Sprintf("Скачивание трека %d/%d: %s", trackIdx, total, track.Title), StatusDownloading)
 
 	outTemplate := filepath.Join(rawDir, fmt.Sprintf("%02d_track.%%(ext)s", trackIdx))
-	rawAudioFile, err := s.downloadRawStream(ctx, streamURL, outTemplate, func(pct float64) {
+	rawAudioFile, err := s.downloadAndValidateRawStream(ctx, streamURL, outTemplate, track.Duration, func(pct float64) {
 		job.UpdateTrackProgress(trackIdx-1, pct, fmt.Sprintf("Скачивание %d/%d: %.0f%%", trackIdx, total, pct))
 	})
 	// Never replace a user-selected source after failure.
@@ -1432,6 +1433,74 @@ func (s *Service) findDownloadedFile(outputTemplate string) (string, error) {
 		return "", fmt.Errorf("downloaded audio file not found matching template %s", outputTemplate)
 	}
 	return matches[0], nil
+}
+
+type ffprobeFormatDurationOutput struct {
+	Format struct {
+		Duration string `json:"duration"`
+	} `json:"format"`
+}
+
+// validateDownloadedStreamAudio проверяет, что скачанный файл не является урезанным превью (сниппетом из-за гео-блокировки).
+func validateDownloadedStreamAudio(ctx context.Context, rawFilePath string, expectedDurationSec int) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	args := []string{
+		"-v", "quiet",
+		"-print_format", "json",
+		"-show_format",
+		rawFilePath,
+	}
+
+	cmd := mediaexec.CommandContext(ctx, "ffprobe", args...)
+	defer cmd.Close()
+	out, err := cmd.Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("ffprobe probe failed: %w", err)
+	}
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	var data ffprobeFormatDurationOutput
+	if err := json.Unmarshal(out, &data); err != nil {
+		return fmt.Errorf("failed to parse ffprobe json: %w", err)
+	}
+
+	durationStr := strings.TrimSpace(data.Format.Duration)
+	if durationStr == "" {
+		return nil // Неизвестная/пустая длительность: не блокируем пайплайн
+	}
+
+	actualDuration, err := strconv.ParseFloat(durationStr, 64)
+	if err != nil || math.IsNaN(actualDuration) || math.IsInf(actualDuration, 0) || actualDuration <= 0 {
+		return nil // Нечисловое значение, NaN/Inf или некорректная длительность: не блокируем пайплайн
+	}
+
+	// Если файл длится менее 35 секунд, а ожидаемый трек длиннее 60 секунд — это 30-секундный гео-сниппет
+	if actualDuration < 35.0 && expectedDurationSec > 60 {
+		return fmt.Errorf("detected 30s preview snippet (actual: %.1fs, expected: %ds)", actualDuration, expectedDurationSec)
+	}
+
+	return nil
+}
+
+func (s *Service) downloadAndValidateRawStream(ctx context.Context, sourceURL, outputTemplate string, expectedDurationSec int, onProgress func(float64)) (string, error) {
+	rawFile, err := s.downloadRawStream(ctx, sourceURL, outputTemplate, onProgress)
+	if err != nil {
+		return "", err
+	}
+	if vErr := validateDownloadedStreamAudio(ctx, rawFile, expectedDurationSec); vErr != nil {
+		_ = safefs.Remove(rawFile)
+		return "", vErr
+	}
+	return rawFile, nil
 }
 
 func (s *Service) transcodeToMP3(ctx context.Context, inputRaw, outputMP3 string) error {
