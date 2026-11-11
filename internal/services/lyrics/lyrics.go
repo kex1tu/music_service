@@ -3,10 +3,11 @@ package lyrics
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -40,6 +41,11 @@ type LyricsResponse struct {
 // LyricsProvider defines the contract for searching lyrics from remote providers.
 type LyricsProvider interface {
 	Search(ctx context.Context, artist, title, album string, duration int) (*LyricsSearchResult, error)
+}
+
+// YandexLyricsClient defines the contract for fetching lyrics by exact Yandex catalog track ID.
+type YandexLyricsClient interface {
+	GetTrackLyrics(ctx context.Context, trackID int64) (lyrics string, synced bool, err error)
 }
 
 // LrclibClient is an HTTP client for lrclib.net.
@@ -174,6 +180,7 @@ func (c *LrclibClient) Search(ctx context.Context, artist, title, album string, 
 type Service struct {
 	musicSandbox *sandbox.PathSandbox
 	provider     LyricsProvider
+	yandexClient YandexLyricsClient
 }
 
 // NewService creates a new LyricsService with an optional custom LyricsProvider.
@@ -186,6 +193,48 @@ func NewService(musicSandbox *sandbox.PathSandbox, provider ...LyricsProvider) *
 		musicSandbox: musicSandbox,
 		provider:     p,
 	}
+}
+
+// SetYandexClient задает клиент для прямого запроса текстов Яндекс Музыки по каталожному ID.
+func (s *Service) SetYandexClient(client YandexLyricsClient) {
+	s.yandexClient = client
+}
+
+// SearchOptions содержит опциональные параметры точного поиска текстов.
+type SearchOptions struct {
+	YandexTrackID int64
+}
+
+// SearchOption конфигурирует параметры поиска текстов песен.
+type SearchOption func(*SearchOptions)
+
+// WithYandexTrackID передает точный каталожный идентификатор трека Яндекс Музыки.
+func WithYandexTrackID(id int64) SearchOption {
+	return func(o *SearchOptions) {
+		if id > 0 {
+			o.YandexTrackID = id
+		}
+	}
+}
+
+// GetLyricsByYandexID запрашивает текст напрямую из Яндекс Музыки по точному числовому ID трека.
+func (s *Service) GetLyricsByYandexID(ctx context.Context, trackID int64) (*LyricsSearchResult, error) {
+	if s.yandexClient == nil || trackID <= 0 {
+		return nil, nil
+	}
+	text, synced, err := s.yandexClient.GetTrackLyrics(ctx, trackID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(text) == "" {
+		return nil, nil
+	}
+	return &LyricsSearchResult{
+		Lyrics:  text,
+		Content: text,
+		Synced:  synced,
+		Source:  "yandex",
+	}, nil
 }
 
 // GetLyrics reads the local lyric file (.lrc or .txt) adjacent to the MP3 file.
@@ -230,8 +279,39 @@ func (s *Service) GetLyrics(relPath string) (*LyricsResponse, error) {
 	}, nil
 }
 
-// SearchLyrics searches for lyrics using the configured provider.
+// SearchLyrics searches for lyrics using the configured providers (LRCLIB fallback).
+// Preserves exact 5-parameter signature for compatibility with feature slice interfaces.
 func (s *Service) SearchLyrics(ctx context.Context, artist, title, album string, duration int) (*LyricsSearchResult, error) {
+	return s.SearchLyricsWithOptions(ctx, artist, title, album, duration)
+}
+
+// SearchLyricsWithOptions searches for lyrics using configured providers and optional source context.
+// При наличии WithYandexTrackID сначала запрашивается Яндекс Музыка по точному каталожному ID.
+// Если в Яндексе текст отсутствует (404) или возникла ошибка (кроме отмены контекста), выполняется fallback на LRCLIB.
+func (s *Service) SearchLyricsWithOptions(ctx context.Context, artist, title, album string, duration int, opts ...SearchOption) (*LyricsSearchResult, error) {
+	var options SearchOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if options.YandexTrackID > 0 && s.yandexClient != nil {
+		yandexCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		result, err := s.GetLyricsByYandexID(yandexCtx, options.YandexTrackID)
+		cancel()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err == nil && result != nil {
+			result.TrackName = title
+			result.ArtistName = artist
+			return result, nil
+		}
+	}
 	if s.provider == nil {
 		return &LyricsSearchResult{Source: "none"}, nil
 	}
@@ -243,6 +323,38 @@ func (s *Service) SearchLyrics(ctx context.Context, artist, title, album string,
 		return &LyricsSearchResult{Source: "none"}, nil
 	}
 	return res, nil
+}
+
+// SaveDownloadedLyrics creates a staging companion without overwriting an existing one.
+// safefs resolves and opens files relative to the registered staging root.
+func SaveDownloadedLyrics(staging *sandbox.PathSandbox, mp3Path string, result *LyricsSearchResult) error {
+	if staging == nil {
+		return sandbox.ErrStorageConfig
+	}
+	if _, err := staging.ToRelative(mp3Path); err != nil {
+		return err
+	}
+	base := strings.TrimSuffix(mp3Path, filepath.Ext(mp3Path))
+	ext, alternate := ".txt", ".lrc"
+	if result.Synced {
+		ext, alternate = alternate, ext
+	}
+	if _, err := safefs.Lstat(base + alternate); !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	path := base + ext
+	file, err := safefs.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, writeErr := file.WriteString(result.Lyrics)
+	if err := errors.Join(writeErr, file.Close()); err != nil {
+		return errors.Join(err, safefs.Remove(path))
+	}
+	return nil
 }
 
 // SaveLyrics saves lyrics strictly to an external .lrc or .txt file adjacent to the MP3 file.

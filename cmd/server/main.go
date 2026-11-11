@@ -103,6 +103,10 @@ func main() {
 
 	organizerService := organizer.NewService(musicSandbox, tmpSandbox)
 	lyricsService := lyrics.NewService(musicSandbox)
+	yandexClient := resolver.NewYandexMusicClient(cfg.YandexMusicToken, cfg.YandexMusicProxy)
+	yandexClient.SetSignKey(cfg.YandexLyricsSignKey)
+	lyricsService.SetYandexClient(yandexClient)
+	downloadService.SetLyricsService(lyricsService)
 
 	// Initialize Downloader Vertical Feature Slice
 	downloaderRepo := featureDownloader.NewRepository(database.Conn())
@@ -152,7 +156,6 @@ func main() {
 	tagHandler := handlers.NewTagHandler(musicSandbox, tmpSandbox, organizerService, deezerClient, sourceResolver.Enricher())
 	tagHandler.SetDB(database)
 
-	yandexClient := resolver.NewYandexMusicClient(cfg.YandexMusicToken, cfg.YandexMusicProxy)
 	ytmusicClient := resolver.NewYouTubeMusicClient("")
 	itunesClient := resolver.NewITunesClient(nil)
 	mbClient := resolver.NewMusicBrainzClient(cfg.MusicBrainzUserToken)

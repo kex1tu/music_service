@@ -38,6 +38,7 @@ type Config struct {
 	MaxConcurrentDownloads  int
 	CookiesFile             string
 	YandexMusicToken        string
+	YandexLyricsSignKey     string
 	YandexMusicProxy        string
 	MusicBrainzUserToken    string
 	MusicBrainzClientID     string
@@ -133,6 +134,7 @@ func loadEnvironment() (*Config, error) {
 		MaxConcurrentDownloads:      maxDownloads,
 		CookiesFile:                 getEnv("YTDLP_COOKIES_PATH", "cookies.txt"),
 		YandexMusicToken:            getEnv("YANDEX_MUSIC_TOKEN", ""),
+		YandexLyricsSignKey:         getEnv("YANDEX_LYRICS_SIGN_KEY", ""),
 		YandexMusicProxy:            getEnv("YANDEX_MUSIC_PROXY", ""),
 		MusicBrainzUserToken:        getEnv("MUSICBRAINZ_USER_TOKEN", ""),
 		MusicBrainzClientID:         getEnv("MUSICBRAINZ_CLIENT_ID", ""),

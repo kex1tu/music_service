@@ -1305,21 +1305,20 @@ func (s *Service) processSingleTrack(
 		if lyricsAlbum == "" && !meta.IsPlaylist {
 			lyricsAlbum = meta.AlbumTitle
 		}
-		lrcRes, _ := s.lyrics.SearchLyrics(ctx, primaryArt, track.Title, lyricsAlbum, track.Duration)
-		if (lrcRes == nil || lrcRes.Lyrics == "") && primaryArt != track.Artist {
+		var searchOpts []lyrics.SearchOption
+		if yandexID, ok := track.GetYandexTrackID(); ok {
+			searchOpts = append(searchOpts, lyrics.WithYandexTrackID(yandexID))
+		}
+		lrcRes, _ := s.lyrics.SearchLyricsWithOptions(ctx, primaryArt, track.Title, lyricsAlbum, track.Duration, searchOpts...)
+		if (lrcRes == nil || lrcRes.Lyrics == "") && primaryArt != track.Artist && ctx.Err() == nil {
 			lrcRes, _ = s.lyrics.SearchLyrics(ctx, track.Artist, track.Title, lyricsAlbum, track.Duration)
 		}
 		if lrcRes != nil && lrcRes.Lyrics != "" {
+			if err := lyrics.SaveDownloadedLyrics(s.tmpSandbox, mp3Path, lrcRes); err != nil {
+				log.Printf("[Downloader] Failed to save lyrics companion: %v", err)
+			}
 			if lrcRes.Synced {
-				lrcFilename := fmt.Sprintf("%s%s.lrc", trackPrefix, safeTitle)
-				lrcPath := filepath.Join(convertedDir, lrcFilename)
-				_ = safefs.WriteFile(lrcPath, []byte(lrcRes.Lyrics), 0644)
-
 				spots = censorcheck.ExtractSpots(lrcRes.Lyrics, 3)
-			} else {
-				txtFilename := fmt.Sprintf("%s%s.txt", trackPrefix, safeTitle)
-				txtPath := filepath.Join(convertedDir, txtFilename)
-				_ = safefs.WriteFile(txtPath, []byte(lrcRes.Lyrics), 0644)
 			}
 		}
 	}

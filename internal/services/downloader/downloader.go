@@ -14,6 +14,7 @@ import (
 	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
+	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/resolver"
 )
 
@@ -24,6 +25,7 @@ type Service struct {
 	tmpSandbox   *sandbox.PathSandbox
 	musicSandbox *sandbox.PathSandbox
 	cookiesPath  string
+	lyrics       *lyrics.Service
 	sem          chan struct{}
 	client       *http.Client
 	ctx          context.Context
@@ -103,6 +105,11 @@ func (s *Service) TmpSandbox() *sandbox.PathSandbox {
 // MusicSandbox returns the permanent music library PathSandbox.
 func (s *Service) MusicSandbox() *sandbox.PathSandbox {
 	return s.musicSandbox
+}
+
+// SetLyricsService injects the lyrics service into the downloader.
+func (s *Service) SetLyricsService(l *lyrics.Service) {
+	s.lyrics = l
 }
 
 // Database returns the underlying SQLite database via JobManager.
