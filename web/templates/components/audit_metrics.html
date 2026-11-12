@@ -1,8 +1,8 @@
 {{ define "audit_metrics" }}
 <!-- Сводка метрик коллекции (8 карточек) -->
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-8 gap-4">
+<div class="grid grid-cols-2 lg:grid-cols-4 2xl:grid-cols-8 gap-2.5 sm:gap-4">
     <!-- Карточка 1: Всего треков -->
-    <div class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel">
+    <div class="bg-surface-panel border border-surface-border rounded-xl p-3 sm:p-5 shadow-panel">
         <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-content-secondary uppercase tracking-wider">Всего треков</span>
             <span class="w-8 h-8 rounded-lg bg-brand/10 text-brand flex items-center justify-center">
@@ -24,7 +24,7 @@
         role="button"
         tabindex="0"
         aria-label="Показать треки без текстов"
-        class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel cursor-pointer hover:border-purple-500/50 transition focus-visible:ring-2 focus-visible:ring-purple-400"
+        class="bg-surface-panel border border-surface-border rounded-xl p-3 sm:p-5 shadow-panel cursor-pointer hover:border-purple-500/50 transition focus-visible:ring-2 focus-visible:ring-purple-400"
         :class="{'ring-1 ring-purple-500/50': activeSubTab === 'lyrics'}">
         <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-purple-400 uppercase tracking-wider">Без текстов (.lrc)</span>
@@ -47,7 +47,7 @@
         role="button"
         tabindex="0"
         aria-label="Показать релизы без обложек"
-        class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel cursor-pointer hover:border-yellow-500/50 transition focus-visible:ring-2 focus-visible:ring-yellow-400"
+        class="bg-surface-panel border border-surface-border rounded-xl p-3 sm:p-5 shadow-panel cursor-pointer hover:border-yellow-500/50 transition focus-visible:ring-2 focus-visible:ring-yellow-400"
         :class="{'ring-1 ring-yellow-500/50': activeSubTab === 'covers'}">
         <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-yellow-400 uppercase tracking-wider">Без обложек</span>
@@ -70,7 +70,7 @@
         role="button"
         tabindex="0"
         aria-label="Показать дубликаты треков"
-        class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel cursor-pointer hover:border-red-500/50 transition focus-visible:ring-2 focus-visible:ring-red-400"
+        class="bg-surface-panel border border-surface-border rounded-xl p-3 sm:p-5 shadow-panel cursor-pointer hover:border-red-500/50 transition focus-visible:ring-2 focus-visible:ring-red-400"
         :class="{'ring-1 ring-red-500/50': activeSubTab === 'duplicates'}">
         <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-red-400 uppercase tracking-wider">Дубликаты треков</span>
@@ -93,7 +93,7 @@
         role="button"
         tabindex="0"
         aria-label="Показать неполные релизы"
-        class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel cursor-pointer hover:border-sky-500/50 transition focus-visible:ring-2 focus-visible:ring-sky-400"
+        class="bg-surface-panel border border-surface-border rounded-xl p-3 sm:p-5 shadow-panel cursor-pointer hover:border-sky-500/50 transition focus-visible:ring-2 focus-visible:ring-sky-400"
         :class="{'ring-1 ring-sky-500/50': activeSubTab === 'incomplete'}">
         <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-sky-400 uppercase tracking-wider">Неполные релизы</span>
@@ -116,7 +116,7 @@
         role="button"
         tabindex="0"
         aria-label="Показать файлы с некорректными путями"
-        class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel cursor-pointer hover:border-amber-500/50 transition focus-visible:ring-2 focus-visible:ring-amber-400"
+        class="bg-surface-panel border border-surface-border rounded-xl p-3 sm:p-5 shadow-panel cursor-pointer hover:border-amber-500/50 transition focus-visible:ring-2 focus-visible:ring-amber-400"
         :class="{'ring-1 ring-amber-500/50': activeSubTab === 'paths'}">
         <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-amber-400 uppercase tracking-wider">Не по шаблону</span>
@@ -139,7 +139,7 @@
         role="button"
         tabindex="0"
         aria-label="Показать нелатинские жанры"
-        class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel cursor-pointer hover:border-rose-500/50 transition focus-visible:ring-2 focus-visible:ring-rose-400"
+        class="bg-surface-panel border border-surface-border rounded-xl p-3 sm:p-5 shadow-panel cursor-pointer hover:border-rose-500/50 transition focus-visible:ring-2 focus-visible:ring-rose-400"
         :class="{'ring-1 ring-rose-500/50': activeSubTab === 'genres'}">
         <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-rose-400 uppercase tracking-wider">Жанры (не-EN)</span>
@@ -162,7 +162,7 @@
         role="button"
         tabindex="0"
         aria-label="Показать дефекты тегов"
-        class="bg-surface-panel border border-surface-border rounded-xl p-5 shadow-panel cursor-pointer hover:border-brand/50 transition focus-visible:ring-2 focus-visible:ring-brand"
+        class="bg-surface-panel border border-surface-border rounded-xl p-3 sm:p-5 shadow-panel cursor-pointer hover:border-brand/50 transition focus-visible:ring-2 focus-visible:ring-brand"
         :class="{'ring-1 ring-brand/50': activeSubTab === 'tags'}">
         <div class="flex items-center justify-between">
             <span class="text-xs font-semibold text-brand uppercase tracking-wider">Сверка тегов</span>

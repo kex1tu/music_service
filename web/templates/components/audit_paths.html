@@ -35,7 +35,35 @@
             </div>
         </template>
         <template x-if="!isLoading && invalidPaths.length > 0">
-            <div class="overflow-x-auto max-h-[600px]">
+            <div>
+                <!-- Мобильный вид (< md) -->
+                <div class="md:hidden divide-y divide-surface-borderSubtle">
+                    <template x-for="item in invalidPaths.slice(0, 100)" :key="'mob-' + item.path">
+                        <div class="p-3.5 space-y-2">
+                            <div class="text-xs font-mono text-amber-300 break-all" x-text="item.path"></div>
+                            <div class="text-xs text-content-secondary" x-text="item.reason || 'Нарушение формата имени или каталога'"></div>
+                            <div class="text-xs font-mono text-brand break-all bg-surface-base/70 border border-surface-border/60 rounded p-2" x-text="item.suggested_path"></div>
+                            <div class="flex items-center gap-2 pt-1">
+                                <button
+                                    @click="fixPath(item)"
+                                    :disabled="item._isFixing"
+                                    :aria-label="'Исправить путь файла ' + item.path"
+                                    class="flex-1 px-3 py-2 bg-brand hover:bg-brand-hover text-zinc-950 rounded text-xs font-bold transition disabled:opacity-50 shadow-sm active:scale-95">
+                                    <span x-text="item._isFixing ? '...' : 'Исправить'"></span>
+                                </button>
+                                <button
+                                    @click="openDirectory(item.path.split('/').slice(0, -1).join('/'))"
+                                    :aria-label="'Открыть папку файла ' + item.path"
+                                    class="px-3 py-2 bg-surface-elevated hover:bg-surface-hover text-content-primary border border-surface-border rounded text-xs transition shrink-0">
+                                    В папку
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Десктопный вид (>= md) -->
+                <div class="hidden md:block overflow-x-auto max-h-[600px]">
                 <table class="w-full text-left border-collapse text-xs">
                     <thead class="bg-surface-base text-content-secondary uppercase tracking-wider font-semibold sticky top-0 z-10 border-b border-surface-border font-mono text-xs">
                         <tr>
@@ -70,6 +98,7 @@
                         </template>
                     </tbody>
                 </table>
+                </div>
                 <template x-if="invalidPaths.length > 100">
                     <div class="p-3 bg-surface-base border-t border-surface-border text-center text-xs text-content-muted">
                         Показано первых 100 файлов из <span class="font-mono text-amber-300" x-text="invalidPaths.length"></span>. Кнопка «Исправить все пути» обработает все найденные файлы.

@@ -32,8 +32,8 @@
         </div>
     </template>
 
-    <div class="flex-1 overflow-x-auto overflow-y-auto max-h-[calc(100vh-230px)] relative select-none">
-        <table class="w-full text-left text-xs text-content-secondary border-collapse table-fixed md:table-auto md:min-w-[900px] transition-colors"
+    <div class="flex-1 overflow-x-auto md:overflow-y-auto md:max-h-[calc(100vh-230px)] relative select-none">
+        <table class="w-full text-left text-xs text-content-secondary border-collapse table-auto md:min-w-[900px] transition-colors"
                :class="gridDensity === 'compact' ? 'table-dense' : ''">
             <!-- Липкая шапка таблицы (Sticky Header) -->
             <thead class="sticky top-0 z-20 bg-surface-panel/95 backdrop-blur-md text-xs font-mono uppercase tracking-wider text-content-muted border-b border-surface-border">
@@ -132,7 +132,7 @@
                                     </template>
 
                                     <!-- Сетка папок -->
-                                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-left pt-1 max-h-80 overflow-y-auto p-1">
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-left pt-1 md:max-h-80 md:overflow-y-auto p-1">
                                         <template x-for="dir in visibleDirectories" :key="dir.path">
                                             <div class="p-2 bg-surface-elevated hover:bg-surface-hover hover:border-white/20 border border-surface-border rounded-md flex items-center space-x-2.5 transition group shadow-xs text-left">
                                                 <button
