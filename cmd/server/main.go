@@ -70,6 +70,8 @@ func main() {
 	log.Println("[Main] Resetting library metadata cache tables on startup (preserving download_jobs)...")
 	if err := database.ResetLibraryTables(context.Background()); err != nil {
 		log.Printf("[Main] Warning: Failed to reset library cache tables: %v", err)
+	} else {
+		log.Println("[Main] Library metadata cache tables reset")
 	}
 
 	// 4. Initialize services and root context

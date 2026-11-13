@@ -393,10 +393,14 @@ func CleanString(s string) string {
 	return fmt.Sprintf("%s", s)
 }
 
-// ResetLibraryTables очищает таблицы кэша медиатеки при запуске сервиса, сохраняя персистентные таблицы:
-// download_jobs, soundcloud_uncensored_cache, app_settings, pinned_track_sources,
-// tracked_artists, radar_releases, artist_relations, radio_history.
+// ResetLibraryTables атомарно очищает таблицы кэша медиатеки при запуске сервиса.
 func (db *DB) ResetLibraryTables(ctx context.Context) error {
+	tx, err := db.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("не удалось начать очистку кэша: %w", err)
+	}
+	defer tx.Rollback()
+
 	queries := []string{
 		"DELETE FROM track_genres;",
 		"DELETE FROM audit_issues;",
@@ -407,11 +411,11 @@ func (db *DB) ResetLibraryTables(ctx context.Context) error {
 		"DELETE FROM genres;",
 	}
 	for _, q := range queries {
-		if _, err := db.conn.ExecContext(ctx, q); err != nil {
+		if _, err := tx.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("ошибка очистки таблицы (%s): %w", q, err)
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // TrackHash вычисляет стабильный 16-символьный хэш пути к файлу трека.

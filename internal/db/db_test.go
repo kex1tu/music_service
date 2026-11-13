@@ -114,6 +114,35 @@ func TestAppSettings(t *testing.T) {
 	}
 }
 
+func TestResetLibraryTablesRollsBackOnFailure(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "library.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	ctx := context.Background()
+	if _, err := database.conn.ExecContext(ctx, `
+		INSERT INTO audit_issues (issue_type, entity_type) VALUES ('test', 'track');
+		INSERT INTO artists (name, clean_name) VALUES ('Test Artist', 'test artist');
+		CREATE TRIGGER fail_artist_delete BEFORE DELETE ON artists
+		BEGIN SELECT RAISE(ABORT, 'test delete failure'); END;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.ResetLibraryTables(ctx); err == nil {
+		t.Fatal("expected cache reset to fail")
+	}
+
+	var issueCount int
+	if err := database.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_issues").Scan(&issueCount); err != nil {
+		t.Fatal(err)
+	}
+	if issueCount != 1 {
+		t.Fatalf("expected audit issue to survive failed cache reset, got %d", issueCount)
+	}
+}
+
 func TestSoundCloudCache(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "db_sc_test_*")
 	if err != nil {
