@@ -1,11 +1,26 @@
 #!/usr/bin/env bash
-# Deploy the local build (including embedded UI), preserving remote source trees.
-# Usage: ./scripts/deploy.sh all|nl_music|server2
+# Deploy a build (including embedded UI), preserving remote source trees.
+# Usage: ./scripts/deploy.sh all|nl_music|server2 [--prebuilt SHA256]
 set -euo pipefail
 TARGET="${1:-}"
-case "$TARGET" in all|nl_music|server2) ;; *) echo 'Usage: ./scripts/deploy.sh all|nl_music|server2' >&2; exit 2 ;; esac
+usage() {
+    echo 'Usage: ./scripts/deploy.sh all|nl_music|server2 [--prebuilt SHA256]' >&2
+    exit 2
+}
+case "$TARGET" in all|nl_music|server2) ;; *) usage ;; esac
+EXPECTED_SHA=""
+if (( $# != 1 )); then
+    [[ $# == 3 && "$2" == --prebuilt && "$3" =~ ^[0-9a-f]{64}$ ]] || usage
+    EXPECTED_SHA="$3"
+fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_PATH="$ROOT_DIR/bin/music-manager"
+if [[ -n "$EXPECTED_SHA" ]]; then
+    if [[ ! -f "$BIN_PATH" || "$(sha256sum "$BIN_PATH" | cut -d ' ' -f1)" != "$EXPECTED_SHA" ]]; then
+        echo "Prebuilt binary is missing or has the wrong SHA256: $BIN_PATH" >&2
+        exit 1
+    fi
+fi
 DEPLOY_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3)
 if [[ -f "$HOME/.ssh/music_deploy_key" ]]; then
@@ -121,19 +136,23 @@ public_check() {
 }
 servers=("$TARGET")
 [[ "$TARGET" != all ]] || servers=(nl_music server2)
-echo "Deployment=$DEPLOY_ID target=$TARGET (local working tree, remote sources preserved)"
+echo "Deployment=$DEPLOY_ID target=$TARGET (remote sources preserved)"
 # Verify both targets before changing either installation.
 for server in "${servers[@]}"; do
     select_server "$server"
     echo "Preflight: $SERVER_ID"
     remote_run preflight
 done
-echo 'Running Go tests...'
-(cd "$ROOT_DIR" && go test -v ./...)
-echo 'Building static Linux amd64 binary...'
-mkdir -p "$ROOT_DIR/bin"
-(cd "$ROOT_DIR" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o "$BIN_PATH" cmd/server/main.go)
-BIN_SHA="$(sha256sum "$BIN_PATH" | cut -d ' ' -f1)"
+if [[ -n "$EXPECTED_SHA" ]]; then
+    BIN_SHA="$EXPECTED_SHA"
+else
+    echo 'Running Go tests...'
+    (cd "$ROOT_DIR" && go test -v ./...)
+    echo 'Building static Linux amd64 binary...'
+    mkdir -p "$ROOT_DIR/bin"
+    (cd "$ROOT_DIR" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o "$BIN_PATH" cmd/server/main.go)
+    BIN_SHA="$(sha256sum "$BIN_PATH" | cut -d ' ' -f1)"
+fi
 echo "Build SHA256=$BIN_SHA"
 for server in "${servers[@]}"; do
     select_server "$server"

@@ -548,7 +548,9 @@ func TestAssertGoldenJSON_ExistingUpdate(t *testing.T) {
 	goldenPath := filepath.Join(tempDir, "existing.golden.json")
 
 	initial := []byte(`{"version":1}`)
-	AssertGoldenJSON(t, initial, goldenPath)
+	if err := os.WriteFile(goldenPath, initial, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	// Теперь обновляем файл с UPDATE_GOLDEN=1
 	t.Setenv("UPDATE_GOLDEN", "1")

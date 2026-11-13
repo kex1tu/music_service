@@ -42,6 +42,10 @@ func TestAdversarial_AssertGoldenJSON_ExactMatches(t *testing.T) {
 	// 3. Deeply nested structure semantic match
 	t.Run("deeply_nested_semantic_match", func(t *testing.T) {
 		goldenFile := filepath.Join(tempDir, "nested.golden.json")
+		expected := []byte(`{"root":{"level1":{"level2":{"flag":true,"items":[1,2,3]}}}}`)
+		if err := os.WriteFile(goldenFile, expected, 0644); err != nil {
+			t.Fatal(err)
+		}
 		actual := []byte(`{
 			"root": {
 				"level1": {
@@ -53,9 +57,6 @@ func TestAdversarial_AssertGoldenJSON_ExactMatches(t *testing.T) {
 			}
 		}`)
 
-		AssertGoldenJSON(t, actual, goldenFile)
-
-		// Calling it again on the created file must succeed identically
 		AssertGoldenJSON(t, actual, goldenFile)
 	})
 }
@@ -97,6 +98,7 @@ func TestAdversarial_AssertGoldenJSON_LargeNumbersAndUseNumber(t *testing.T) {
 	}
 
 	// 2. Test AssertGoldenJSON end-to-end with large numbers
+	t.Setenv("UPDATE_GOLDEN", "true")
 	AssertGoldenJSON(t, payload, goldenFile)
 
 	// Read written file and verify digits
@@ -117,6 +119,7 @@ func TestAdversarial_AssertGoldenJSON_LargeNumbersAndUseNumber(t *testing.T) {
 	}
 
 	// 3. Compare without modification - must match without precision drift
+	t.Setenv("UPDATE_GOLDEN", "")
 	AssertGoldenJSON(t, payload, goldenFile)
 }
 
