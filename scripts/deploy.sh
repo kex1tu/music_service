@@ -72,13 +72,15 @@ runtime_config() {
     echo "Service=$service app=$app_dir local=$local_url"
 }
 wait_for_health() {
-    local i
-    for i in {1..15}; do
+    # SQLite and filesystem initialization on nl_music can take over a minute.
+    local deadline=$((SECONDS + 180))
+    while (( SECONDS < deadline )); do
         if systemctl is-active --quiet "$service" && runtime_config && curl --noproxy '*' --fail --silent --show-error --max-time 5 "$local_url/api/health"; then
             echo; return 0
         fi
         sleep 2
     done
+    echo "Service did not become healthy within 180 seconds: $service ($app_dir)" >&2
     return 1
 }
 case "$mode" in
