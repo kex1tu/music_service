@@ -10,6 +10,7 @@ import (
 // Each index is the source user_version; entries are immutable after release.
 var migrations = [...]func(context.Context, *sql.Conn) error{
 	migrateUnversioned,
+	migrateTracksAlbumIndex,
 }
 
 func (db *DB) migrate() error {

@@ -74,7 +74,7 @@ func TestSQLiteMigrationRetriesAfterDiskFull(t *testing.T) {
 		Scan(&status, &updatedAt); err != nil || status != "queued" || updatedAt != "2025-01-02 03:04:05" {
 		t.Fatalf("status=%q updated_at=%q err=%v", status, updatedAt, err)
 	}
-	if err := reopened.Conn().QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 1 {
+	if err := reopened.Conn().QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != len(migrations) {
 		t.Fatalf("user_version=%d err=%v", version, err)
 	}
 }
