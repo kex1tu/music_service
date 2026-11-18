@@ -100,7 +100,7 @@ func TestNavidromeReaderAndSubsonicClient(t *testing.T) {
 		t.Fatalf("failed to setup mock navidrome schema: %v", err)
 	}
 
-	reader := NewNavidromeReader(naviDBPath)
+	reader := NewNavidromeReader(naviDBPath, "/var/music")
 	if !reader.IsAvailable() {
 		t.Fatal("expected reader to be available")
 	}
@@ -219,46 +219,68 @@ func TestIcyMetadataBlock(t *testing.T) {
 }
 
 func TestNavidromeStatsMatching(t *testing.T) {
-	stats := &NavidromeStats{
-		StarredPaths: map[string]bool{
-			"/var/music/Daft Punk/Discovery/01. One More Time.mp3": true,
-			"D:\\Music\\The Weeknd\\Starboy\\01. Starboy.mp3":     true,
-		},
-		PlayCounts: map[string]int{
-			"/var/music/Daft Punk/Discovery/01. One More Time.mp3": 42,
-			"The Weeknd/Starboy/01. Starboy.mp3":                   15,
-		},
-		LastPlayed: map[string]time.Time{
-			"/var/music/Daft Punk/Discovery/01. One More Time.mp3": time.Now().Add(-1 * time.Hour),
-		},
+	database, dir, cleanup := setupTestDB(t)
+	defer cleanup()
+	naviDBPath := filepath.Join(dir, "navi # stats.db")
+	conn, err := sql.Open("sqlite", naviDBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_, err = conn.Exec(`
+		CREATE TABLE library (id INTEGER PRIMARY KEY, path TEXT);
+		CREATE TABLE media_file (id TEXT PRIMARY KEY, path TEXT, library_id INTEGER);
+		CREATE TABLE annotation (user_id TEXT, item_id TEXT, item_type TEXT, starred BOOLEAN, play_count INTEGER, play_date DATETIME);
+		INSERT INTO library VALUES (1, 'D:\Music'), (2, 'D:\MusicBackup'), (3, 'D:\Music\Nested');
+		INSERT INTO media_file VALUES
+			('a', 'A\Intro.mp3', 1), ('b', 'B/Intro.mp3', 1), ('outside', 'B/Intro.mp3', 2),
+			('nested', 'Intro.mp3', 3), ('absolute', 'D:\Music\C\Intro.mp3', 1);
+		INSERT INTO annotation VALUES
+			('one', 'a', 'media_file', 1, 4, '2026-01-01 12:00:00'),
+			('two', 'a', 'media_file', 0, 2, '2026-03-01 12:00:00'),
+			('one', 'b', 'album', 1, 99, '2026-04-01 12:00:00'),
+			('one', 'outside', 'media_file', 1, 50, '2026-04-01 12:00:00'),
+			('one', 'nested', 'media_file', 1, 0, NULL),
+			('one', 'absolute', 'media_file', 1, 0, NULL);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	reader := NewNavidromeReader(naviDBPath, `D:\Music\`)
+	stats, err := reader.GetUserListeningStats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"A/Intro.mp3", "Nested/Intro.mp3", "C/Intro.mp3"} {
+		if !stats.IsStarred(rel) {
+			t.Errorf("%q should be starred", rel)
+		}
+	}
+	for _, rel := range []string{"B/Intro.mp3", "Intro.mp3", "Other/A/Intro.mp3"} {
+		if stats.IsStarred(rel) || stats.GetPlayCount(rel) != 0 || !stats.GetLastPlayed(rel).IsZero() {
+			t.Errorf("%q inherited an unrelated annotation", rel)
+		}
+	}
+	if got := stats.GetPlayCount("A/Intro.mp3"); got != 6 {
+		t.Errorf("play count = %d, want 6", got)
+	}
+	if got := stats.GetLastPlayed("A/Intro.mp3"); !got.Equal(time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)) {
+		t.Errorf("last played = %v, want March 1", got)
 	}
 
-	// 1. Проверка IsStarred с относительными путями против абсолютных путей Navidrome
-	if !stats.IsStarred("Daft Punk/Discovery/01. One More Time.mp3") {
-		t.Error("expected IsStarred to match relative path with absolute Navidrome path")
+	if _, err := conn.Exec("DROP TABLE annotation"); err != nil {
+		t.Fatal(err)
 	}
-	if !stats.IsStarred("The Weeknd/Starboy/01. Starboy.mp3") {
-		t.Error("expected IsStarred to match Windows-style Navidrome path")
+	if available, warning := reader.ListeningStatus(ctx); available || warning == "" {
+		t.Fatalf("incompatible schema: available=%t, warning=%q", available, warning)
 	}
-	if stats.IsStarred("Unknown/Album/Nonexistent.mp3") {
-		t.Error("expected IsStarred to return false for nonexistent track")
+	selector := NewWaveSelector(database, reader, nil)
+	if _, err := selector.SelectNextTrack(ctx, "wave", ""); err != nil {
+		t.Fatalf("rotation failed without Navidrome: %v", err)
 	}
-
-	// 2. Проверка GetPlayCount
-	if count := stats.GetPlayCount("Daft Punk/Discovery/01. One More Time.mp3"); count != 42 {
-		t.Errorf("expected play count 42, got %d", count)
-	}
-	if count := stats.GetPlayCount("The Weeknd/Starboy/01. Starboy.mp3"); count != 15 {
-		t.Errorf("expected play count 15, got %d", count)
-	}
-	if count := stats.GetPlayCount("Other/Track.mp3"); count != 0 {
-		t.Errorf("expected play count 0 for unknown track, got %d", count)
-	}
-
-	// 3. Проверка GetLastPlayed
-	lp := stats.GetLastPlayed("Daft Punk/Discovery/01. One More Time.mp3")
-	if lp.IsZero() {
-		t.Error("expected non-zero last played time")
+	if playlist, err := selector.GeneratePlaylist(ctx, 2); err != nil || len(playlist) != 2 {
+		t.Fatalf("playlist failed without Navidrome: length=%d err=%v", len(playlist), err)
 	}
 }
 
@@ -372,7 +394,7 @@ func TestNavidromeSubsonicClient_Errors(t *testing.T) {
 }
 
 func TestNavidromeReader_NotAvailable(t *testing.T) {
-	reader := NewNavidromeReader("/path/to/nonexistent/db.sqlite")
+	reader := NewNavidromeReader("/path/to/nonexistent/db.sqlite", "/music")
 	if reader.IsAvailable() {
 		t.Error("expected IsAvailable=false for nonexistent path")
 	}

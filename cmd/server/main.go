@@ -277,7 +277,11 @@ func main() {
 	lastfmClient := resolver.NewLastfmClient(cfg.LastfmAPIKey)
 	similarityEngine := resolver.NewSimilarityEngine(deezerClient, lastfmClient, database)
 
-	navidromeReader := radio.NewNavidromeReader(cfg.NavidromeDBPath)
+	navidromeMusicRoot := cfg.NavidromeMusicRoot
+	if navidromeMusicRoot == "" {
+		navidromeMusicRoot = musicSandbox.Root()
+	}
+	navidromeReader := radio.NewNavidromeReader(cfg.NavidromeDBPath, navidromeMusicRoot)
 	navidromeSubsonic := radio.NewNavidromeSubsonicClient(cfg.NavidromeURL, cfg.NavidromeUser, cfg.NavidromePassword)
 
 	waveSelector := radio.NewWaveSelector(database, navidromeReader, similarityEngine)

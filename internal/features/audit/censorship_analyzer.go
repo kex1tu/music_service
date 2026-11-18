@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -52,7 +53,12 @@ func (a *CensorshipAudit) readLyrics(path string) (string, error) {
 
 func (a *CensorshipAudit) analyze(ctx context.Context, path, reference, provider string) (CensorshipResult, error) {
 	r := CensorshipResult{Verdict: "insufficient_data", Algorithm: censorcheck.AlgorithmVersion, Coverage: "limited", Evidence: []CensorshipEvidence{}, Limitations: []string{"Признаки редактирования не доказывают намеренность; требуется прослушивание"}}
-	audioHash, e := censorcheck.AudioDigest(ctx, a.sb, path)
+	target, e := censorcheck.OpenAudio(a.sb, path)
+	if e != nil {
+		return r, e
+	}
+	defer target.Close()
+	audioHash, e := censorcheck.AudioDigest(ctx, target)
 	if e != nil {
 		return r, e
 	}
@@ -60,35 +66,38 @@ func (a *CensorshipAudit) analyze(ctx context.Context, path, reference, provider
 	if lyricsErr != nil {
 		r.Limitations = append(r.Limitations, "Синхронизированный текст недоступен")
 	}
-	full, e := a.sb.Resolve(path, false)
-	if e != nil {
-		return r, e
-	}
-	tags, _ := id3.ReadTags(full, "")
+	tags, _ := id3.ReadTagsFromFile(target, "")
 	duration := 0.0
 	if tags != nil {
 		duration = tags.Duration
 	}
+	spots := censorcheck.ExtractAuditSpots(lyrics)
+	windows := censorcheck.AuditWindows(spots, duration)
+
+	var refFile *os.File
 	referenceHash := ""
-	referenceOK := false
-	if reference != "" {
-		rp, err := a.sb.Resolve(reference, false)
-		if err != nil {
-			return r, err
+	if reference != "" && len(windows) > 0 {
+		refFile, e = censorcheck.OpenAudio(a.sb, reference)
+		if e != nil {
+			return r, e
 		}
-		rt, _ := id3.ReadTags(rp, "")
+		defer refFile.Close()
+		rt, _ := id3.ReadTagsFromFile(refFile, "")
+		referenceOK := false
 		if tags != nil && rt != nil && tags.Artist != "" && rt.Artist != "" && tags.Title != "" && rt.Title != "" {
 			ev := resolver.EvaluateTrack(tags.Title, tags.Artist, int(tags.Duration), rt.Title, rt.Artist, int(rt.Duration))
 			referenceOK = ev.Compatible && ev.TitleSimilarity >= 0.9 && ev.ArtistSimilarity >= 0.9
 		}
 		if referenceOK {
-			referenceHash, e = censorcheck.AudioDigest(ctx, a.sb, reference)
+			referenceHash, e = censorcheck.AudioDigest(ctx, refFile)
 			if e != nil {
 				return r, e
 			}
 		} else {
 			r.Limitations = append(r.Limitations, "Эталон не использован: совместимость записи не подтверждена")
 		}
+	} else if reference != "" {
+		r.Limitations = append(r.Limitations, "Эталон не использован: нет текстовых контрольных точек")
 	}
 	identity := "local"
 	if provider != "local" {
@@ -101,18 +110,17 @@ func (a *CensorshipAudit) analyze(ctx context.Context, path, reference, provider
 	var cached string
 	e = a.db.QueryRowContext(ctx, "SELECT result_json FROM censorship_cache WHERE cache_key=?", key).Scan(&cached)
 	if e == nil {
-		if json.Unmarshal([]byte(cached), &r) == nil {
-			return r, nil
+		var result CensorshipResult
+		if json.Unmarshal([]byte(cached), &result) == nil && result.AudioHash == audioHash && result.ReferenceAudioHash == referenceHash {
+			return result, nil
 		}
 	} else if !errors.Is(e, sql.ErrNoRows) {
 		return r, e
 	}
-	spots := censorcheck.ExtractAuditSpots(lyrics)
-	windows := censorcheck.AuditWindows(spots, duration)
 	if len(windows) == 0 {
 		r.Coverage = "audio_signals_only"
 		r.Limitations = append(r.Limitations, "Нет пригодных текстовых контрольных точек; замены слов могут быть пропущены")
-		signals, err := censorcheck.ScanSignals(ctx, a.sb, path)
+		signals, err := censorcheck.ScanSignals(ctx, target)
 		if err != nil {
 			return r, err
 		}
@@ -123,15 +131,15 @@ func (a *CensorshipAudit) analyze(ctx context.Context, path, reference, provider
 		r.Coverage = "selected_lyric_windows"
 		r.TotalWindows = len(windows)
 		for _, w := range windows {
-			pcm, err := censorcheck.DecodeWindow(ctx, a.sb, path, w)
+			pcm, err := censorcheck.DecodeWindow(ctx, target, w)
 			if err != nil {
 				return r, err
 			}
 			for _, s := range censorcheck.InspectPCM(pcm, w.Start) {
 				r.Evidence = append(r.Evidence, CensorshipEvidence{Start: s.Start, End: s.End, Kind: s.Kind, Origin: "local_signal"})
 			}
-			if referenceOK {
-				refPCM, err := censorcheck.DecodeWindow(ctx, a.sb, reference, w)
+			if referenceHash != "" {
+				refPCM, err := censorcheck.DecodeWindow(ctx, refFile, w)
 				if err != nil {
 					return r, err
 				}
@@ -174,13 +182,24 @@ func (a *CensorshipAudit) analyze(ctx context.Context, path, reference, provider
 	}
 	r.Limitations = append(r.Limitations, "Проверенные участки не подтверждают отсутствие цензуры во всём треке")
 	sort.SliceStable(r.Evidence, func(i, j int) bool { return r.Evidence[i].Start < r.Evidence[j].Start })
-	finalHash, err := censorcheck.AudioDigest(ctx, a.sb, path)
+	finalHash, err := censorcheck.AudioDigest(ctx, target)
 	if err != nil {
 		return r, err
 	}
 	if finalHash != audioHash {
 		return r, fmt.Errorf("audio changed during audit; retry with the current file")
 	}
+	if referenceHash != "" {
+		finalReferenceHash, err := censorcheck.AudioDigest(ctx, refFile)
+		if err != nil {
+			return r, err
+		}
+		if finalReferenceHash != referenceHash {
+			return r, fmt.Errorf("reference audio changed during audit; retry with the current file")
+		}
+	}
+	r.AudioHash = audioHash
+	r.ReferenceAudioHash = referenceHash
 	raw, e := json.Marshal(r)
 	if e != nil {
 		return r, e
