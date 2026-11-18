@@ -46,13 +46,9 @@ func (m *Module) SwitchTrackVersion(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, 400, "invalid version_policy")
 		return
 	}
-	result, err := m.service.SwitchTrackVersion(r.Context(), trackID, req.TargetURL, req.VersionPolicy)
+	result, err := m.service.switchJobTrackSource(r.Context(), strings.TrimSpace(req.JobID), trackID, req.TargetURL, req.VersionPolicy)
 	if err != nil {
-		if errors.Is(err, ErrInvalidURL) {
-			httputil.RespondError(w, http.StatusBadRequest, err.Error())
-		} else {
-			httputil.RespondError(w, http.StatusInternalServerError, err.Error())
-		}
+		respondQueueChangeError(w, err)
 		return
 	}
 
@@ -232,25 +228,24 @@ func (m *Module) BindBackfillSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if m.service.Repo() != nil {
-		tTitle := req.TrackTitle
-		if tTitle == "" {
-			tTitle = req.AlbumTitle
-		}
-		cacheKey := resolver.BuildCacheKey("", req.ArtistName, tTitle)
-		_ = m.service.Repo().SavePinnedSource(r.Context(), PinnedTrackSourceDTO{
-			CacheKey:   cacheKey,
-			ArtistName: req.ArtistName,
-			TrackTitle: tTitle,
-			PinnedURL:  req.TargetURL,
-			SourceType: "manual",
-			UpdatedAt:  time.Now().UTC(),
-		})
+	title := req.TrackTitle
+	if title == "" {
+		title = req.AlbumTitle
 	}
-
-	selection, err := m.service.SwitchReleaseSource(r.Context(), SwitchReleaseSourceRequest{SourceURL: req.TargetURL, TargetPath: req.Path, VersionPolicy: req.VersionPolicy, TrackMapping: map[int]string{0: req.TargetURL}, TargetTracks: []resolver.ResolvedTrack{{Title: req.TrackTitle, Artist: req.ArtistName, Album: req.AlbumTitle, TrackNumber: req.TrackNumber, Duration: req.Duration}}})
+	selection, err := m.service.SwitchReleaseSource(r.Context(), SwitchReleaseSourceRequest{
+		SourceURL: req.TargetURL, TargetPath: req.Path, VersionPolicy: req.VersionPolicy,
+		TrackMapping: map[int]string{0: req.TargetURL},
+		TargetTracks: []resolver.ResolvedTrack{{
+			Title: title, Artist: req.ArtistName, Album: req.AlbumTitle,
+			TrackNumber: req.TrackNumber, Duration: req.Duration, ISRC: req.ISRC,
+		}},
+	})
 	if err != nil {
-		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
+		if errors.Is(err, errQueueStorage) {
+			respondQueueChangeError(w, err)
+		} else {
+			httputil.RespondError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 	job, _ := m.service.GetJob(selection.JobID)

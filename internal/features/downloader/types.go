@@ -67,9 +67,14 @@ type Job struct {
 	AlbumMetadata        resolver.ReleaseMetadata `json:"-"`
 	SelectedTrackIndices []int                    `json:"selected_track_indices,omitempty"`
 	Tracks               []resolver.ResolvedTrack `json:"tracks,omitempty"`
-	trackProgress        []float64                `json:"-"`
-	cancelFunc           func()                   `json:"-"`
-	onUpdate             func()                   `json:"-"`
+	SkipExisting         bool                     `json:"skip_existing,omitempty"`
+	selectionCorrupt     bool
+	manualTrackIndex     *int
+	backfillTrackNumbers []int
+	backfillTrackURLs    []string
+	trackProgress        []float64 `json:"-"`
+	cancelFunc           func()    `json:"-"`
+	onUpdate             func()    `json:"-"`
 }
 
 // DownloadJob является алиасом Job для совместимости.
@@ -104,20 +109,25 @@ func (j *Job) Snapshot() *Job {
 	defer j.mu.RUnlock()
 
 	snap := &Job{
-		ID:                j.ID,
-		Status:            j.Status,
-		Source:            j.Source,
-		URL:               j.URL,
-		Progress:          j.Progress,
-		CurrentStep:       j.CurrentStep,
-		TotalTracks:       j.TotalTracks,
-		CompletedTracks:   j.CompletedTracks,
-		IsBackfill:        j.IsBackfill,
-		CreatedAt:         j.CreatedAt,
-		UpdatedAt:         j.UpdatedAt,
-		CoverRelativePath: j.CoverRelativePath,
-		AlbumMetadata:     j.AlbumMetadata,
-		cancelFunc:        j.cancelFunc,
+		ID:                   j.ID,
+		Status:               j.Status,
+		Source:               j.Source,
+		URL:                  j.URL,
+		Progress:             j.Progress,
+		CurrentStep:          j.CurrentStep,
+		TotalTracks:          j.TotalTracks,
+		CompletedTracks:      j.CompletedTracks,
+		IsBackfill:           j.IsBackfill,
+		CreatedAt:            j.CreatedAt,
+		UpdatedAt:            j.UpdatedAt,
+		CoverRelativePath:    j.CoverRelativePath,
+		AlbumMetadata:        j.AlbumMetadata,
+		SkipExisting:         j.SkipExisting,
+		selectionCorrupt:     j.selectionCorrupt,
+		manualTrackIndex:     j.manualTrackIndex,
+		backfillTrackNumbers: j.backfillTrackNumbers,
+		backfillTrackURLs:    j.backfillTrackURLs,
+		cancelFunc:           j.cancelFunc,
 	}
 	if j.Error != nil {
 		errCopy := *j.Error
@@ -144,6 +154,36 @@ func (j *Job) Snapshot() *Job {
 		copy(snap.SelectedTrackIndices, j.SelectedTrackIndices)
 	}
 	return snap
+}
+
+// resetForQueue is used on an unpublished snapshot before committing the transition.
+func (j *Job) resetForQueue(step string) {
+	j.Status = StatusQueued
+	j.CurrentStep = step
+	j.Progress = 0
+	j.CompletedTracks = 0
+	j.Error = nil
+	j.UpdatedAt = time.Now().UTC()
+}
+
+func (j *Job) applyQueueSnapshot(snap *Job) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.Status = snap.Status
+	j.CurrentStep = snap.CurrentStep
+	j.Progress = snap.Progress
+	j.TotalTracks = snap.TotalTracks
+	j.CompletedTracks = snap.CompletedTracks
+	j.Error = snap.Error
+	j.UpdatedAt = snap.UpdatedAt
+	j.Tracks = snap.Tracks
+	j.AlbumMetadata = snap.AlbumMetadata
+	j.SelectedTrackIndices = snap.SelectedTrackIndices
+	j.SkipExisting = snap.SkipExisting
+	j.selectionCorrupt = snap.selectionCorrupt
+	j.manualTrackIndex = snap.manualTrackIndex
+	j.backfillTrackNumbers = snap.backfillTrackNumbers
+	j.backfillTrackURLs = snap.backfillTrackURLs
 }
 
 // SetOnUpdate устанавливает функцию обратного вызова при изменении задачи.
@@ -460,20 +500,22 @@ type BatchJobRequest = CreateBatchJobRequest
 
 // SwitchVersionRequest — запрос на переключение источника трека.
 type SwitchVersionRequest struct {
+	JobID         string                 `json:"job_id,omitempty"`
 	VersionPolicy resolver.VersionPolicy `json:"version_policy"`
 	TargetURL     string                 `json:"target_url"`
 }
 
 // BindBackfillSourceRequest — запрос на привязку источника к недостающему треку бэкфилла.
 type BindBackfillSourceRequest struct {
+	ISRC          *string                `json:"isrc,omitempty"`
 	VersionPolicy resolver.VersionPolicy `json:"version_policy"`
-	Duration int `json:"duration"`
-	Path        string `json:"path"`
-	AlbumTitle  string `json:"album_title"`
-	ArtistName  string `json:"artist_name"`
-	TrackTitle  string `json:"track_title"`
-	TrackNumber int    `json:"track_number"`
-	TargetURL   string `json:"target_url"`
+	Duration      int                    `json:"duration"`
+	Path          string                 `json:"path"`
+	AlbumTitle    string                 `json:"album_title"`
+	ArtistName    string                 `json:"artist_name"`
+	TrackTitle    string                 `json:"track_title"`
+	TrackNumber   int                    `json:"track_number"`
+	TargetURL     string                 `json:"target_url"`
 }
 
 // --- Response DTOs ---

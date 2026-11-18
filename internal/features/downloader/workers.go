@@ -17,37 +17,27 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	s.ctx, s.cancel = context.WithCancel(ctx)
 
-	// 1. Сброс прерванных задач в SQLite
 	if s.repo != nil {
 		if _, err := s.repo.ResetInterruptedJobs(s.ctx); err != nil {
-			log.Printf("[Downloader] Warning: failed to reset interrupted jobs: %v", err)
+			s.cancel()
+			return fmt.Errorf("reset interrupted downloads: %w", err)
 		}
-		// Загрузка сохраненных задач в память
 		savedJobs, err := s.repo.GetAllJobs(s.ctx)
-		if err == nil {
-			s.jobsMu.Lock()
-			for _, j := range savedJobs {
-				st := j.Status
-				curStep := j.CurrentStep
-				if st == StatusQueued || st == StatusResolving || st == StatusDownloading || st == StatusConverting || st == StatusTagging {
-					st = StatusError
-					curStep = "Прервано перезапуском сервера. Нажмите «Повторить»"
-					j.Status = st
-					j.CurrentStep = curStep
-				}
-				s.jobs[j.ID] = j
-				j.SetOnUpdate(func() {
-					s.syncJobDebounced(j)
-				})
-			}
-			s.jobsMu.Unlock()
+		if err != nil {
+			s.cancel()
+			return fmt.Errorf("load download jobs: %w", err)
 		}
+		s.jobsMu.Lock()
+		for _, job := range savedJobs {
+			s.registerJobLocked(job)
+		}
+		s.jobsMu.Unlock()
 	}
 
 	// 2. Запуск фиксированного пула воркеров
 	for i := 0; i < s.workersCount; i++ {
 		s.wg.Add(1)
-		go s.workerLoop(s.ctx, i)
+		go s.workerLoop(s.ctx)
 	}
 
 	// 3. Запуск демона очистки старых временных директорий
@@ -65,13 +55,6 @@ func (s *Service) Stop(ctx context.Context) error {
 
 	if s.cancel != nil {
 		s.cancel()
-	}
-
-	s.pauseMu.Lock()
-	s.isPaused = false
-	s.pauseMu.Unlock()
-	if s.pauseCond != nil {
-		s.pauseCond.Broadcast()
 	}
 
 	// Ожидаем завершения всех горутин пула
@@ -105,26 +88,81 @@ func (s *Service) Close() error {
 	return s.Stop(ctx)
 }
 
-func (s *Service) workerLoop(ctx context.Context, workerID int) {
+func (s *Service) workerLoop(ctx context.Context) {
 	defer s.wg.Done()
+	poll := time.NewTicker(time.Second)
+	defer poll.Stop()
 
-	for {
+	for ctx.Err() == nil {
+		job, jobCtx, cancel, err := s.claimNextJob(ctx)
+		if err != nil && ctx.Err() == nil {
+			log.Printf("[Downloader] failed to claim queued job: %v", err)
+		}
+		if job != nil {
+			s.wakeWorker()
+			if !job.Snapshot().selectionCorrupt {
+				s.executeJob(jobCtx, job)
+			}
+			cancel()
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case jobID, ok := <-s.workQueue:
-			if !ok {
-				return
-			}
-			if ctx.Err() != nil {
-				return
-			}
-			if err := s.waitIfPaused(ctx); err != nil {
-				return
-			}
-			s.executeJob(ctx, jobID)
+		case <-poll.C:
+		case <-s.wake:
 		}
 	}
+}
+
+func (s *Service) wakeWorker() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Service) claimNextJob(ctx context.Context) (*Job, context.Context, context.CancelFunc, error) {
+	s.pauseMu.RLock()
+	defer s.pauseMu.RUnlock()
+	if s.isPaused {
+		return nil, nil, nil, nil
+	}
+
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
+
+	var job *Job
+	if s.repo != nil {
+		claimed, err := s.repo.ClaimNextJob(ctx)
+		if err != nil || claimed == nil {
+			return nil, nil, nil, err
+		}
+		job = s.jobs[claimed.ID]
+		if job == nil {
+			job = claimed
+			s.registerJobLocked(job)
+		} else {
+			job.applyQueueSnapshot(claimed)
+		}
+	} else {
+		for _, candidate := range s.jobs {
+			draft := candidate.Snapshot()
+			if draft.Status == StatusQueued {
+				draft.Status = StatusResolving
+				candidate.applyQueueSnapshot(draft)
+				job = candidate
+				break
+			}
+		}
+		if job == nil {
+			return nil, nil, nil, nil
+		}
+	}
+
+	jobCtx, cancel := context.WithCancel(ctx)
+	job.SetCancelFunc(cancel)
+	return job, jobCtx, cancel, nil
 }
 
 func (s *Service) cleanerLoop(ctx context.Context) {

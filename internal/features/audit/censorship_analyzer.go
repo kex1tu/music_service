@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"music-manager/internal/core/safefs"
 	"music-manager/internal/id3"
@@ -204,7 +205,10 @@ func (a *CensorshipAudit) analyze(ctx context.Context, path, reference, provider
 	if e != nil {
 		return r, e
 	}
-	_, e = a.db.ExecContext(ctx, "INSERT INTO censorship_cache(cache_key,result_json) VALUES(?,?) ON CONFLICT(cache_key) DO UPDATE SET result_json=excluded.result_json", key, string(raw))
+	e = retryCensorshipWrite(ctx, func() error {
+		_, err := a.db.ExecContext(ctx, "INSERT INTO censorship_cache(cache_key,result_json) VALUES(?,?) ON CONFLICT(cache_key) DO UPDATE SET result_json=excluded.result_json", key, string(raw))
+		return err
+	})
 	return r, e
 }
 
@@ -269,7 +273,14 @@ func (a *CensorshipAudit) transcribe(ctx context.Context, provider string, pcm [
 	if e != nil {
 		return t, e
 	}
-	_, e = a.db.ExecContext(ctx, "INSERT INTO censorship_transcripts(cache_key,transcript_json) VALUES(?,?) ON CONFLICT(cache_key) DO NOTHING", key, string(b))
+	// The provider has already charged this attempt. Preserve its response
+	// even if this item was paused immediately after the provider returned.
+	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 8*time.Second)
+	defer cancel()
+	e = retryCensorshipWrite(storeCtx, func() error {
+		_, err := a.db.ExecContext(storeCtx, "INSERT INTO censorship_transcripts(cache_key,transcript_json) VALUES(?,?) ON CONFLICT(cache_key) DO UPDATE SET transcript_json=excluded.transcript_json WHERE NOT json_valid(censorship_transcripts.transcript_json)", key, string(b))
+		return err
+	})
 	return t, e
 }
 

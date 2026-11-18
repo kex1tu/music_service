@@ -173,7 +173,7 @@ func (m *Module) SwitchReleaseSource(w http.ResponseWriter, r *http.Request) {
 
 	result, err := m.service.SwitchReleaseSource(r.Context(), req)
 	if err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, err.Error())
+		respondQueueChangeError(w, err)
 		return
 	}
 

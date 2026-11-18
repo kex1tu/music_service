@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,114 +21,116 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 	if len(policies) > 0 {
 		policy = policies[0]
 	}
-	if !resolver.ValidVersionPolicy(policy) {
+	return s.switchJobTrackSource(ctx, "", trackID, targetURL, policy)
+}
+
+func (s *Service) switchJobTrackSource(ctx context.Context, jobID, trackID, targetURL string, policy resolver.VersionPolicy) (*SwitchVersionResult, error) {
+	targetURL = strings.TrimSpace(targetURL)
+	parsedURL, err := url.Parse(targetURL)
+	if !resolver.ValidVersionPolicy(policy) || err != nil ||
+		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || !resolver.IsAllowedURL(targetURL) {
 		return nil, ErrInvalidURL
 	}
-	targetURL = strings.TrimSpace(targetURL)
-	if targetURL == "" {
-		return nil, fmt.Errorf("%w: target_url cannot be empty", ErrInvalidURL)
-	}
-	if strings.HasPrefix(targetURL, "-") {
-		return nil, fmt.Errorf("%w: target_url cannot start with '-'", ErrInvalidURL)
-	}
 
-	parsedURL, pErr := url.Parse(targetURL)
-	if pErr != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		return nil, fmt.Errorf("%w: invalid url scheme", ErrInvalidURL)
+	if jobID != "" {
+		// Load by job ID when the task has not yet been materialized in memory.
+		if _, ok := s.GetJob(jobID); !ok {
+			return nil, ErrJobNotFound
+		}
 	}
-
-	if !resolver.IsAllowedURL(targetURL) {
-		return nil, fmt.Errorf("%w: domain %q is not allowed", ErrInvalidURL, parsedURL.Hostname())
-	}
-
-	var matchedJob *Job
-	var trackIdx int = -1
-	var matchedTrack *resolver.ResolvedTrack
-
 	s.jobsMu.Lock()
-	for _, j := range s.jobs {
-		snapshot := j.Snapshot()
-		for i := range snapshot.Tracks {
-			if snapshot.Tracks[i].TrackID == trackID {
-				matchedTrack = &snapshot.Tracks[i]
-				matchedJob = j
-				trackIdx = i
-				break
-			}
-		}
-		if matchedTrack != nil {
-			break
-		}
-	}
-	s.jobsMu.Unlock()
+	defer s.jobsMu.Unlock()
 
-	// Фиксируем пин в репозитории
+	var job, draft *Job
+	trackIndex := -1
+	for id, candidate := range s.jobs {
+		if jobID != "" && id != jobID {
+			continue
+		}
+		snap := candidate.Snapshot()
+		idx := slices.IndexFunc(snap.Tracks, func(track resolver.ResolvedTrack) bool {
+			return track.TrackID == trackID
+		})
+		if idx < 0 {
+			continue
+		}
+		if job != nil {
+			return nil, errSelectionConflict
+		}
+		job, draft, trackIndex = candidate, snap, idx
+	}
+	if job == nil {
+		return nil, ErrJobNotFound
+	}
+	previous := draft.Status
+	switch previous {
+	case StatusQueued, StatusResolving, StatusDownloading, StatusConverting, StatusTagging:
+		return nil, errSelectionConflict
+	}
+	track := &draft.Tracks[trackIndex]
+	selectManualSource(track, targetURL, policy)
+	draft.manualTrackIndex = &trackIndex
+	draft.resetForQueue("Выбранный источник ожидает очереди")
 	if s.repo != nil {
-		_ = s.repo.SavePinnedSource(ctx, PinnedTrackSourceDTO{
-			CacheKey:   trackID,
-			PinnedURL:  targetURL,
-			SourceType: "manual",
-			UpdatedAt:  time.Now().UTC(),
-		})
-
-		if matchedTrack != nil {
-			isrc := ""
-			if matchedTrack.ISRC != nil {
-				isrc = *matchedTrack.ISRC
-			}
-			cacheKey := resolver.BuildCacheKey(isrc, matchedTrack.Artist, matchedTrack.Title)
-			_ = s.repo.SavePinnedSource(ctx, PinnedTrackSourceDTO{
-				CacheKey:   cacheKey,
-				PinnedURL:  targetURL,
-				SourceType: "manual",
-				UpdatedAt:  time.Now().UTC(),
-			})
+		if err := s.repo.updateJobWithSelection(ctx, draft, previous, []PinnedTrackSourceDTO{pinForTrack(*track)}); err != nil {
+			return nil, fmt.Errorf("%w: %w", errQueueStorage, err)
 		}
 	}
+	job.applyQueueSnapshot(draft)
+	s.wakeWorker()
 
-	if matchedJob != nil && trackIdx >= 0 {
-		matchedTrack.AudioSourceURL = targetURL
-		matchedTrack.VersionStatus = "manual"
-		matchedTrack.VersionPolicy = policy
-		matchedJob.UpdateTrack(trackIdx, func(tr *resolver.ResolvedTrack) {
-			tr.AudioSourceURL = targetURL
-			tr.VersionStatus = "manual"
-			tr.VersionPolicy = policy
-		})
+	return &SwitchVersionResult{TrackID: trackID, TargetURL: targetURL, Status: "manual"}, nil
+}
 
-		// Запускаем асинхронную дозагрузку и конвертацию выбранного трека
-		go func() {
-			var rawDir, convertedDir string
-			if s.tmpSandbox != nil {
-				rawDir, _ = s.tmpSandbox.Resolve(filepath.Join(matchedJob.ID, "raw"), true)
-				convertedDir, _ = s.tmpSandbox.Resolve(filepath.Join(matchedJob.ID, "converted"), true)
-			}
-			var coverBytes []byte
-			if convertedDir != "" {
-				coverBytes, _ = safefs.ReadFile(filepath.Join(convertedDir, "cover.jpg"))
-			}
-			snapshot := matchedJob.Snapshot()
-			meta := snapshot.AlbumMetadata
-			if meta.AlbumTitle == "" && snapshot.AlbumTitle != nil {
-				meta.AlbumTitle = *snapshot.AlbumTitle
-			}
-			if meta.AlbumArtist == "" && snapshot.ArtistName != nil {
-				meta.AlbumArtist = *snapshot.ArtistName
-			}
-			workCtx := s.ctx
-			if workCtx == nil {
-				workCtx = context.Background()
-			}
-			s.processSingleTrack(workCtx, matchedJob, &meta, trackIdx+1, *matchedTrack, rawDir, convertedDir, coverBytes, len(snapshot.Tracks))
-			matchedJob.reconcileManualSources()
-		}()
+func (s *Service) executeManualTrack(ctx context.Context, job, snapshot *Job) {
+	index := *snapshot.manualTrackIndex
+	if index < 0 || index >= len(snapshot.Tracks) {
+		job.SetError("Выбранный трек отсутствует в сохранённом треклисте")
+		return
 	}
-
-	return &SwitchVersionResult{
-		TrackID:   trackID,
-		TargetURL: targetURL,
-		Status:    "manual",
-	}, nil
+	var rawDir, convertedDir string
+	var coverBytes []byte
+	if s.tmpSandbox != nil {
+		var err error
+		rawDir, err = s.tmpSandbox.Resolve(filepath.Join(job.ID, "raw", "manual_"+generateUUID()), true)
+		if err != nil {
+			job.SetError("Недоступен временный каталог трека")
+			return
+		}
+		convertedDir, err = s.tmpSandbox.Resolve(filepath.Join(job.ID, "converted"), true)
+		if err != nil {
+			job.SetError("Недоступен каталог подготовленных треков")
+			return
+		}
+		for _, dir := range []string{rawDir, convertedDir} {
+			if err := safefs.MkdirAll(dir, 0700); err != nil {
+				job.SetError("Недоступен временный каталог трека")
+				return
+			}
+		}
+		defer safefs.RemoveAll(rawDir)
+		if cover, err := s.tmpSandbox.Resolve(filepath.Join(job.ID, "converted", "cover.jpg"), false); err == nil {
+			coverBytes, _ = safefs.ReadFile(cover)
+		}
+	}
+	meta := snapshot.AlbumMetadata
+	if meta.AlbumTitle == "" && snapshot.AlbumTitle != nil {
+		meta.AlbumTitle = *snapshot.AlbumTitle
+	}
+	if meta.AlbumArtist == "" && snapshot.ArtistName != nil {
+		meta.AlbumArtist = *snapshot.ArtistName
+	}
+	processed := s.processSingleTrack(ctx, job, &meta, index+1, snapshot.Tracks[index], rawDir, convertedDir, coverBytes, len(snapshot.Tracks))
+	if ctx.Err() != nil {
+		job.SetError("Загрузка отменена")
+		return
+	}
+	if processed {
+		job.mu.Lock()
+		job.manualTrackIndex = nil
+		job.mu.Unlock()
+	}
+	job.reconcileManualSources()
 }
 
 // SwitchReleaseSource привязывает выбранные аудиоисточники кандидатов ко всем трекам задачи
@@ -152,18 +155,31 @@ func (s *Service) SwitchReleaseSource(ctx context.Context, req SwitchReleaseSour
 		return nil, errors.New("необходимо указать job_id или source_url")
 	}
 
-	var job *Job
+	var existing *Job
 	if req.JobID != "" {
 		var ok bool
-		job, ok = s.GetJob(req.JobID)
+		existing, ok = s.GetJob(req.JobID)
 		if !ok {
 			return nil, fmt.Errorf("задача %s не найдена", req.JobID)
 		}
-		switch job.Snapshot().Status {
-		case StatusDownloading, StatusConverting, StatusTagging, StatusResolving, StatusQueued:
-			return nil, errors.New("дождитесь завершения текущей обработки")
+	}
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
+
+	var draft *Job
+	if existing != nil {
+		if s.jobs[req.JobID] != existing {
+			return nil, ErrJobNotFound
 		}
-	} else if strings.TrimSpace(req.SourceURL) != "" {
+		draft = existing.Snapshot()
+		if draft.selectionCorrupt {
+			return nil, ErrCorruptJobSelection
+		}
+		switch draft.Status {
+		case StatusDownloading, StatusConverting, StatusTagging, StatusResolving, StatusQueued:
+			return nil, errSelectionConflict
+		}
+	} else {
 		cleanURL := strings.TrimSpace(req.SourceURL)
 		if !resolver.IsAllowedURL(cleanURL) || len(req.TargetTracks) == 0 {
 			return nil, errors.New("нужны исходный треклист и допустимый источник")
@@ -176,93 +192,69 @@ func (s *Service) SwitchReleaseSource(ctx context.Context, req SwitchReleaseSour
 				return nil, fmt.Errorf("%w: недопустимый путь целевого альбома", sandbox.ErrPathTraversal)
 			}
 		}
-		job = &Job{ID: generateUUID(), Source: "release_picker", URL: cleanURL, Status: StatusQueued, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), UpdatedAt: time.Now().UTC(), Tracks: append([]resolver.ResolvedTrack(nil), req.TargetTracks...)}
-		for i := range job.Tracks {
-			job.Tracks[i].TrackID = fmt.Sprintf("manual_%s_%d", job.ID, i)
-			job.Tracks[i].AudioSourceURL = ""
-			job.Tracks[i].ConvertedPath = nil
+		draft = &Job{ID: generateUUID(), Source: "release_picker", URL: cleanURL, Status: StatusQueued, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), UpdatedAt: time.Now().UTC(), Tracks: append([]resolver.ResolvedTrack(nil), req.TargetTracks...)}
+		for i := range draft.Tracks {
+			draft.Tracks[i].TrackID = fmt.Sprintf("manual_%s_%d", draft.ID, i)
+			draft.Tracks[i].AudioSourceURL = ""
+			draft.Tracks[i].ConvertedPath = nil
 		}
-		job.AlbumMetadata = resolver.ReleaseMetadata{AlbumTitle: job.Tracks[0].Album, AlbumArtist: job.Tracks[0].Artist, TotalTracks: len(job.Tracks)}
+		draft.AlbumMetadata = resolver.ReleaseMetadata{AlbumTitle: draft.Tracks[0].Album, AlbumArtist: draft.Tracks[0].Artist, TotalTracks: len(draft.Tracks)}
 		if req.TargetPath != "" {
 			target := req.TargetPath
-			job.TargetAlbumPath = &target
+			draft.TargetAlbumPath = &target
 		}
 	}
 	for idx := range req.TrackMapping {
-		if idx >= len(job.Snapshot().Tracks) {
+		if idx >= len(draft.Tracks) {
 			return nil, errors.New("индекс трека вне треклиста")
 		}
 	}
-	if req.JobID == "" {
-		if s.repo != nil {
-			if e := s.repo.CreateJob(ctx, job); e != nil {
-				return nil, e
-			}
-		}
-		s.AddJob(job)
-	}
-
-	updatedCount := 0
-	totalTracks := 0
-
-	job.mu.Lock()
-	totalTracks = len(job.Tracks)
-	for idx := range job.Tracks {
-		if audioURL, ok := req.TrackMapping[idx]; ok && strings.TrimSpace(audioURL) != "" {
-			trimmedURL := strings.TrimSpace(audioURL)
-			job.Tracks[idx].AudioSourceURL = trimmedURL
-			job.Tracks[idx].VersionStatus = "manual"
-			job.Tracks[idx].VersionPolicy = req.VersionPolicy
-			job.Tracks[idx].Status = "pending"
-			job.Tracks[idx].Error = nil
-			updatedCount++
-
-			if s.repo != nil {
-				_ = s.repo.SavePinnedSource(ctx, PinnedTrackSourceDTO{
-					CacheKey:   job.Tracks[idx].TrackID,
-					PinnedURL:  trimmedURL,
-					SourceType: "manual",
-					UpdatedAt:  time.Now().UTC(),
-				})
-			}
+	pins := make([]PinnedTrackSourceDTO, 0, len(req.TrackMapping))
+	for idx := range draft.Tracks {
+		track := &draft.Tracks[idx]
+		if audioURL, ok := req.TrackMapping[idx]; ok {
+			selectManualSource(track, strings.TrimSpace(audioURL), req.VersionPolicy)
+			pins = append(pins, pinForTrack(*track))
 		} else {
 			// Unmatched tracks wait for another explicit source choice.
-			job.Tracks[idx].AudioSourceURL = ""
-			job.Tracks[idx].Status = "pending"
-			job.Tracks[idx].Error = nil
+			track.AudioSourceURL = ""
+			track.VersionStatus = ""
+			track.Status = "pending"
+			track.Error = nil
 		}
 	}
 
-	job.Status = StatusQueued
-	job.Progress = 0.0
-	job.CompletedTracks = 0
-	job.CurrentStep = "Источник релиза обновлен, перезапуск очереди"
-	job.Error = nil
-	job.UpdatedAt = time.Now().UTC()
-	job.mu.Unlock()
-
-	job.notifyUpdate()
-
+	previous := draft.Status
+	draft.manualTrackIndex = nil
+	draft.TotalTracks = len(draft.Tracks)
+	draft.resetForQueue("Источник релиза обновлен, перезапуск очереди")
 	if s.repo != nil {
-		_ = s.repo.SaveJob(ctx, job)
+		var err error
+		if existing == nil {
+			err = s.repo.createJobWithPins(ctx, draft, pins)
+		} else {
+			err = s.repo.updateJobWithSelection(ctx, draft, previous, pins)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", errQueueStorage, err)
+		}
 	}
-
-	// Очищаем предыдущие временные скачанные файлы
 	if s.tmpSandbox != nil {
-		if rawDir, err := s.tmpSandbox.Resolve(filepath.Join(job.ID, "raw"), false); err == nil {
+		if rawDir, err := s.tmpSandbox.Resolve(filepath.Join(draft.ID, "raw"), false); err == nil {
 			_ = safefs.RemoveAll(rawDir)
 		}
 	}
-
-	select {
-	case s.workQueue <- job.ID:
-	default:
+	if existing == nil {
+		s.registerJobLocked(draft)
+	} else {
+		existing.applyQueueSnapshot(draft)
 	}
+	s.wakeWorker()
 
 	return &SwitchReleaseSourceResult{
-		JobID:        job.ID,
-		UpdatedCount: updatedCount,
-		TotalTracks:  totalTracks,
+		JobID:        draft.ID,
+		UpdatedCount: len(pins),
+		TotalTracks:  len(draft.Tracks),
 		Status:       "queued",
 	}, nil
 }

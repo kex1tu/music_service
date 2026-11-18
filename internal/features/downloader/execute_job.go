@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"music-manager/internal/core/safefs"
@@ -12,21 +13,11 @@ import (
 )
 
 // executeJob запускает конвейер обработки задачи.
-func (s *Service) executeJob(parentCtx context.Context, jobID string) {
-	job, ok := s.GetJob(jobID)
-	if !ok {
-		return
-	}
-
-	ctx, cancel := context.WithCancel(parentCtx)
-	job.SetCancelFunc(cancel)
-	defer cancel()
-
-	if s.waitIfPaused(ctx) != nil {
-		return
-	}
-
-	if job.IsBackfill {
+func (s *Service) executeJob(ctx context.Context, job *Job) {
+	snap := job.Snapshot()
+	if snap.manualTrackIndex != nil {
+		s.executeManualTrack(ctx, job, snap)
+	} else if job.IsBackfill {
 		s.executeBackfill(ctx, job)
 	} else {
 		s.executeRegular(ctx, job)
@@ -35,13 +26,7 @@ func (s *Service) executeJob(parentCtx context.Context, jobID string) {
 
 func (s *Service) executeRegular(ctx context.Context, job *Job) {
 	snapshot := job.Snapshot()
-	hasManual := false
-	for _, tr := range snapshot.Tracks {
-		if tr.VersionStatus == "manual" {
-			hasManual = true
-			break
-		}
-	}
+	hasManual := hasManualSource(snapshot.Tracks)
 	job.SetStatus(StatusResolving)
 	job.UpdateProgress(5.0, "Определение источника и метаданных")
 
@@ -69,7 +54,7 @@ func (s *Service) executeRegular(ctx context.Context, job *Job) {
 		meta = &resolver.ReleaseMetadata{}
 	}
 
-	selectedIndices := job.GetSelectedTrackIndices()
+	selectedIndices := snapshot.SelectedTrackIndices
 	if len(selectedIndices) > 0 && !hasManual {
 		var filteredTracks []resolver.ResolvedTrack
 		for _, idx := range selectedIndices {
@@ -83,6 +68,16 @@ func (s *Service) executeRegular(ctx context.Context, job *Job) {
 	if len(tracks) == 0 {
 		job.SetError("Не выбрано ни одного трека для загрузки")
 		return
+	}
+	if snapshot.SkipExisting && !hasManual && s.repo != nil {
+		tracks = slices.DeleteFunc(tracks, func(track resolver.ResolvedTrack) bool {
+			existing, err := s.repo.CheckTrackInLibrary(ctx, track.Title, track.Artist)
+			return err == nil && existing != nil
+		})
+		if len(tracks) == 0 {
+			job.SetReady(0, 0)
+			return
+		}
 	}
 
 	job.SetMetadata(*meta, tracks)
@@ -173,6 +168,21 @@ func (s *Service) executeBackfill(ctx context.Context, job *Job) {
 					if !existingNumbers[t.TrackNumber] {
 						tracks = append(tracks, t)
 					}
+				}
+			}
+		}
+	}
+
+	snapshot := job.Snapshot()
+	if len(snapshot.backfillTrackNumbers) > 0 {
+		tracks = slices.DeleteFunc(tracks, func(track resolver.ResolvedTrack) bool {
+			return !slices.Contains(snapshot.backfillTrackNumbers, track.TrackNumber)
+		})
+		if len(snapshot.backfillTrackURLs) == len(snapshot.backfillTrackNumbers) {
+			for i := range tracks {
+				index := slices.Index(snapshot.backfillTrackNumbers, tracks[i].TrackNumber)
+				if source := snapshot.backfillTrackURLs[index]; source != "" && resolver.IsAllowedURL(source) {
+					tracks[i].AudioSourceURL = source
 				}
 			}
 		}

@@ -406,7 +406,13 @@ func TestDownloader_Repository_Lifecycle(t *testing.T) {
 		t.Fatalf("expected 1 active job in list, got %d", len(activeJobs))
 	}
 
-	// 5. Сброс прерванных задач
+	// QUEUED survives restart. Only a task already claimed by a worker is interrupted.
+	if resetCount, err := repo.ResetInterruptedJobs(ctx); err != nil || resetCount != 0 {
+		t.Fatalf("reset %d queued jobs, err %v", resetCount, err)
+	}
+	if err := repo.UpdateJobStatus(ctx, job.ID, downloader.StatusResolving, "Resolving", nil); err != nil {
+		t.Fatal(err)
+	}
 	resetCount, err := repo.ResetInterruptedJobs(ctx)
 	if err != nil {
 		t.Fatalf("failed to reset interrupted jobs: %v", err)
@@ -734,10 +740,9 @@ func TestDownloader_QuickListenSpots_ExtractedOnLyricsFound(t *testing.T) {
 	})
 	svc.SetLyricsService(lyricsSvc)
 
-	// Создаем тестовую задачу с 1 треком
-	job, err := svc.CreateJob(context.Background(), "https://soundcloud.com/test-artist/test-track", "soundcloud")
-	if err != nil {
-		t.Fatalf("failed to create job: %v", err)
+	job := &downloader.Job{
+		ID: "quick-listen-fixture", Status: downloader.StatusReady,
+		URL: "https://soundcloud.com/test-artist/test-track", Source: "soundcloud",
 	}
 
 	meta := resolver.ReleaseMetadata{
@@ -787,6 +792,10 @@ func TestDownloader_QuickListenSpots_ExtractedOnLyricsFound(t *testing.T) {
 	}
 	if !foundCoAP {
 		t.Errorf("expected CategoryDrugCoAP spot in track QuickListenSpots")
+	}
+
+	if err := svc.Repo().CreateJob(t.Context(), job); err != nil {
+		t.Fatal(err)
 	}
 
 	// Проверяем сериализацию эндпоинта GET /downloads/{id}
@@ -843,10 +852,10 @@ func TestDownloader_ReleaseCandidates_And_SwitchReleaseSource(t *testing.T) {
 		t.Fatalf("expected 400 Bad Request, got %d", resp400.StatusCode)
 	}
 
-	// 2. Создаем задачу в очереди
-	job, err := mod.Service().CreateJob(context.Background(), "https://music.youtube.com/playlist?list=mock_cand_job", "youtube")
-	if err != nil {
-		t.Fatalf("CreateJob error: %v", err)
+	mod.Service().PauseQueue()
+	job := &downloader.Job{
+		ID: "release-source-fixture", Status: downloader.StatusWaitingSource,
+		URL: "https://music.youtube.com/playlist?list=mock_cand_job", Source: "youtube",
 	}
 
 	// Заполняем треки задачи потокобезопасно через SetMetadata
@@ -877,6 +886,11 @@ func TestDownloader_ReleaseCandidates_And_SwitchReleaseSource(t *testing.T) {
 		AlbumArtist: "DEAD BLONDE",
 		AlbumTitle:  "СПЛЕТНИЦА",
 	}, tracks)
+
+	if err := mod.Service().Repo().CreateJob(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	mod.Service().AddJob(job)
 
 	// 3. Запрашиваем кандидатов по job_id
 	respCands := env.Get(fmt.Sprintf("/api/downloads/release-candidates?job_id=%s", job.ID))

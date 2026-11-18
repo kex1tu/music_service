@@ -3,13 +3,17 @@ package audit
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql/driver"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"modernc.org/sqlite"
 
 	"music-manager/internal/core/mediaexec"
 	"music-manager/internal/core/safefs"
@@ -240,4 +244,124 @@ func TestReferenceComparisonRejectsUniformMasteringChange(t *testing.T) {
 	if alignedDifference(a, b) {
 		t.Fatal("uniform gain treated as an edit")
 	}
+}
+
+func TestCensorshipRetriesEvidenceAndTranscriptWrites(t *testing.T) {
+	// The counters are outside SQLite, so the one-shot faults survive rollback.
+	var transcriptWrites, evidenceWrites atomic.Int32
+	functions := make(map[string]string)
+	for name, calls := range map[string]*atomic.Int32{"transcripts": &transcriptWrites, "evidence": &evidenceWrites} {
+		function := fmt.Sprintf("audit_test_%s_%d", name, time.Now().UnixNano())
+		if err := sqlite.RegisterScalarFunction(function, 0, func(_ *sqlite.FunctionContext, _ []driver.Value) (driver.Value, error) {
+			return calls.Add(1) == 1, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		functions[name] = function
+	}
+	database, sb := auditFixture(t)
+	conn := database.Conn()
+	for table, function := range functions {
+		trigger := fmt.Sprintf(`CREATE TRIGGER test_%s_fault BEFORE INSERT ON censorship_%s
+			WHEN %s() BEGIN SELECT RAISE(FAIL, 'one-shot storage failure'); END`,
+			table, table, function)
+		if _, err := conn.ExecContext(t.Context(), trigger); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cloud := &testTranscriber{}
+	a, err := NewCensorshipAudit(conn, sb, map[string]censorcheck.Transcriber{"gemini": cloud}, 1200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	opts := CensorshipOptions{Paths: []string{"track.mp3"}, Provider: "gemini"}
+	id, err := a.Start(t.Context(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitCensorState(t, a, id, "completed")
+	items, err := a.Items(t.Context(), id, "", 100, 0)
+	if err != nil || len(items) != 1 || items[0].State != "done" || items[0].Verdict != "checked_words_preserved" {
+		t.Fatalf("result did not survive storage failure: %+v, %v", items, err)
+	}
+	var evidenceCount, seconds int
+	if err := conn.QueryRowContext(t.Context(), "SELECT count(*) FROM censorship_evidence WHERE item_id=?", items[0].ID).Scan(&evidenceCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRowContext(t.Context(), "SELECT seconds FROM censorship_cloud_usage WHERE provider='gemini'").Scan(&seconds); err != nil {
+		t.Fatal(err)
+	}
+	if transcriptWrites.Load() != 2 || evidenceWrites.Load() < 2 || evidenceCount != len(items[0].Result.Evidence) || cloud.calls.Load() != 1 || seconds <= 0 {
+		t.Fatalf("transcript writes=%d, evidence writes=%d, evidence=%d, calls=%d, quota=%d",
+			transcriptWrites.Load(), evidenceWrites.Load(), evidenceCount, cloud.calls.Load(), seconds)
+	}
+
+	a.Close()
+	if _, err := conn.ExecContext(t.Context(), "DELETE FROM censorship_cache"); err != nil {
+		t.Fatal(err)
+	}
+	reloadedCloud := &testTranscriber{}
+	reloaded, err := NewCensorshipAudit(conn, sb, map[string]censorcheck.Transcriber{"gemini": reloadedCloud}, 1200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reloaded.Close()
+	id, err = reloaded.Start(t.Context(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitCensorState(t, reloaded, id, "completed")
+	var reloadedSeconds int
+	if err := conn.QueryRowContext(t.Context(), "SELECT seconds FROM censorship_cloud_usage WHERE provider='gemini'").Scan(&reloadedSeconds); err != nil {
+		t.Fatal(err)
+	}
+	if reloadedCloud.calls.Load() != 0 || reloadedSeconds != seconds {
+		t.Fatalf("cached transcript billed again: calls=%d, quota=%d, previous=%d", reloadedCloud.calls.Load(), reloadedSeconds, seconds)
+	}
+}
+
+func TestCensorshipLeaseRecoversExpiredClaimAndRejectsStaleAttempt(t *testing.T) {
+	database, sb := auditFixture(t)
+	conn := database.Conn()
+	const expiredID = "expired-claim"
+	const activeID = "active-claim"
+	if _, err := conn.ExecContext(t.Context(), `
+		INSERT INTO censorship_runs(id,state,provider,options_json) VALUES(?,'running','local','{}'),(?,'running','local','{}')`,
+		expiredID, activeID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	expiredToken := censorshipLeasePrefix(now.Add(-time.Minute)) + "expired"
+	activeToken := censorshipLeasePrefix(now.Add(time.Minute)) + "active"
+	if _, err := conn.ExecContext(t.Context(), `
+		INSERT INTO censorship_items(run_id,file_path,state,attempt_token)
+		VALUES(?,'track.mp3','running',?), (?,'track.mp3','running',?)`,
+		expiredID, expiredToken, activeID, activeToken); err != nil {
+		t.Fatal(err)
+	}
+	a, err := NewCensorshipAudit(conn, sb, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	a.notify()
+	awaitCensorState(t, a, expiredID, "completed")
+	var id int64
+	if err := conn.QueryRowContext(t.Context(), "SELECT id FROM censorship_items WHERE run_id=?", activeID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.finishAttempt(t.Context(), id, activeID, expiredToken, CensorshipResult{Verdict: "stale"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var state, token string
+	if err := conn.QueryRowContext(t.Context(), "SELECT state,attempt_token FROM censorship_items WHERE id=?", id).Scan(&state, &token); err != nil || state != "running" || token != activeToken {
+		t.Fatalf("unexpired claim was modified: %q, %q, %v", state, token, err)
+	}
+	if _, err := conn.ExecContext(t.Context(), "UPDATE censorship_items SET attempt_token=? WHERE id=?", expiredToken, id); err != nil {
+		t.Fatal(err)
+	}
+	a.notify()
+	awaitCensorState(t, a, activeID, "completed")
 }
