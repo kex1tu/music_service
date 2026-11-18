@@ -40,6 +40,10 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("сбой инициализации схемы SQLite: %w", err)
 	}
 
+	if err := initializeLibraryIndex(conn); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("инициализация журнала индекса медиатеки: %w", err)
+	}
 	return db, nil
 }
 

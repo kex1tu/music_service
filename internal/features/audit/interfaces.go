@@ -44,3 +44,8 @@ type LyricsService interface {
 	SearchLyrics(ctx context.Context, artist, title, album string, duration int) (*lyrics.LyricsSearchResult, error)
 	SaveLyrics(relPath string, content string, kind string) error
 }
+
+// LibraryDeletionIndex coordinates a filesystem deletion and SQLite cleanup.
+type LibraryDeletionIndex interface {
+	DeletePath(context.Context, string, bool, func() error) (int64, error)
+}

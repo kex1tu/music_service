@@ -2,6 +2,8 @@ package organizer
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io/fs"
 
 	"path/filepath"
@@ -54,6 +56,7 @@ func FixLibraryPermissions(musicRootDir string) (dirsFixed, filesFixed int, err 
 // устаревших фреймов TXXX и некорректных прав доступа, и нормализует их под стандарт Navidrome ID3v2.4.
 func (s *Service) NormalizeNavidromeLibrary(ctx context.Context, onTrackNormalized func(relPath string)) (*NavidromeFixReport, error) {
 	report := &NavidromeFixReport{}
+	var failures []error
 	musicRoot := s.musicSandbox.Root()
 
 	err := safefs.WalkDir(musicRoot, func(fullPath string, d fs.DirEntry, walkErr error) error {
@@ -97,6 +100,12 @@ func (s *Service) NormalizeNavidromeLibrary(ctx context.Context, onTrackNormaliz
 
 		relPath, relErr := s.musicSandbox.ToRelative(fullPath)
 		if relErr != nil {
+			return nil
+		}
+
+		fullPath, err = s.musicSandbox.Resolve(relPath, false)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("%q: %w", relPath, err))
 			return nil
 		}
 
@@ -193,7 +202,10 @@ func (s *Service) NormalizeNavidromeLibrary(ctx context.Context, onTrackNormaliz
 		// Если есть слеши, конфликтные TXXX или исправлены метаданные сингла — переписываем теги
 		if needsRewrite {
 			// WriteTags автоматически кодирует TPE1/TPE2 в ID3v2.4 \x00 и отфильтровывает TXXX:ARTISTS
-			if wErr := id3.WriteTags(fullPath, *tags, nil); wErr == nil {
+			err := ApplyTrackChange(ctx, s.trackIndex, fullPath, fullPath, false, func() error {
+				return id3.WriteTags(fullPath, *tags, nil)
+			})
+			if err == nil {
 				report.TagsNormalized++
 				if isSingleFixed {
 					report.SinglesFixed++
@@ -201,11 +213,13 @@ func (s *Service) NormalizeNavidromeLibrary(ctx context.Context, onTrackNormaliz
 				if onTrackNormalized != nil {
 					onTrackNormalized(relPath)
 				}
+			} else {
+				failures = append(failures, fmt.Errorf("%q: %w", relPath, err))
 			}
 		}
 
 		return nil
 	})
 
-	return report, err
+	return report, errors.Join(err, errors.Join(failures...))
 }

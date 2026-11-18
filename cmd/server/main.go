@@ -66,14 +66,6 @@ func main() {
 	}
 	defer database.Close()
 
-	// Reset library cache tables on startup (preserving download_jobs) and rebuild from filesystem
-	log.Println("[Main] Resetting library metadata cache tables on startup (preserving download_jobs)...")
-	if err := database.ResetLibraryTables(context.Background()); err != nil {
-		log.Printf("[Main] Warning: Failed to reset library cache tables: %v", err)
-	} else {
-		log.Println("[Main] Library metadata cache tables reset")
-	}
-
 	// 4. Initialize services and root context
 	appCtx, appCancel := context.WithCancel(context.Background())
 	defer appCancel()
@@ -103,7 +95,9 @@ func main() {
 	)
 	defer downloadService.Close()
 
+	scannerService := scanner.NewScanner(musicSandbox, database, deezerClient, tmpSandbox)
 	organizerService := organizer.NewService(musicSandbox, tmpSandbox)
+	organizerService.SetTrackChanger(scannerService)
 	lyricsService := lyrics.NewService(musicSandbox)
 	yandexClient := resolver.NewYandexMusicClient(cfg.YandexMusicToken, cfg.YandexMusicProxy)
 	yandexClient.SetSignKey(cfg.YandexLyricsSignKey)
@@ -128,7 +122,11 @@ func main() {
 	defer downloaderFeatureSvc.Close()
 	downloaderModule := featureDownloader.NewModule(downloaderFeatureSvc, deezerClient)
 
-	scannerService := scanner.NewScanner(musicSandbox, database, deezerClient)
+	if err := scannerService.RetryPending(appCtx); err != nil {
+		log.Printf("[Main] Pending library index changes will be retried: %v", err)
+	}
+
+	go scannerService.RunIndexRecovery(appCtx)
 
 	// 5. Start background scanner and fsnotify watcher
 	if err := scannerService.StartWatcher(appCtx); err != nil {
@@ -227,6 +225,8 @@ func main() {
 		BackfillStarter: auditAdapter,
 		Organizer:       organizerService,
 		Scanner:         scannerService,
+		TrackIndex:      scannerService,
+		DeletionIndex:   scannerService,
 		Lyrics:          lyricsService,
 		Enricher:        sourceResolver.Enricher(),
 		Deezer:          deezerClient,
@@ -243,6 +243,7 @@ func main() {
 		MusicSandbox: musicSandbox,
 		TmpSandbox:   tmpSandbox,
 		Repo:         tagRepo,
+		TrackIndex:   scannerService,
 		Organizer:    organizerService,
 		Deezer:       deezerClient,
 		MusicBrainz:  mbClient,
@@ -265,7 +266,8 @@ func main() {
 		MusicSandbox: musicSandbox,
 		TmpSandbox:   tmpSandbox,
 		Repo:         fileManagerRepo,
-		Organizer:    &fileManagerOrganizerAdapter{sb: musicSandbox},
+		Organizer:    &fileManagerOrganizerAdapter{sb: musicSandbox, index: scannerService},
+		LibraryIndex: scannerService,
 		Scanner:      &fileManagerScannerAdapter{scanner: scannerService, sb: musicSandbox},
 		JobCreator:   &downloaderBackfillAdapter{svc: downloaderFeatureSvc},
 		SourceFinder: &fileManagerSourceFinder{deezer: deezerClient, matcher: audioMatcher},
@@ -438,7 +440,8 @@ func (a *downloaderBackfillAdapter) CreateBackfillJob(
 }
 
 type fileManagerOrganizerAdapter struct {
-	sb *sandbox.PathSandbox
+	sb    *sandbox.PathSandbox
+	index organizer.TrackChanger
 }
 
 func (a *fileManagerOrganizerAdapter) RenameFile(oldRel, newRel string) ([]string, error) {
@@ -450,12 +453,12 @@ func (a *fileManagerOrganizerAdapter) RenameFile(oldRel, newRel string) ([]strin
 	if err != nil {
 		return nil, err
 	}
-	target, err := organizer.MoveTrackWithCompanions(oldFull, newFull, false)
-	if err != nil {
+	target, err := organizer.MoveIndexedTrack(context.Background(), a.index, oldFull, newFull, false, nil)
+	if target == "" {
 		return nil, err
 	}
 	relTarget, _ := a.sb.ToRelative(target)
-	return []string{relTarget}, nil
+	return []string{relTarget}, err
 }
 
 func (a *fileManagerOrganizerAdapter) SyncCompanions(oldBaseRel, newBaseRel string) error {

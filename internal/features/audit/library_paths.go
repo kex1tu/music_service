@@ -58,15 +58,14 @@ func (s *Service) FixPath(ctx context.Context, relPath string, overwrite bool) (
 
 	if fullPath != targetFull {
 		oldDir := filepath.Dir(fullPath)
-		actualDest, err := organizer.MoveTrackWithCompanions(fullPath, targetFull, overwrite)
-		if err != nil {
+		actualDest, err := s.moveIndexedTrack(ctx, fullPath, targetFull, overwrite)
+		if actualDest == "" && err != nil {
 			return nil, fmt.Errorf("failed to move file: %w", err)
 		}
-
-		actualRel, _ := s.musicSandbox.ToRelative(actualDest)
-		_ = s.repo.UpdateTrackPath(ctx, relPath, actualRel)
-		_ = s.repo.DeleteAuditIssueByPath(ctx, relPath, "invalid_path")
-		targetRel = actualRel
+		targetRel, _ = s.musicSandbox.ToRelative(actualDest)
+		if err != nil {
+			return &FixPathResponse{SourcePath: relPath, TargetPath: targetRel, Message: err.Error()}, nil
+		}
 
 		organizer.CleanEmptyParents(oldDir, s.musicSandbox.Root())
 	}
@@ -100,12 +99,9 @@ func (s *Service) FixAllPaths(ctx context.Context) (*FixAllPathsResponse, error)
 		}
 
 		oldDir := filepath.Dir(fullPath)
-		actualDest, err := organizer.MoveTrackWithCompanions(fullPath, targetFull, false)
+		_, err = s.moveIndexedTrack(ctx, fullPath, targetFull, false)
 
 		if err == nil {
-			actualRel, _ := s.musicSandbox.ToRelative(actualDest)
-			_ = s.repo.UpdateTrackPath(ctx, p.FilePath, actualRel)
-			_ = s.repo.DeleteAuditIssueByPath(ctx, p.FilePath, "invalid_path")
 			fixed++
 			oldDirs[oldDir] = true
 		} else {
@@ -133,6 +129,7 @@ func (s *Service) Reorganize(ctx context.Context) (*ReorganizeLibraryResponse, e
 	}
 
 	moved := 0
+	var errs []string
 	oldDirs := make(map[string]bool)
 
 	for _, tr := range paths {
@@ -147,14 +144,13 @@ func (s *Service) Reorganize(ctx context.Context) (*ReorganizeLibraryResponse, e
 			}
 
 			oldDir := filepath.Dir(srcFull)
-			actualDest, err := organizer.MoveTrackWithCompanions(srcFull, dstFull, false)
+			_, err = s.moveIndexedTrack(ctx, srcFull, dstFull, false)
 
 			if err == nil {
-				actualRel, _ := s.musicSandbox.ToRelative(actualDest)
 				moved++
-				_ = s.repo.UpdateTrackPath(ctx, tr.FilePath, actualRel)
-				_ = s.repo.DeleteAuditIssueByPath(ctx, tr.FilePath, "invalid_path")
 				oldDirs[oldDir] = true
+			} else {
+				errs = append(errs, fmt.Sprintf("%s: %v", tr.FilePath, err))
 			}
 		}
 	}
@@ -165,15 +161,17 @@ func (s *Service) Reorganize(ctx context.Context) (*ReorganizeLibraryResponse, e
 	}
 
 	if s.scanner != nil {
-		_, _ = s.scanner.ScanAll(ctx)
+		if _, err := s.scanner.ScanAll(ctx); err != nil {
+			errs = append(errs, err.Error())
+		}
 	}
 
 	return &ReorganizeLibraryResponse{
-		Success:     true,
+		Success:     len(errs) == 0,
 		TotalTracks: len(paths),
 		MovedTracks: moved,
 		TotalAlbums: 1,
-		Errors:      []string{},
+		Errors:      errs,
 	}, nil
 }
 
@@ -182,16 +180,22 @@ func (s *Service) NormalizeNavidrome(ctx context.Context) (*NavidromeReport, err
 		return nil, errors.New("organizer service is not initialized")
 	}
 
-	onTrack := func(relPath string) {
-		if s.scanner != nil {
-			if full, err := s.musicSandbox.Resolve(relPath, false); err == nil {
-				_ = s.scanner.IndexFile(full, relPath)
+	var onTrack func(string)
+	var indexFailures []error
+	if s.trackIndex == nil && s.scanner != nil {
+		onTrack = func(relPath string) {
+			full, err := s.musicSandbox.Resolve(relPath, false)
+			if err == nil {
+				err = s.scanner.IndexFile(full, relPath)
+			}
+			if err != nil {
+				indexFailures = append(indexFailures, fmt.Errorf("%q: %w", relPath, err))
 			}
 		}
 	}
 
 	rep, err := s.organizer.NormalizeNavidromeLibrary(ctx, onTrack)
-	if err != nil {
+	if err := errors.Join(err, errors.Join(indexFailures...)); err != nil {
 		return nil, err
 	}
 
@@ -202,4 +206,17 @@ func (s *Service) NormalizeNavidrome(ctx context.Context) (*NavidromeReport, err
 		SinglesFixed:     rep.SinglesFixed,
 		TotalScanned:     rep.TotalScanned,
 	}, nil
+}
+
+func (s *Service) moveIndexedTrack(ctx context.Context, source, target string, overwrite bool) (string, error) {
+	actual, err := organizer.MoveIndexedTrack(ctx, s.trackIndex, source, target, overwrite, nil)
+	if err != nil || s.trackIndex != nil || actual == "" {
+		return actual, err
+	}
+	oldRel, _ := s.musicSandbox.ToRelative(source)
+	newRel, _ := s.musicSandbox.ToRelative(actual)
+	if err := s.repo.UpdateTrackPath(ctx, oldRel, newRel); err != nil {
+		return actual, err
+	}
+	return actual, s.repo.DeleteAuditIssueByPath(ctx, oldRel, "invalid_path")
 }

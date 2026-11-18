@@ -2,7 +2,9 @@ package filemanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"music-manager/internal/core/sandbox"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +28,20 @@ func (s *Service) DeleteFile(ctx context.Context, relPath string) (*DeleteRespon
 		return nil, ErrInvalidPath
 	}
 
+	// The encoded form was already checked by ResolvePath. Prefer the exact
+	// filesystem spelling if it exists, for example a directory named A%20B.
+	if !isTmp && strings.Contains(trimmed, "%") {
+		literal, literalErr := s.musicSandbox.Resolve(trimmed, false, sandbox.LiteralPath)
+		if literalErr != nil {
+			return nil, literalErr
+		}
+		if _, err := safefs.Lstat(literal); err == nil {
+			fullPath = literal
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
+
 	st, err := safefs.Stat(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -35,55 +51,57 @@ func (s *Service) DeleteFile(ctx context.Context, relPath string) (*DeleteRespon
 	}
 
 	var deletedTracks int64
-
-	if st.IsDir() {
-		// Удаление директории
-		if err := safefs.RemoveAll(fullPath); err != nil {
-			return nil, fmt.Errorf("failed to remove directory: %w", err)
-		}
-		if s.repo != nil && !isTmp {
-			deletedTracks, _ = s.repo.DeleteDirectoryRecords(ctx, relPath)
-		}
-		return &DeleteResponse{
-			Success:       true,
-			Message:       "Каталог успешно удален",
-			DeletedTracks: int(deletedTracks),
-			Path:          relPath,
-		}, nil
-	}
-
-	// Удаление отдельного файла
 	ext := strings.ToLower(filepath.Ext(fullPath))
-	baseName := strings.TrimSuffix(fullPath, ext)
-
-	if err := safefs.Remove(fullPath); err != nil {
-		return nil, fmt.Errorf("failed to remove file: %w", err)
+	remove := func() error {
+		if st.IsDir() {
+			return safefs.RemoveAll(fullPath)
+		}
+		if err := safefs.Remove(fullPath); err != nil {
+			return err
+		}
+		if ext == ".mp3" && !isTmp {
+			base := strings.TrimSuffix(relPath, filepath.Ext(relPath))
+			for _, suffix := range []string{".lrc", ".txt", ".jpg"} {
+				if companion, err := s.musicSandbox.Resolve(base+suffix, false, sandbox.LiteralPath); err == nil {
+					_ = safefs.Remove(companion)
+				}
+			}
+		}
+		return nil
 	}
 
-	if s.repo != nil && !isTmp {
-		if ext == ".mp3" {
-			// Удаляем сопутствующие файлы текстов и обложки
-			_ = safefs.Remove(baseName + ".lrc")
-			_ = safefs.Remove(baseName + ".txt")
-			_ = safefs.Remove(baseName + ".jpg")
-
-			deletedTracks, _ = s.repo.DeleteTrackByPath(ctx, relPath)
-		} else if ext == ".jpg" || ext == ".png" {
-			albumDir := filepath.Dir(relPath)
-			_ = s.repo.UpdateAlbumCoverStatus(ctx, albumDir, false)
+	if !isTmp {
+		relPath, err = s.musicSandbox.ToRelative(fullPath)
+		if err != nil {
+			return nil, err
 		}
 	}
+	indexed := !isTmp && (st.IsDir() || ext == ".mp3")
+	if indexed && s.libraryIndex != nil {
+		deletedTracks, err = s.libraryIndex.DeletePath(ctx, fullPath, st.IsDir(), remove)
+	} else if err = remove(); err == nil && !isTmp && s.repo != nil {
+		switch {
+		case st.IsDir():
+			deletedTracks, err = s.repo.DeleteDirectoryRecords(ctx, relPath)
+		case ext == ".mp3":
+			deletedTracks, err = s.repo.DeleteTrackByPath(ctx, relPath)
+		case ext == ".jpg" || ext == ".png":
+			err = s.repo.UpdateAlbumCoverStatus(ctx, filepath.Dir(relPath), false)
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("delete %q: %w", relPath, err)
+	}
 
-	// Очистка пустых родительских директорий
-	s.cleanupEmptyParents(filepath.Dir(fullPath), isTmp)
-
-	return &DeleteResponse{
-		Success:       true,
-		Message:       "Файл успешно удален",
-		DeletedTracks: int(deletedTracks),
-		Path:          relPath,
-		DeletedPaths:  []string{relPath},
-	}, nil
+	response := &DeleteResponse{Success: true, DeletedTracks: int(deletedTracks), Path: relPath}
+	if st.IsDir() {
+		response.Message = "Каталог успешно удален"
+	} else {
+		s.cleanupEmptyParents(filepath.Dir(fullPath), isTmp)
+		response.Message = "Файл успешно удален"
+		response.DeletedPaths = []string{relPath}
+	}
+	return response, nil
 }
 
 // DeleteBatch выполняет пакетное удаление файлов или каталогов.
@@ -170,14 +188,16 @@ func (s *Service) RenameFile(ctx context.Context, oldRel, newRel string) (*Renam
 	}
 
 	var affectedFiles []string
+	var renameErr error
 
-	// Если доступен сервис organizer — используем его логику синхронизации сопутствующих файлов
 	if s.organizer != nil {
-		renamed, err := s.organizer.RenameFile(oldRel, newRel)
-		if err != nil {
-			return nil, err
+		affectedFiles, renameErr = s.organizer.RenameFile(oldRel, newRel)
+		if renameErr != nil && len(affectedFiles) == 0 {
+			return nil, renameErr
 		}
-		affectedFiles = renamed
+		if len(affectedFiles) > 0 && s.libraryIndex != nil {
+			newRel = affectedFiles[0]
+		}
 	} else {
 		if err := safefs.MkdirAll(filepath.Dir(newFull), 0755); err != nil {
 			return nil, err
@@ -198,25 +218,29 @@ func (s *Service) RenameFile(ctx context.Context, oldRel, newRel string) (*Renam
 		}
 	}
 
-	if s.repo != nil {
-		_ = s.repo.UpdateTrackPath(ctx, oldRel, newRel)
-	}
-
-	if s.scanner != nil {
-		_ = s.scanner.RemoveFile(ctx, oldRel)
-		_ = s.scanner.IndexFile(ctx, newRel)
+	if s.libraryIndex == nil {
+		if s.repo != nil {
+			renameErr = s.repo.UpdateTrackPath(ctx, oldRel, newRel)
+		}
+		if renameErr == nil && s.scanner != nil {
+			renameErr = s.scanner.IndexFile(ctx, newRel)
+		}
 	}
 
 	s.trackCache.Delete(oldRel)
 	s.trackCache.Store(newRel, newRel)
 
-	return &RenameResponse{
-		Success:        true,
+	res := &RenameResponse{
+		Success:        renameErr == nil,
 		OldPath:        oldRel,
 		NewPath:        newRel,
 		AffectedFiles:  affectedFiles,
 		AffectedTracks: 1,
-	}, nil
+	}
+	if renameErr != nil {
+		res.Error = renameErr.Error()
+	}
+	return res, nil
 }
 
 // ReorganizeLibrary выполняет реорганизацию медиатеки.

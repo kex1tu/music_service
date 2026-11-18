@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"path/filepath"
 	"strings"
+
+	"music-manager/internal/db"
 )
 
 // DBTX определяет универсальный контракт для выполнения SQL-запросов (*sql.DB, *sql.Tx).
@@ -117,7 +119,6 @@ type AuditRepository interface {
 	ListTracksWithoutLyrics(ctx context.Context) ([]TrackCandidateDTO, error)
 	GetMissingTracksForAlbum(ctx context.Context, albumPath string) ([]MissingTrackEntityDTO, error)
 }
-
 
 // Repository реализует персистентный слой SQLite WAL для аудита медиатеки.
 type Repository struct {
@@ -291,31 +292,7 @@ func (r *Repository) GetTracksForDuplicatesScan(ctx context.Context) ([]TrackCan
 }
 
 func (r *Repository) DeleteTrackAndCleanup(ctx context.Context, path string) error {
-	var trackID, albumID int64
-	err := r.db.QueryRowContext(ctx, "SELECT id, album_id FROM tracks WHERE file_path = ?;", path).Scan(&trackID, &albumID)
-	if err == nil {
-		_, _ = r.db.ExecContext(ctx, "DELETE FROM tracks WHERE id = ?;", trackID)
-		_, _ = r.db.ExecContext(ctx, "DELETE FROM track_genres WHERE track_id = ?;", trackID)
-		_, _ = r.db.ExecContext(ctx, "DELETE FROM audit_issues WHERE (entity_type = 'track' AND entity_id = ?) OR file_path = ?;", trackID, path)
-
-		if albumID > 0 {
-			var count int
-			_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM tracks WHERE album_id = ?;", albumID).Scan(&count)
-			if count == 0 {
-				_, _ = r.db.ExecContext(ctx, "DELETE FROM albums WHERE id = ?;", albumID)
-				_, _ = r.db.ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id = ?;", albumID)
-			} else {
-				_, _ = r.db.ExecContext(ctx, "UPDATE albums SET present_tracks_count = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;", count, albumID)
-			}
-		}
-
-		_, _ = r.db.ExecContext(ctx, "DELETE FROM artists WHERE (SELECT COUNT(*) FROM albums WHERE artist_id = artists.id) = 0;")
-		return nil
-	}
-
-	// Fallback if not found by file_path
-	_, err = r.db.ExecContext(ctx, "DELETE FROM tracks WHERE file_path = ?;", path)
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM audit_issues WHERE file_path = ?;", path)
+	_, err := db.DeleteLibraryTracks(ctx, r.db, path, false)
 	return err
 }
 
@@ -837,4 +814,3 @@ func (r *Repository) GetMissingTracksForAlbum(ctx context.Context, albumPath str
 	}
 	return list, nil
 }
-

@@ -44,18 +44,21 @@ func (s *Service) RetagGenres(ctx context.Context) (*RetagGenresResponse, error)
 		}
 
 		currentTags.Genre = canon
-		if err := id3.WriteTags(fullPath, *currentTags, nil); err != nil {
+		if err := s.writeLibraryTags(ctx, fullPath, *currentTags, nil); err != nil {
 			errs = append(errs, fmt.Sprintf("write tags error %s: %v", t.Path, err))
 			continue
 		}
 
-		// Update repository
-		var trackID int64
-		if s.db != nil {
-			_ = s.db.QueryRowContext(ctx, "SELECT id FROM tracks WHERE file_path = ?;", t.Path).Scan(&trackID)
-		}
-		if trackID > 0 {
-			_ = s.repo.RetagTrackGenre(ctx, trackID, canon)
+		if s.trackIndex == nil && s.scanner == nil && s.db != nil {
+			var trackID int64
+			err := s.db.QueryRowContext(ctx, "SELECT id FROM tracks WHERE file_path = ?", t.Path).Scan(&trackID)
+			if err == nil {
+				err = s.repo.RetagTrackGenre(ctx, trackID, canon)
+			}
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("index %s: %v", t.Path, err))
+				continue
+			}
 		}
 
 		updatedCount++

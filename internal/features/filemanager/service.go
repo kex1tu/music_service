@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -24,8 +25,14 @@ var (
 	ErrTargetExists = errors.New("target file already exists")
 )
 
+// LibraryIndex coordinates deletion on disk with the SQLite index.
+type LibraryIndex interface {
+	DeletePath(ctx context.Context, fullPath string, directory bool, remove func() error) (int64, error)
+}
+
 // ServiceConfig определяет зависимости для инициализации сервиса FileManager.
 type ServiceConfig struct {
+	LibraryIndex LibraryIndex
 	MusicSandbox *sandbox.PathSandbox
 	TmpSandbox   *sandbox.PathSandbox
 	Repo         Repository
@@ -37,6 +44,7 @@ type ServiceConfig struct {
 
 // Service инкапсулирует операции файлового менеджера, стриминга и организации медиатеки.
 type Service struct {
+	libraryIndex LibraryIndex
 	musicSandbox *sandbox.PathSandbox
 	tmpSandbox   *sandbox.PathSandbox
 	repo         Repository
@@ -55,6 +63,7 @@ func NewService(cfg ServiceConfig) *Service {
 		repo:         cfg.Repo,
 		organizer:    cfg.Organizer,
 		scanner:      cfg.Scanner,
+		libraryIndex: cfg.LibraryIndex,
 		jobCreator:   cfg.JobCreator,
 		sourceFinder: cfg.SourceFinder,
 	}
@@ -105,22 +114,22 @@ func (s *Service) ResolveTrack(ctx context.Context, idOrHash string) (fullPath s
 		return "", "", nil, false, ErrTrackNotFound
 	}
 
-	// 1. Проверка in-memory кэша
-	if val, ok := s.trackCache.Load(idOrHash); ok {
-		relPath = val.(string)
-	}
-
-	// 2. Поиск в SQLite репозитории
-	if relPath == "" && s.repo != nil {
+	// Indexed IDs must follow a move even when an earlier request cached the
+	// old path and another file has since appeared there.
+	if s.repo != nil {
 		t, dbErr := s.repo.GetTrackByIDOrHash(ctx, idOrHash)
 		if dbErr == nil && t != nil {
-			track = t
-			relPath = t.FilePath
-			s.trackCache.Store(idOrHash, relPath)
-			s.trackCache.Store(t.ID, relPath)
-			if t.FilePath != "" {
-				s.trackCache.Store(t.FilePath, relPath)
+			full, err := s.musicSandbox.Resolve(t.FilePath, false, sandbox.LiteralPath)
+			if err != nil || !fileExists(full) {
+				return "", "", nil, false, ErrTrackNotFound
 			}
+			return full, t.FilePath, t, false, nil
+		}
+	}
+
+	if _, err := strconv.ParseInt(idOrHash, 10, 64); err != nil {
+		if val, ok := s.trackCache.Load(idOrHash); ok {
+			relPath = val.(string)
 		}
 	}
 

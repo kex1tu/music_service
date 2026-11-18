@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 
@@ -482,6 +483,7 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 
 	if len(req.Paths) > 0 {
 		var deletedCount int
+		var failures []string
 		for _, p := range req.Paths {
 			if strings.TrimSpace(p) == "" {
 				continue
@@ -494,23 +496,29 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			if st.IsDir() {
-				_ = safefs.RemoveAll(fPath)
-			} else {
-				_ = safefs.Remove(fPath)
+			remove := func() error {
+				if st.IsDir() {
+					return safefs.RemoveAll(fPath)
+				}
+				if err := safefs.Remove(fPath); err != nil {
+					return err
+				}
 				ext := filepath.Ext(fPath)
 				base := strings.TrimSuffix(fPath, ext)
 				_ = safefs.Remove(base + ".lrc")
 				_ = safefs.Remove(base + ".txt")
+				return nil
 			}
-			cleanP := filepath.Clean(filepath.ToSlash(p))
-			_, _ = h.database.Conn().Exec("DELETE FROM tracks WHERE file_path = ?;", cleanP)
-			_, _ = h.database.Conn().Exec("DELETE FROM audit_issues WHERE file_path = ?;", cleanP)
+			if err := h.deleteIndexedPath(r.Context(), fPath, st.IsDir(), remove); err != nil {
+				failures = append(failures, fmt.Sprintf("%s: %v", p, err))
+				continue
+			}
 			deletedCount++
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"success": true,
+			"success": len(failures) == 0,
+			"errors":  failures,
 			"deleted": deletedCount,
 		})
 		return
@@ -539,85 +547,33 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 
 	isDir := info.IsDir()
 	if isDir {
-		if err := safefs.RemoveAll(fullPath); err != nil {
-			http.Error(w, `{"error":"failed to delete directory"}`, http.StatusInternalServerError)
+		if err := h.deleteIndexedPath(r.Context(), fullPath, true, func() error { return safefs.RemoveAll(fullPath) }); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		// Синхронизация БД при удалении директории
-		cleanDir := filepath.Clean(filepath.ToSlash(relPath))
-		_, _ = h.database.Conn().Exec(`
-			DELETE FROM audit_issues 
-			WHERE file_path = ? OR file_path LIKE ? || '/%' 
-			   OR entity_id IN (SELECT id FROM tracks WHERE file_path = ? OR file_path LIKE ? || '/%');
-		`, cleanDir, cleanDir, cleanDir, cleanDir)
-
-		_, _ = h.database.Conn().Exec(`
-			DELETE FROM track_genres 
-			WHERE track_id IN (SELECT id FROM tracks WHERE file_path = ? OR file_path LIKE ? || '/%');
-		`, cleanDir, cleanDir)
-
-		_, _ = h.database.Conn().Exec(`
-			DELETE FROM tracks WHERE file_path = ? OR file_path LIKE ? || '/%';
-		`, cleanDir, cleanDir)
-
-		_, _ = h.database.Conn().Exec(`
-			DELETE FROM albums 
-			WHERE folder_path = ? OR folder_path LIKE ? || '/%' 
-			   OR (SELECT COUNT(*) FROM tracks WHERE album_id = albums.id) = 0;
-		`, cleanDir, cleanDir)
-
-		_, _ = h.database.Conn().Exec(`
-			DELETE FROM artists WHERE (SELECT COUNT(*) FROM albums WHERE artist_id = artists.id) = 0;
-		`)
-		_, _ = h.database.Conn().Exec(`
-			DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums);
-		`)
 	} else {
 		ext := strings.ToLower(filepath.Ext(fullPath))
 
-		if err := safefs.Remove(fullPath); err != nil {
-			http.Error(w, `{"error":"failed to delete file"}`, http.StatusInternalServerError)
-			return
-		}
-
 		if ext == ".mp3" {
-			// Удаляем сопутствующие тексты и обложки трека
-			base := strings.TrimSuffix(fullPath, filepath.Ext(fullPath))
-			_ = safefs.Remove(base + ".lrc")
-			_ = safefs.Remove(base + ".txt")
-			_ = safefs.Remove(base + ".jpg")
-			_ = safefs.Remove(base + ".jpeg")
-			_ = safefs.Remove(base + ".png")
-			_ = safefs.Remove(base + ".webp")
-
-			// Синхронизация БД при удалении MP3
-			var trackID, albumID int64
-			err := h.database.Conn().QueryRow("SELECT id, album_id FROM tracks WHERE file_path = ?", relPath).Scan(&trackID, &albumID)
-			if err == nil {
-				_, _ = h.database.Conn().Exec("DELETE FROM audit_issues WHERE (entity_type = 'track' AND entity_id = ?) OR file_path = ?", trackID, relPath)
-				_, _ = h.database.Conn().Exec("DELETE FROM track_genres WHERE track_id = ?", trackID)
-				_, _ = h.database.Conn().Exec("DELETE FROM tracks WHERE id = ?", trackID)
-
-				if albumID > 0 {
-					var count int
-					_ = h.database.Conn().QueryRow("SELECT COUNT(*) FROM tracks WHERE album_id = ?", albumID).Scan(&count)
-					if count == 0 {
-						_, _ = h.database.Conn().Exec("DELETE FROM albums WHERE id = ?", albumID)
-						_, _ = h.database.Conn().Exec("DELETE FROM missing_tracks WHERE album_id = ?", albumID)
-					} else {
-						_, _ = h.database.Conn().Exec(`
-							UPDATE albums SET
-								present_tracks_count = ?,
-								updated_at = CURRENT_TIMESTAMP
-							WHERE id = ?
-						`, count, albumID)
+			err := h.deleteIndexedPath(r.Context(), fullPath, false, func() error {
+				if err := safefs.Remove(fullPath); err != nil {
+					return err
+				}
+				base := strings.TrimSuffix(relPath, filepath.Ext(relPath))
+				for _, suffix := range []string{".lrc", ".txt", ".jpg", ".jpeg", ".png", ".webp"} {
+					if companion, err := h.musicSandbox.Resolve(base+suffix, false); err == nil {
+						_ = safefs.Remove(companion)
 					}
 				}
-
-				_, _ = h.database.Conn().Exec("DELETE FROM artists WHERE (SELECT COUNT(*) FROM albums WHERE artist_id = artists.id) = 0")
-				_, _ = h.database.Conn().Exec("DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums)")
+				return nil
+			})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
 			}
+		} else if err := safefs.Remove(fullPath); err != nil {
+			http.Error(w, `{"error":"failed to delete file"}`, http.StatusInternalServerError)
+			return
 		} else if ext == ".lrc" || ext == ".txt" {
 			// Синхронизация БД при удалении текста песни
 			audioRel := strings.TrimSuffix(relPath, ext) + ".mp3"
@@ -660,4 +616,20 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		"deleted_path": relPath,
 		"is_directory": isDir,
 	})
+}
+
+func (h *FileHandler) deleteIndexedPath(ctx context.Context, fullPath string, directory bool, remove func() error) error {
+	if h.scanner != nil {
+		_, err := h.scanner.DeletePath(ctx, fullPath, directory, remove)
+		return err
+	}
+	relPath, err := h.musicSandbox.ToRelative(fullPath)
+	if err != nil {
+		return err
+	}
+	if err := remove(); err != nil {
+		return err
+	}
+	_, err = db.DeleteLibraryTracks(ctx, h.database.Conn(), relPath, directory)
+	return err
 }

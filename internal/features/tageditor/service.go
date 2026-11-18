@@ -10,6 +10,7 @@ import (
 
 	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
+	"music-manager/internal/services/organizer"
 )
 
 var (
@@ -35,6 +36,7 @@ type ServiceConfig struct {
 	TmpSandbox      *sandbox.PathSandbox
 	Repo            TagRepository
 	Organizer       PathOrganizer
+	TrackIndex      organizer.TrackChanger
 	Deezer          DeezerCatalog
 	MusicBrainz     MusicBrainzCatalog
 	Shazam          ShazamCatalog
@@ -53,6 +55,7 @@ type Service struct {
 	tmpSandbox   *sandbox.PathSandbox
 	repo         TagRepository
 	organizer    PathOrganizer
+	trackIndex   organizer.TrackChanger
 	deezer       DeezerCatalog
 	musicbrainz  MusicBrainzCatalog
 	shazam       ShazamCatalog
@@ -91,6 +94,7 @@ func NewService(cfg ServiceConfig) *Service {
 		tmpSandbox:   cfg.TmpSandbox,
 		repo:         cfg.Repo,
 		organizer:    cfg.Organizer,
+		trackIndex:   cfg.TrackIndex,
 		deezer:       cfg.Deezer,
 		musicbrainz:  cfg.MusicBrainz,
 		shazam:       cfg.Shazam,

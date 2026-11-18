@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"fmt"
+	"music-manager/internal/services/lyrics"
 	"time"
 )
 
@@ -65,13 +66,8 @@ func (s *Service) StartBatchLyrics(ctx context.Context) (BatchProgress, error) {
 			if s.lyrics != nil {
 				res, err := s.lyrics.SearchLyrics(workerCtx, tr.Artist, tr.Title, tr.Album, tr.Duration)
 				if err == nil && res != nil && res.Lyrics != "" {
-					saveErr := s.lyrics.SaveLyrics(tr.FilePath, res.Lyrics, "auto")
+					saveErr := s.saveBatchTrackLyrics(workerCtx, tr.FilePath, res)
 					if saveErr == nil {
-						kind := "txt"
-						if res.Synced {
-							kind = "lrc"
-						}
-						_ = s.repo.SetTrackLyricsStatusAndResolve(workerCtx, tr.FilePath, kind)
 
 						s.lyricsMu.Lock()
 						s.lyricsState.Found++
@@ -112,4 +108,23 @@ func (s *Service) CancelBatchLyrics() bool {
 		return true
 	}
 	return false
+}
+
+func (s *Service) saveBatchTrackLyrics(ctx context.Context, path string, result *lyrics.LyricsSearchResult) error {
+	save := func() error { return s.lyrics.SaveLyrics(path, result.Lyrics, "auto") }
+	if s.trackIndex != nil {
+		full, err := s.musicSandbox.Resolve(path, false)
+		if err != nil {
+			return err
+		}
+		return s.trackIndex.ChangeTrack(ctx, full, full, false, save)
+	}
+	if err := save(); err != nil {
+		return err
+	}
+	kind := "txt"
+	if result.Synced {
+		kind = "lrc"
+	}
+	return s.repo.SetTrackLyricsStatusAndResolve(ctx, path, kind)
 }

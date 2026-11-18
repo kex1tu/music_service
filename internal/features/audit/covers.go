@@ -54,7 +54,7 @@ func (s *Service) BackfillAlbumCover(ctx context.Context, folderPath string, alb
 		return nil, fmt.Errorf("failed to find cover online: %w", cErr)
 	}
 
-	tracksUpdated, sErr := s.applyCoverToAlbumDir(fullDir, folderPath, coverBytes, mime)
+	tracksUpdated, sErr := s.applyCoverToAlbumDir(ctx, fullDir, folderPath, coverBytes, mime)
 	if sErr != nil {
 		return nil, fmt.Errorf("failed to save cover: %w", sErr)
 	}
@@ -137,7 +137,7 @@ func (s *Service) StartBatchCovers(ctx context.Context) (BatchProgress, error) {
 				continue
 			}
 
-			if _, err := s.applyCoverToAlbumDir(fullDir, a.Path, coverBytes, mime); err == nil {
+			if _, err := s.applyCoverToAlbumDir(ctx, fullDir, a.Path, coverBytes, mime); err == nil {
 				s.coversMu.Lock()
 				s.coversState.Found++
 				s.coversMu.Unlock()
@@ -212,7 +212,7 @@ func (s *Service) fetchBestCoverOnline(ctx context.Context, artist, album string
 	return nil, "", fmt.Errorf("cover not found online for %q", query)
 }
 
-func (s *Service) applyCoverToAlbumDir(fullDir, folderRelPath string, coverBytes []byte, mime string) (int, error) {
+func (s *Service) applyCoverToAlbumDir(ctx context.Context, fullDir, folderRelPath string, coverBytes []byte, mime string) (int, error) {
 	if len(coverBytes) == 0 {
 		return 0, fmt.Errorf("empty cover bytes")
 	}
@@ -242,6 +242,7 @@ func (s *Service) applyCoverToAlbumDir(fullDir, folderRelPath string, coverBytes
 	}
 
 	tracksUpdated := 0
+	var failures []error
 	for _, e := range entries {
 		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".mp3") {
 			continue
@@ -255,21 +256,23 @@ func (s *Service) applyCoverToAlbumDir(fullDir, folderRelPath string, coverBytes
 		mp3Path := filepath.Join(fullDir, e.Name())
 		relTrack, _ := s.musicSandbox.ToRelative(mp3Path)
 
-		tags, rErr := id3.ReadTags(mp3Path, relTrack)
-		if rErr == nil && tags != nil {
-			if wErr := id3.WriteTags(mp3Path, *tags, coverInfo); wErr == nil {
-				tracksUpdated++
-				if s.scanner != nil {
-					_ = s.scanner.IndexFile(mp3Path, relTrack)
-				}
-			}
+		tags, err := id3.ReadTags(mp3Path, relTrack)
+		if err == nil {
+			err = s.writeLibraryTags(ctx, mp3Path, *tags, coverInfo)
 		}
+		if err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", relTrack, err))
+			continue
+		}
+		tracksUpdated++
 	}
 
 	relCover, _ := s.musicSandbox.ToRelative(coverPath)
-	_ = s.repo.UpdateAlbumCover(context.Background(), folderRelPath, relCover, mime)
+	if err := s.repo.UpdateAlbumCover(ctx, folderRelPath, relCover, mime); err != nil {
+		failures = append(failures, err)
+	}
 
-	return tracksUpdated, nil
+	return tracksUpdated, errors.Join(failures...)
 }
 
 func downloadImageWithMime(ctx context.Context, client *http.Client, urlStr string) ([]byte, string, error) {

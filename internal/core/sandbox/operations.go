@@ -64,7 +64,7 @@ func OperationRoot(path string) (*os.Root, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	if _, err = sb.Resolve(filepath.ToSlash(rel), true); err != nil {
+	if _, err = sb.Resolve(filepath.ToSlash(rel), true, LiteralPath); err != nil {
 		return nil, "", err
 	}
 	sb.handleMu.Lock()

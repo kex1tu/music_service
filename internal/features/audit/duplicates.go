@@ -87,25 +87,30 @@ func (s *Service) deleteTrackAndCompanions(ctx context.Context, relPath string) 
 		return fmt.Errorf("%w: %s (%v)", ErrSandboxViolation, relPath, err)
 	}
 
-	// 2. Remove audio file
-	if err := safefs.Remove(fullPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove audio file: %w", err)
+	relPath, err = s.musicSandbox.ToRelative(fullPath)
+	if err != nil {
+		return err
 	}
-
-	// 3. Remove companion .lrc and .txt files through strict sandbox resolution
-	dirRel := filepath.Dir(relPath)
-	baseNoExt := strings.TrimSuffix(filepath.Base(relPath), filepath.Ext(relPath))
-
-	for _, ext := range []string{".lrc", ".txt"} {
-		companionRel := filepath.Join(dirRel, baseNoExt+ext)
-		if companionFull, cErr := s.musicSandbox.Resolve(companionRel, false); cErr == nil {
-			_ = safefs.Remove(companionFull)
+	remove := func() error {
+		if err := safefs.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove audio file: %w", err)
 		}
+		base := strings.TrimSuffix(relPath, filepath.Ext(relPath))
+		for _, ext := range []string{".lrc", ".txt"} {
+			if companion, err := s.musicSandbox.Resolve(base+ext, false); err == nil {
+				_ = safefs.Remove(companion)
+			}
+		}
+		return nil
 	}
 
-	// 4. Clean up SQLite records
-	if err := s.repo.DeleteTrackAndCleanup(ctx, relPath); err != nil {
-		return fmt.Errorf("failed to clean up database track %s: %w", relPath, err)
+	if s.deletionIndex != nil {
+		_, err = s.deletionIndex.DeletePath(ctx, fullPath, false, remove)
+	} else if err = remove(); err == nil {
+		err = s.repo.DeleteTrackAndCleanup(ctx, relPath)
+	}
+	if err != nil {
+		return err
 	}
 
 	// 5. Clean empty parent directories up to sandbox root
@@ -177,7 +182,7 @@ func (s *Service) fixDuplicateGroups(ctx context.Context, groupKey string) (*Fix
 			}
 		}
 
-		removed, err := organizer.MergeDuplicateGroup(s.musicSandbox, paths)
+		removed, err := organizer.MergeIndexedDuplicateGroup(ctx, s.trackIndex, s.musicSandbox, paths)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", grp.Key, err))
 		}
@@ -186,8 +191,10 @@ func (s *Service) fixDuplicateGroups(ctx context.Context, groupKey string) (*Fix
 		}
 		for _, path := range removed {
 			result.DeletedFiles = append(result.DeletedFiles, path)
-			if err := s.repo.DeleteTrackAndCleanup(ctx, path); err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", path, err))
+			if s.trackIndex == nil {
+				if err := s.repo.DeleteTrackAndCleanup(ctx, path); err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", path, err))
+				}
 			}
 		}
 	}
