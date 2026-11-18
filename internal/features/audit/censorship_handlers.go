@@ -2,13 +2,14 @@ package audit
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"music-manager/internal/core/httputil"
-	"music-manager/internal/core/safefs"
+	"music-manager/internal/services/censorcheck"
 )
 
 func (m *Module) censorAvailable(w http.ResponseWriter) bool {
@@ -109,36 +110,44 @@ func (m *Module) CensorshipAudio(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, 400, "invalid item id")
 		return
 	}
-	var path, reference string
-	if e = m.service.censorship.db.QueryRowContext(r.Context(), "SELECT file_path,reference_path FROM censorship_items WHERE id=?", id).Scan(&path, &reference); e != nil {
+	w.Header().Set("Cache-Control", "private, no-store")
+	var path, reference, raw string
+	e = m.service.censorship.db.QueryRowContext(r.Context(), "SELECT file_path,reference_path,result_json FROM censorship_items WHERE id=? AND state='done'", id).Scan(&path, &reference, &raw)
+	if errors.Is(e, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
 	}
+	var result CensorshipResult
+	if e != nil || json.Unmarshal([]byte(raw), &result) != nil {
+		httputil.RespondError(w, http.StatusInternalServerError, "failed to read audit evidence")
+		return
+	}
+	expected := result.AudioHash
 	if r.URL.Query().Get("reference") == "true" {
-		path = reference
+		path, expected = reference, result.ReferenceAudioHash
 	}
-	if path == "" {
-		http.NotFound(w, r)
+	if path == "" || expected == "" {
+		httputil.RespondError(w, http.StatusConflict, "Аудиозапись не привязана к этому результату")
 		return
 	}
-	full, e := m.service.censorship.sb.Resolve(path, false)
+	f, e := censorcheck.OpenAudio(m.service.censorship.sb, path)
 	if e != nil {
-		http.NotFound(w, r)
-		return
-	}
-	f, e := safefs.Open(full)
-	if e != nil {
-		http.NotFound(w, r)
+		httputil.RespondError(w, http.StatusConflict, "Аудиозапись этого результата недоступна по сохранённому пути")
 		return
 	}
 	defer f.Close()
-	info, e := f.Stat()
-	if e != nil || !info.Mode().IsRegular() {
-		http.NotFound(w, r)
+	before, e := f.Stat()
+	if e != nil {
+		httputil.RespondError(w, http.StatusConflict, "Не удалось проверить аудиозапись этого результата")
+		return
+	}
+	actual, digestErr := censorcheck.AudioDigest(r.Context(), f)
+	info, statErr := f.Stat()
+	if digestErr != nil || statErr != nil || actual != expected || info.Size() != before.Size() || !info.ModTime().Equal(before.ModTime()) {
+		httputil.RespondError(w, http.StatusConflict, "Аудиозапись изменилась или недоступна для проверки")
 		return
 	}
 	w.Header().Set("Content-Type", "audio/mpeg")
-	w.Header().Set("Cache-Control", "private, no-cache")
 	http.ServeContent(w, r, info.Name(), info.ModTime(), f)
 }
 func (m *Module) registerCensorshipRoutes(r chi.Router) {
@@ -148,4 +157,5 @@ func (m *Module) registerCensorshipRoutes(r chi.Router) {
 	r.Post("/censorship/{runID}/{action}", m.ControlCensorship)
 	r.Post("/censorship-items/{itemID}/decision", m.DecideCensorship)
 	r.Get("/censorship-items/{itemID}/audio", m.CensorshipAudio)
+	r.Head("/censorship-items/{itemID}/audio", m.CensorshipAudio)
 }

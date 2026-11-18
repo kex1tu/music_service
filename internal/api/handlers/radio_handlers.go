@@ -106,13 +106,14 @@ func (h *RadioHandler) GetWaveQueue(w http.ResponseWriter, r *http.Request) {
 // GetWaveStats возвращает общую статистику для панели Радио.
 func (h *RadioHandler) GetWaveStats(w http.ResponseWriter, r *http.Request) {
 	genres, _ := h.db.GetAvailableGenres(r.Context(), 10)
-	naviAvailable := h.navidromeReader != nil && h.navidromeReader.IsAvailable()
+	naviAvailable, naviWarning := h.navidromeReader.ListeningStatus(r.Context())
 	subsonicConfigured := h.subsonic != nil && h.subsonic.IsConfigured()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"top_genres":          genres,
 		"navidrome_available": naviAvailable,
+		"navidrome_warning":   naviWarning,
 		"subsonic_configured": subsonicConfigured,
 		"wave_size":           h.cfg.RadioWaveSize,
 		"stream_token_set":    h.cfg.RadioStreamToken != "",

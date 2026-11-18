@@ -4,13 +4,17 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"net/url"
-
 	"regexp"
 	"strconv"
 	"strings"
@@ -30,6 +34,8 @@ var (
 type scAPIUser struct {
 	Username  string `json:"username"`
 	Permalink string `json:"permalink"`
+	Verified  bool   `json:"verified"`
+	AvatarURL string `json:"avatar_url"`
 }
 
 type scAPITrackItem struct {
@@ -37,6 +43,7 @@ type scAPITrackItem struct {
 	Title        string    `json:"title"`
 	Duration     int64     `json:"duration"` // in milliseconds
 	PermalinkURL string    `json:"permalink_url"`
+	ArtworkURL   string    `json:"artwork_url"`
 	User         scAPIUser `json:"user"`
 }
 
@@ -58,31 +65,86 @@ type scAPISearchResponse struct {
 	NextHref     string           `json:"next_href"`
 }
 
+// SoundCloudSetsPageResult содержит результат постраничного поиска сетов/альбомов с сохранением признака пагинации.
+type SoundCloudSetsPageResult struct {
+	Candidates        []AlbumReleaseCandidate `json:"candidates"`
+	HasMoreSoundCloud bool                    `json:"has_more_soundcloud"`
+	AlbumOffset       int                     `json:"album_offset"`
+	PlaylistOffset    int                     `json:"playlist_offset"`
+	AlbumToken        string                  `json:"album_token,omitempty"`
+	PlaylistToken     string                  `json:"playlist_token,omitempty"`
+}
+
+// SoundCloudContinuationToken безопасный токен продолжения пагинации SoundCloud.
+type SoundCloudContinuationToken struct {
+	Category string `json:"c"`
+	Query    string `json:"q"`
+	Offset   int    `json:"o"`
+	Cursor   string `json:"cur,omitempty"`
+}
+
 // SoundCloudSetSearcher осуществляет поиск и разбор плейлистов/сетов SoundCloud и других внешних ссылок.
 type SoundCloudSetSearcher struct {
 	cookiesPath  string
 	searchFunc   func(ctx context.Context, artist, album string, limit int) ([]AlbumReleaseCandidate, error)
 	parseURLFunc func(ctx context.Context, setURL string) (*AlbumReleaseCandidate, error)
 
-	httpClient  *http.Client
-	apiBaseURL  string
-	webBaseURL  string
-	clientID    string
-	clientIDMu  sync.RWMutex
-	clientIDExp time.Time
+	httpClient    *http.Client
+	apiBaseURL    string
+	webBaseURL    string
+	clientID      string
+	clientIDMu    sync.RWMutex
+	clientIDExp   time.Time
+	tokenSecret   []byte
+	tokenSecretMu sync.RWMutex
 }
 
 // NewSoundCloudSetSearcher создает новый экземпляр SoundCloudSetSearcher.
 func NewSoundCloudSetSearcher(cookiesPath string) *SoundCloudSetSearcher {
-	return &SoundCloudSetSearcher{
+	s := &SoundCloudSetSearcher{
 		cookiesPath: cookiesPath,
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 5 {
+					return fmt.Errorf("слишком много перенаправлений")
+				}
+				if req.URL.Scheme != "https" && req.URL.Scheme != "http" {
+					return fmt.Errorf("недопустимая схема редиректа: %s", req.URL.Scheme)
+				}
+				if req.URL.User != nil {
+					return fmt.Errorf("учетные данные в URL редиректа запрещены")
+				}
+				return nil
+			},
 		},
 		apiBaseURL: "https://api-v2.soundcloud.com",
 		webBaseURL: "https://soundcloud.com",
 		clientID:   defaultSoundCloudClientID,
 	}
+	s.getTokenSecret()
+	return s
+}
+
+func (s *SoundCloudSetSearcher) getTokenSecret() []byte {
+	s.tokenSecretMu.RLock()
+	if len(s.tokenSecret) == 32 {
+		defer s.tokenSecretMu.RUnlock()
+		return s.tokenSecret
+	}
+	s.tokenSecretMu.RUnlock()
+
+	s.tokenSecretMu.Lock()
+	defer s.tokenSecretMu.Unlock()
+	if len(s.tokenSecret) == 32 {
+		return s.tokenSecret
+	}
+	sec := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, sec); err != nil {
+		copy(sec, []byte("sc-sec-token-rnd-default-key-32b"))
+	}
+	s.tokenSecret = sec
+	return s.tokenSecret
 }
 
 // SetCustomHTTPClient позволяет настроить HTTP клиент (для тестов или прокси).
@@ -364,21 +426,31 @@ func (s *SoundCloudSetSearcher) querySetsEndpoint(ctx context.Context, endpoint,
 }
 
 func (s *SoundCloudSetSearcher) querySearchPage(ctx context.Context, endpoint, query, clientID string, limit, offset int) (scAPISearchResponse, error) {
+	return s.querySearchPageDetailed(ctx, endpoint, query, clientID, limit, offset, "")
+}
+
+func (s *SoundCloudSetSearcher) querySearchPageDetailed(ctx context.Context, endpoint, query, clientID string, limit, offset int, cursor string) (scAPISearchResponse, error) {
 	var root scAPISearchResponse
 	baseURL := s.apiBaseURL
 	if baseURL == "" {
 		baseURL = "https://api-v2.soundcloud.com"
 	}
 
-	reqURL := fmt.Sprintf("%s/%s?q=%s&client_id=%s&limit=%d&offset=%d&linked_partitioning=1",
+	var qBuilder strings.Builder
+	qBuilder.WriteString(fmt.Sprintf("%s/%s?q=%s&client_id=%s&limit=%d&linked_partitioning=1",
 		baseURL,
 		endpoint,
 		url.QueryEscape(query),
 		url.QueryEscape(clientID),
 		limit,
-		offset,
-	)
+	))
+	if cursor != "" {
+		qBuilder.WriteString("&cursor=" + url.QueryEscape(cursor))
+	} else {
+		qBuilder.WriteString(fmt.Sprintf("&offset=%d", offset))
+	}
 
+	reqURL := qBuilder.String()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return root, err
@@ -396,11 +468,133 @@ func (s *SoundCloudSetSearcher) querySearchPage(ctx context.Context, endpoint, q
 		return root, fmt.Errorf("SoundCloud API error: status %d", resp.StatusCode)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&root); err != nil {
+	limitedReader := io.LimitReader(resp.Body, 5*1024*1024)
+	if err := json.NewDecoder(limitedReader).Decode(&root); err != nil {
 		return root, err
 	}
 
 	return root, nil
+}
+
+func (s *SoundCloudSetSearcher) parseAndValidateNextHref(nextHref, expectedEndpoint, expectedQuery string, currentOffset int, currentCursor string) (nextOffset int, nextCursor string, valid bool) {
+	trimmed := strings.TrimSpace(nextHref)
+	if trimmed == "" {
+		return -1, "", false
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.User != nil {
+		return -1, "", false
+	}
+
+	baseU, err := url.Parse(s.apiBaseURL)
+	if err != nil {
+		return -1, "", false
+	}
+	expectedHost := baseU.Host
+	if expectedHost == "" {
+		expectedHost = "api-v2.soundcloud.com"
+	}
+	if !strings.EqualFold(u.Host, expectedHost) {
+		return -1, "", false
+	}
+
+	expectedScheme := baseU.Scheme
+	if expectedScheme == "" {
+		expectedScheme = "https"
+	}
+	if !strings.EqualFold(u.Scheme, expectedScheme) {
+		return -1, "", false
+	}
+
+	expectedPath := "/" + strings.TrimPrefix(expectedEndpoint, "/")
+	if u.Path != expectedPath {
+		return -1, "", false
+	}
+
+	q, err := url.ParseQuery(u.RawQuery)
+	if err != nil || (q.Has("q") && q.Get("q") != expectedQuery) {
+		return -1, "", false
+	}
+	nextCursor = q.Get("cursor")
+	if len(nextCursor) > 512 {
+		return -1, "", false
+	}
+	nextOffset = -1
+	if rawOff := q.Get("offset"); rawOff != "" {
+		parsedOff, err := strconv.Atoi(rawOff)
+		if err != nil || parsedOff < 0 || parsedOff > 100000 {
+			return -1, "", false
+		}
+		nextOffset = parsedOff
+	}
+
+	if (nextCursor != "" && nextCursor == currentCursor) ||
+		(nextCursor == "" && currentCursor == "" && nextOffset <= currentOffset) {
+		return -1, "", false
+	}
+	if nextOffset < 0 && nextCursor == "" {
+		return -1, "", false
+	}
+
+	return nextOffset, nextCursor, true
+}
+
+func (s *SoundCloudSetSearcher) createContinuationToken(category, query string, offset int, cursor string) string {
+	tok := SoundCloudContinuationToken{
+		Category: category,
+		Query:    strings.TrimSpace(query),
+		Offset:   offset,
+		Cursor:   cursor,
+	}
+	data, err := json.Marshal(tok)
+	if err != nil {
+		return ""
+	}
+	payload := base64.RawURLEncoding.EncodeToString(data)
+	h := hmac.New(sha256.New, s.getTokenSecret())
+	h.Write([]byte(payload))
+	sig := hex.EncodeToString(h.Sum(nil))
+	return payload + "." + sig
+}
+
+func (s *SoundCloudSetSearcher) parseContinuationToken(tokenStr, expectedCategory, expectedQuery string) (offset int, cursor string, err error) {
+	tokenStr = strings.TrimSpace(tokenStr)
+	if tokenStr == "" {
+		return 0, "", nil
+	}
+	if len(tokenStr) > 2048 {
+		return -1, "", fmt.Errorf("token too long")
+	}
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 2 {
+		return -1, "", fmt.Errorf("malformed token structure")
+	}
+	payload, sig := parts[0], parts[1]
+	h := hmac.New(sha256.New, s.getTokenSecret())
+	h.Write([]byte(payload))
+	expectedSig := hex.EncodeToString(h.Sum(nil))
+	if !hmac.Equal([]byte(sig), []byte(expectedSig)) {
+		return -1, "", fmt.Errorf("invalid token signature")
+	}
+
+	data, err := base64.RawURLEncoding.DecodeString(payload)
+	if err != nil {
+		return -1, "", fmt.Errorf("invalid token encoding")
+	}
+
+	var tok SoundCloudContinuationToken
+	if err := json.Unmarshal(data, &tok); err != nil {
+		return -1, "", fmt.Errorf("invalid token payload")
+	}
+
+	if tok.Category != expectedCategory {
+		return -1, "", fmt.Errorf("token category mismatch: want %s, got %s", expectedCategory, tok.Category)
+	}
+	if strings.TrimSpace(tok.Query) != strings.TrimSpace(expectedQuery) {
+		return -1, "", fmt.Errorf("token query mismatch")
+	}
+
+	return tok.Offset, tok.Cursor, nil
 }
 
 // HydrateTracks запрашивает полную информацию о треках по их ID через батчевый эндпоинт SoundCloud API /tracks?ids=...
@@ -524,35 +718,109 @@ func (s *SoundCloudSetSearcher) convertAlbumToCandidate(album scAPIAlbumItem, hy
 	}
 }
 
-// SearchSetsAPI выполняет прямой поиск альбомов и сетов через SoundCloud API v2.
-func (s *SoundCloudSetSearcher) SearchSetsAPI(ctx context.Context, query string, limit int) ([]AlbumReleaseCandidate, error) {
+// SearchSetsAPIPaged выполняет постраничный поиск альбомов и сетов через SoundCloud API v2.
+func (s *SoundCloudSetSearcher) SearchSetsAPIPaged(ctx context.Context, query string, albumOffset, playlistOffset int, albumToken, playlistToken string, limit int) (SoundCloudSetsPageResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
 	limit = SoundCloudCandidateLimit(limit)
+	pageSize := limit
 
 	clientID, err := s.GetClientID(ctx)
 	if err != nil || clientID == "" {
 		clientID = defaultSoundCloudClientID
 	}
 
-	search := func(endpoint, resultType string) ([]scAPIAlbumItem, error) {
-		items, err := s.querySetsEndpoint(ctx, endpoint, query, clientID, limit)
+	var res SoundCloudSetsPageResult
+	var albums, playlists []scAPIAlbumItem
+	var hasMoreAlbums, hasMorePlaylists bool
+	var albumErr, playlistErr error
+
+	// 1. Поиск альбомов
+	if albumOffset >= 0 || albumToken != "" {
+		off := albumOffset
+		cur := ""
+		if albumToken != "" {
+			parsedOff, parsedCur, err := s.parseContinuationToken(albumToken, "album", query)
+			if err != nil {
+				return res, err
+			}
+			off, cur = parsedOff, parsedCur
+		}
+		page, err := s.querySearchPageDetailed(ctx, "search/albums", query, clientID, pageSize, off, cur)
 		if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403")) {
 			s.InvalidateClientID()
 			if newID, nErr := s.GetClientID(ctx); nErr == nil && newID != "" {
 				clientID = newID
-				items, err = s.querySetsEndpoint(ctx, endpoint, query, clientID, limit)
+				page, err = s.querySearchPageDetailed(ctx, "search/albums", query, clientID, pageSize, off, cur)
 			}
 		}
-		for i := range items {
-			items[i].ResultType = resultType
+		if err != nil {
+			albumErr = err
+			res.AlbumOffset = albumOffset
+			res.AlbumToken = albumToken
+		} else {
+			nextOff, nextCur, valid := s.parseAndValidateNextHref(page.NextHref, "search/albums", query, off, cur)
+			hasMoreAlbums = valid
+			if valid {
+				res.AlbumOffset = nextOff
+				res.AlbumToken = s.createContinuationToken("album", query, nextOff, nextCur)
+			} else {
+				res.AlbumOffset = -1
+			}
+			for i := range page.Collection {
+				page.Collection[i].ResultType = "album"
+			}
+			albums = page.Collection
 		}
-		return items, err
+	} else {
+		res.AlbumOffset = -1
 	}
-	albums, albumErr := search("search/albums", "album")
-	playlists, playlistErr := search("search/playlists_without_albums", "playlist")
+
+	// 2. Поиск плейлистов
+	if playlistOffset >= 0 || playlistToken != "" {
+		off := playlistOffset
+		cur := ""
+		if playlistToken != "" {
+			parsedOff, parsedCur, err := s.parseContinuationToken(playlistToken, "playlist", query)
+			if err != nil {
+				return res, err
+			}
+			off, cur = parsedOff, parsedCur
+		}
+		page, err := s.querySearchPageDetailed(ctx, "search/playlists_without_albums", query, clientID, pageSize, off, cur)
+		if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403")) {
+			s.InvalidateClientID()
+			if newID, nErr := s.GetClientID(ctx); nErr == nil && newID != "" {
+				clientID = newID
+				page, err = s.querySearchPageDetailed(ctx, "search/playlists_without_albums", query, clientID, pageSize, off, cur)
+			}
+		}
+		if err != nil {
+			playlistErr = err
+			res.PlaylistOffset = playlistOffset
+			res.PlaylistToken = playlistToken
+		} else {
+			nextOff, nextCur, valid := s.parseAndValidateNextHref(page.NextHref, "search/playlists_without_albums", query, off, cur)
+			hasMorePlaylists = valid
+			if valid {
+				res.PlaylistOffset = nextOff
+				res.PlaylistToken = s.createContinuationToken("playlist", query, nextOff, nextCur)
+			} else {
+				res.PlaylistOffset = -1
+			}
+			for i := range page.Collection {
+				page.Collection[i].ResultType = "playlist"
+			}
+			playlists = page.Collection
+		}
+	} else {
+		res.PlaylistOffset = -1
+	}
+
+	res.HasMoreSoundCloud = hasMoreAlbums || hasMorePlaylists || albumErr != nil || playlistErr != nil
+
 	if albumErr != nil && playlistErr != nil {
-		return nil, fmt.Errorf("SoundCloud search failed: albums: %v; playlists: %w", albumErr, playlistErr)
+		return res, fmt.Errorf("SoundCloud search failed: albums: %v; playlists: %w", albumErr, playlistErr)
 	}
 
 	var allItems []scAPIAlbumItem
@@ -573,11 +841,7 @@ func (s *SoundCloudSetSearcher) SearchSetsAPI(ctx context.Context, query string,
 	}
 
 	if len(allItems) == 0 {
-		return nil, nil
-	}
-
-	if len(allItems) > limit {
-		allItems = allItems[:limit]
+		return res, nil
 	}
 
 	var stubIDs []int64
@@ -607,7 +871,18 @@ func (s *SoundCloudSetSearcher) SearchSetsAPI(ctx context.Context, query string,
 		}
 	}
 
-	return candidates, nil
+	res.Candidates = candidates
+	return res, nil
+}
+
+// SearchSetsAPI выполняет прямой поиск альбомов и сетов через SoundCloud API v2 (первая страница).
+func (s *SoundCloudSetSearcher) SearchSetsAPI(ctx context.Context, query string, limit int) ([]AlbumReleaseCandidate, error) {
+	pageRes, err := s.SearchSetsAPIPaged(ctx, query, 0, 0, "", "", limit)
+	return limitSoundCloudSets(pageRes.Candidates, limit), err
+}
+
+func limitSoundCloudSets(candidates []AlbumReleaseCandidate, limit int) []AlbumReleaseCandidate {
+	return candidates[:min(len(candidates), SoundCloudCandidateLimit(limit))]
 }
 
 // SearchSoundCloudSets выполняет поиск сетов/плейлистов на SoundCloud по артисту и названию альбома.
@@ -616,21 +891,32 @@ func (s *SoundCloudSetSearcher) SearchSoundCloudSets(ctx context.Context, artist
 		return s.searchFunc(ctx, artist, album, limit)
 	}
 
+	res, err := s.SearchSoundCloudSetsPaged(ctx, artist, album, 0, 0, "", "", limit)
+	if err == nil && len(res.Candidates) > 0 {
+		return limitSoundCloudSets(res.Candidates, limit), nil
+	}
+	return nil, err
+}
+
+// SearchSoundCloudSetsPaged выполняет постраничный поиск сетов/плейлистов на SoundCloud по артисту и названию альбома.
+func (s *SoundCloudSetSearcher) SearchSoundCloudSetsPaged(ctx context.Context, artist, album string, albumOffset, playlistOffset int, albumToken, playlistToken string, limit int) (SoundCloudSetsPageResult, error) {
+	if s.searchFunc != nil {
+		cands, err := s.searchFunc(ctx, artist, album, limit)
+		return SoundCloudSetsPageResult{
+			Candidates: cands,
+		}, err
+	}
+
 	if limit <= 0 {
-		limit = 3
+		limit = 30
 	}
 
 	cleanArt := strings.TrimSpace(artist)
 	cleanAlb := strings.TrimSpace(album)
 	if cleanArt == "" && cleanAlb == "" {
-		return nil, nil
+		return SoundCloudSetsPageResult{}, nil
 	}
 
-	query := fmt.Sprintf("%s %s", cleanArt, cleanAlb)
-	candidates, err := s.SearchSetsAPI(ctx, query, limit)
-	if err == nil && len(candidates) > 0 {
-		return candidates, nil
-	}
-
-	return nil, err
+	query := strings.TrimSpace(cleanArt + " " + cleanAlb)
+	return s.SearchSetsAPIPaged(ctx, query, albumOffset, playlistOffset, albumToken, playlistToken, limit)
 }

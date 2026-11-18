@@ -1,11 +1,12 @@
 package organizer
 
 import (
+	"errors"
 	"io"
-
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 
 	"music-manager/internal/core/safefs"
 )
@@ -35,13 +36,41 @@ func moveFile(src, dest string) error {
 	if err := safefs.Rename(src, dest); err == nil {
 		_ = safefs.Chmod(dest, 0644)
 		return nil
-	}
-	// Fallback to streaming copy and delete across different mount points (EXDEV)
-	if err := copyFile(src, dest); err != nil {
+	} else if !errors.Is(err, syscall.EXDEV) {
 		return err
 	}
-	_ = safefs.Chmod(dest, 0644)
-	return safefs.Remove(src)
+
+	in, err := safefs.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	// Publish the destination only once a full copy has reached disk. After
+	// an interrupted copy a recovery scan must never see an incomplete MP3.
+	out, err := safefs.CreateTemp(filepath.Dir(dest), ".move-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := out.Name()
+	defer safefs.Remove(tmp)
+	_, err = io.Copy(out, in)
+	if err == nil {
+		err = out.Chmod(0644)
+	}
+	if err == nil {
+		err = out.Sync()
+	}
+	if err = errors.Join(err, out.Close()); err != nil {
+		return err
+	}
+	if err := safefs.Link(tmp, dest); err != nil {
+		return err
+	}
+	if err := safefs.Remove(src); err != nil {
+		return errors.Join(err, safefs.Remove(dest))
+	}
+	return nil
 }
 
 func copyFile(src, dest string) error {
@@ -98,8 +127,4 @@ func CleanEmptyParents(startDir, rootDir string) {
 
 		curr = filepath.Dir(curr)
 	}
-}
-
-func removeIfEmpty(dir string) {
-	RemoveIfEmpty(dir)
 }

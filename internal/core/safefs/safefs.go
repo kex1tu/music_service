@@ -162,6 +162,26 @@ func Rename(src, dst string) error {
 	}
 	return &os.LinkError{Op: "rename", Old: src, New: dst, Err: syscall.EXDEV}
 }
+
+// Link publishes a filesystem entry without replacing an existing path.
+func Link(src, dst string) error {
+	a, ar, err := sandbox.OperationRoot(src)
+	if err != nil {
+		return err
+	}
+	b, br, err := sandbox.OperationRoot(dst)
+	if err != nil {
+		return err
+	}
+	if a == nil && b == nil {
+		return os.Link(src, dst)
+	}
+	if a != nil && a == b {
+		return a.Link(ar, br)
+	}
+	return &os.LinkError{Op: "link", Old: src, New: dst, Err: syscall.EXDEV}
+}
+
 func Chmod(name string, mode os.FileMode) error {
 	f, e := Open(name)
 	if e != nil {

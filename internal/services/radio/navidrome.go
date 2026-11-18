@@ -3,21 +3,14 @@ package radio
 import (
 	"context"
 	"crypto/md5"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-
-	"path/filepath"
 	"strings"
 	"time"
-
-	_ "modernc.org/sqlite"
-
-	"music-manager/internal/core/safefs"
 )
 
 // NavidromeStats содержит статистику прослушиваний из Navidrome.
@@ -25,153 +18,6 @@ type NavidromeStats struct {
 	StarredPaths map[string]bool
 	PlayCounts   map[string]int
 	LastPlayed   map[string]time.Time
-}
-
-func normalizePath(p string) string {
-	clean := strings.TrimSpace(p)
-	clean = strings.ReplaceAll(clean, "\\", "/")
-	return clean
-}
-
-// IsStarred проверяет, помечен ли трек как избранный в Navidrome (с нормализацией путей).
-func (s *NavidromeStats) IsStarred(relPath string) bool {
-	if s == nil || len(s.StarredPaths) == 0 {
-		return false
-	}
-	cleanRel := normalizePath(relPath)
-	if s.StarredPaths[cleanRel] {
-		return true
-	}
-	baseRel := filepath.Base(cleanRel)
-	for p := range s.StarredPaths {
-		cleanP := normalizePath(p)
-		if cleanP == cleanRel || strings.HasSuffix(cleanP, "/"+cleanRel) || strings.HasSuffix(cleanP, cleanRel) || (filepath.Base(cleanP) == baseRel && baseRel != ".") {
-			return true
-		}
-	}
-	return false
-}
-
-// GetPlayCount возвращает количество прослушиваний трека в Navidrome.
-func (s *NavidromeStats) GetPlayCount(relPath string) int {
-	if s == nil || len(s.PlayCounts) == 0 {
-		return 0
-	}
-	cleanRel := normalizePath(relPath)
-	if count, ok := s.PlayCounts[cleanRel]; ok {
-		return count
-	}
-	for p, count := range s.PlayCounts {
-		cleanP := normalizePath(p)
-		if cleanP == cleanRel || strings.HasSuffix(cleanP, "/"+cleanRel) || strings.HasSuffix(cleanP, cleanRel) {
-			return count
-		}
-	}
-	return 0
-}
-
-// GetLastPlayed возвращает дату последнего прослушивания трека в Navidrome.
-func (s *NavidromeStats) GetLastPlayed(relPath string) time.Time {
-	if s == nil || len(s.LastPlayed) == 0 {
-		return time.Time{}
-	}
-	cleanRel := normalizePath(relPath)
-	if lp, ok := s.LastPlayed[cleanRel]; ok {
-		return lp
-	}
-	for p, lp := range s.LastPlayed {
-		cleanP := normalizePath(p)
-		if cleanP == cleanRel || strings.HasSuffix(cleanP, "/"+cleanRel) || strings.HasSuffix(cleanP, cleanRel) {
-			return lp
-		}
-	}
-	return time.Time{}
-}
-
-// NavidromeReader осуществляет безопасное чтение navidrome.db в режиме strictly read-only.
-type NavidromeReader struct {
-	dbPath string
-}
-
-// NewNavidromeReader создает новый экземпляр NavidromeReader.
-func NewNavidromeReader(dbPath string) *NavidromeReader {
-	return &NavidromeReader{dbPath: strings.TrimSpace(dbPath)}
-}
-
-// IsAvailable проверяет, существует ли файл базы Navidrome.
-func (r *NavidromeReader) IsAvailable() bool {
-	if r.dbPath == "" {
-		return false
-	}
-	info, err := safefs.Stat(r.dbPath)
-	return err == nil && !info.IsDir()
-}
-
-// GetUserListeningStats читает избранные треки и количество прослушиваний из navidrome.db.
-func (r *NavidromeReader) GetUserListeningStats(ctx context.Context) (*NavidromeStats, error) {
-	if !r.IsAvailable() {
-		return nil, fmt.Errorf("navidrome database not available at %q", r.dbPath)
-	}
-
-	// Открываем базу строго в режиме read-only с таймаутом занятости
-	dsn := fmt.Sprintf("file:%s?mode=ro&_pragma=busy_timeout(5000)", r.dbPath)
-	conn, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open navidrome db: %w", err)
-	}
-	defer conn.Close()
-
-	stats := &NavidromeStats{
-		StarredPaths: make(map[string]bool),
-		PlayCounts:   make(map[string]int),
-		LastPlayed:   make(map[string]time.Time),
-	}
-
-	// 1. Извлечение избранного (starred = 1)
-	starredQuery := `
-	SELECT mf.path
-	FROM annotation a
-	JOIN media_file mf ON a.item_id = mf.id
-	WHERE a.starred = 1;
-	`
-	rows, err := conn.QueryContext(ctx, starredQuery)
-	if err != nil {
-		return nil, fmt.Errorf("navidrome query starred failed: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err == nil && p != "" {
-			stats.StarredPaths[normalizePath(p)] = true
-		}
-	}
-
-	// 2. Извлечение истории прослушиваний (play_count > 0)
-	historyQuery := `
-	SELECT mf.path, COALESCE(a.play_count, 0), a.play_date
-	FROM annotation a
-	JOIN media_file mf ON a.item_id = mf.id
-	WHERE a.play_count > 0;
-	`
-	hRows, err := conn.QueryContext(ctx, historyQuery)
-	if err != nil {
-		return nil, fmt.Errorf("navidrome query history failed: %w", err)
-	}
-	defer hRows.Close()
-	for hRows.Next() {
-		var p string
-		var count int
-		var playDate sql.NullTime
-		if err := hRows.Scan(&p, &count, &playDate); err == nil && p != "" {
-			normP := normalizePath(p)
-			stats.PlayCounts[normP] = count
-			if playDate.Valid {
-				stats.LastPlayed[normP] = playDate.Time
-			}
-		}
-	}
-
-	return stats, nil
 }
 
 // NavidromeSubsonicClient выполняет экспорт радиостанций в Navidrome Subsonic REST API.

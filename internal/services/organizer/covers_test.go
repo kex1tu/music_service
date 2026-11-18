@@ -1,7 +1,10 @@
 package organizer
 
 import (
+	"bytes"
 	"encoding/base64"
+	"image"
+	"image/jpeg"
 	"os"
 	"path/filepath"
 	"testing"
@@ -151,10 +154,11 @@ func TestMoveAlbum_Single_EmbeddedCoverExtraction(t *testing.T) {
 		Album:       "",
 		TrackNumber: 1,
 	}
-	cover := &id3.CoverInfo{
-		MimeType: "image/jpeg",
-		Data:     []byte("embedded-cover-data"),
+	var artwork bytes.Buffer
+	if err := jpeg.Encode(&artwork, image.NewRGBA(image.Rect(0, 0, 16, 16)), nil); err != nil {
+		t.Fatal(err)
 	}
+	cover := &id3.CoverInfo{MimeType: "image/jpeg", Data: artwork.Bytes()}
 	_ = id3.WriteTags(jobTrack, initialTags, cover)
 
 	tracks := []id3.TrackTags{

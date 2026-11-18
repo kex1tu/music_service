@@ -2,10 +2,9 @@ package downloader
 
 import (
 	"context"
-
 	"time"
 
-	"music-manager/internal/core/safefs"
+	"music-manager/internal/services/downloadstaging"
 )
 
 func (s *Service) startCleaner(ctx context.Context, maxAge time.Duration) {
@@ -23,27 +22,19 @@ func (s *Service) startCleaner(ctx context.Context, maxAge time.Duration) {
 }
 
 func (s *Service) cleanOldTempDirs(maxAge time.Duration) {
-	root := s.tmpSandbox.Root()
-	entries, err := safefs.ReadDir(root)
-	if err != nil {
-		return
-	}
-
-	cutoff := time.Now().Add(-maxAge)
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	downloadstaging.CleanOldDirs(s.tmpSandbox, maxAge, func(id string) bool {
+		if s.jobs == nil {
+			return true
 		}
-		dirPath, err := s.tmpSandbox.Resolve(entry.Name(), false)
-		if err != nil {
-			continue
+		if job, exists := s.jobs.Get(id); exists && job.Snapshot().Status != StatusCancelled {
+			return false
 		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
+		if database := s.jobs.Database(); database != nil {
+			job, err := database.GetJob(ctx, id)
+			return err == nil && (job == nil || job.Status == string(StatusCancelled))
 		}
-		if info.ModTime().Before(cutoff) {
-			_ = safefs.RemoveAll(dirPath)
-		}
-	}
+		return true
+	})
 }

@@ -79,11 +79,12 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 			}
 			wg.Wait()
 
+			catalog, err := DeezerCatalogTracks(album)
+			if err != nil {
+				return nil, nil, err
+			}
 			for i, t := range album.Tracks.Data {
-				pos := t.TrackPosition
-				if pos == 0 {
-					pos = i + 1
-				}
+				position := catalog[i].TrackPosition
 				trackTot := total
 				tArtist := t.Artist.Name
 				if tArtist == "" {
@@ -114,16 +115,11 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 				}
 				formattedArtist := id3.FormatMultiValue(artists)
 
-				discNum := t.DiskNumber
-				if discNum <= 0 {
-					discNum = 1
-				}
-
 				tr := ResolvedTrack{
 					TrackID:     fmt.Sprintf("dz_%d", t.ID),
-					TrackNumber: pos,
+					TrackNumber: position.TrackNumber,
 					TrackTotal:  &trackTot,
-					DiscNumber:  discNum,
+					DiscNumber:  position.DiscNumber,
 					Title:       id3.CleanTitle(t.Title, ""),
 					Artist:      formattedArtist,
 					Album:       album.Title,

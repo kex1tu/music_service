@@ -6,10 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -17,218 +14,23 @@ import (
 	"time"
 
 	"music-manager/internal/core/mediaexec"
-	"music-manager/internal/core/safefs"
+	"music-manager/internal/services/downloadmedia"
 	"music-manager/internal/services/resolver"
 )
 
-var progressRegex = regexp.MustCompile(`(?:\[download\]|\bdownload:)?\s*(\d+(?:\.\d+)?)%`)
-
-func (s *Service) downloadRawStream(ctx context.Context, sourceURL, outputTemplate string, onProgress func(float64)) (string, error) {
-	args := []string{
-		"--ignore-config",
-		"--no-download-archive",
-		"-f", "ba/b",
-		"-o", outputTemplate,
-		"--no-playlist",
-		"--newline",
-		"--no-colors",
-		"--progress",
-		"--progress-template", "download:%(progress._percent_str)s",
-		"--progress-delta", "0.2",
-		"--no-warnings",
-		"--concurrent-fragments", "4",
-		"--buffer-size", "64k",
-		"--extractor-args", "youtube:player_client=tv_embedded,web_embedded,android,ios",
-		"--add-header", "Accept-Language:ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-	}
-
-	useCookies := resolver.IsValidNetscapeCookiesFile(s.cookiesPath)
-	if useCookies {
-		args = append(args, "--cookies", s.cookiesPath)
-	}
-	args = append(args, "--", sourceURL)
-
-	cmd := mediaexec.CommandContext(ctx, "yt-dlp", args...)
-	defer cmd.Close()
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", err
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("failed to start yt-dlp: %w", err)
-	}
-
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		line := scanner.Text()
-		match := progressRegex.FindStringSubmatch(line)
-		if len(match) >= 2 && onProgress != nil {
-			if val, pErr := strconv.ParseFloat(match[1], 64); pErr == nil {
-				onProgress(val)
-			}
-		}
-	}
-
-	if err := cmd.Wait(); err != nil {
-		// Fallback: если yt-dlp отклонил куки, повторяем загрузку в гостевом режиме
-		if useCookies && strings.Contains(stderr.String(), "does not look like a Netscape format cookies file") {
-			argsNoCookies := make([]string, 0, len(args))
-			for i := 0; i < len(args); i++ {
-				if args[i] == "--cookies" {
-					i++
-					continue
-				}
-				argsNoCookies = append(argsNoCookies, args[i])
-			}
-			cmdRetry := mediaexec.CommandContext(ctx, "yt-dlp", argsNoCookies...)
-			defer cmdRetry.Close()
-			stdoutRetry, pErr := cmdRetry.StdoutPipe()
-			if pErr == nil {
-				var stderrRetry bytes.Buffer
-				cmdRetry.Stderr = &stderrRetry
-				if sErr := cmdRetry.Start(); sErr == nil {
-					scannerRetry := bufio.NewScanner(stdoutRetry)
-					for scannerRetry.Scan() {
-						line := scannerRetry.Text()
-						match := progressRegex.FindStringSubmatch(line)
-						if len(match) >= 2 && onProgress != nil {
-							if val, valErr := strconv.ParseFloat(match[1], 64); valErr == nil {
-								onProgress(val)
-							}
-						}
-					}
-					if wErr := cmdRetry.Wait(); wErr == nil {
-						return s.findDownloadedFile(outputTemplate)
-					}
-					stderr = stderrRetry
-				}
-			}
-		}
-		return "", fmt.Errorf("yt-dlp download failed: %w: %s", err, stderr.String())
-	}
-
-	return s.findDownloadedFile(outputTemplate)
-}
-
 func (s *Service) downloadAndValidateRawStream(ctx context.Context, sourceURL, outputTemplate string, expectedDurationSec int, onProgress func(float64)) (string, error) {
-	rawFile, err := s.downloadRawStream(ctx, sourceURL, outputTemplate, onProgress)
-	if err != nil {
-		return "", err
-	}
-	if vErr := validateDownloadedStreamAudio(ctx, rawFile, expectedDurationSec); vErr != nil {
-		_ = safefs.Remove(rawFile)
-		return "", vErr
-	}
-	return rawFile, nil
-}
-
-func (s *Service) findDownloadedFile(outputTemplate string) (string, error) {
-	dir := filepath.Dir(outputTemplate)
-	pattern := filepath.Base(strings.Replace(outputTemplate, "%(ext)s", "*", 1))
-	matches, err := safefs.Glob(filepath.Join(dir, pattern))
-	if err != nil || len(matches) == 0 {
-		return "", fmt.Errorf("downloaded audio file not found matching template %s", outputTemplate)
-	}
-	return matches[0], nil
-}
-
-func buildFfmpegArgs(inputRaw, outputMP3 string) []string {
-	return []string{
-		"-y",
-		"-threads", "0",
-		"-i", inputRaw,
-		"-vn",
-		"-codec:a", "libmp3lame",
-		"-b:a", "320k",
-		"-ar", "44100",
-		"-ac", "2",
-		"-map_metadata", "-1",
-		outputMP3,
-	}
+	return downloadmedia.DownloadAndValidateAudio(ctx, s.cookiesPath, sourceURL, outputTemplate, expectedDurationSec, onProgress)
 }
 
 func (s *Service) transcodeToMP3(ctx context.Context, inputRaw, outputMP3 string) error {
-	args := buildFfmpegArgs(inputRaw, outputMP3)
-
-	cmd := mediaexec.CommandContext(ctx, "ffmpeg", args...)
-	defer cmd.Close()
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ffmpeg transcoding error: %w: %s", err, stderr.String())
-	}
-
-	info, err := safefs.Stat(outputMP3)
-	if err != nil || info.Size() == 0 {
-		return fmt.Errorf("transcoded MP3 is empty or missing")
-	}
-
-	return nil
+	return downloadmedia.TranscodeToMP3(ctx, inputRaw, outputMP3)
 }
 
 func (s *Service) downloadCover(ctx context.Context, coverURL string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, coverURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to download cover: status %d", resp.StatusCode)
-	}
-
-	return io.ReadAll(resp.Body)
+	return downloadmedia.DownloadCover(ctx, s.client, coverURL)
 }
 
 var rolloffRegex = regexp.MustCompile(`lavfi\.aspectralstats(?:\.\d+)?\.rolloff=([0-9.]+)`)
-
-type ffprobeFormatDurationOutput struct {
-	Format struct {
-		Duration string `json:"duration"`
-	} `json:"format"`
-}
-
-// validateDownloadedStreamAudio проверяет, что скачанный файл не является урезанным превью (сниппетом из-за гео-блокировки).
-func validateDownloadedStreamAudio(ctx context.Context, rawFilePath string, expectedDurationSec int) error {
-	args := []string{
-		"-v", "quiet",
-		"-print_format", "json",
-		"-show_format",
-		rawFilePath,
-	}
-
-	cmd := mediaexec.CommandContext(ctx, "ffprobe", args...)
-	defer cmd.Close()
-	out, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("ffprobe probe failed: %w", err)
-	}
-
-	var data ffprobeFormatDurationOutput
-	if err := json.Unmarshal(out, &data); err != nil {
-		return fmt.Errorf("failed to parse ffprobe json: %w", err)
-	}
-
-	actualDuration, err := strconv.ParseFloat(data.Format.Duration, 64)
-	if err != nil {
-		return nil // Если парсинг длительности не удался, не блокируем пайплайн
-	}
-
-	// Если файл длится менее 35 секунд, а ожидаемый трек длиннее 60 секунд — это 30-секундный гео-сниппет
-	if actualDuration < 35.0 && expectedDurationSec > 60 {
-		return fmt.Errorf("detected 30s preview snippet (actual: %.1fs, expected: %ds)", actualDuration, expectedDurationSec)
-	}
-
-	return nil
-}
 
 type ffprobeAudioOutput struct {
 	Streams []struct {

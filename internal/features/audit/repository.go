@@ -3,8 +3,12 @@ package audit
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"strings"
+
+	"music-manager/internal/core/textkey"
+	"music-manager/internal/db"
 )
 
 // DBTX определяет универсальный контракт для выполнения SQL-запросов (*sql.DB, *sql.Tx).
@@ -38,19 +42,8 @@ type IncompleteAlbumDTO struct {
 	PresentCount  int
 	ExpectedCount int
 	TotalTracks   int
+	TotalDiscs    int
 	DeezerAlbumID *string
-}
-
-// MissingTrackEntityDTO — запись недостающего трека для таблицы missing_tracks.
-type MissingTrackEntityDTO struct {
-	AlbumID          int64
-	Title            string
-	Artist           string
-	TrackNumber      int
-	DiscNumber       int
-	ExpectedDuration int
-	DeezerID         string
-	DeezerURL        string
 }
 
 // TagAuditTrackDTO — запись трека для инспекции тегов.
@@ -78,11 +71,9 @@ type AuditRepository interface {
 
 	// 3. Incomplete Albums & Missing Tracks
 	GetIncompleteAlbums(ctx context.Context, limit int) ([]IncompleteAlbumDTO, error)
-	GetMissingTrackNumbers(ctx context.Context, albumID int64) ([]int, error)
 	GetPresentTrackNumbers(ctx context.Context, albumID int64) ([]int, error)
 	GetAlbumMetadataByPath(ctx context.Context, folderPath string) (*IncompleteAlbumDTO, error)
-	UpdateAlbumVerification(ctx context.Context, albumID int64, expectedCount, presentCount int, deezerID string, isComplete bool) error
-	ReplaceMissingTracks(ctx context.Context, albumID int64, tracks []MissingTrackEntityDTO) error
+	VerifyCatalog(ctx context.Context, albumID int64, deezerID string, catalog []db.CatalogTrack) (map[db.TrackPosition]bool, error)
 
 	// 4. Invalid Paths & Reorganization
 	GetInvalidPaths(ctx context.Context) ([]InvalidPathRecord, error)
@@ -115,9 +106,8 @@ type AuditRepository interface {
 	ListAllTracksForDuplicates(ctx context.Context) ([]TrackCandidateDTO, error)
 	ListTracksForTagAudit(ctx context.Context) ([]TagAuditTrackDTO, error)
 	ListTracksWithoutLyrics(ctx context.Context) ([]TrackCandidateDTO, error)
-	GetMissingTracksForAlbum(ctx context.Context, albumPath string) ([]MissingTrackEntityDTO, error)
+	GetMissingTracksForAlbum(ctx context.Context, albumPath string) ([]db.CatalogTrack, error)
 }
-
 
 // Repository реализует персистентный слой SQLite WAL для аудита медиатеки.
 type Repository struct {
@@ -156,7 +146,7 @@ func (r *Repository) SearchLibrary(ctx context.Context, query string, limit int)
 	if limit <= 0 {
 		limit = 50
 	}
-	term := "%" + query + "%"
+	term := textkey.Search(query)
 
 	result := &SearchLibraryResult{
 		Tracks:  make([]SearchTrackItem, 0),
@@ -170,7 +160,7 @@ func (r *Repository) SearchLibrary(ctx context.Context, query string, limit int)
 	FROM tracks t
 	JOIN albums al ON t.album_id = al.id
 	JOIN artists ar ON t.artist_id = ar.id
-	WHERE t.title LIKE ? OR t.clean_title LIKE ?
+	WHERE instr(t.search_title, ?) > 0 OR instr(t.search_clean_title, ?) > 0
 	LIMIT ?;
 	`
 	tRows, err := r.db.QueryContext(ctx, trackQuery, term, term, limit)
@@ -209,7 +199,7 @@ func (r *Repository) SearchLibrary(ctx context.Context, query string, limit int)
 	SELECT al.id, al.title, ar.name AS artist, al.year, al.has_cover, al.cover_path, al.folder_path
 	FROM albums al
 	JOIN artists ar ON al.artist_id = ar.id
-	WHERE al.title LIKE ? OR al.clean_title LIKE ?
+	WHERE instr(al.search_title, ?) > 0 OR instr(al.search_clean_title, ?) > 0
 	LIMIT ?;
 	`
 	aRows, err := r.db.QueryContext(ctx, albumQuery, term, term, limit)
@@ -241,10 +231,10 @@ func (r *Repository) SearchLibrary(ctx context.Context, query string, limit int)
 	artistQuery := `
 	SELECT id, name
 	FROM artists
-	WHERE name LIKE ? OR clean_name LIKE ?
+	WHERE instr(clean_name, ?) > 0
 	LIMIT ?;
 	`
-	arRows, err := r.db.QueryContext(ctx, artistQuery, term, term, limit)
+	arRows, err := r.db.QueryContext(ctx, artistQuery, term, limit)
 	if err == nil {
 		defer arRows.Close()
 		for arRows.Next() {
@@ -291,31 +281,7 @@ func (r *Repository) GetTracksForDuplicatesScan(ctx context.Context) ([]TrackCan
 }
 
 func (r *Repository) DeleteTrackAndCleanup(ctx context.Context, path string) error {
-	var trackID, albumID int64
-	err := r.db.QueryRowContext(ctx, "SELECT id, album_id FROM tracks WHERE file_path = ?;", path).Scan(&trackID, &albumID)
-	if err == nil {
-		_, _ = r.db.ExecContext(ctx, "DELETE FROM tracks WHERE id = ?;", trackID)
-		_, _ = r.db.ExecContext(ctx, "DELETE FROM track_genres WHERE track_id = ?;", trackID)
-		_, _ = r.db.ExecContext(ctx, "DELETE FROM audit_issues WHERE (entity_type = 'track' AND entity_id = ?) OR file_path = ?;", trackID, path)
-
-		if albumID > 0 {
-			var count int
-			_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM tracks WHERE album_id = ?;", albumID).Scan(&count)
-			if count == 0 {
-				_, _ = r.db.ExecContext(ctx, "DELETE FROM albums WHERE id = ?;", albumID)
-				_, _ = r.db.ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id = ?;", albumID)
-			} else {
-				_, _ = r.db.ExecContext(ctx, "UPDATE albums SET present_tracks_count = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;", count, albumID)
-			}
-		}
-
-		_, _ = r.db.ExecContext(ctx, "DELETE FROM artists WHERE (SELECT COUNT(*) FROM albums WHERE artist_id = artists.id) = 0;")
-		return nil
-	}
-
-	// Fallback if not found by file_path
-	_, err = r.db.ExecContext(ctx, "DELETE FROM tracks WHERE file_path = ?;", path)
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM audit_issues WHERE file_path = ?;", path)
+	_, err := db.DeleteLibraryTracks(ctx, r.db, path, false)
 	return err
 }
 
@@ -329,7 +295,8 @@ func (r *Repository) GetIncompleteAlbums(ctx context.Context, limit int) ([]Inco
 	}
 	query := `
 	SELECT al.id, al.folder_path, al.title, a.name, al.year, al.has_cover, al.cover_path,
-	       al.present_tracks_count, al.expected_tracks_count, al.total_tracks, al.deezer_id
+	       al.present_tracks_count, al.expected_tracks_count, al.total_tracks, al.deezer_id,
+	       COALESCE(al.total_discs, 1), COALESCE((SELECT MAX(MAX(t.disc_number, t.disc_total)) FROM tracks t WHERE t.album_id = al.id), 1)
 	FROM albums al
 	JOIN artists a ON al.artist_id = a.id
 	WHERE al.present_tracks_count > 0
@@ -346,11 +313,12 @@ func (r *Repository) GetIncompleteAlbums(ctx context.Context, limit int) ([]Inco
 	var list []IncompleteAlbumDTO
 	for rows.Next() {
 		var item IncompleteAlbumDTO
+		var taggedDiscs int
 		var yr, exp, tot sql.NullInt64
 		var cov, dz sql.NullString
 		if err := rows.Scan(
 			&item.ID, &item.FolderPath, &item.Title, &item.Artist, &yr, &item.HasCover, &cov,
-			&item.PresentCount, &exp, &tot, &dz,
+			&item.PresentCount, &exp, &tot, &dz, &item.TotalDiscs, &taggedDiscs,
 		); err != nil {
 			return nil, err
 		}
@@ -364,29 +332,12 @@ func (r *Repository) GetIncompleteAlbums(ctx context.Context, limit int) ([]Inco
 		if dz.Valid {
 			item.DeezerAlbumID = &dz.String
 		}
+		item.TotalDiscs = max(item.TotalDiscs, taggedDiscs)
 		item.ExpectedCount = int(exp.Int64)
 		item.TotalTracks = int(tot.Int64)
 		list = append(list, item)
 	}
-	return list, nil
-}
-
-func (r *Repository) GetMissingTrackNumbers(ctx context.Context, albumID int64) ([]int, error) {
-	query := "SELECT track_number FROM missing_tracks WHERE album_id = ? ORDER BY track_number ASC;"
-	rows, err := r.db.QueryContext(ctx, query, albumID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var nums []int
-	for rows.Next() {
-		var n int
-		if err := rows.Scan(&n); err == nil {
-			nums = append(nums, n)
-		}
-	}
-	return nums, nil
+	return list, rows.Err()
 }
 
 func (r *Repository) GetPresentTrackNumbers(ctx context.Context, albumID int64) ([]int, error) {
@@ -408,21 +359,20 @@ func (r *Repository) GetPresentTrackNumbers(ctx context.Context, albumID int64) 
 }
 
 func (r *Repository) GetAlbumMetadataByPath(ctx context.Context, folderPath string) (*IncompleteAlbumDTO, error) {
-	cleanPath := filepath.Clean(folderPath)
-	base := filepath.Base(folderPath)
+	cleanPath := db.AlbumRoot(filepath.ToSlash(folderPath))
 
 	query := `
 	SELECT al.id, al.title, ar.name, COALESCE(al.year, 0), COALESCE(al.deezer_id, ''),
 	       COALESCE(al.expected_tracks_count, 0), COALESCE(al.present_tracks_count, 0), COALESCE(al.total_tracks, 0)
 	FROM albums al
 	JOIN artists ar ON al.artist_id = ar.id
-	WHERE al.folder_path = ? OR al.folder_path = ? OR al.title = ?
+	WHERE al.folder_path = ?
 	LIMIT 1;
 	`
 	var item IncompleteAlbumDTO
 	var dz string
 	var yr int
-	err := r.db.QueryRowContext(ctx, query, folderPath, cleanPath, base).Scan(
+	err := r.db.QueryRowContext(ctx, query, cleanPath).Scan(
 		&item.ID, &item.Title, &item.Artist, &yr, &dz,
 		&item.ExpectedCount, &item.PresentCount, &item.TotalTracks,
 	)
@@ -435,57 +385,18 @@ func (r *Repository) GetAlbumMetadataByPath(ctx context.Context, folderPath stri
 	if dz != "" {
 		item.DeezerAlbumID = &dz
 	}
-	item.FolderPath = folderPath
+	item.FolderPath = cleanPath
 	return &item, nil
 }
 
-func (r *Repository) UpdateAlbumVerification(ctx context.Context, albumID int64, expectedCount, presentCount int, deezerID string, isComplete bool) error {
-	comp := 0
-	if isComplete {
-		comp = 1
+func (r *Repository) VerifyCatalog(ctx context.Context, albumID int64, deezerID string, catalog []db.CatalogTrack) (map[db.TrackPosition]bool, error) {
+	conn, ok := r.db.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("catalog verification requires a database connection")
 	}
-	query := `
-	UPDATE albums SET
-		expected_tracks_count = ?,
-		total_tracks = ?,
-		present_tracks_count = ?,
-		deezer_id = ?,
-		is_complete = ?,
-		updated_at = CURRENT_TIMESTAMP
-	WHERE id = ?;
-	`
-	_, err := r.db.ExecContext(ctx, query, expectedCount, expectedCount, presentCount, deezerID, comp, albumID)
-	return err
-}
-
-func (r *Repository) ReplaceMissingTracks(ctx context.Context, albumID int64, tracks []MissingTrackEntityDTO) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id = ?;", albumID)
-	if err != nil {
-		return err
-	}
-
-	insertQ := `
-	INSERT INTO missing_tracks (
-		album_id, title, artist, track_number, disc_number,
-		expected_duration, deezer_id, deezer_url, status, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'missing', CURRENT_TIMESTAMP)
-	ON CONFLICT(album_id, track_number, disc_number) DO UPDATE SET
-		title = excluded.title,
-		artist = excluded.artist,
-		deezer_id = excluded.deezer_id,
-		deezer_url = excluded.deezer_url,
-		updated_at = CURRENT_TIMESTAMP;
-	`
-	for _, t := range tracks {
-		disc := t.DiscNumber
-		if disc <= 0 {
-			disc = 1
-		}
-		if _, err := r.db.ExecContext(ctx, insertQ, albumID, t.Title, t.Artist, t.TrackNumber, disc, t.ExpectedDuration, t.DeezerID, t.DeezerURL); err != nil {
-			return err
-		}
-	}
-	return nil
+	return db.VerifyCatalog(ctx, conn, albumID, deezerID, catalog)
 }
 
 // ----------------------------------------------------------------------------
@@ -811,16 +722,17 @@ func (r *Repository) ListTracksWithoutLyrics(ctx context.Context) ([]TrackCandid
 	return r.GetTracksForLyricsFetch(ctx)
 }
 
-func (r *Repository) GetMissingTracksForAlbum(ctx context.Context, albumPath string) ([]MissingTrackEntityDTO, error) {
+func (r *Repository) GetMissingTracksForAlbum(ctx context.Context, albumPath string) ([]db.CatalogTrack, error) {
 	meta, err := r.GetAlbumMetadataByPath(ctx, albumPath)
 	if err != nil || meta == nil {
 		return nil, err
 	}
 	query := `
-	SELECT album_id, title, artist, track_number, disc_number, expected_duration, COALESCE(deezer_id, ''), COALESCE(deezer_url, '')
+	SELECT title, artist, track_number, COALESCE(disc_number, 1), COALESCE(expected_duration, 0),
+	       COALESCE(deezer_id, ''), COALESCE(deezer_url, ''), COALESCE(isrc, '')
 	FROM missing_tracks
 	WHERE album_id = ?
-	ORDER BY track_number;
+	ORDER BY disc_number, track_number;
 	`
 	rows, err := r.db.QueryContext(ctx, query, meta.ID)
 	if err != nil {
@@ -828,13 +740,13 @@ func (r *Repository) GetMissingTracksForAlbum(ctx context.Context, albumPath str
 	}
 	defer rows.Close()
 
-	var list []MissingTrackEntityDTO
+	var list []db.CatalogTrack
 	for rows.Next() {
-		var m MissingTrackEntityDTO
-		if err := rows.Scan(&m.AlbumID, &m.Title, &m.Artist, &m.TrackNumber, &m.DiscNumber, &m.ExpectedDuration, &m.DeezerID, &m.DeezerURL); err == nil {
-			list = append(list, m)
+		var m db.CatalogTrack
+		if err := rows.Scan(&m.Title, &m.Artist, &m.TrackNumber, &m.DiscNumber, &m.Duration, &m.DeezerID, &m.DeezerURL, &m.ISRC); err != nil {
+			return nil, err
 		}
+		list = append(list, m)
 	}
-	return list, nil
+	return list, rows.Err()
 }
-

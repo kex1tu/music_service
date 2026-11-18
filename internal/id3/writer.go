@@ -91,11 +91,13 @@ func WriteTags(filePath string, tags TrackTags, cover *CoverInfo) error {
 	// APIC: Фронтальная обложка (оптимизируется в памяти)
 	if cover != nil && len(cover.Data) > 0 {
 		optData, optMime := OptimizeCoverForID3(cover.Data, 1000, 85)
-		optCover := &CoverInfo{
-			MimeType: optMime,
-			Data:     optData,
+		if len(optData) > 0 {
+			optCover := &CoverInfo{
+				MimeType: optMime,
+				Data:     optData,
+			}
+			writeAPICFrame(&framesBuf, optCover)
 		}
-		writeAPICFrame(&framesBuf, optCover)
 	}
 
 	// Сохраняем сторонние валидные фреймы (COMM, TCOP, ISRC, TBPM и др.)

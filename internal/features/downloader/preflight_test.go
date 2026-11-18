@@ -148,8 +148,9 @@ func TestDownloader_Preflight_DeduplicationAndSelection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create job: %v", err)
 		}
-		if len(job.SelectedTrackIndices) != 2 || job.SelectedTrackIndices[0] != 0 || job.SelectedTrackIndices[1] != 2 {
-			t.Fatalf("unexpected selected indices: %+v", job.SelectedTrackIndices)
+		snap := job.Snapshot()
+		if len(snap.SelectedTrackIndices) != 2 || snap.SelectedTrackIndices[0] != 0 || snap.SelectedTrackIndices[1] != 2 || !snap.SkipExisting {
+			t.Fatalf("unexpected download selection: indices=%v, skip existing=%t", snap.SelectedTrackIndices, snap.SkipExisting)
 		}
 	})
 
