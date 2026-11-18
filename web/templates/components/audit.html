@@ -62,54 +62,54 @@
     {{ template "audit_metrics" . }}
 
     <!-- Вкладки подразделов аудита -->
-    <div class="flex flex-wrap gap-2 border-b border-surface-border pb-2">
-        <button @click="activeSubTab = 'censorship'" :aria-pressed="activeSubTab === 'censorship'" class="min-h-[44px] px-3 rounded border border-surface-border text-sm text-content-secondary">Проверка цензуры</button>
+    <div class="flex items-center overflow-x-auto no-scrollbar sm:flex-wrap gap-2 border-b border-surface-border pb-2">
+        <button @click="activeSubTab = 'censorship'" :aria-pressed="activeSubTab === 'censorship'" :class="activeSubTab === 'censorship' ? 'bg-surface-elevated text-white border-white/30' : 'text-content-muted hover:text-content-primary border-surface-border'" class="shrink-0 py-2 px-3 rounded-lg text-xs font-medium transition flex items-center border">Проверка цензуры</button>
         <button
             @click="activeSubTab = 'lyrics'"
             :class="activeSubTab === 'lyrics' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
+            class="shrink-0 py-2 px-3 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Треки без текстов</span>
             <span class="px-1.5 py-0.5 bg-surface-elevated text-content-secondary rounded text-xs font-mono" x-text="missingLyrics.length || summary.missing_lyrics_count || 0"></span>
         </button>
         <button
             @click="activeSubTab = 'covers'"
             :class="activeSubTab === 'covers' ? 'bg-yellow-600/20 text-yellow-300 border border-yellow-500/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
+            class="shrink-0 py-2 px-3 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Релизы без обложек</span>
             <span class="px-1.5 py-0.5 bg-surface-elevated text-content-secondary rounded text-xs font-mono" x-text="missingCovers.length || summary.missing_covers_count || 0"></span>
         </button>
         <button
             @click="activeSubTab = 'duplicates'"
             :class="activeSubTab === 'duplicates' ? 'bg-red-600/20 text-red-300 border border-red-500/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
+            class="shrink-0 py-2 px-3 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Дубликаты песен</span>
             <span class="px-1.5 py-0.5 bg-surface-elevated text-content-secondary rounded text-xs font-mono" x-text="duplicatesData.groups ? duplicatesData.groups.length : 0"></span>
         </button>
         <button
             @click="activeSubTab = 'incomplete'"
             :class="activeSubTab === 'incomplete' ? 'bg-sky-600/20 text-sky-300 border border-sky-500/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
+            class="shrink-0 py-2 px-3 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Неполные релизы</span>
             <span class="px-1.5 py-0.5 bg-surface-elevated text-content-secondary rounded text-xs font-mono" x-text="incompleteAlbums.length || summary.incomplete_albums_count || 0"></span>
         </button>
         <button
             @click="activeSubTab = 'paths'"
             :class="activeSubTab === 'paths' ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
+            class="shrink-0 py-2 px-3 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Некорректные пути</span>
             <span class="px-1.5 py-0.5 bg-surface-elevated text-content-secondary rounded text-xs font-mono" x-text="invalidPaths.length || summary.invalid_paths_count || 0"></span>
         </button>
         <button
             @click="activeSubTab = 'genres'"
             :class="activeSubTab === 'genres' ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
+            class="shrink-0 py-2 px-3 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Жанры на проверку</span>
             <span class="px-1.5 py-0.5 bg-surface-elevated text-content-secondary rounded text-xs font-mono" x-text="nonEnGenres.length || summary.non_en_genres_count || 0"></span>
         </button>
         <button
             @click="activeSubTab = 'tags'"
             :class="activeSubTab === 'tags' ? 'bg-brand-muted text-brand border border-brand/40' : 'text-content-muted hover:text-content-primary border border-transparent'"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-2">
+            class="shrink-0 py-2 px-3 rounded-lg text-xs font-medium transition flex items-center space-x-2">
             <span>Сверка тегов</span>
             <span class="px-1.5 py-0.5 bg-surface-elevated text-content-secondary rounded text-xs font-mono" x-text="tagIssues.length || summary.tag_issues_count || 0"></span>
         </button>

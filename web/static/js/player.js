@@ -35,6 +35,7 @@ document.addEventListener('alpine:init', () => {
         audioSourceNode: null,
         canvasEl: null,
         canvasCtx: null,
+        canvasResizeObserver: null,
         visualizerRunning: false,
         animationFrameId: null,
         peakValues: new Float32Array(32),
@@ -116,25 +117,22 @@ document.addEventListener('alpine:init', () => {
         },
 
         bindCanvas(canvas) {
+            this.canvasResizeObserver?.disconnect();
+            this.stopVisualizer();
             this.canvasEl = canvas;
-            if (this.canvasEl) {
-                this.canvasCtx = this.canvasEl.getContext('2d');
-                this.resizeCanvas();
-                window.addEventListener('resize', () => this.resizeCanvas());
-                if (this.isPlaying) {
-                    this.startVisualizer();
+            this.canvasCtx = canvas.getContext('2d');
+            this.canvasResizeObserver = new ResizeObserver(([entry]) => {
+                const { width, height } = entry.contentRect;
+                if (!width || !height) {
+                    this.stopVisualizer();
+                    return;
                 }
-            }
-        },
-
-        resizeCanvas() {
-            if (!this.canvasEl) return;
-            const rect = this.canvasEl.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
                 const dpr = window.devicePixelRatio || 1;
-                this.canvasEl.width = Math.floor(rect.width * dpr);
-                this.canvasEl.height = Math.floor(rect.height * dpr);
-            }
+                canvas.width = Math.floor(width * dpr);
+                canvas.height = Math.floor(height * dpr);
+                this.startVisualizer();
+            });
+            this.canvasResizeObserver.observe(canvas);
         },
 
         ensureAudioContext() {
@@ -542,7 +540,8 @@ document.addEventListener('alpine:init', () => {
         // ==================== WEB AUDIO API СПЕКТРОАНАЛИЗАТОР ====================
 
         startVisualizer() {
-            if (this.visualizerRunning) return;
+            if (this.visualizerRunning || !this.isPlaying || !this.canvasCtx ||
+                !this.canvasEl.clientWidth || !this.canvasEl.clientHeight) return;
             this.visualizerRunning = true;
             this.renderVisualizer();
         },
@@ -576,20 +575,9 @@ document.addEventListener('alpine:init', () => {
                 return;
             }
 
-            if (!this.canvasEl || !this.canvasCtx) {
-                this.animationFrameId = requestAnimationFrame(() => this.renderVisualizer());
-                return;
-            }
-
             const ctx = this.canvasCtx;
             const width = this.canvasEl.width;
             const height = this.canvasEl.height;
-
-            if (width === 0 || height === 0) {
-                this.resizeCanvas();
-                this.animationFrameId = requestAnimationFrame(() => this.renderVisualizer());
-                return;
-            }
 
             // Очистка CRT экрана (матовый угольно-черный)
             ctx.fillStyle = '#080a0d';
@@ -894,26 +882,10 @@ document.addEventListener('alpine:init', () => {
                 this.loadLyrics(this.currentTrack);
                 this.fetchTrackSpecs(this.currentTrack);
             }
-            setTimeout(() => {
-                this.resizeCanvas();
-                if (this.isPlaying && this.centerDeckMode === 'spectrum') {
-                    this.startVisualizer();
-                }
-            }, 50);
         },
 
         setCenterDeckMode(mode) {
             this.centerDeckMode = mode;
-            if (mode === 'spectrum') {
-                setTimeout(() => {
-                    this.resizeCanvas();
-                    if (this.isPlaying) {
-                        this.startVisualizer();
-                    }
-                }, 30);
-            } else {
-                this.stopVisualizer();
-            }
         },
 
         // ==================== УТИЛИТЫ ФОРМАТИРОВАНИЯ ====================

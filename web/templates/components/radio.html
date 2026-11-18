@@ -11,7 +11,7 @@
 
         <div class="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div class="space-y-3 max-w-xl">
-                <div class="flex items-center space-x-2">
+                <div class="flex flex-wrap items-center gap-2">
                     <span class="px-2.5 py-1 text-xs font-mono font-bold uppercase tracking-wider bg-brand text-zinc-950 rounded-full shadow-md shadow-brand/20">ICY 320 kbps Zero-Transcoding</span>
                     <template x-if="$store.radio.stats.navidrome_available || $store.radio.stats.subsonic_configured">
                         <span class="px-2.5 py-1 text-xs font-mono font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full"
@@ -98,7 +98,7 @@
                 </div>
             </div>
 
-            <div class="flex flex-wrap gap-2">
+            <div class="flex flex-wrap gap-2 max-h-40 sm:max-h-none overflow-y-auto no-scrollbar">
                 <template x-for="g in $store.radio.genres" :key="g.name || g">
                     <button
                         @click="$store.radio.playGenre(g.name || g)"
@@ -126,39 +126,41 @@
             </div>
 
             <div class="space-y-3">
-                <div class="flex items-center space-x-2">
+                <div class="flex flex-col sm:flex-row sm:items-center gap-2">
                     <input
                         type="text"
                         x-model="$store.radio.artistSearch"
                         @keydown.enter="$store.radio.playArtist()"
                         placeholder="Имя артиста (напр. Daft Punk)..."
                         aria-label="Имя артиста для радиопотока"
-                        class="flex-1 bg-surface-input border border-surface-border rounded-xl px-3 py-2 text-xs text-white placeholder-content-muted focus:outline-none focus:border-brand">
-                    <button
-                        @click="$store.radio.playArtist()"
-                        class="px-3 py-2 bg-brand hover:bg-brand-hover text-zinc-950 text-xs font-semibold rounded-xl transition shrink-0"
-                        title="Воспроизвести на сайте">
-                        Включить
-                    </button>
-                    <button
-                        @click="$store.radio.exportArtistToNavidrome()"
-                        :disabled="$store.radio.isSyncingNavidrome"
-                        class="px-3 py-2 bg-surface-elevated hover:bg-surface-hover border border-surface-border text-content-secondary hover:text-brand text-xs font-semibold rounded-xl transition shrink-0 flex items-center space-x-1"
-                        title="Экспортировать радиостанцию этого артиста в Navidrome">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
-                        </svg>
-                        <span>В Navidrome</span>
-                    </button>
-                    <button
-                        @click="$store.radio.copyStreamUrl('artist', $store.radio.artistSearch)"
-                        class="p-2 bg-surface-elevated hover:bg-surface-hover border border-surface-border text-content-muted hover:text-white rounded-xl transition shrink-0"
-                        aria-label="Скопировать ссылку на поток артиста"
-                        title="Скопировать прямую ссылку на поток">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                            <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
-                        </svg>
-                    </button>
+                        class="w-full sm:flex-1 min-w-0 bg-surface-input border border-surface-border rounded-xl px-3 py-2 text-xs text-white placeholder-content-muted focus:outline-none focus:border-brand">
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button
+                            @click="$store.radio.playArtist()"
+                            class="flex-1 sm:flex-none px-3 py-2 bg-brand hover:bg-brand-hover text-zinc-950 text-xs font-semibold rounded-xl transition shrink-0"
+                            title="Воспроизвести на сайте">
+                            Включить
+                        </button>
+                        <button
+                            @click="$store.radio.exportArtistToNavidrome()"
+                            :disabled="$store.radio.isSyncingNavidrome"
+                            class="flex-1 sm:flex-none justify-center px-3 py-2 bg-surface-elevated hover:bg-surface-hover border border-surface-border text-content-secondary hover:text-brand text-xs font-semibold rounded-xl transition shrink-0 flex items-center space-x-1"
+                            title="Экспортировать радиостанцию этого артиста в Navidrome">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                            </svg>
+                            <span>В Navidrome</span>
+                        </button>
+                        <button
+                            @click="$store.radio.copyStreamUrl('artist', $store.radio.artistSearch)"
+                            class="p-2 bg-surface-elevated hover:bg-surface-hover border border-surface-border text-content-muted hover:text-white rounded-xl transition shrink-0"
+                            aria-label="Скопировать ссылку на поток артиста"
+                            title="Скопировать прямую ссылку на поток">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 <p class="text-xs text-content-muted">
                     Совет: Поток автоматически расширяется композициями похожих артистов из графа схожести. Нажмите «В Navidrome» для создания станции в вашей медиатеке.

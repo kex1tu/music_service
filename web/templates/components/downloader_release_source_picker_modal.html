@@ -255,7 +255,7 @@
                         </div>
 
                         <div class="border border-surface-border rounded-xl overflow-hidden bg-surface-base">
-                            <div class="grid grid-cols-12 bg-surface-elevated border-b border-surface-border px-3 py-2 text-[11px] font-semibold text-content-muted uppercase tracking-wider">
+                            <div class="hidden md:grid md:grid-cols-12 bg-surface-elevated border-b border-surface-border px-3 py-2 text-[11px] font-semibold text-content-muted uppercase tracking-wider">
                                 <div class="col-span-6 flex items-center gap-2">
                                     <span>Целевой трек релиза</span>
                                 </div>
@@ -267,9 +267,9 @@
                             <div class="divide-y divide-surface-border/50 max-h-[380px] overflow-y-auto">
                                 <template x-for="(target, tIdx) in $store.releaseSourcePicker.targetTracks" :key="target.track_id || tIdx">
                                     <div class="p-2.5 transition hover:bg-surface-hover/50 relative">
-                                        <div class="grid grid-cols-12 items-center gap-2">
+                                        <div class="grid grid-cols-1 md:grid-cols-12 items-center gap-2">
                                             <!-- ЛЕВАЯ КОЛОНКА: Целевой трек -->
-                                            <div class="col-span-6 flex items-center space-x-2 min-w-0 pr-2">
+                                            <div class="md:col-span-6 flex items-center space-x-2 min-w-0 pr-2">
                                                 <span class="w-6 text-center text-xs font-mono text-content-muted font-bold" x-text="target.track_number || (tIdx + 1)"></span>
                                                 <div class="min-w-0 flex-1">
                                                     <p class="text-xs font-bold text-white truncate" x-text="target.title"></p>
@@ -281,7 +281,7 @@
                                             </div>
 
                                             <!-- ПРАВАЯ КОЛОНКА: Сопоставленный кандидат -->
-                                            <div class="col-span-6 flex items-center space-x-2 min-w-0 pl-2 border-l border-surface-border/60">
+                                            <div class="md:col-span-6 flex items-center space-x-2 min-w-0 pt-1.5 border-t border-surface-border/40 md:pt-0 md:border-t-0 md:pl-2 md:border-l md:border-surface-border/60">
                                                 <template x-if="$store.releaseSourcePicker.getMappedCandidateTrack(tIdx)">
                                                     <div class="flex items-center space-x-2 min-w-0 flex-1">
                                                         <div class="min-w-0 flex-1">
