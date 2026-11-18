@@ -131,6 +131,10 @@ func (s *Service) SaveBatch(req BatchSaveRequest) (*OrganizerResult, error) {
 // Canonical structure: music_library / {Album} - {Album Artist} / {TrackNumber:02d}. {Title}.mp3.
 // For singles without an explicit album, album name is set to the track's title.
 func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist string, tracks []TrackTags, coverBase64 string) (*OrganizerResult, error) {
+	return s.moveAlbum(sourceDir, fallbackAlbum, fallbackAlbumArtist, tracks, coverBase64, nil)
+}
+
+func (s *Service) moveAlbum(sourceDir, fallbackAlbum, fallbackAlbumArtist string, tracks []TrackTags, coverBase64 string, backfill *backfillDestination) (*OrganizerResult, error) {
 	if len(tracks) == 1 {
 		if strings.TrimSpace(fallbackAlbumArtist) == "" && strings.TrimSpace(tracks[0].Artist) != "" {
 			fallbackAlbumArtist = strings.TrimSpace(tracks[0].Artist)
@@ -185,6 +189,9 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 		}
 
 		targetDir := s.ComputeAlbumDir(trArtist, trAlbum)
+		if backfill != nil {
+			targetDir = backfill.root
+		}
 		uniqueAlbumDirsMap[targetDir] = true
 	}
 
@@ -227,6 +234,9 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 	}
 
 	isTmp := strings.HasPrefix(sourceDir, "tmp_downloads") || strings.HasPrefix(sourceDir, "tmp/") || (strings.Contains(sourceDir, "-") && len(sourceDir) == 36)
+	if backfill != nil {
+		isTmp = false
+	}
 	var updatedTracks []TrackTags
 	var movedSourceDirs []string
 
@@ -245,19 +255,22 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 			}
 		}
 
-		if srcFullPath == "" && s.tmpSandbox != nil {
+		if srcFullPath == "" && s.tmpSandbox != nil && backfill == nil {
 			if p, err := s.tmpSandbox.Resolve(origPath, false); err == nil && fileExists(p) {
 				srcFullPath = p
 			}
 		}
 
-		if srcFullPath == "" {
+		if srcFullPath == "" && !(backfill != nil && isTmpTrack) {
 			if p, err := s.musicSandbox.Resolve(origPath, false); err == nil && fileExists(p) {
 				srcFullPath = p
 			}
 		}
 
 		if srcFullPath == "" || !fileExists(srcFullPath) {
+			if backfill != nil {
+				return nil, fmt.Errorf("backfill source %q is unavailable", origPath)
+			}
 			continue // skip missing files safely
 		}
 
@@ -294,6 +307,18 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 		}
 
 		albumDir, targetRel := s.ComputeTargetPath(trAlbumArtist, trAlbum, tr.TrackNumber, trTitle, filepath.Base(srcFullPath))
+		if backfill != nil {
+			albumDir = backfill.root
+			existing, _ := s.musicSandbox.ToRelative(srcFullPath)
+			targetRel = backfill.trackPath(existing, tr.DiscNumber, filepath.Base(targetRel))
+			dir, err := s.musicSandbox.Resolve(filepath.Dir(targetRel), true)
+			if err != nil {
+				return nil, err
+			}
+			if err := safefs.MkdirAll(dir, 0755); err != nil {
+				return nil, err
+			}
+		}
 
 		if info, ok := albumInfoMap[albumDir]; ok {
 			info.sourceDirs[srcDir] = true
@@ -328,7 +353,9 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 		}
 
 		// Write ID3v2.4 tags to disk
-		_ = id3.WriteTags(actualDestFull, trCopy, nil)
+		if err := id3.WriteTags(actualDestFull, trCopy, nil); err != nil && backfill != nil {
+			return nil, fmt.Errorf("write tags to %q: %w", actualRel, err)
+		}
 
 		updatedTracks = append(updatedTracks, trCopy)
 	}

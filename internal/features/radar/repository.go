@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"music-manager/internal/core/textkey"
+	"music-manager/internal/db"
 	"strings"
 )
 
@@ -21,6 +23,9 @@ type Repository interface {
 	GetTrackedArtists(ctx context.Context, onlyFollowed bool) ([]TrackedArtist, error)
 	GetTrackedArtistByName(ctx context.Context, name string) (*TrackedArtist, error)
 	UpsertTrackedArtist(ctx context.Context, name string) error
+	SetArtistFollowed(ctx context.Context, id int64, followed bool) error
+	SetArtistAutoDownload(ctx context.Context, id int64, auto bool) error
+	SetArtistLinks(ctx context.Context, id int64, alias, deezerID, mbID, yandexID string) error
 	GetArtistDiscography(ctx context.Context, artistName string) ([]RadarRelease, error)
 	SetRadarReleaseStatus(ctx context.Context, releaseID int64, status string) error
 }
@@ -36,25 +41,24 @@ func NewRepository(db DBTX) *SQLiteRepository {
 }
 
 func cleanKey(s string) string {
-	return strings.ToLower(strings.TrimSpace(s))
+	return textkey.Search(s)
 }
 
 // UpsertTrackedArtist добавляет артиста на отслеживание или обновляет метку времени.
 func (r *SQLiteRepository) UpsertTrackedArtist(ctx context.Context, name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("artist name cannot be empty")
-	}
-	cleanName := cleanKey(name)
-	query := `
-	INSERT INTO tracked_artists (name, clean_name, is_followed, updated_at)
-	VALUES (?, ?, 1, CURRENT_TIMESTAMP)
-	ON CONFLICT(name) DO UPDATE SET
-		clean_name = excluded.clean_name,
-		updated_at = CURRENT_TIMESTAMP;
-	`
-	_, err := r.db.ExecContext(ctx, query, name, cleanName)
-	return err
+	return db.RegisterTrackedArtist(ctx, r.db, name)
+}
+
+func (r *SQLiteRepository) SetArtistFollowed(ctx context.Context, id int64, followed bool) error {
+	return db.SetTrackedArtistFollowed(ctx, r.db, id, followed)
+}
+
+func (r *SQLiteRepository) SetArtistAutoDownload(ctx context.Context, id int64, auto bool) error {
+	return db.SetTrackedArtistAutoDownload(ctx, r.db, id, auto)
+}
+
+func (r *SQLiteRepository) SetArtistLinks(ctx context.Context, id int64, alias, deezerID, mbID, yandexID string) error {
+	return db.SetTrackedArtistLinks(ctx, r.db, id, alias, deezerID, mbID, yandexID)
 }
 
 // GetTrackedArtists возвращает список всех отслеживаемых артистов со статистикой пробелов.
@@ -167,13 +171,14 @@ func (r *SQLiteRepository) GetTrackedArtistByName(ctx context.Context, name stri
 		GROUP BY clean_artist_name
 	) gap_cnt ON gap_cnt.clean_artist_name = ta.clean_name
 	WHERE ta.clean_name = ?
+	ORDER BY ta.name = ? DESC, ta.id
 	LIMIT 1;
 	`
 	var a TrackedArtist
 	var isFollowedInt, autoDownloadInt int
 	var lastChecked sql.NullTime
 
-	err := r.db.QueryRowContext(ctx, query, cleanName).Scan(
+	err := r.db.QueryRowContext(ctx, query, cleanName, strings.TrimSpace(name)).Scan(
 		&a.ID, &a.Name, &a.CleanName, &isFollowedInt, &autoDownloadInt,
 		&a.CustomSearchAlias, &a.DeezerID, &a.MusicBrainzID, &a.YandexID,
 		&lastChecked, &a.AlbumCount, &a.TrackCount, &a.GapCount, &a.CreatedAt, &a.UpdatedAt,
@@ -213,14 +218,14 @@ func (r *SQLiteRepository) GetRadarFeed(ctx context.Context, releaseType, search
 
 	search = strings.TrimSpace(search)
 	if search != "" {
-		conditions = append(conditions, "(rr.artist_name LIKE ? OR rr.title LIKE ?)")
-		pattern := "%" + search + "%"
+		conditions = append(conditions, "(instr(rr.clean_artist_name, ?) > 0 OR instr(music_search_key(rr.title), ?) > 0)")
+		pattern := textkey.Search(search)
 		args = append(args, pattern, pattern)
 	}
 
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
-	countQuery := fmt.Sprintf("SELECT COUNT(DISTINCT COALESCE(NULLIF(rr.deezer_id, ''), rr.clean_title)) FROM radar_releases rr %s", whereClause)
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM radar_releases rr %s", whereClause)
 	var total int
 	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, err
@@ -228,15 +233,14 @@ func (r *SQLiteRepository) GetRadarFeed(ctx context.Context, releaseType, search
 
 	dataQuery := fmt.Sprintf(`
 	SELECT 
-		MIN(rr.id), rr.artist_name, rr.clean_artist_name, rr.title, rr.clean_title,
+		rr.id, rr.artist_name, rr.clean_artist_name, rr.title, rr.clean_title,
 		rr.release_type, COALESCE(rr.release_date, ''), rr.year, COALESCE(rr.cover_url, ''),
 		rr.track_count, COALESCE(rr.deezer_id, ''), COALESCE(rr.musicbrainz_id, ''),
 		COALESCE(rr.shazam_id, ''), rr.source_url, rr.status, rr.is_radar,
 		rr.created_at, rr.updated_at
 	FROM radar_releases rr
 	%s
-	GROUP BY COALESCE(NULLIF(rr.deezer_id, ''), rr.clean_title)
-	ORDER BY rr.release_date DESC, rr.created_at DESC
+	ORDER BY rr.release_date DESC, rr.created_at DESC, rr.id
 	LIMIT ? OFFSET ?;
 	`, whereClause)
 
@@ -276,19 +280,16 @@ func (r *SQLiteRepository) GetArtistDiscography(ctx context.Context, artistName 
 	cleanName := cleanKey(artistName)
 	query := `
 	SELECT 
-		MIN(rr.id), rr.artist_name, rr.clean_artist_name, rr.title, rr.clean_title,
+		rr.id, rr.artist_name, rr.clean_artist_name, rr.title, rr.clean_title,
 		rr.release_type, COALESCE(rr.release_date, ''), rr.year, COALESCE(rr.cover_url, ''),
 		rr.track_count, COALESCE(rr.deezer_id, ''), COALESCE(rr.musicbrainz_id, ''),
 		COALESCE(rr.shazam_id, ''), rr.source_url, rr.status, rr.is_radar,
 		rr.created_at, rr.updated_at
 	FROM radar_releases rr
-	WHERE rr.clean_artist_name = ? OR rr.clean_artist_name LIKE ? OR rr.artist_name LIKE ?
-	GROUP BY COALESCE(NULLIF(rr.deezer_id, ''), rr.clean_title)
+	WHERE music_radar_artist_matches(rr.artist_name, ?)
 	ORDER BY rr.year DESC, rr.release_date DESC;
 	`
-	pattern := "%" + cleanName + "%"
-	rawPattern := "%" + artistName + "%"
-	rows, err := r.db.QueryContext(ctx, query, cleanName, pattern, rawPattern)
+	rows, err := r.db.QueryContext(ctx, query, cleanName)
 	if err != nil {
 		return nil, err
 	}

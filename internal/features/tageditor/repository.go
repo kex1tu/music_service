@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	librarydb "music-manager/internal/db"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
@@ -327,7 +328,12 @@ func (r *Repository) UpdateTrackTags(ctx context.Context, relPath string, tags T
 	}
 
 	albumDir := filepath.ToSlash(filepath.Dir(cleanRel))
-	albumID, err := r.GetOrCreateAlbum(ctx, albumTitle, albumArtistID, effAlbumArtist, tags.Year, albumDir, tags.HasCover)
+	tags.DiscNumber = librarydb.LocalDiscNumber(albumDir, tags.DiscNumber)
+	displayAlbumArtist := strings.TrimSpace(tags.AlbumArtist)
+	if displayAlbumArtist == "" {
+		displayAlbumArtist = effAlbumArtist
+	}
+	albumID, err := r.GetOrCreateAlbum(ctx, albumTitle, albumArtistID, displayAlbumArtist, tags.Year, albumDir, tags.HasCover)
 	if err != nil {
 		return err
 	}
@@ -434,7 +440,7 @@ func (r *Repository) GetOrCreateArtist(ctx context.Context, name string) (int64,
 	if name == "" {
 		name = "Unknown Artist"
 	}
-	cleanName := strings.ToLower(name)
+	cleanName := librarydb.CleanArtistKey(name)
 
 	// 1. Автоматическая регистрация в tracked_artists
 	_, _ = r.db.ExecContext(ctx, `
@@ -467,62 +473,7 @@ func (r *Repository) GetOrCreateArtist(ctx context.Context, name string) (int64,
 
 // GetOrCreateAlbum находит или вставляет альбом.
 func (r *Repository) GetOrCreateAlbum(ctx context.Context, title string, artistID int64, albumArtistName string, year int, folderPath string, hasCover bool) (int64, error) {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		title = "Unknown Album"
-	}
-	folderPath = filepath.ToSlash(filepath.Clean(folderPath))
-
-	var id int64
-	var err error
-
-	// 1. Поиск по folder_path, если он задан
-	if folderPath != "" && folderPath != "." {
-		err = r.db.QueryRowContext(ctx, "SELECT id FROM albums WHERE folder_path = ? LIMIT 1;", folderPath).Scan(&id)
-	} else {
-		err = sql.ErrNoRows
-	}
-
-	// 2. Поиск по паре (title, artist_id)
-	if errors.Is(err, sql.ErrNoRows) {
-		err = r.db.QueryRowContext(ctx, "SELECT id FROM albums WHERE title = ? AND artist_id = ? LIMIT 1;", title, artistID).Scan(&id)
-	}
-
-	if err == nil {
-		// Альбом найден: актуализируем недостающие поля
-		_, _ = r.db.ExecContext(ctx, `
-			UPDATE albums SET
-				folder_path = CASE WHEN folder_path = '' THEN ? ELSE folder_path END,
-				has_cover = CASE WHEN ? THEN 1 ELSE has_cover END,
-				year = CASE WHEN year = 0 OR year IS NULL THEN ? ELSE year END,
-				album_artist = CASE WHEN album_artist = '' OR album_artist IS NULL THEN ? ELSE album_artist END,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ?;
-		`, folderPath, hasCover, year, albumArtistName, id)
-		return id, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, err
-	}
-
-	// 3. Создаем новый альбом
-	cleanTitle := strings.ToLower(title)
-	res, err := r.db.ExecContext(ctx, `
-		INSERT INTO albums (title, clean_title, artist_id, album_artist, year, folder_path, has_cover)
-		VALUES (?, ?, ?, ?, ?, ?, ?);
-	`, title, cleanTitle, artistID, albumArtistName, year, folderPath, hasCover)
-	if err != nil {
-		if err2 := r.db.QueryRowContext(ctx, "SELECT id FROM albums WHERE title = ? AND artist_id = ? LIMIT 1;", title, artistID).Scan(&id); err2 == nil {
-			return id, nil
-		}
-		if folderPath != "" && folderPath != "." {
-			if err3 := r.db.QueryRowContext(ctx, "SELECT id FROM albums WHERE folder_path = ? LIMIT 1;", folderPath).Scan(&id); err3 == nil {
-				return id, nil
-			}
-		}
-		return 0, err
-	}
-	return res.LastInsertId()
+	return librarydb.UpsertLocalAlbum(ctx, r.db, title, artistID, albumArtistName, year, folderPath, hasCover)
 }
 
 // UpdateAlbumCover сохраняет путь к файлу обложки альбома.
@@ -765,8 +716,8 @@ func (r *Repository) ClearMusicBrainzTokens(ctx context.Context) error {
 
 // Compile-time checks for interface conformance
 var (
-	_ TagRepository                       = (*Repository)(nil)
-	_ TokenPersistence                    = (*Repository)(nil)
+	_ TagRepository                        = (*Repository)(nil)
+	_ TokenPersistence                     = (*Repository)(nil)
 	_ resolver.MusicBrainzTokenPersistence = (*Repository)(nil)
 )
 

@@ -3,6 +3,7 @@ package downloader
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -58,6 +59,7 @@ type Job struct {
 	CompletedTracks      int                      `json:"completed_tracks"`
 	Error                *string                  `json:"error,omitempty"`
 	TargetAlbumPath      *string                  `json:"target_album_path,omitempty"`
+	Backfill             *BackfillRequest         `json:"backfill,omitempty"`
 	IsBackfill           bool                     `json:"is_backfill"`
 	AlbumTitle           *string                  `json:"album_title,omitempty"`
 	ArtistName           *string                  `json:"artist_name,omitempty"`
@@ -134,6 +136,13 @@ func (j *Job) Snapshot() *Job {
 	if j.TargetAlbumPath != nil {
 		pathCopy := *j.TargetAlbumPath
 		snap.TargetAlbumPath = &pathCopy
+	}
+	if j.Backfill != nil {
+		selection := *j.Backfill
+		selection.Positions = slices.Clone(j.Backfill.Positions)
+		selection.TrackURLs = slices.Clone(j.Backfill.TrackURLs)
+		selection.TrackNumbers = slices.Clone(j.Backfill.TrackNumbers)
+		snap.Backfill = &selection
 	}
 	if len(j.Tracks) > 0 {
 		snap.Tracks = make([]resolver.ResolvedTrack, len(j.Tracks))
@@ -467,13 +476,15 @@ type SwitchVersionRequest struct {
 // BindBackfillSourceRequest — запрос на привязку источника к недостающему треку бэкфилла.
 type BindBackfillSourceRequest struct {
 	VersionPolicy resolver.VersionPolicy `json:"version_policy"`
-	Duration int `json:"duration"`
-	Path        string `json:"path"`
-	AlbumTitle  string `json:"album_title"`
-	ArtistName  string `json:"artist_name"`
-	TrackTitle  string `json:"track_title"`
-	TrackNumber int    `json:"track_number"`
-	TargetURL   string `json:"target_url"`
+	Duration      int                    `json:"duration"`
+	Path          string                 `json:"path"`
+	AlbumTitle    string                 `json:"album_title"`
+	ArtistName    string                 `json:"artist_name"`
+	TrackTitle    string                 `json:"track_title"`
+	TrackNumber   int                    `json:"track_number"`
+	TargetURL     string                 `json:"target_url"`
+	DiscNumber    int                    `json:"disc_number"`
+	DeezerID      string                 `json:"deezer_id,omitempty"`
 }
 
 // --- Response DTOs ---
@@ -596,13 +607,18 @@ type DiscographyRelease struct {
 	TrackCount int    `json:"track_count"`
 }
 
-// MissingTrackInfo — DTO информации о недостающем треке для бэкфилла из базы данных.
+// BackfillRequest stores the immutable selection for initial execution and retries.
+type BackfillRequest struct {
+	AlbumID      string                 `json:"deezer_album_id,omitempty"`
+	Positions    []db.BackfillSelection `json:"positions,omitempty"`
+	TrackURLs    []string               `json:"track_urls,omitempty"`
+	TrackNumbers []int                  `json:"track_numbers,omitempty"`
+}
+
+// MissingTrackInfo is a catalog gap and its optional manually pinned audio source.
 type MissingTrackInfo struct {
-	Title            string `json:"title"`
-	Artist           string `json:"artist"`
-	TrackNumber      int    `json:"track_number"`
-	ExpectedDuration int    `json:"expected_duration"`
-	DeezerURL        string `json:"deezer_url"`
+	db.CatalogTrack
+	PinnedURL string
 }
 
 // PinnedTrackSourceDTO — DTO для сохранения и чтения ручной привязки трека.
@@ -659,6 +675,7 @@ type ParseReleaseURLRequest struct {
 
 // SwitchReleaseSourceRequest — запрос применения источника цельного релиза.
 type SwitchReleaseSourceRequest struct {
+	Backfill      *db.BackfillSelection    `json:"-"`
 	TargetTracks  []resolver.ResolvedTrack `json:"target_tracks,omitempty"`
 	VersionPolicy resolver.VersionPolicy   `json:"version_policy"`
 	JobID         string                   `json:"job_id"`

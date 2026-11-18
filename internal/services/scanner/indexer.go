@@ -59,9 +59,7 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 	}
 
 	albumDir := filepath.Dir(relPath)
-	if albumDir == "." {
-		albumDir = ""
-	}
+	tags.DiscNumber = db.LocalDiscNumber(filepath.ToSlash(albumDir), tags.DiscNumber)
 
 	// 1. Get or create primary artist for the track (avoiding composite 'Artist 1\\Artist 2' in artists table)
 	primaryTrackArtist := resolver.ExtractPrimaryArtist(artistName)
@@ -86,7 +84,11 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		return err
 	}
 
-	albumID, err := s.getOrCreateAlbum(albumTitle, albumArtistID, effectiveAlbumArtist, tags.Year, albumDir, tags.HasCover)
+	displayAlbumArtist := strings.TrimSpace(albumArtist)
+	if displayAlbumArtist == "" {
+		displayAlbumArtist = effectiveAlbumArtist
+	}
+	albumID, err := s.getOrCreateAlbum(albumTitle, albumArtistID, displayAlbumArtist, tags.Year, albumDir, tags.HasCover)
 	if err != nil {
 		return err
 	}

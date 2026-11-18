@@ -66,14 +66,6 @@ func main() {
 	}
 	defer database.Close()
 
-	// Reset library cache tables on startup (preserving download_jobs) and rebuild from filesystem
-	log.Println("[Main] Resetting library metadata cache tables on startup (preserving download_jobs)...")
-	if err := database.ResetLibraryTables(context.Background()); err != nil {
-		log.Printf("[Main] Warning: Failed to reset library cache tables: %v", err)
-	} else {
-		log.Println("[Main] Library metadata cache tables reset")
-	}
-
 	// 4. Initialize services and root context
 	appCtx, appCancel := context.WithCancel(context.Background())
 	defer appCancel()
@@ -429,8 +421,9 @@ func (a *downloaderBackfillAdapter) CreateBackfillJob(
 	targetAlbumPath, albumTitle, artistName, deezerAlbumID string,
 	trackURLs []string,
 	trackNumbers []int,
+	positions ...db.BackfillSelection,
 ) (string, error) {
-	job, err := a.svc.CreateBackfillJob(ctx, targetAlbumPath, albumTitle, artistName, deezerAlbumID, trackURLs, trackNumbers)
+	job, err := a.svc.CreateBackfillJob(ctx, targetAlbumPath, albumTitle, artistName, deezerAlbumID, trackURLs, trackNumbers, positions...)
 	if err != nil {
 		return "", err
 	}

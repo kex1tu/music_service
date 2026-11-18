@@ -2,252 +2,317 @@ package db
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
+	"regexp"
 	"strings"
+	"time"
 
+	"music-manager/internal/core/textkey"
 	"music-manager/internal/id3"
 )
 
-// ReconcileAllRadarReleases проверяет все релизы со статусом 'new' или 'downloaded' и при наличии в медиатеке переводит в in_library.
-func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
-	// 1. Быстро загружаем карту альбомов медиатеки
-	albumRows, err := db.conn.QueryContext(ctx, `
-		SELECT a.clean_title, COALESCE(a.album_artist, ''), COALESCE(ar.name, ''), COALESCE(ar.clean_name, ''), a.folder_path
-		FROM albums a
-		JOIN artists ar ON a.artist_id = ar.id;
-	`)
-	if err != nil {
-		return 0, err
-	}
-	defer albumRows.Close()
+var artistSeparator = regexp.MustCompile(`\s+(?:feat\.?|ft\.?|vs\.?)\s+|[,;&/\\\x00]+`)
 
-	type localAlb struct {
-		cleanTitle  string
-		albumArtist string
-		artistName  string
-		artistClean string
-		folderPath  string
+func radarArtistMatches(releaseArtist, localArtist string) bool {
+	release, local := textkey.Search(releaseArtist), textkey.Search(localArtist)
+	if release == "" || local == "" {
+		return false
 	}
-	albumMap := make(map[string][]localAlb)
-	for albumRows.Next() {
-		var alb localAlb
-		if err := albumRows.Scan(&alb.cleanTitle, &alb.albumArtist, &alb.artistName, &alb.artistClean, &alb.folderPath); err == nil {
-			albumMap[alb.cleanTitle] = append(albumMap[alb.cleanTitle], alb)
-			normClean := id3.CleanReleaseTitle(alb.cleanTitle)
-			if normClean != "" && normClean != alb.cleanTitle {
-				albumMap[normClean] = append(albumMap[normClean], alb)
+	if release == local {
+		return true
+	}
+	for _, name := range artistSeparator.Split(release, -1) {
+		for _, candidate := range artistSeparator.Split(local, -1) {
+			if strings.TrimSpace(name) != "" && strings.TrimSpace(name) == strings.TrimSpace(candidate) {
+				return true
 			}
 		}
 	}
-	albumRows.Close()
+	return false
+}
 
-	// 2. Быстро загружаем набор заголовков треков
-	trackRows, err := db.conn.QueryContext(ctx, `SELECT clean_title FROM tracks;`)
+type radarAlbum struct {
+	id       int64
+	deezerID string
+	complete bool
+	expected int
+}
+
+func (db *DB) radarAlbumCandidates(ctx context.Context, release RadarReleaseEntity) ([]radarAlbum, error) {
+	key := id3.CleanReleaseTitle(release.Title)
+	rows, err := db.conn.QueryContext(ctx, `
+		SELECT a.id, a.title, ar.name, COALESCE(a.album_artist, ''), COALESCE(a.year, 0),
+			COALESCE(a.deezer_id, ''), COALESCE(a.is_complete, 0),
+			COALESCE(a.expected_tracks_count, 0)
+		FROM albums a JOIN artists ar ON a.artist_id = ar.id
+		WHERE a.clean_title IN (?, ?) OR a.deezer_id = NULLIF(?, '')`,
+		key, textkey.Search(release.Title), release.DeezerID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	defer trackRows.Close()
-
-	trackSet := make(map[string]struct{})
-	for trackRows.Next() {
-		var ct string
-		if err := trackRows.Scan(&ct); err == nil {
-			trackSet[ct] = struct{}{}
-			normCt := id3.CleanReleaseTitle(ct)
-			if normCt != "" {
-				trackSet[normCt] = struct{}{}
-			}
+	defer rows.Close()
+	var matches []radarAlbum
+	for rows.Next() {
+		var a radarAlbum
+		var title, artist, albumArtist string
+		var year int
+		if err := rows.Scan(&a.id, &title, &artist, &albumArtist, &year, &a.deezerID, &a.complete, &a.expected); err != nil {
+			return nil, err
 		}
-	}
-	trackRows.Close()
-
-	// 3. Выгружаем релизы для проверки
-	radarRows, err := db.conn.QueryContext(ctx, `
-		SELECT id, clean_title, artist_name, clean_artist_name
-		FROM radar_releases
-		WHERE is_radar = 1 OR status IN ('new', 'downloaded');
-	`)
-	if err != nil {
-		return 0, err
-	}
-	defer radarRows.Close()
-
-	var matchedIDs []int64
-	for radarRows.Next() {
-		var id int64
-		var cleanTitle, artistName, cleanArtistName string
-		if err := radarRows.Scan(&id, &cleanTitle, &artistName, &cleanArtistName); err != nil {
+		if !radarArtistMatches(release.ArtistName, artist) && !radarArtistMatches(release.ArtistName, albumArtist) {
 			continue
 		}
-
-		inLibrary := false
-
-		// 3.1. Сверка по альбомам с учетом мульти-артистов и папок
-		matchedAlb := false
-		tokens := extractArtistTokens(artistName)
-		if len(tokens) == 0 {
-			tokens = []string{cleanArtistName}
+		if a.deezerID != "" && release.DeezerID != "" {
+			if a.deezerID != release.DeezerID {
+				continue
+			}
+		} else if textkey.Search(title) != textkey.Search(release.Title) ||
+			(year > 0 && release.Year > 0 && year != release.Year) {
+			continue
 		}
+		matches = append(matches, a)
+	}
+	return matches, rows.Err()
+}
 
-		normClean := id3.CleanReleaseTitle(cleanTitle)
+// HasRadarAlbumCandidate checks whether fetching a catalog tracklist could
+// help verify an album already on disk.
+func (db *DB) HasRadarAlbumCandidate(ctx context.Context, release RadarReleaseEntity) (bool, error) {
+	albums, err := db.radarAlbumCandidates(ctx, release)
+	return len(albums) > 0, err
+}
 
-		if candidates, ok := albumMap[cleanTitle]; ok {
-			for _, c := range candidates {
-				if matchesAnyArtist(tokens, c.artistName) ||
-					matchesAnyArtist(tokens, c.albumArtist) ||
-					matchesAnyArtist(tokens, c.artistClean) ||
-					containsAnyToken(c.folderPath, tokens) {
-					inLibrary = true
-					matchedAlb = true
+// RadarReleaseInLibrary applies the same matching rules during catalog discovery
+// and background reconciliation.
+func (db *DB) RadarReleaseInLibrary(ctx context.Context, release RadarReleaseEntity) (bool, error) {
+	if release.isSingleTrack() {
+		return db.radarSingleInLibrary(ctx, release)
+	}
+	albums, err := db.radarAlbumCandidates(ctx, release)
+	if err != nil {
+		return false, err
+	}
+	for _, album := range albums {
+		if len(release.Tracklist) != 0 {
+			matches, localCount, err := catalogMatches(ctx, db.conn, album.id, release.Tracklist)
+			if err != nil {
+				return false, err
+			}
+			if len(matches) == len(release.Tracklist) && localCount == len(release.Tracklist) {
+				return true, nil
+			}
+			continue
+		}
+		// A verified catalog link can stand in for a missing tracklist until
+		// the provider is available again.
+		if !album.complete || album.expected == 0 || release.DeezerID == "" || album.deezerID != release.DeezerID ||
+			(release.TrackCount > 0 && release.TrackCount != album.expected) {
+			continue
+		}
+		complete, err := db.radarHasCompletePositions(ctx, album.id, album.expected)
+		if complete || err != nil {
+			return complete, err
+		}
+	}
+	return false, nil
+}
+
+func singleTrackCredit(release RadarReleaseEntity) (title, artist string) {
+	title, artist = release.Title, release.ArtistName
+	if len(release.Tracklist) == 1 {
+		title = release.Tracklist[0].Title
+		if release.Tracklist[0].Artist != "" {
+			artist = release.Tracklist[0].Artist
+		}
+	}
+	return title, artist
+}
+
+func (r RadarReleaseEntity) isSingleTrack() bool {
+	return r.ReleaseType == "single" && r.TrackCount <= 1 && len(r.Tracklist) <= 1
+}
+
+func (db *DB) radarSingleInLibrary(ctx context.Context, release RadarReleaseEntity) (bool, error) {
+	title, artist := singleTrackCredit(release)
+	rows, err := db.conn.QueryContext(ctx, `
+		SELECT t.title, a.name FROM tracks t JOIN artists a ON a.id = t.artist_id
+		WHERE t.clean_title IN (?, ?)`, id3.CleanReleaseTitle(title), textkey.Search(title))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var localTitle, localArtist string
+		if err := rows.Scan(&localTitle, &localArtist); err != nil {
+			return false, err
+		}
+		if textkey.Search(title) == textkey.Search(localTitle) && radarArtistMatches(artist, localArtist) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+func (db *DB) radarSingleTrackIndex(ctx context.Context, releases []RadarReleaseEntity) (map[string][]string, error) {
+	titles := make(map[string]bool)
+	for _, release := range releases {
+		if release.isSingleTrack() {
+			title, _ := singleTrackCredit(release)
+			titles[textkey.Search(title)] = true
+		}
+	}
+	tracks := make(map[string][]string)
+	if len(titles) == 0 {
+		return tracks, nil
+	}
+	rows, err := db.conn.QueryContext(ctx, `SELECT t.title, ar.name FROM tracks t JOIN artists ar ON ar.id=t.artist_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var title, artist string
+		if err := rows.Scan(&title, &artist); err != nil {
+			return nil, err
+		}
+		key := textkey.Search(title)
+		if titles[key] {
+			tracks[key] = append(tracks[key], artist)
+		}
+	}
+	return tracks, rows.Err()
+}
+
+func (db *DB) radarHasCompletePositions(ctx context.Context, albumID int64, expected int) (bool, error) {
+	rows, err := db.conn.QueryContext(ctx, `
+		SELECT DISTINCT MAX(1, COALESCE(disc_number, 1)), COALESCE(track_number, 0)
+		FROM tracks WHERE album_id = ?1 AND NOT EXISTS(
+			SELECT 1 FROM missing_tracks WHERE album_id = ?1
+		) ORDER BY 1, 2`, albumID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	count, previous := 0, ReleasePosition(1, 0)
+	for rows.Next() {
+		var p TrackPosition
+		if err := rows.Scan(&p.DiscNumber, &p.TrackNumber); err != nil {
+			return false, err
+		}
+		if count == 0 && p != ReleasePosition(1, 1) {
+			return false, nil
+		}
+		if (p.DiscNumber != previous.DiscNumber || p.TrackNumber != previous.TrackNumber+1) &&
+			(p.DiscNumber != previous.DiscNumber+1 || p.TrackNumber != 1) {
+			return false, nil
+		}
+		previous = p
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return count == expected, nil
+}
+
+// RadarReleaseRecent is the inbox policy for releases absent from the library.
+func RadarReleaseRecent(date string, year int, now time.Time) bool {
+	if parsed, err := time.Parse("2006-01-02", date); err == nil {
+		age := now.Sub(parsed)
+		return age >= -7*24*time.Hour && age <= 365*24*time.Hour
+	}
+	return year >= now.Year()-1 && year <= now.Year()
+}
+
+// ReconcileAllRadarReleases rechecks local statuses without modifying ignored releases.
+func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
+	rows, err := db.conn.QueryContext(ctx, `
+		SELECT id, artist_name, title, release_type, COALESCE(release_date, ''), COALESCE(year, 0),
+			COALESCE(track_count, 0), COALESCE(deezer_id, ''), status, COALESCE(tracklist, 'null')
+		FROM radar_releases WHERE status IN ('new', 'downloaded', 'in_library', 'missing', 'version_exists')`)
+	if err != nil {
+		return 0, err
+	}
+	var releases []RadarReleaseEntity
+	for rows.Next() {
+		var r RadarReleaseEntity
+		var tracklist string
+		if err := rows.Scan(&r.ID, &r.ArtistName, &r.Title, &r.ReleaseType, &r.ReleaseDate, &r.Year,
+			&r.TrackCount, &r.DeezerID, &r.Status, &tracklist); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if err := json.Unmarshal([]byte(tracklist), &r.Tracklist); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		releases = append(releases, r)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return 0, err
+	}
+	singles, err := db.radarSingleTrackIndex(ctx, releases)
+	if err != nil {
+		return 0, err
+	}
+	type update struct {
+		id            int64
+		before, after string
+	}
+	var updates []update
+	for _, r := range releases {
+		var found bool
+		if r.isSingleTrack() {
+			title, artist := singleTrackCredit(r)
+			for _, localArtist := range singles[textkey.Search(title)] {
+				if radarArtistMatches(artist, localArtist) {
+					found = true
 					break
 				}
 			}
-		}
-
-		if !matchedAlb && normClean != "" {
-			if candidates, ok := albumMap[normClean]; ok {
-				for _, c := range candidates {
-					if matchesAnyArtist(tokens, c.artistName) ||
-						matchesAnyArtist(tokens, c.albumArtist) ||
-						matchesAnyArtist(tokens, c.artistClean) ||
-						containsAnyToken(c.folderPath, tokens) {
-						inLibrary = true
-						matchedAlb = true
-						break
-					}
-				}
+		} else {
+			found, err = db.RadarReleaseInLibrary(ctx, r)
+			if err != nil {
+				return 0, err
 			}
 		}
-
-		if !matchedAlb {
-			for albClean, candidates := range albumMap {
-				if (len(albClean) >= 4 && strings.Contains(cleanTitle, albClean)) ||
-					(len(cleanTitle) >= 4 && strings.Contains(albClean, cleanTitle)) ||
-					(normClean != "" && len(albClean) >= 4 && strings.Contains(normClean, albClean)) {
-					for _, c := range candidates {
-						if matchesAnyArtist(tokens, c.artistName) ||
-							matchesAnyArtist(tokens, c.albumArtist) ||
-							matchesAnyArtist(tokens, c.artistClean) ||
-							containsAnyToken(c.folderPath, tokens) {
-							inLibrary = true
-							matchedAlb = true
-							break
-						}
-					}
-					if matchedAlb {
-						break
-					}
-				}
+		next := r.Status
+		if found {
+			next = "in_library"
+		} else if r.Status == "in_library" {
+			next = "missing"
+			if RadarReleaseRecent(r.ReleaseDate, r.Year, time.Now()) {
+				next = "new"
 			}
 		}
-
-		// 3.2. Сверка по трекам (для синглов)
-		if !inLibrary {
-			if _, ok := trackSet[cleanTitle]; ok {
-				inLibrary = true
-			} else if normClean != "" {
-				if _, ok := trackSet[normClean]; ok {
-					inLibrary = true
-				}
-			}
-		}
-
-		if inLibrary {
-			matchedIDs = append(matchedIDs, id)
+		if next != r.Status {
+			updates = append(updates, update{r.ID, r.Status, next})
 		}
 	}
-	radarRows.Close()
-
-	if len(matchedIDs) == 0 {
+	if len(updates) == 0 {
 		return 0, nil
 	}
-
-	// 4. Пакетное обновление в транзакции чанками по 500
 	tx, err := db.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
-
-	batchSize := 500
-	for i := 0; i < len(matchedIDs); i += batchSize {
-		end := i + batchSize
-		if end > len(matchedIDs) {
-			end = len(matchedIDs)
-		}
-		chunk := matchedIDs[i:end]
-
-		placeholders := make([]string, len(chunk))
-		args := make([]any, len(chunk))
-		for j, id := range chunk {
-			placeholders[j] = "?"
-			args[j] = id
-		}
-		query := fmt.Sprintf("UPDATE radar_releases SET status = 'in_library', is_radar = 0, updated_at = CURRENT_TIMESTAMP WHERE id IN (%s)", strings.Join(placeholders, ","))
-		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+	count := 0
+	for _, u := range updates {
+		result, err := tx.ExecContext(ctx, `UPDATE radar_releases SET status = ?, is_radar = ?, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND status = ? AND status <> 'ignored'`, u.after, u.after == "new", u.id, u.before)
+		if err != nil {
 			return 0, err
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-
-	return len(matchedIDs), nil
-}
-
-func extractArtistTokens(raw string) []string {
-	if raw == "" {
-		return nil
-	}
-	replacer := strings.NewReplacer(
-		",", "|",
-		"&", "|",
-		"feat.", "|",
-		"feat", "|",
-		"ft.", "|",
-		"ft", "|",
-		"vs.", "|",
-		"vs", "|",
-		"with", "|",
-		"\\", "|",
-		"/", "|",
-		";", "|",
-		"\x00", "|",
-	)
-	normalized := replacer.Replace(raw)
-	parts := strings.Split(normalized, "|")
-	var tokens []string
-	seen := make(map[string]bool)
-	for _, p := range parts {
-		cleaned := CleanArtistKey(p)
-		if cleaned != "" && !seen[cleaned] {
-			seen[cleaned] = true
-			tokens = append(tokens, cleaned)
+		n, err := result.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		if u.after == "in_library" {
+			count += int(n)
 		}
 	}
-	return tokens
-}
-
-func containsAnyToken(str string, tokens []string) bool {
-	lower := strings.ToLower(str)
-	for _, t := range tokens {
-		if t != "" && strings.Contains(lower, t) {
-			return true
-		}
-	}
-	return false
-}
-
-func matchesAnyArtist(tokens []string, target string) bool {
-	cleanedTarget := CleanArtistKey(target)
-	if cleanedTarget == "" {
-		return false
-	}
-	for _, t := range tokens {
-		if t == cleanedTarget || strings.Contains(cleanedTarget, t) || strings.Contains(t, cleanedTarget) {
-			return true
-		}
-	}
-	return false
+	return count, tx.Commit()
 }

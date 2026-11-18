@@ -95,6 +95,7 @@ window.TagSaver = {
                     };
                 }),
                 source_dir: component.sourceDir || 'tmp_downloads',
+                target_album_path: firstRelease?.targetAlbumPath || undefined,
                 cover_path: isSingleRelease && firstRelease ? firstRelease.coverPath : component.coverPath,
                 cover_base64: isSingleRelease && firstRelease ? firstRelease.coverBase64 : (component.coverBase64 || null),
                 cover_url: isSingleRelease && firstRelease ? firstRelease.selectedCoverUrl : (component.selectedCoverUrl || null),

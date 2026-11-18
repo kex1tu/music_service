@@ -885,15 +885,22 @@ func (c *MusicBrainzClient) GetArtistReleaseGroups(ctx context.Context, mbid str
 	for _, rg := range data.ReleaseGroups {
 		artist := formatArtistCredit(rg.ArtistCredit)
 		year := parseYear(rg.FirstReleaseDate)
+		releaseType := strings.ToLower(rg.PrimaryType)
+		for _, secondary := range rg.SecondaryTypes {
+			if strings.EqualFold(secondary, "compilation") {
+				releaseType = "compilation"
+				break
+			}
+		}
 		results = append(results, CatalogReleaseSummary{
-			ID:     rg.ID,
-			Source: "musicbrainz",
-			Title:  rg.Title,
-			Artist: artist,
-			Year:   year,
-			Date:   rg.FirstReleaseDate,
+			ID:          rg.ID,
+			ReleaseType: releaseType,
+			Source:      "musicbrainz",
+			Title:       rg.Title,
+			Artist:      artist,
+			Year:        year,
+			Date:        rg.FirstReleaseDate,
 		})
 	}
 	return results, nil
 }
-

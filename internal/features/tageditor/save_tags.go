@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"music-manager/internal/id3"
+	"music-manager/internal/services/organizer"
 )
 
 // SaveTags записывает теги в один файл с соблюдением стандарта ID3v2.4 и null-byte разделителей.
@@ -93,7 +94,13 @@ func (s *Service) BatchSaveTags(ctx context.Context, req BatchSaveRequest) (*Bat
 		}
 	}
 
-	res, err := s.organizer.MoveAlbum(req.SourceDir, req.Album.Album, req.Album.AlbumArtist, req.Tracks, coverB64)
+	var res *organizer.OrganizerResult
+	var err error
+	if req.TargetAlbumPath != "" {
+		res, err = s.organizer.MoveAlbumInto(req.TargetAlbumPath, req.Album.Album, req.Album.AlbumArtist, req.Tracks, coverB64)
+	} else {
+		res, err = s.organizer.MoveAlbum(req.SourceDir, req.Album.Album, req.Album.AlbumArtist, req.Tracks, coverB64)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("organizer move album failed: %w", err)
 	}

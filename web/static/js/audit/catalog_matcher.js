@@ -25,7 +25,7 @@ window.AuditCatalogMatcher = {
             directUrl = track;
         } else if (track && typeof track === 'object') {
             directUrl = track.deezer_url || null;
-            trackNumber = track.track_number || null;
+            trackNumber = track.track_number ? `${track.disc_number || 1}_${track.track_number}` : null;
         }
         const trackKey = directUrl || (trackNumber ? `track_${trackNumber}` : null);
         const key = trackKey ? `${path}:::${trackKey}` : path;
@@ -96,7 +96,7 @@ window.AuditCatalogMatcher = {
             directUrl = track;
         } else if (track && typeof track === 'object') {
             directUrl = track.deezer_url || null;
-            trackNumber = track.track_number || null;
+            trackNumber = track.track_number ? `${track.disc_number || 1}_${track.track_number}` : null;
         }
 
         const trackKey = directUrl || (trackNumber ? `track_${trackNumber}` : null);
@@ -106,26 +106,18 @@ window.AuditCatalogMatcher = {
         this.downloadingTracks = { ...this.downloadingTracks, [key]: true };
 
         try {
-            let trackUrls = null;
-            let trackNumbers = null;
-
-            if (directUrl || trackNumber) {
-                if (directUrl) trackUrls = [directUrl];
-                if (trackNumber) trackNumbers = [trackNumber];
-            } else {
-                if (album.missing_tracks && album.missing_tracks.length > 0) {
-                    trackNumbers = album.missing_tracks.map(t => t.track_number).filter(n => n > 0);
-                    trackUrls = album.missing_tracks.map(t => t.deezer_url).filter(Boolean);
-                } else if (album.missing_track_numbers && album.missing_track_numbers.length > 0) {
-                    trackNumbers = album.missing_track_numbers;
-                }
-            }
-
+            const selected = track && typeof track === 'object' ? [track] : (album.missing_tracks || []);
+            const positions = selected.filter(t => t.track_number > 0).map(t => ({
+                disc_number: t.disc_number || 1,
+                track_number: t.track_number,
+                deezer_id: t.deezer_id || '',
+                deezer_url: t.deezer_url || '',
+            }));
             const payload = {
                 path: album.path,
                 deezer_album_id: album.deezer_album_id || null,
-                track_urls: trackUrls && trackUrls.length > 0 ? trackUrls : null,
-                track_numbers: trackNumbers && trackNumbers.length > 0 ? trackNumbers : null,
+                positions,
+                track_urls: typeof track === 'string' ? [track] : null,
             };
 
             console.log('[Audit] Sending POST /files/audit/incomplete-albums/download-missing:', payload);

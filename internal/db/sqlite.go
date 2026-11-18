@@ -40,6 +40,17 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("сбой инициализации схемы SQLite: %w", err)
 	}
 
+	if err := db.migrateReleaseModel(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("миграция модели релизов: %w", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO tracked_artists (name, clean_name, is_followed)
+		SELECT MIN(ar.name), music_search_key(ar.name), 1 FROM artists ar
+		WHERE NOT EXISTS (SELECT 1 FROM tracked_artists ta WHERE ta.clean_name = music_search_key(ar.name))
+		GROUP BY music_search_key(ar.name) ON CONFLICT(name) DO NOTHING`); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("регистрация артистов медиатеки: %w", err)
+	}
 	return db, nil
 }
 
@@ -68,7 +79,6 @@ func (db *DB) initSchema() error {
 	_, _ = db.conn.ExecContext(ctx, "ALTER TABLE missing_tracks ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP;")
 	_, _ = db.conn.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_radar_releases_artist_status ON radar_releases(clean_artist_name, status);")
 	_, _ = db.conn.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_radar_releases_clean_title ON radar_releases(clean_title);")
-	_, _ = db.conn.ExecContext(ctx, "INSERT INTO tracked_artists (name, clean_name, is_followed) SELECT name, clean_name, 1 FROM artists ON CONFLICT(name) DO NOTHING;")
 
 	return nil
 }

@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"music-manager/internal/db"
 
 	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/organizer"
@@ -19,6 +20,7 @@ type BackfillStarter interface {
 		targetAlbumPath, albumTitle, artistName, deezerAlbumID string,
 		trackURLs []string,
 		trackNumbers []int,
+		positions ...db.BackfillSelection,
 	) (jobID string, err error)
 }
 

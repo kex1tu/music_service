@@ -1,6 +1,7 @@
 package resolver
 
 import (
+	"music-manager/internal/core/textkey"
 	"regexp"
 	"strings"
 )
@@ -27,7 +28,7 @@ var (
 
 // CleanArtistKey приводит имя исполнителя к стандартному нижнему регистру для ключей словарей и индексов.
 func CleanArtistKey(s string) string {
-	return strings.ToLower(strings.TrimSpace(s))
+	return textkey.Search(s)
 }
 
 // NormalizeUnicodeText converts decomposed combining characters (NFD) to precomposed NFC.
@@ -154,5 +155,3 @@ func AreArtistsEquivalent(a, b string) bool {
 	}
 	return false
 }
-
-

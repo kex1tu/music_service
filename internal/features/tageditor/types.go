@@ -58,7 +58,8 @@ type SaveTagsResponse struct {
 
 // BatchSaveRequest представляет тело запроса пакетного сохранения тегов и раскладки альбома.
 type BatchSaveRequest struct {
-	Album struct {
+	TargetAlbumPath string `json:"target_album_path,omitempty"`
+	Album           struct {
 		AlbumArtist string `json:"album_artist"`
 		Album       string `json:"album"`
 		Year        *int   `json:"year"`

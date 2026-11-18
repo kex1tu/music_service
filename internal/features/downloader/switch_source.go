@@ -11,6 +11,7 @@ import (
 
 	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
+	"music-manager/internal/db"
 	"music-manager/internal/services/resolver"
 )
 
@@ -177,14 +178,21 @@ func (s *Service) SwitchReleaseSource(ctx context.Context, req SwitchReleaseSour
 			}
 		}
 		job = &Job{ID: generateUUID(), Source: "release_picker", URL: cleanURL, Status: StatusQueued, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), UpdatedAt: time.Now().UTC(), Tracks: append([]resolver.ResolvedTrack(nil), req.TargetTracks...)}
+		if req.Backfill != nil {
+			job.IsBackfill = true
+			job.Backfill = &BackfillRequest{Positions: []db.BackfillSelection{*req.Backfill}}
+		}
 		for i := range job.Tracks {
 			job.Tracks[i].TrackID = fmt.Sprintf("manual_%s_%d", job.ID, i)
+			if req.Backfill != nil && req.Backfill.DeezerID != "" {
+				job.Tracks[i].TrackID = "dz_" + req.Backfill.DeezerID
+			}
 			job.Tracks[i].AudioSourceURL = ""
 			job.Tracks[i].ConvertedPath = nil
 		}
 		job.AlbumMetadata = resolver.ReleaseMetadata{AlbumTitle: job.Tracks[0].Album, AlbumArtist: job.Tracks[0].Artist, TotalTracks: len(job.Tracks)}
 		if req.TargetPath != "" {
-			target := req.TargetPath
+			target := db.AlbumRoot(filepath.ToSlash(req.TargetPath))
 			job.TargetAlbumPath = &target
 		}
 	}

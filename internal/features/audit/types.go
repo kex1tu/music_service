@@ -3,6 +3,7 @@ package audit
 import (
 	"time"
 
+	"music-manager/internal/db"
 	"music-manager/internal/id3"
 )
 
@@ -119,17 +120,18 @@ type FixDuplicatesResponse struct {
 
 // IncompleteAlbum представляет неполный альбом с дефицитом дорожек.
 type IncompleteAlbum struct {
-	Path                string  `json:"path"`
-	Album               string  `json:"album"`
-	Artist              string  `json:"artist"`
-	Year                *int    `json:"year"`
-	HasCover            bool    `json:"has_cover"`
-	CoverURL            *string `json:"cover_url"`
-	PresentCount        int     `json:"present_count"`
-	ExpectedCount       int     `json:"expected_count"`
-	MissingTrackNumbers []int   `json:"missing_track_numbers"`
-	IsCatalogMatched    bool    `json:"is_catalog_matched"`
-	DeezerAlbumID       *string `json:"deezer_album_id"`
+	Path                string            `json:"path"`
+	Album               string            `json:"album"`
+	Artist              string            `json:"artist"`
+	Year                *int              `json:"year"`
+	HasCover            bool              `json:"has_cover"`
+	CoverURL            *string           `json:"cover_url"`
+	PresentCount        int               `json:"present_count"`
+	ExpectedCount       int               `json:"expected_count"`
+	MissingTracks       []db.CatalogTrack `json:"missing_tracks"`
+	MissingTrackNumbers []int             `json:"missing_track_numbers"`
+	IsCatalogMatched    bool              `json:"is_catalog_matched"`
+	DeezerAlbumID       *string           `json:"deezer_album_id"`
 }
 
 // IncompleteAlbumsResponse — ответ со списком неполных альбомов.
@@ -141,10 +143,11 @@ type IncompleteAlbumsResponse struct {
 
 // DownloadMissingRequest — запрос на запуск бэкфилла недостающих треков.
 type DownloadMissingRequest struct {
-	Path          string   `json:"path"`
-	DeezerAlbumID *string  `json:"deezer_album_id"`
-	TrackURLs     []string `json:"track_urls"`
-	TrackNumbers  []int    `json:"track_numbers"`
+	Positions     []db.BackfillSelection `json:"positions"`
+	Path          string                 `json:"path"`
+	DeezerAlbumID *string                `json:"deezer_album_id"`
+	TrackURLs     []string               `json:"track_urls"`
+	TrackNumbers  []int                  `json:"track_numbers"`
 }
 
 // BackfillJobInfo — базовая информация о созданной задаче бэкфилла.
@@ -469,4 +472,3 @@ type NormalizeNavidromeResponse struct {
 	Success bool            `json:"success"`
 	Report  NavidromeReport `json:"report"`
 }
-

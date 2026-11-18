@@ -74,9 +74,11 @@ document.addEventListener('alpine:init', () => {
             const tit = track.title || `Трек #${track.track_number}`;
             this.context = {
                 jobId: null,
-                trackId: track.track_number ? `missing_${track.track_number}` : '',
+                trackId: track.track_number ? `missing_${track.disc_number || 1}_${track.track_number}` : '',
                 isrc: track.isrc || '',
                 trackNumber: track.track_number || 1,
+                discNumber: track.disc_number || 1,
+                deezerId: track.deezer_id || '',
                 title: tit,
                 artist: art,
                 album: album.album || '',
@@ -265,6 +267,8 @@ document.addEventListener('alpine:init', () => {
                         artist_name: this.context.artist,
                         track_title: this.context.title,
                         track_number: this.context.trackNumber,
+                        disc_number: this.context.discNumber,
+                        deezer_id: this.context.deezerId,
                         target_url: targetUrl,
                         version_policy: this.versionPolicy,
                         duration: this.context.expectedDuration,

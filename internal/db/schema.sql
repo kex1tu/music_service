@@ -44,11 +44,11 @@ CREATE TABLE IF NOT EXISTS albums (
     genius_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(artist_id, title)
+    UNIQUE(folder_path)
 );
 CREATE INDEX IF NOT EXISTS idx_albums_clean ON albums(clean_title);
 CREATE INDEX IF NOT EXISTS idx_albums_complete ON albums(is_complete);
-CREATE INDEX IF NOT EXISTS idx_albums_folder ON albums(folder_path);
+CREATE INDEX IF NOT EXISTS idx_albums_deezer ON albums(deezer_id);
 
 -- 3. Треки
 CREATE TABLE IF NOT EXISTS tracks (
@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_tracks_clean ON tracks(clean_title);
+CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks(album_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_path ON tracks(file_path);
 CREATE INDEX IF NOT EXISTS idx_tracks_hash ON tracks(file_hash);
 CREATE INDEX IF NOT EXISTS idx_tracks_path_valid ON tracks(is_path_valid);
@@ -153,7 +154,8 @@ CREATE TABLE IF NOT EXISTS download_jobs (
     album_title TEXT,
     artist_name TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    backfill_selection TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_download_jobs_status ON download_jobs(status);
 
@@ -231,7 +233,8 @@ CREATE TABLE IF NOT EXISTS radar_releases (
     is_radar BOOLEAN DEFAULT 0,         -- 1 если дата релиза за последние 2 года
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(clean_artist_name, clean_title, release_type)
+    identity_key TEXT UNIQUE,
+    tracklist TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_radar_releases_artist ON radar_releases(clean_artist_name);
 CREATE INDEX IF NOT EXISTS idx_radar_releases_status ON radar_releases(status);

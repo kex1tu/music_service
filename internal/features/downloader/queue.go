@@ -6,10 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"slices"
 	"sort"
 	"time"
 
 	"music-manager/internal/core/safefs"
+	"music-manager/internal/db"
 	"music-manager/internal/services/resolver"
 )
 
@@ -143,9 +146,19 @@ func (s *Service) CreateBackfillJob(
 	targetAlbumPath, albumTitle, artistName, deezerAlbumID string,
 	trackURLs []string,
 	trackNumbers []int,
+	positions ...db.BackfillSelection,
 ) (*Job, error) {
 	if targetAlbumPath == "" && albumTitle == "" {
 		return nil, errors.New("target album path or title required")
+	}
+
+	if targetAlbumPath != "" {
+		targetAlbumPath = db.AlbumRoot(filepath.ToSlash(targetAlbumPath))
+	}
+	selection := &BackfillRequest{AlbumID: deezerAlbumID, Positions: slices.Clone(positions),
+		TrackURLs: slices.Clone(trackURLs), TrackNumbers: slices.Clone(trackNumbers)}
+	if err := s.freezeBackfillSelection(ctx, targetAlbumPath, selection); err != nil {
+		return nil, err
 	}
 
 	jobID := generateUUID()
@@ -168,6 +181,7 @@ func (s *Service) CreateBackfillJob(
 		Progress:        0.0,
 		CurrentStep:     "Задача дозагрузки ожидает очереди",
 		IsBackfill:      true,
+		Backfill:        selection,
 		TargetAlbumPath: &tPath,
 		AlbumTitle:      &aTitle,
 		ArtistName:      &aArtist,
@@ -175,10 +189,12 @@ func (s *Service) CreateBackfillJob(
 		UpdatedAt:       time.Now().UTC(),
 	}
 
-	s.AddJob(job)
 	if s.repo != nil {
-		_ = s.repo.CreateJob(ctx, job)
+		if err := s.repo.CreateJob(ctx, job); err != nil {
+			return nil, fmt.Errorf("save backfill job: %w", err)
+		}
 	}
+	s.AddJob(job)
 
 	select {
 	case s.workQueue <- jobID:
