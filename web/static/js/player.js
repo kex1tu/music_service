@@ -35,7 +35,9 @@ document.addEventListener('alpine:init', () => {
         audioSourceNode: null,
         canvasEl: null,
         canvasCtx: null,
-        canvasResizeObserver: null,
+        displayResizeObserver: null,
+        spectrumVisible: false,
+        levelMeterVisible: false,
         visualizerRunning: false,
         animationFrameId: null,
         peakValues: new Float32Array(32),
@@ -117,22 +119,34 @@ document.addEventListener('alpine:init', () => {
         },
 
         bindCanvas(canvas) {
-            this.canvasResizeObserver?.disconnect();
-            this.stopVisualizer();
             this.canvasEl = canvas;
             this.canvasCtx = canvas.getContext('2d');
-            this.canvasResizeObserver = new ResizeObserver(([entry]) => {
-                const { width, height } = entry.contentRect;
-                if (!width || !height) {
-                    this.stopVisualizer();
-                    return;
+            this.observeAudioDisplay(canvas);
+        },
+
+        observeAudioDisplay(element) {
+            this.displayResizeObserver ??= new ResizeObserver((entries) => {
+                for (const { target, contentRect } of entries) {
+                    const { width, height } = contentRect;
+                    const visible = width > 0 && height > 0;
+                    if (target === this.canvasEl) {
+                        this.spectrumVisible = visible && !!this.canvasCtx;
+                        if (this.spectrumVisible) {
+                            const dpr = window.devicePixelRatio || 1;
+                            target.width = Math.floor(width * dpr);
+                            target.height = Math.floor(height * dpr);
+                        }
+                    } else {
+                        this.levelMeterVisible = visible;
+                    }
                 }
-                const dpr = window.devicePixelRatio || 1;
-                canvas.width = Math.floor(width * dpr);
-                canvas.height = Math.floor(height * dpr);
-                this.startVisualizer();
+                if (this.spectrumVisible || this.levelMeterVisible) {
+                    this.startVisualizer();
+                } else {
+                    this.stopVisualizer();
+                }
             });
-            this.canvasResizeObserver.observe(canvas);
+            this.displayResizeObserver.observe(element);
         },
 
         ensureAudioContext() {
@@ -540,8 +554,8 @@ document.addEventListener('alpine:init', () => {
         // ==================== WEB AUDIO API СПЕКТРОАНАЛИЗАТОР ====================
 
         startVisualizer() {
-            if (this.visualizerRunning || !this.isPlaying || !this.canvasCtx ||
-                !this.canvasEl.clientWidth || !this.canvasEl.clientHeight) return;
+            if (this.visualizerRunning || !this.isPlaying ||
+                (!this.spectrumVisible && !this.levelMeterVisible)) return;
             this.visualizerRunning = true;
             this.renderVisualizer();
         },
@@ -552,29 +566,37 @@ document.addEventListener('alpine:init', () => {
                 cancelAnimationFrame(this.animationFrameId);
                 this.animationFrameId = null;
             }
-            const barL = document.getElementById('vu-meter-bar-l');
-            const barR = document.getElementById('vu-meter-bar-r');
-            const valL = document.getElementById('vu-meter-val-l');
-            const valR = document.getElementById('vu-meter-val-r');
-            if (barL) barL.style.width = '0%';
-            if (barR) barR.style.width = '0%';
-            if (valL) valL.textContent = '0%';
-            if (valR) valR.textContent = '0%';
+            this.updateLevelMeter(0, 0);
         },
 
         renderVisualizer() {
             if (!this.visualizerRunning) return;
 
-            // Если вкладка Плеер не активна или режим не 'spectrum' — усыпляем rAF-луп
-            const app = Alpine.store('app');
-            const isPlayerTab = app && app.activeTab === 'player';
-
-            if (!isPlayerTab || this.centerDeckMode !== 'spectrum') {
-                this.visualizerRunning = false;
-                this.animationFrameId = null;
+            if (!this.isPlaying || Alpine.store('app')?.activeTab !== 'player') {
+                this.stopVisualizer();
                 return;
             }
 
+            const freqData = new Uint8Array(32);
+            this.analyserNode?.getByteFrequencyData(freqData);
+            if (this.spectrumVisible) this.renderSpectrum(freqData);
+
+            if (this.levelMeterVisible) {
+                let sumL = 0;
+                let sumR = 0;
+                const binsPerChannel = freqData.length / 2;
+                for (let i = 0; i < binsPerChannel; i++) {
+                    sumL += freqData[i];
+                    sumR += freqData[i + binsPerChannel];
+                }
+                const maxSum = binsPerChannel * 255;
+                this.updateLevelMeter(Math.round(sumL * 100 / maxSum), Math.round(sumR * 100 / maxSum));
+            }
+
+            this.animationFrameId = requestAnimationFrame(() => this.renderVisualizer());
+        },
+
+        renderSpectrum(freqData) {
             const ctx = this.canvasCtx;
             const width = this.canvasEl.width;
             const height = this.canvasEl.height;
@@ -595,25 +617,15 @@ document.addEventListener('alpine:init', () => {
                 ctx.stroke();
             }
 
-            const binCount = 32;
-            const freqData = new Uint8Array(binCount);
-
-            if (this.analyserNode && this.isPlaying) {
-                this.analyserNode.getByteFrequencyData(freqData);
-            }
-
+            const binCount = freqData.length;
             const paddingX = 16 * (window.devicePixelRatio || 1);
             const usableWidth = width - paddingX * 2;
             const gap = 3 * (window.devicePixelRatio || 1);
             const barWidth = Math.max(2, (usableWidth - gap * (binCount - 1)) / binCount);
 
             const gravity = 0.5 * (window.devicePixelRatio || 1);
-            let sumL = 0;
-            let sumR = 0;
-
             for (let i = 0; i < binCount; i++) {
-                const val = freqData[i] || 0;
-                const normalized = val / 255;
+                const normalized = freqData[i] / 255;
                 const barHeight = Math.max(2, normalized * (height - 30));
 
                 const x = paddingX + i * (barWidth + gap);
@@ -642,26 +654,7 @@ document.addEventListener('alpine:init', () => {
                 const peakY = height - 16 - this.peakValues[i];
                 ctx.fillStyle = '#fbbf24'; // Warm amber peak dot
                 ctx.fillRect(x, peakY, barWidth, 2 * (window.devicePixelRatio || 1));
-
-                // Расчет средних для стерео VU-метра
-                if (i < 16) {
-                    sumL += val;
-                } else {
-                    sumR += val;
-                }
             }
-
-            // Обновление аналоговых VU пиков напрямую в DOM без реактивного шторма Alpine
-            const pctL = Math.min(100, Math.round((sumL / (16 * 255)) * 100));
-            const pctR = Math.min(100, Math.round((sumR / (16 * 255)) * 100));
-            const barL = document.getElementById('vu-meter-bar-l');
-            const barR = document.getElementById('vu-meter-bar-r');
-            const valL = document.getElementById('vu-meter-val-l');
-            const valR = document.getElementById('vu-meter-val-r');
-            if (barL) barL.style.width = pctL + '%';
-            if (barR) barR.style.width = pctR + '%';
-            if (valL) valL.textContent = pctL + '%';
-            if (valR) valR.textContent = pctR + '%';
 
             // Частотные подписи внизу
             ctx.fillStyle = '#52525b'; // Zinc 600
@@ -674,8 +667,17 @@ document.addEventListener('alpine:init', () => {
                 const lblX = paddingX + targetIdx * (barWidth + gap) + barWidth / 2;
                 ctx.fillText(labels[j], lblX, height - 4);
             }
+        },
 
-            this.animationFrameId = requestAnimationFrame(() => this.renderVisualizer());
+        updateLevelMeter(left, right) {
+            const barL = document.getElementById('vu-meter-bar-l');
+            const barR = document.getElementById('vu-meter-bar-r');
+            const valL = document.getElementById('vu-meter-val-l');
+            const valR = document.getElementById('vu-meter-val-r');
+            if (barL) barL.style.width = left + '%';
+            if (barR) barR.style.width = right + '%';
+            if (valL) valL.textContent = left + '%';
+            if (valR) valR.textContent = right + '%';
         },
 
         // ==================== КАРАОКЕ LRC ====================
