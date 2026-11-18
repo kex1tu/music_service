@@ -14,6 +14,7 @@ import (
 	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
+	"music-manager/internal/services/downloadstaging"
 	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/resolver"
 )
@@ -259,6 +260,24 @@ func (s *Service) DeleteJob(id string) error {
 		_ = safefs.RemoveAll(jobDir)
 	}
 	return nil
+}
+
+// FinishImport drops a ready job from the queue while preserving staging leftovers.
+func (s *Service) FinishImport(id string) (bool, error) {
+	job, ok := s.jobs.Get(id)
+	if !ok {
+		return true, nil
+	}
+	status := job.Snapshot().Status
+	if status != StatusReady && status != StatusPartialReady {
+		return false, nil
+	}
+	pending, err := downloadstaging.HasPendingImport(s.tmpSandbox, id)
+	if err != nil || pending {
+		return false, err
+	}
+	s.jobs.Delete(id)
+	return true, nil
 }
 
 // PauseQueue приостанавливает запуск новых задач в очереди. Активные задачи завершают текущий шаг.

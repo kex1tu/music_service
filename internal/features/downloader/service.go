@@ -29,6 +29,7 @@ import (
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/censorcheck"
+	"music-manager/internal/services/downloadstaging"
 	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/resolver"
 )
@@ -656,6 +657,30 @@ func (s *Service) RetryAllFailedJobs(ctx context.Context) ([]string, error) {
 
 // DeleteJob отменяет задачу и удаляет её из памяти, БД и песочницы.
 func (s *Service) DeleteJob(ctx context.Context, id string) error {
+	return s.deleteJob(ctx, id, true)
+}
+
+// FinishImport drops a ready job from the queue once its staged tracks have been consumed.
+func (s *Service) FinishImport(ctx context.Context, id string) (bool, error) {
+	job, ok := s.GetJob(id)
+	if !ok {
+		return true, nil
+	}
+	status := job.Snapshot().Status
+	if status != StatusReady && status != StatusPartialReady {
+		return false, nil
+	}
+	pending, err := downloadstaging.HasPendingImport(s.tmpSandbox, id)
+	if err != nil || pending {
+		return false, err
+	}
+	if err := s.deleteJob(ctx, id, false); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Service) deleteJob(ctx context.Context, id string, removeStaging bool) error {
 	s.jobsMu.Lock()
 	job, ok := s.jobs[id]
 	if ok {
@@ -663,15 +688,16 @@ func (s *Service) DeleteJob(ctx context.Context, id string) error {
 	}
 	s.jobsMu.Unlock()
 
-	if ok && job != nil {
+	if ok && job != nil && removeStaging {
 		job.Cancel()
 	}
 
+	var err error
 	if s.repo != nil {
-		_ = s.repo.DeleteJob(ctx, id)
+		err = s.repo.DeleteJob(ctx, id)
 	}
 
-	if s.tmpSandbox != nil {
+	if removeStaging && s.tmpSandbox != nil {
 		if jobDir, err := s.tmpSandbox.Resolve(id, false); err == nil {
 			_ = safefs.RemoveAll(jobDir)
 		}
@@ -684,7 +710,7 @@ func (s *Service) DeleteJob(ctx context.Context, id string) error {
 	}
 	s.timersMu.Unlock()
 
-	return nil
+	return err
 }
 
 // ClearCompletedJobs очищает завершенные, упавшие и отмененные задачи.
@@ -1713,28 +1739,21 @@ func (s *Service) cleanerLoop(ctx context.Context) {
 }
 
 func (s *Service) cleanOldTempDirs() {
-	if s.tmpSandbox == nil {
-		return
-	}
-	root := s.tmpSandbox.Root()
-	entries, err := safefs.ReadDir(root)
-	if err != nil {
-		return
-	}
-	cutoff := time.Now().Add(-s.cleanerMaxAge)
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	downloadstaging.CleanOldDirs(s.tmpSandbox, s.cleanerMaxAge, func(id string) bool {
+		s.jobsMu.RLock()
+		job := s.jobs[id]
+		s.jobsMu.RUnlock()
+		if job != nil && job.Snapshot().Status != StatusCancelled {
+			return false
 		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
+		if s.repo == nil {
+			return true
 		}
-		if info.ModTime().Before(cutoff) {
-			dirPath := filepath.Join(root, entry.Name())
-			_ = safefs.RemoveAll(dirPath)
-		}
-	}
+		stored, err := s.repo.GetJob(ctx, id)
+		return err == nil && (stored == nil || stored.Status == StatusCancelled)
+	})
 }
 
 // JobRegistry предоставляет фасад доступа к реестру задач в стиле Jobs().

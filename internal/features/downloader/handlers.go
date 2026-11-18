@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"music-manager/internal/core/mediaexec"
 	"music-manager/internal/core/safefs"
 	"music-manager/internal/id3"
+	"music-manager/internal/services/downloadstaging"
 	"music-manager/internal/services/resolver"
 )
 
@@ -190,6 +192,12 @@ func (m *Module) GetJobTracks(w http.ResponseWriter, r *http.Request) {
 		coverURL = &c
 	}
 
+	if snap.Status == StatusReady || snap.Status == StatusPartialReady {
+		snap.Tracks = slices.DeleteFunc(snap.Tracks, func(track resolver.ResolvedTrack) bool {
+			return track.ConvertedPath != nil && downloadstaging.TrackMissing(m.service.tmpSandbox, *track.ConvertedPath)
+		})
+	}
+
 	resp := DownloadTracksResponse{
 		JobID:           snap.ID,
 		AlbumArtist:     albumArtist,
@@ -217,7 +225,20 @@ func (m *Module) GetDownloadTracks(w http.ResponseWriter, r *http.Request) {
 // DELETE /downloads/{id}
 func (m *Module) DeleteJob(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	_ = m.service.DeleteJob(r.Context(), id)
+	if r.URL.Query().Get("imported") == "true" {
+		finished, err := m.service.FinishImport(r.Context(), id)
+		if err != nil {
+			httputil.RespondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !finished {
+			httputil.RespondJSON(w, http.StatusOK, DeleteResponse{Status: "pending", JobID: id})
+			return
+		}
+	} else {
+		_ = m.service.DeleteJob(r.Context(), id)
+	}
+
 	httputil.RespondJSON(w, http.StatusOK, DeleteResponse{Status: "deleted", JobID: id})
 }
 

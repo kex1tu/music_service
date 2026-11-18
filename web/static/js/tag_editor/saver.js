@@ -119,6 +119,7 @@ window.TagSaver = {
             }
 
             const result = await res.json();
+            window.api.tags.requireCompleteBatch(result);
             const totalSavedReleases = component.releases.length;
             const toastMsg = totalSavedReleases > 1
                 ? `Успешно сохранено ${totalSavedReleases} релизов (${component.tracks.length} треков) в медиатеку!`
@@ -128,7 +129,7 @@ window.TagSaver = {
             if (component.jobIds && component.jobIds.length > 0) {
                 try {
                     await Promise.allSettled(
-                        component.jobIds.map((jid) => window.api.raw(`/downloads/${jid}`, { method: 'DELETE' }))
+                        component.jobIds.map((jid) => window.api.downloader.finishImport(jid))
                     );
                     if (Alpine.store('app').queue) {
                         await Alpine.store('app').queue.fetchQueue();

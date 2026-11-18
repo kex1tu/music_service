@@ -477,7 +477,8 @@ func (s *Service) BatchSaveTags(ctx context.Context, req BatchSaveRequest) (*Bat
 	}
 
 	return &BatchSaveResponse{
-		Success:        true,
+		Success:        res.Complete(),
+		TrackResults:   res.TrackResults,
 		DestinationDir: res.DestinationDir,
 		Tracks:         res.Tracks,
 	}, nil

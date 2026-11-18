@@ -70,7 +70,7 @@ func TestFileHandler_FixAllDuplicates(t *testing.T) {
 	f1 := filepath.Join(albumDir, "01. Song.mp3")
 	f2 := filepath.Join(albumDir, "01. Song (1).mp3")
 	_ = os.WriteFile(f1, []byte("good mp3"), 0644)
-	_ = os.WriteFile(f2, []byte("duplicate mp3"), 0644)
+	_ = os.WriteFile(f2, []byte("good mp3"), 0644)
 
 	// Insert artist first
 	aRes, err := database.Conn().Exec("INSERT INTO artists (name, clean_name) VALUES ('TestArtist', 'testartist')")

@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -627,5 +628,81 @@ func TestTagEditor_Repository_Operations(t *testing.T) {
 	accCleared, _, _, _, _ := repo.LoadMusicBrainzTokens(ctx)
 	if accCleared != "" {
 		t.Errorf("expected empty token after clear, got %q", accCleared)
+	}
+}
+
+func TestTagEditor_StagingPartialImportAndReplay(t *testing.T) {
+	env, _ := setupTagEditorTest(t)
+	const dir = "job/converted"
+	first := env.CreateDummyFile(env.TmpSandbox, dir+"/first.mp3", []byte("first audio"))
+	second := env.CreateDummyFile(env.TmpSandbox, dir+"/second.mp3", []byte("second audio"))
+	lrc := env.CreateDummyFile(env.TmpSandbox, dir+"/second.lrc", []byte("second lyrics"))
+	unknown := env.CreateDummyFile(env.TmpSandbox, "job/notes.dat", []byte("keep"))
+	firstTrack := id3.TrackTags{Path: dir + "/first.mp3", Title: "First", TrackNumber: 1}
+	secondTrack := id3.TrackTags{Path: dir + "/second.mp3", Title: "Second", TrackNumber: 2}
+
+	save := func(tracks ...id3.TrackTags) tageditor.BatchSaveResponse {
+		t.Helper()
+		req := tageditor.BatchSaveRequest{SourceDir: "tmp_downloads/" + dir, Tracks: tracks}
+		req.Album.Album = "Album"
+		req.Album.AlbumArtist = "Artist"
+		resp := env.PostJSON("/tags/batch", req)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("unexpected status %d: %s", resp.StatusCode, env.ReadBody(resp))
+		}
+		var result tageditor.BatchSaveResponse
+		env.DecodeJSON(resp, &result)
+		return result
+	}
+	checkStatuses := func(res tageditor.BatchSaveResponse, statuses ...string) {
+		t.Helper()
+		if len(res.TrackResults) != len(statuses) {
+			t.Fatalf("unexpected track results: %+v", res.TrackResults)
+		}
+		for i, status := range statuses {
+			if res.TrackResults[i].Status != status {
+				t.Fatalf("expected %q at index %d, got %+v", status, i, res.TrackResults[i])
+			}
+		}
+	}
+
+	missing := id3.TrackTags{Path: dir + "/missing.mp3", Title: "Missing"}
+	result := save(missing, firstTrack)
+	checkStatuses(result, "missing", "moved")
+	if result.Success || len(result.Tracks) != 1 || result.TrackResults[1].DestinationPath != result.Tracks[0].Path {
+		t.Fatalf("unexpected partial result: %+v", result)
+	}
+	if _, err := os.Stat(first); !os.IsNotExist(err) {
+		t.Fatalf("moved MP3 remains in staging: %v", err)
+	}
+	for _, path := range []string{second, lrc, unknown} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("unselected file should remain: %v", err)
+		}
+	}
+
+	checkStatuses(save(firstTrack), "missing")
+	importedSecond := save(secondTrack)
+	checkStatuses(importedSecond, "moved")
+	if !importedSecond.Success {
+		t.Fatalf("second import failed: %+v", importedSecond)
+	}
+	secondDest, err := env.MusicSandbox.Resolve(importedSecond.Tracks[0].Path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := os.ReadFile(strings.TrimSuffix(secondDest, ".mp3") + ".lrc")
+	if err != nil || string(text) != "second lyrics" {
+		t.Fatalf("second track lost its lyrics: %q, %v", text, err)
+	}
+	entries, err := filepath.Glob(filepath.Join(filepath.Dir(secondDest), "*.mp3"))
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("expected exactly two MP3s after retry: %v, %v", entries, err)
+	}
+	if _, err := os.Stat(filepath.Dir(second)); !os.IsNotExist(err) {
+		t.Fatalf("empty converted directory still exists: %v", err)
+	}
+	if _, err := os.Stat(unknown); err != nil {
+		t.Fatalf("job file should remain: %v", err)
 	}
 }

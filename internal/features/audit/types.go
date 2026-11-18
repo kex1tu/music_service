@@ -107,6 +107,7 @@ type ResolveDuplicatesRequest struct {
 
 // FixDuplicatesResponse — результат операции разрешения дубликатов.
 type FixDuplicatesResponse struct {
+	ReviewGroups int      `json:"review_groups,omitempty"`
 	Success      bool     `json:"success"`
 	DeletedCount int      `json:"deleted_count"`
 	DeletedFiles []string `json:"deleted_files"`
@@ -469,4 +470,3 @@ type NormalizeNavidromeResponse struct {
 	Success bool            `json:"success"`
 	Report  NavidromeReport `json:"report"`
 }
-
