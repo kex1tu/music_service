@@ -1,9 +1,4 @@
--- DDL схема базы данных медиатеки Music Downloader & Tag Manager (SQLite WAL)
-
-PRAGMA journal_mode = WAL;
-PRAGMA busy_timeout = 5000;
-PRAGMA synchronous = NORMAL;
-PRAGMA foreign_keys = ON;
+-- Target schema for migration 1. Add a new migration for subsequent changes.
 
 -- 1. Исполнители
 CREATE TABLE IF NOT EXISTS artists (
