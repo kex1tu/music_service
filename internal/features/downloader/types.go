@@ -675,7 +675,8 @@ type ParseReleaseURLRequest struct {
 
 // SwitchReleaseSourceRequest — запрос применения источника цельного релиза.
 type SwitchReleaseSourceRequest struct {
-	Backfill      *db.BackfillSelection    `json:"-"`
+	MissingOnly   bool                     `json:"missing_only,omitempty"`
+	Backfill      []db.BackfillSelection   `json:"-"`
 	TargetTracks  []resolver.ResolvedTrack `json:"target_tracks,omitempty"`
 	VersionPolicy resolver.VersionPolicy   `json:"version_policy"`
 	JobID         string                   `json:"job_id"`

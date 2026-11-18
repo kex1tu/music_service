@@ -159,7 +159,7 @@ func (r *Repository) SearchLibrary(ctx context.Context, query string, limit int)
 	FROM tracks t
 	JOIN albums al ON t.album_id = al.id
 	JOIN artists ar ON t.artist_id = ar.id
-	WHERE instr(music_search_key(t.title), ?) > 0 OR instr(music_search_key(t.clean_title), ?) > 0
+	WHERE instr(t.search_title, ?) > 0 OR instr(t.search_clean_title, ?) > 0
 	LIMIT ?;
 	`
 	tRows, err := r.db.QueryContext(ctx, trackQuery, term, term, limit)
@@ -198,7 +198,7 @@ func (r *Repository) SearchLibrary(ctx context.Context, query string, limit int)
 	SELECT al.id, al.title, ar.name AS artist, al.year, al.has_cover, al.cover_path, al.folder_path
 	FROM albums al
 	JOIN artists ar ON al.artist_id = ar.id
-	WHERE instr(music_search_key(al.title), ?) > 0 OR instr(music_search_key(al.clean_title), ?) > 0
+	WHERE instr(al.search_title, ?) > 0 OR instr(al.search_clean_title, ?) > 0
 	LIMIT ?;
 	`
 	aRows, err := r.db.QueryContext(ctx, albumQuery, term, term, limit)
@@ -230,7 +230,7 @@ func (r *Repository) SearchLibrary(ctx context.Context, query string, limit int)
 	artistQuery := `
 	SELECT id, name
 	FROM artists
-	WHERE instr(music_search_key(name), ?) > 0
+	WHERE instr(clean_name, ?) > 0
 	LIMIT ?;
 	`
 	arRows, err := r.db.QueryContext(ctx, artistQuery, term, limit)

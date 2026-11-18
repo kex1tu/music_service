@@ -4,7 +4,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
+	"music-manager/internal/services/resolver"
 )
 
 func TestBackfillKeepsSelectedDiscAndCatalogIDAfterReload(t *testing.T) {
@@ -55,5 +57,45 @@ func TestBackfillKeepsSelectedDiscAndCatalogIDAfterReload(t *testing.T) {
 	ambiguous := &BackfillRequest{AlbumID: "44", TrackNumbers: []int{1}}
 	if err := svc.freezeBackfillSelection(ctx, "Live", ambiguous); err == nil {
 		t.Fatal("ambiguous legacy track number selected more than one disc")
+	}
+}
+
+func TestManualReleaseBackfillPersistsOnlyItsCatalogPositions(t *testing.T) {
+	ctx := t.Context()
+	database, err := db.Open(filepath.Join(t.TempDir(), "backfill.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	music, err := sandbox.NewPathSandbox(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(database.Conn())
+	svc := NewService(ServiceConfig{Repo: repo, MusicSandbox: music})
+	t.Cleanup(func() {
+		if err := svc.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	const source = "https://music.youtube.com/watch?v=fixture"
+	result, err := svc.SwitchReleaseSource(ctx, SwitchReleaseSourceRequest{
+		TargetPath: "CD edition", SourceURL: source, MissingOnly: true,
+		TrackMapping: map[int]string{0: source},
+		TargetTracks: []resolver.ResolvedTrack{{TrackID: "dz_442", TrackNumber: 1, DiscNumber: 2, Title: "Intro"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := repo.GetJob(ctx, result.JobID)
+	want := db.BackfillSelection{TrackPosition: db.ReleasePosition(2, 1), DeezerID: "442"}
+	if err != nil || job == nil || !job.IsBackfill || job.Backfill == nil || len(job.Backfill.Positions) != 1 ||
+		job.Backfill.Positions[0] != want || job.TargetAlbumPath == nil || *job.TargetAlbumPath != "CD edition" {
+		t.Fatalf("wrong persisted manual backfill: %+v, %v", job, err)
+	}
+	_, tracks, err := svc.resolveBackfill(ctx, job)
+	if err != nil || len(tracks) != 1 || tracks[0].TrackID != "dz_442" ||
+		tracks[0].DiscNumber != 2 || tracks[0].AudioSourceURL != source {
+		t.Fatalf("wrong resolved manual backfill: %+v, %v", tracks, err)
 	}
 }

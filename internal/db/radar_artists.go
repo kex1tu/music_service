@@ -68,10 +68,13 @@ func (db *DB) GetTrackedArtists(ctx context.Context, onlyFollowed bool) ([]Track
 		ta.created_at, ta.updated_at
 	FROM tracked_artists ta
 	LEFT JOIN (
-		SELECT ar.clean_name, COUNT(DISTINCT a.id) as cnt
-		FROM artists ar
-		JOIN albums a ON (a.artist_id = ar.id OR a.id IN (SELECT album_id FROM tracks WHERE artist_id = ar.id))
-		GROUP BY ar.clean_name
+		SELECT clean_name, COUNT(DISTINCT album_id) as cnt
+		FROM (
+			SELECT ar.clean_name, a.id AS album_id FROM albums a JOIN artists ar ON ar.id = a.artist_id
+			UNION ALL
+			SELECT ar.clean_name, t.album_id FROM tracks t JOIN artists ar ON ar.id = t.artist_id
+		)
+		GROUP BY clean_name
 	) al_cnt ON al_cnt.clean_name = ta.clean_name
 	LEFT JOIN (
 		SELECT ar.clean_name, COUNT(t.id) as cnt
@@ -136,10 +139,13 @@ func (db *DB) GetTrackedArtistByName(ctx context.Context, name string) (*Tracked
 		ta.created_at, ta.updated_at
 	FROM tracked_artists ta
 	LEFT JOIN (
-		SELECT ar.clean_name, COUNT(DISTINCT a.id) as cnt
-		FROM artists ar
-		JOIN albums a ON (a.artist_id = ar.id OR a.id IN (SELECT album_id FROM tracks WHERE artist_id = ar.id))
-		GROUP BY ar.clean_name
+		SELECT clean_name, COUNT(DISTINCT album_id) as cnt
+		FROM (
+			SELECT ar.clean_name, a.id AS album_id FROM albums a JOIN artists ar ON ar.id = a.artist_id
+			UNION ALL
+			SELECT ar.clean_name, t.album_id FROM tracks t JOIN artists ar ON ar.id = t.artist_id
+		)
+		GROUP BY clean_name
 	) al_cnt ON al_cnt.clean_name = ta.clean_name
 	LEFT JOIN (
 		SELECT ar.clean_name, COUNT(t.id) as cnt

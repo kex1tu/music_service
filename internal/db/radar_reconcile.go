@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"music-manager/internal/core/textkey"
-	"music-manager/internal/id3"
 )
 
 var artistSeparator = regexp.MustCompile(`\s+(?:feat\.?|ft\.?|vs\.?)\s+|[,;&/\\\x00]+`)
@@ -39,14 +38,13 @@ type radarAlbum struct {
 }
 
 func (db *DB) radarAlbumCandidates(ctx context.Context, release RadarReleaseEntity) ([]radarAlbum, error) {
-	key := id3.CleanReleaseTitle(release.Title)
 	rows, err := db.conn.QueryContext(ctx, `
-		SELECT a.id, a.title, ar.name, COALESCE(a.album_artist, ''), COALESCE(a.year, 0),
+		SELECT a.id, ar.name, COALESCE(a.album_artist, ''), COALESCE(a.year, 0),
 			COALESCE(a.deezer_id, ''), COALESCE(a.is_complete, 0),
 			COALESCE(a.expected_tracks_count, 0)
 		FROM albums a JOIN artists ar ON a.artist_id = ar.id
-		WHERE a.clean_title IN (?, ?) OR a.deezer_id = NULLIF(?, '')`,
-		key, textkey.Search(release.Title), release.DeezerID)
+		WHERE a.search_title = ? OR a.deezer_id = NULLIF(?, '')`,
+		textkey.Search(release.Title), release.DeezerID)
 	if err != nil {
 		return nil, err
 	}
@@ -54,9 +52,9 @@ func (db *DB) radarAlbumCandidates(ctx context.Context, release RadarReleaseEnti
 	var matches []radarAlbum
 	for rows.Next() {
 		var a radarAlbum
-		var title, artist, albumArtist string
+		var artist, albumArtist string
 		var year int
-		if err := rows.Scan(&a.id, &title, &artist, &albumArtist, &year, &a.deezerID, &a.complete, &a.expected); err != nil {
+		if err := rows.Scan(&a.id, &artist, &albumArtist, &year, &a.deezerID, &a.complete, &a.expected); err != nil {
 			return nil, err
 		}
 		if !radarArtistMatches(release.ArtistName, artist) && !radarArtistMatches(release.ArtistName, albumArtist) {
@@ -66,8 +64,7 @@ func (db *DB) radarAlbumCandidates(ctx context.Context, release RadarReleaseEnti
 			if a.deezerID != release.DeezerID {
 				continue
 			}
-		} else if textkey.Search(title) != textkey.Search(release.Title) ||
-			(year > 0 && release.Year > 0 && year != release.Year) {
+		} else if year > 0 && release.Year > 0 && year != release.Year {
 			continue
 		}
 		matches = append(matches, a)
@@ -135,18 +132,18 @@ func (r RadarReleaseEntity) isSingleTrack() bool {
 func (db *DB) radarSingleInLibrary(ctx context.Context, release RadarReleaseEntity) (bool, error) {
 	title, artist := singleTrackCredit(release)
 	rows, err := db.conn.QueryContext(ctx, `
-		SELECT t.title, a.name FROM tracks t JOIN artists a ON a.id = t.artist_id
-		WHERE t.clean_title IN (?, ?)`, id3.CleanReleaseTitle(title), textkey.Search(title))
+		SELECT a.name FROM tracks t JOIN artists a ON a.id = t.artist_id
+		WHERE t.search_title = ?`, textkey.Search(title))
 	if err != nil {
 		return false, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var localTitle, localArtist string
-		if err := rows.Scan(&localTitle, &localArtist); err != nil {
+		var localArtist string
+		if err := rows.Scan(&localArtist); err != nil {
 			return false, err
 		}
-		if textkey.Search(title) == textkey.Search(localTitle) && radarArtistMatches(artist, localArtist) {
+		if radarArtistMatches(artist, localArtist) {
 			return true, nil
 		}
 	}
@@ -165,7 +162,7 @@ func (db *DB) radarSingleTrackIndex(ctx context.Context, releases []RadarRelease
 	if len(titles) == 0 {
 		return tracks, nil
 	}
-	rows, err := db.conn.QueryContext(ctx, `SELECT t.title, ar.name FROM tracks t JOIN artists ar ON ar.id=t.artist_id`)
+	rows, err := db.conn.QueryContext(ctx, `SELECT t.search_title, ar.name FROM tracks t JOIN artists ar ON ar.id=t.artist_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -175,9 +172,8 @@ func (db *DB) radarSingleTrackIndex(ctx context.Context, releases []RadarRelease
 		if err := rows.Scan(&title, &artist); err != nil {
 			return nil, err
 		}
-		key := textkey.Search(title)
-		if titles[key] {
-			tracks[key] = append(tracks[key], artist)
+		if titles[title] {
+			tracks[title] = append(tracks[title], artist)
 		}
 	}
 	return tracks, rows.Err()
@@ -228,8 +224,13 @@ func RadarReleaseRecent(date string, year int, now time.Time) bool {
 func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
 	rows, err := db.conn.QueryContext(ctx, `
 		SELECT id, artist_name, title, release_type, COALESCE(release_date, ''), COALESCE(year, 0),
-			COALESCE(track_count, 0), COALESCE(deezer_id, ''), status, COALESCE(tracklist, 'null')
-		FROM radar_releases WHERE status IN ('new', 'downloaded', 'in_library', 'missing', 'version_exists')`)
+			COALESCE(track_count, 0), COALESCE(deezer_id, ''), status, COALESCE(tracklist, '')
+		FROM radar_releases rr
+		WHERE status IN ('new', 'downloaded', 'in_library', 'missing', 'version_exists')
+			AND (status = 'in_library' OR rr.release_type <> 'single' OR rr.track_count > 1
+				OR rr.tracklist IS NOT NULL OR EXISTS (
+					SELECT 1 FROM tracks t WHERE t.search_title = rr.search_title
+				))`)
 	if err != nil {
 		return 0, err
 	}
@@ -242,9 +243,11 @@ func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
 			rows.Close()
 			return 0, err
 		}
-		if err := json.Unmarshal([]byte(tracklist), &r.Tracklist); err != nil {
-			rows.Close()
-			return 0, err
+		if tracklist != "" {
+			if err := json.Unmarshal([]byte(tracklist), &r.Tracklist); err != nil {
+				rows.Close()
+				return 0, err
+			}
 		}
 		releases = append(releases, r)
 	}

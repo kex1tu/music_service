@@ -98,6 +98,9 @@ func (s *Service) freezeBackfillSelection(ctx context.Context, folder string, se
 }
 
 func (s *Service) resolveBackfill(ctx context.Context, job *Job) (*resolver.ReleaseMetadata, []resolver.ResolvedTrack, error) {
+	if job.Source == "release_picker" && job.Backfill != nil && len(job.Tracks) > 0 {
+		return &job.AlbumMetadata, job.Tracks, nil
+	}
 	var selection BackfillRequest
 	if job.Backfill != nil {
 		selection = *job.Backfill

@@ -44,6 +44,10 @@ func Open(dbPath string) (*DB, error) {
 		conn.Close()
 		return nil, fmt.Errorf("миграция модели релизов: %w", err)
 	}
+	if err := db.initLibrarySearchKeys(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("ключи Unicode-поиска: %w", err)
+	}
 	if _, err := conn.Exec(`INSERT INTO tracked_artists (name, clean_name, is_followed)
 		SELECT MIN(ar.name), music_search_key(ar.name), 1 FROM artists ar
 		WHERE NOT EXISTS (SELECT 1 FROM tracked_artists ta WHERE ta.clean_name = music_search_key(ar.name))

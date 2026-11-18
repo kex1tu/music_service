@@ -181,3 +181,29 @@ func mustReleaseSQL(t *testing.T, conn *sql.DB, query string) {
 		t.Fatal(err)
 	}
 }
+
+func TestUnicodeLibrarySearchFollowsRetag(t *testing.T) {
+	ctx := t.Context()
+	db, err := Open(filepath.Join(t.TempDir(), "search.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mustReleaseSQL(t, db.conn, `
+		INSERT INTO artists (id, name, clean_name) VALUES (1, 'Ёлка', 'ёлка');
+		INSERT INTO albums (id, title, clean_title, artist_id, folder_path) VALUES (1, 'Концерт', 'концерт', 1, 'Live');
+		INSERT INTO tracks (id, album_id, artist_id, title, clean_title, file_path, file_size, mtime)
+		VALUES (1, 1, 1, 'Песня', 'песня', 'Live/01.mp3', 1, 1);
+	`)
+	for _, query := range []string{"ПЕСНЯ", "песня"} {
+		result, err := db.SearchLibrary(ctx, query, 10)
+		if err != nil || len(result.Tracks) != 1 || result.Tracks[0].Title != "Песня" {
+			t.Fatalf("Unicode search %q: %+v, %v", query, result, err)
+		}
+	}
+	mustReleaseSQL(t, db.conn, "UPDATE tracks SET title = 'Съёмка', clean_title = 'съёмка' WHERE id = 1")
+	result, err := db.SearchLibrary(ctx, "СЪЁМКА", 10)
+	if err != nil || len(result.Tracks) != 1 || result.Tracks[0].Title != "Съёмка" {
+		t.Fatalf("Unicode search after updating title: %+v, %v", result, err)
+	}
+}

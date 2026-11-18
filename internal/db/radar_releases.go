@@ -61,30 +61,25 @@ func (db *DB) UpsertRadarRelease(ctx context.Context, r *RadarReleaseEntity) err
 	}
 	key := RadarIdentityKey(r.ArtistName, r.Title, r.ReleaseType, r.DeezerID, r.MusicBrainzID, r.ShazamID)
 	fallback := RadarIdentityKey(r.ArtistName, r.Title, r.ReleaseType, "", "", "")
-	tx, err := db.conn.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if key != fallback {
-		if _, err := tx.ExecContext(ctx, `UPDATE radar_releases SET identity_key = ?1
-			WHERE identity_key = ?2 AND NOT EXISTS (SELECT 1 FROM radar_releases WHERE identity_key = ?1)`,
-			key, fallback); err != nil {
-			return err
-		}
-	}
-	err = tx.QueryRowContext(ctx, `
+	return db.conn.QueryRowContext(ctx, `
 		INSERT INTO radar_releases (artist_name, clean_artist_name, title, clean_title, release_type,
 			release_date, year, cover_url, track_count, deezer_id, musicbrainz_id, shazam_id,
 			source_url, status, is_radar, identity_key, tracklist)
 		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-			CASE WHEN ?16 = ?18 THEN COALESCE((
-				SELECT MIN(identity_key) FROM radar_releases
-				WHERE clean_artist_name = ?2 AND music_search_key(title) = music_search_key(?3)
-					AND release_type = ?5 AND identity_key IS NOT NULL
-				HAVING COUNT(*) = 1
-			), ?16) ELSE ?16 END, ?17)
+			CASE
+				WHEN ?16 = ?18 THEN COALESCE((
+					SELECT MIN(identity_key) FROM radar_releases
+					WHERE clean_artist_name = ?2 AND search_title = music_search_key(?3)
+						AND release_type = ?5 AND identity_key IS NOT NULL
+					HAVING COUNT(*) = 1
+				), ?16)
+				WHEN NOT EXISTS (SELECT 1 FROM radar_releases WHERE identity_key = ?16)
+					AND EXISTS (SELECT 1 FROM radar_releases WHERE identity_key = ?18)
+				THEN ?18
+				ELSE ?16
+			END, ?17)
 		ON CONFLICT(identity_key) DO UPDATE SET
+			identity_key = CASE WHEN ?16 <> ?18 THEN ?16 ELSE radar_releases.identity_key END,
 			artist_name = CASE WHEN length(excluded.artist_name) > length(radar_releases.artist_name)
 				THEN excluded.artist_name ELSE radar_releases.artist_name END,
 			clean_artist_name = CASE WHEN length(excluded.artist_name) > length(radar_releases.artist_name)
@@ -108,10 +103,6 @@ func (db *DB) UpsertRadarRelease(ctx context.Context, r *RadarReleaseEntity) err
 		r.ReleaseDate, r.Year, r.CoverURL, r.TrackCount, r.DeezerID, r.MusicBrainzID, r.ShazamID,
 		r.SourceURL, r.Status, r.IsRadar && r.Status == "new", key, tracklist, fallback,
 	).Scan(&r.ID, &r.Status, &r.IsRadar)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 // GetRadarFeed возвращает ленту новинок (is_radar = 1) с фильтрацией и пагинацией.
@@ -136,9 +127,9 @@ func (db *DB) GetRadarFeed(ctx context.Context, releaseType, search string, limi
 
 	search = strings.TrimSpace(search)
 	if search != "" {
-		conditions = append(conditions, "(instr(rr.clean_artist_name, ?) > 0 OR instr(music_search_key(rr.title), ?) > 0)")
+		conditions = append(conditions, "(instr(rr.clean_artist_name, ?) > 0 OR instr(rr.search_title, ?) > 0 OR instr(rr.search_clean_title, ?) > 0)")
 		pattern := textkey.Search(search)
-		args = append(args, pattern, pattern)
+		args = append(args, pattern, pattern, pattern)
 	}
 
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")

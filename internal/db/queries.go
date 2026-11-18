@@ -193,7 +193,7 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (*Sear
 	FROM tracks t
 	JOIN albums al ON t.album_id = al.id
 	JOIN artists ar ON t.artist_id = ar.id
-	WHERE instr(music_search_key(t.title), ?) > 0 OR instr(music_search_key(t.clean_title), ?) > 0
+	WHERE instr(t.search_title, ?) > 0 OR instr(t.search_clean_title, ?) > 0
 	LIMIT ?;
 	`
 	tRows, err := db.conn.QueryContext(ctx, trackQuery, term, term, limit)
@@ -237,7 +237,7 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (*Sear
 	       (SELECT COUNT(1) FROM tracks WHERE album_id = al.id) AS track_count
 	FROM albums al
 	JOIN artists ar ON al.artist_id = ar.id
-	WHERE instr(music_search_key(al.title), ?) > 0 OR instr(music_search_key(al.clean_title), ?) > 0
+	WHERE instr(al.search_title, ?) > 0 OR instr(al.search_clean_title, ?) > 0
 	LIMIT ?;
 	`
 	aRows, err := db.conn.QueryContext(ctx, albumQuery, term, term, limit)
@@ -277,11 +277,11 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (*Sear
 	FROM artists ar
 	LEFT JOIN tracks t ON t.artist_id = ar.id
 	LEFT JOIN albums al ON al.artist_id = ar.id
-	WHERE instr(music_search_key(ar.name), ?) > 0 OR instr(music_search_key(ar.clean_name), ?) > 0
+	WHERE instr(ar.clean_name, ?) > 0
 	GROUP BY ar.id, ar.name
 	LIMIT ?;
 	`
-	arRows, err := db.conn.QueryContext(ctx, artistQuery, term, term, limit)
+	arRows, err := db.conn.QueryContext(ctx, artistQuery, term, limit)
 	if err == nil {
 		defer arRows.Close()
 		for arRows.Next() {

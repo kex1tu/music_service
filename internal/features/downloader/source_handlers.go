@@ -250,9 +250,9 @@ func (m *Module) BindBackfillSource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	position := db.ReleasePosition(req.DiscNumber, req.TrackNumber)
-	var backfill *db.BackfillSelection
+	var backfill []db.BackfillSelection
 	if req.Path != "" && position.TrackNumber > 0 {
-		backfill = &db.BackfillSelection{TrackPosition: position, DeezerID: req.DeezerID}
+		backfill = []db.BackfillSelection{{TrackPosition: position, DeezerID: req.DeezerID}}
 	}
 	selection, err := m.service.SwitchReleaseSource(r.Context(), SwitchReleaseSourceRequest{
 		SourceURL: req.TargetURL, TargetPath: req.Path, VersionPolicy: req.VersionPolicy, Backfill: backfill,
