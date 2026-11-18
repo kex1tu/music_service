@@ -158,6 +158,130 @@
             </div>
         </template>
         <template x-if="tagViewMode === 'tracks' && !tagIssuesLoading && tagIssues.length > 0">
+            <div>
+                <!-- Мобильный вид (< md): Треки -->
+                <div class="md:hidden divide-y divide-surface-borderSubtle">
+                    <div class="px-3.5 py-2.5 bg-surface-base/70 flex items-center justify-between gap-2">
+                        <label class="flex items-center space-x-2 text-xs text-content-secondary cursor-pointer select-none">
+                            <input
+                                type="checkbox"
+                                :checked="tagIssues.length > 0 && selectedPaths.length === tagIssues.length"
+                                @change="toggleSelectAll()"
+                                aria-label="Выбрать все треки для исправления"
+                                class="w-4 h-4 rounded border-surface-border bg-surface-input text-brand focus:ring-0 focus:ring-offset-0 cursor-pointer" />
+                            <span>Выбрать все (<span class="font-mono text-content-primary" x-text="tagIssues.length"></span>)</span>
+                        </label>
+                        <span class="text-[11px] font-mono text-content-muted" x-show="selectedPaths.length > 0">
+                            Выбрано: <span class="text-brand font-bold" x-text="selectedPaths.length"></span>
+                        </span>
+                    </div>
+                    <template x-for="item in ($store.app.isDesktopLayout ? [] : tagIssues)" :key="'mob-' + item.file_path">
+                        <div class="p-3.5 space-y-2.5 transition" :class="isSelected(item.file_path) ? 'bg-sky-950/20' : ''">
+                            <div class="flex items-start gap-2.5">
+                                <input
+                                    type="checkbox"
+                                    :checked="isSelected(item.file_path)"
+                                    @change="toggleSelectItem(item.file_path)"
+                                    :aria-label="'Выбрать трек ' + item.title"
+                                    class="mt-0.5 w-4 h-4 rounded border-surface-border bg-surface-input text-brand focus:ring-0 focus:ring-offset-0 cursor-pointer shrink-0" />
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-start justify-between gap-2">
+                                        <div class="font-medium text-sm text-white truncate flex-1" x-text="item.title" :title="item.title"></div>
+                                        <span
+                                            class="shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
+                                            :class="{
+                                                'bg-brand-muted text-brand border border-brand/30': item.severity === 'safe_autofix',
+                                                'bg-amber-500/20 text-amber-300 border border-amber-500/30': item.severity === 'review_needed',
+                                                'bg-blue-500/20 text-blue-300 border border-blue-500/30': item.severity === 'info'
+                                            }"
+                                            x-text="{
+                                                'safe_autofix': 'Авто',
+                                                'review_needed': 'Проверка',
+                                                'info': 'Инфо'
+                                            }[item.severity] || item.severity">
+                                        </span>
+                                    </div>
+                                    <div class="text-xs text-content-secondary truncate mt-0.5" x-text="item.artist" :title="item.artist"></div>
+                                    <div class="text-[11px] text-content-muted truncate font-mono mt-0.5" x-text="item.file_path" :title="item.file_path"></div>
+                                </div>
+                            </div>
+
+                            <!-- Дефекты -->
+                            <div class="flex flex-wrap gap-1">
+                                <template x-for="iss in item.issues" :key="'mob-' + item.file_path + '-' + iss">
+                                    <span
+                                        class="px-2 py-0.5 rounded text-[11px] font-medium"
+                                        :class="{
+                                            'bg-red-500/10 text-red-400 border border-red-500/20': iss === 'dirty_title',
+                                            'bg-purple-500/10 text-purple-400 border border-purple-500/20': iss === 'unparsed_feat',
+                                            'bg-amber-500/10 text-amber-400 border border-amber-500/20': iss === 'label_as_artist',
+                                            'bg-blue-500/10 text-blue-400 border border-blue-500/20': iss === 'artist_in_title',
+                                            'bg-brand/10 text-brand border border-brand/20': iss === 'literal_backslash_artist',
+                                            'bg-red-600/10 text-red-400 border border-red-600/20': iss === 'censored_version',
+                                            'bg-gray-500/10 text-gray-400 border border-gray-500/20': iss === 'missing_year' || iss === 'missing_album' || iss === 'track_num_in_title'
+                                        }"
+                                        x-text="{
+                                            'dirty_title': 'Клиповый мусор',
+                                            'unparsed_feat': 'Нераспарсен feat',
+                                            'label_as_artist': 'Канал / Лейбл',
+                                            'artist_in_title': 'Дубль артиста',
+                                            'literal_backslash_artist': 'Navidrome \\\\',
+                                            'track_num_in_title': 'Номер в названии',
+                                            'missing_year': 'Нет года',
+                                            'missing_album': 'Нет альбома',
+                                            'censored_version': 'Цензурированная версия'
+                                        }[iss] || iss">
+                                    </span>
+                                </template>
+                            </div>
+
+                            <!-- Предлагаемые чистые теги -->
+                            <div class="bg-surface-base/70 border border-surface-border/60 rounded-lg p-2.5 space-y-0.5">
+                                <div class="text-xs font-medium text-brand truncate" x-text="item.proposed.title" :title="item.proposed.title"></div>
+                                <div class="text-xs text-teal-400/90 truncate" x-text="item.proposed.artist" :title="item.proposed.artist"></div>
+                                <template x-if="item.proposed.album && item.proposed.album !== item.album">
+                                    <div class="text-[11px] text-content-muted truncate" x-text="'Альбом: ' + item.proposed.album"></div>
+                                </template>
+                            </div>
+
+                            <!-- Действия -->
+                            <div class="flex flex-wrap items-center gap-1.5">
+                                <button
+                                    @click="fixTagIssue(item)"
+                                    :disabled="isFixingTagIssue[item.file_path]"
+                                    :aria-label="'Исправить теги для ' + item.title"
+                                    class="px-3 py-1.5 bg-brand/20 hover:bg-brand/30 text-brand border border-brand/30 rounded text-xs font-semibold transition disabled:opacity-50 inline-flex items-center space-x-1 active:scale-95">
+                                    <span x-text="isFixingTagIssue[item.file_path] ? '...' : 'Исправить'"></span>
+                                </button>
+                                <button
+                                    @click="openTagDiffModal(item)"
+                                    :aria-label="'Сверка тегов для ' + item.title"
+                                    class="px-3 py-1.5 bg-sky-700/80 hover:bg-sky-600 text-white rounded text-xs font-medium transition inline-flex items-center space-x-1">
+                                    <span>Сверка</span>
+                                </button>
+                                <template x-if="item.issues.includes('censored_version')">
+                                    <button
+                                        @click="deleteCensoredTrack(item)"
+                                        :aria-label="'Удалить цензурированный файл ' + item.title"
+                                        class="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-600/30 rounded text-xs font-medium transition inline-flex items-center space-x-1"
+                                        title="Удалить цензурированный файл">
+                                        <span>Удалить</span>
+                                    </button>
+                                </template>
+                                <button
+                                    @click="openAlbumDiffForTrack(item)"
+                                    :aria-label="'Сверить весь альбом трека ' + item.title"
+                                    class="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded text-xs font-medium transition inline-flex items-center space-x-1"
+                                    title="Сверить весь альбом этого трека с онлайн-каталогом">
+                                    <span>Альбом</span>
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Десктопный вид (>= md): Треки -->
+                <div class="hidden md:block">
             <div class="overflow-x-auto max-h-[650px]">
                 <table class="w-full text-left border-collapse text-xs">
                     <thead class="bg-surface-base text-content-secondary uppercase tracking-wider font-semibold sticky top-0 z-10 border-b border-surface-border font-mono text-xs">
@@ -178,7 +302,7 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-800/60">
-                        <template x-for="item in tagIssues" :key="item.file_path">
+                        <template x-for="item in ($store.app.isDesktopLayout ? tagIssues : [])" :key="item.file_path">
                             <tr class="hover:bg-gray-800/40 transition" :class="isSelected(item.file_path) ? 'bg-sky-950/20' : ''">
                                 <!-- Чекбокс выбора -->
                                 <td class="p-3 w-10 text-center">
@@ -294,6 +418,8 @@
                         </template>
                     </tbody>
                 </table>
+                    </div>
+                </div>
                 <template x-if="tagIssuesTotalCount > tagIssues.length">
                     <div class="p-3 bg-surface-base border-t border-surface-border text-center text-xs text-content-muted">
                         Показано первых <span class="font-mono text-brand" x-text="tagIssues.length"></span> треков из <span class="font-mono text-brand" x-text="tagIssuesTotalCount"></span>.
@@ -304,6 +430,34 @@
 
         <!-- Таблица в режиме "По альбомам / релизам" -->
         <template x-if="tagViewMode === 'albums' && !tagIssuesLoading && getAlbumGroups().length > 0">
+            <div>
+                <!-- Мобильный вид (< md): Альбомы -->
+                <div class="md:hidden divide-y divide-surface-borderSubtle">
+                    <template x-for="grp in ($store.app.isDesktopLayout ? [] : getAlbumGroups())" :key="'mob-' + (grp.folder_path || grp.album)">
+                        <div class="p-3.5 space-y-2.5">
+                            <div class="flex items-start justify-between gap-2">
+                                <div class="min-w-0 flex-1">
+                                    <div class="text-sm font-semibold text-white truncate" x-text="grp.album" :title="grp.album"></div>
+                                    <div class="text-xs text-gray-300 truncate mt-0.5" x-text="grp.artist || '—'" :title="grp.artist"></div>
+                                </div>
+                                <span class="shrink-0 px-2 py-0.5 rounded text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono" x-text="grp.issues_count"></span>
+                            </div>
+                            <div class="text-[11px] text-content-muted font-mono truncate" x-text="grp.folder_path" :title="grp.folder_path"></div>
+                            <button
+                                @click="openAlbumDiffModal(grp.folder_path, grp.album, grp.artist)"
+                                :aria-label="'Сверить альбом онлайн: ' + grp.album"
+                                class="w-full px-3 py-2 bg-brand hover:bg-brand-hover text-zinc-950 rounded text-xs font-semibold transition inline-flex items-center justify-center space-x-1.5 shadow-sm active:scale-95">
+                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14h2v2h-2zm0-10h2v8h-2z"/>
+                                </svg>
+                                <span>Сверить альбом онлайн</span>
+                            </button>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Десктопный вид (>= md): Альбомы -->
+                <div class="hidden md:block">
             <div class="overflow-x-auto max-h-[650px]">
                 <table class="w-full text-left border-collapse text-xs">
                     <thead class="bg-surface-base text-content-secondary uppercase tracking-wider font-semibold sticky top-0 z-10 border-b border-surface-border font-mono text-xs">
@@ -316,7 +470,7 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-800/60">
-                        <template x-for="grp in getAlbumGroups()" :key="grp.folder_path || grp.album">
+                        <template x-for="grp in ($store.app.isDesktopLayout ? getAlbumGroups() : [])" :key="grp.folder_path || grp.album">
                             <tr class="hover:bg-gray-800/40 transition">
                                 <td class="p-3 font-semibold text-white max-w-xs truncate" x-text="grp.album" :title="grp.album"></td>
                                 <td class="p-3 text-gray-300 max-w-xs truncate" x-text="grp.artist || '—'" :title="grp.artist"></td>
@@ -339,6 +493,8 @@
                         </template>
                     </tbody>
                 </table>
+                </div>
+                </div>
             </div>
         </template>
     </div>
@@ -456,7 +612,7 @@
 
                         <!-- Diff Таблица Сравнения -->
                         <template x-if="catalogDiffMatches[selectedMatchIndex]">
-                            <div class="border border-surface-border rounded-xl overflow-hidden bg-surface-base">
+                            <div class="border border-surface-border rounded-xl overflow-x-auto bg-surface-base">
                                 <table class="w-full text-left border-collapse text-xs">
                                     <thead class="bg-surface-base text-content-secondary uppercase tracking-wider font-semibold border-b border-surface-border font-mono text-xs">
                                         <tr>
@@ -660,7 +816,7 @@
                         </div>
 
                         <!-- Таблица сопоставления треков -->
-                        <div class="border border-surface-border rounded-xl overflow-hidden bg-surface-base">
+                        <div class="border border-surface-border rounded-xl overflow-x-auto bg-surface-base">
                             <table class="w-full text-left border-collapse text-xs">
                                 <thead class="bg-surface-base text-content-secondary uppercase tracking-wider font-semibold border-b border-surface-border font-mono text-xs">
                                     <tr>

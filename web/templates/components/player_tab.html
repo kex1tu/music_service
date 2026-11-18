@@ -5,6 +5,7 @@
     x-transition:enter="transition ease-out duration-200"
     x-transition:enter-start="opacity-0 translate-y-2"
     x-transition:enter-end="opacity-100 translate-y-0"
+    x-data="{ mobileDeck: 'deck' }"
     class="space-y-6"
     style="display: none;"
 >
@@ -41,10 +42,36 @@
     </div>
 
     <!-- ТРЕХПАЛУБНАЯ СТУДИЙНАЯ КОНСОЛЬ (3-DECK RACK) -->
+    <!-- Переключатель палуб для мобильных экранов (< lg) -->
+    <div class="lg:hidden grid grid-cols-3 gap-1.5 p-1 bg-surface-panel border border-surface-border rounded-xl font-mono text-xs">
+        <button
+            type="button"
+            @click="mobileDeck = 'deck'"
+            :class="mobileDeck === 'deck' ? 'bg-white text-zinc-950 font-bold shadow-xs' : 'text-content-secondary hover:text-white'"
+            class="py-2 px-2 rounded-lg transition text-center uppercase tracking-wider">
+            DECK-A
+        </button>
+        <button
+            type="button"
+            @click="mobileDeck = 'monitor'"
+            :class="mobileDeck === 'monitor' ? 'bg-white text-zinc-950 font-bold shadow-xs' : 'text-content-secondary hover:text-white'"
+            class="py-2 px-2 rounded-lg transition text-center uppercase tracking-wider">
+            MONITOR
+        </button>
+        <button
+            type="button"
+            @click="mobileDeck = 'queue'"
+            :class="mobileDeck === 'queue' ? 'bg-white text-zinc-950 font-bold shadow-xs' : 'text-content-secondary hover:text-white'"
+            class="py-2 px-2 rounded-lg transition text-center uppercase tracking-wider">
+            ОЧЕРЕДЬ
+        </button>
+    </div>
+
+    <!-- ТРЕХПАЛУБНАЯ СТУДИЙНАЯ КОНСОЛЬ (3-DECK RACK) -->
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
         <!-- ==================== LEFT DECK: КАССЕТА И МАСТЕР-УПРАВЛЕНИЕ (4 КОЛОНКИ) ==================== -->
-        <div class="lg:col-span-4 bg-surface-panel border border-surface-border rounded-2xl p-5 shadow-panel flex flex-col justify-between space-y-6">
+        <div :class="mobileDeck === 'deck' ? 'flex' : 'hidden lg:flex'" class="lg:col-span-4 bg-surface-panel border border-surface-border rounded-2xl p-5 shadow-panel flex-col justify-between space-y-6">
             
             <!-- Блок обложки и физического картриджа -->
             <div class="space-y-4">
@@ -54,7 +81,7 @@
                 </div>
 
                 <!-- Виниловый картридж обложки -->
-                <div class="relative w-full aspect-square rounded-2xl bg-surface-input border border-surface-border p-3 shadow-inner flex items-center justify-center overflow-hidden group">
+                <div class="relative w-full max-w-[240px] lg:max-w-none mx-auto aspect-square rounded-2xl bg-surface-input border border-surface-border p-3 shadow-inner flex items-center justify-center overflow-hidden group">
                     <template x-if="$store.player.currentTrack && ($store.player.currentTrack.has_cover || $store.player.currentTrack.cover_url)">
                         <div class="relative w-full h-full rounded-xl overflow-hidden flex items-center justify-center shadow-lg">
                             <img
@@ -267,10 +294,10 @@
         </div>
 
         <!-- ==================== CENTER DECK: МУЛЬТИФУНКЦИОНАЛЬНЫЙ СТУДИЙНЫЙ МОНИТОР (5 КОЛОНОК) ==================== -->
-        <div class="lg:col-span-5 bg-surface-panel border border-surface-border rounded-2xl p-5 shadow-panel flex flex-col justify-between space-y-4">
+        <div :class="mobileDeck === 'monitor' ? 'flex' : 'hidden lg:flex'" class="lg:col-span-5 bg-surface-panel border border-surface-border rounded-2xl p-5 shadow-panel flex-col justify-between space-y-4">
             
             <!-- Переключатель режимов монитора -->
-            <div class="flex items-center justify-between border-b border-surface-border pb-3">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-surface-border pb-3">
                 <div class="flex items-center space-x-1.5 font-mono text-xs">
                     <span class="text-content-muted mr-1.5 text-xs tracking-wider uppercase">MONITOR:</span>
                     <button
@@ -312,17 +339,17 @@
             <div class="relative flex-1 min-h-[320px] max-h-[460px] bg-surface-base border border-surface-border rounded-xl p-4 flex flex-col shadow-inner overflow-hidden">
                 
                 <!-- РЕЖИМ 1: CANVAS СПЕКТРОАНАЛИЗАТОР -->
-                <div x-show="$store.player.centerDeckMode === 'spectrum'" class="w-full h-full flex flex-col justify-between">
+                <div x-show="$store.player.centerDeckMode === 'spectrum'" class="w-full min-h-0 flex-1 flex flex-col">
                     <div class="flex items-center justify-between text-xs font-mono text-content-muted mb-2">
                         <span>REAL-TIME FFT • 32 BINS</span>
                         <span class="text-brand font-semibold" x-text="$store.player.isPlaying ? 'SIGNAL LOCKED' : 'SIGNAL IDLE'"></span>
                     </div>
 
-                    <div class="flex-1 relative w-full flex items-center justify-center">
+                    <div class="flex-1 relative w-full">
                         <canvas
                             x-ref="visualizerCanvas"
                             x-init="$store.player.bindCanvas($refs.visualizerCanvas)"
-                            class="w-full h-full block">
+                            class="absolute inset-0 w-full h-full block">
                         </canvas>
                     </div>
 
@@ -454,10 +481,10 @@
         </div>
 
         <!-- ==================== RIGHT DECK: TAPE QUEUE RACK (3 КОЛОНКИ) ==================== -->
-        <div class="lg:col-span-3 bg-surface-panel border border-surface-border rounded-2xl p-5 shadow-panel flex flex-col justify-between space-y-4">
+        <div :class="mobileDeck === 'queue' ? 'flex' : 'hidden lg:flex'" class="lg:col-span-3 bg-surface-panel border border-surface-border rounded-2xl p-5 shadow-panel flex-col justify-between space-y-4">
             
             <!-- Заголовок очереди -->
-            <div class="flex items-center justify-between border-b border-surface-border pb-3">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-surface-border pb-3">
                 <div>
                     <h3 class="text-xs font-mono font-bold text-content-primary tracking-wider">TAPE RACK (ОЧЕРЕДЬ)</h3>
                     <p class="text-xs font-mono text-content-muted" x-text="`${$store.player.playlist?.length || 0} ТРЕКОВ • ${$store.player.formatDuration($store.player.queueTotalDuration)}`"></p>

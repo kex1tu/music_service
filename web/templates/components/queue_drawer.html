@@ -1,6 +1,6 @@
 {{ define "queue_drawer" }}
 <!-- ==================== ПЛАВАЮЩИЙ МЕНЕДЖЕР ОЧЕРЕДЕЙ (QUEUE WIDGET) ==================== -->
-    <div class="fixed right-4 z-40 flex flex-col items-end pointer-events-none transition-all duration-300"
+    <div class="fixed left-3 right-3 sm:left-auto sm:right-4 z-40 flex flex-col items-end pointer-events-none transition-all duration-300"
          :class="$store.player?.isVisible ? 'bottom-[calc(9.5rem+env(safe-area-inset-bottom,0px))] md:bottom-24' : 'bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] md:bottom-4'"
          x-data>
         <!-- Развернутая панель очереди (Drawer) -->
@@ -14,7 +14,7 @@
             x-transition:leave-end="opacity-0 translate-y-4 scale-95"
             role="region"
             aria-label="Очередь фоновых загрузок"
-            class="pointer-events-auto bg-surface-panel/95 backdrop-blur-md border border-surface-border rounded-lg shadow-2xl w-80 sm:w-96 mb-3 overflow-hidden flex flex-col max-h-[32rem]">
+            class="pointer-events-auto bg-surface-panel/95 backdrop-blur-md border border-surface-border rounded-lg shadow-2xl self-stretch sm:self-auto w-auto sm:w-96 max-w-full mb-3 overflow-hidden flex flex-col max-h-[32rem]">
             
             <!-- Шапка панели -->
             <div class="p-3 bg-surface-base/90 border-b border-surface-border flex items-center justify-between">

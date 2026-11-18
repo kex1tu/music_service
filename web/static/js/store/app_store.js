@@ -10,6 +10,7 @@ document.addEventListener('alpine:init', () => {
         activeModal: null,
         toasts: [],
         currentJobId: null,
+        isDesktopLayout: false,
 
         tagEditorData: null,
         deleteConfirmData: null,
@@ -19,6 +20,11 @@ document.addEventListener('alpine:init', () => {
         queue: null,
 
         init() {
+            const desktopLayout = window.matchMedia('(min-width: 768px)');
+            this.isDesktopLayout = desktopLayout.matches;
+            desktopLayout.addEventListener('change', (event) => {
+                this.isDesktopLayout = event.matches;
+            });
             this.queue = window.createQueueManager();
             Alpine.store('queue', this.queue);
             this.checkAuth();
