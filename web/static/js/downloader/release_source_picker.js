@@ -51,6 +51,7 @@ document.addEventListener('alpine:init', () => {
             if (!album) return;
             this.reset();
             this.jobId = null;
+            this.missingOnly = true;
             this.targetPath = album.path || null;
             this.artist = album.artist || '';
             this.album = album.album || '';
@@ -90,6 +91,7 @@ document.addEventListener('alpine:init', () => {
             this.activeTab = 'candidates';
             this.jobId = null;
             this.targetPath = null;
+            this.missingOnly = false;
             this.artist = '';
             this.album = '';
             this.isCyrillic = false;
@@ -150,6 +152,7 @@ document.addEventListener('alpine:init', () => {
                 }
                 if (this.jobId) params.append('job_id', this.jobId);
                 if (this.targetPath) params.append('path', this.targetPath);
+                if (this.missingOnly) params.set('missing_only', 'true');
 
                 const res = await window.api.raw(`/api/downloads/release-candidates?${params.toString()}`);
                 if (!res.ok) {
@@ -344,6 +347,7 @@ document.addEventListener('alpine:init', () => {
                     target_tracks: this.targetTracks,
                     job_id: this.jobId || '',
                     target_path: this.targetPath || '',
+                    missing_only: this.missingOnly,
                     source_url: cand ? (cand.url || '') : '',
                     track_mapping: trackMapping,
                 };

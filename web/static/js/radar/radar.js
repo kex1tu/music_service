@@ -133,9 +133,13 @@ document.addEventListener('alpine:init', () => {
                 if (this.artistsOnlyFollowed) {
                     params.set('followed', 'true');
                 }
+                const search = this.artistsSearch.trim();
+                const onlyFollowed = this.artistsOnlyFollowed;
+                if (search) params.set('search', search);
                 const res = await window.api.raw(`/api/radar/artists?${params.toString()}`);
                 if (res.ok) {
                     const data = await res.json();
+                    if (this.artistsSearch.trim() !== search || this.artistsOnlyFollowed !== onlyFollowed) return;
                     this.artists = data.items || [];
                     this.artistsTotal = data.total || 0;
                 }
@@ -144,12 +148,6 @@ document.addEventListener('alpine:init', () => {
             } finally {
                 this.isLoading = false;
             }
-        },
-
-        filteredArtists() {
-            if (!this.artistsSearch.trim()) return this.artists;
-            const q = this.artistsSearch.toLowerCase().trim();
-            return this.artists.filter(a => a.name.toLowerCase().includes(q) || (a.custom_search_alias && a.custom_search_alias.toLowerCase().includes(q)));
         },
 
         async addArtist() {
@@ -178,7 +176,7 @@ document.addEventListener('alpine:init', () => {
                 const res = await window.api.raw(`/api/radar/artists/${encodeURIComponent(artist.name)}/follow`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ followed: targetState })
+                    body: JSON.stringify({ artist_id: artist.id, followed: targetState })
                 });
                 if (res.ok) {
                     artist.is_followed = targetState;
@@ -195,7 +193,7 @@ document.addEventListener('alpine:init', () => {
                 const res = await window.api.raw(`/api/radar/artists/${encodeURIComponent(artist.name)}/auto-download`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ auto_download: targetState })
+                    body: JSON.stringify({ artist_id: artist.id, auto_download: targetState })
                 });
                 if (res.ok) {
                     artist.auto_download = targetState;
@@ -328,8 +326,10 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async openDiscography(artistName) {
-            const targetArtist = artistName ? artistName.split(',')[0].trim() : artistName;
+        async openDiscography(artist) {
+            const chosen = typeof artist === 'object' ? artist : null;
+            const targetArtist = chosen ? chosen.name : artist?.split(',')[0].trim();
+            this.artistTrackedInfo = null;
             this.selectedArtist = targetArtist;
             this.isDiscographyModalOpen = true;
             this.isDiscographyLoading = true;
@@ -340,7 +340,7 @@ document.addEventListener('alpine:init', () => {
                 if (res.ok) {
                     const data = await res.json();
                     this.discographyReleases = data.releases || [];
-                    this.artistTrackedInfo = data.tracked || null;
+                    this.artistTrackedInfo = chosen || data.tracked || null;
                     if (this.artistTrackedInfo) {
                         this.customAlias = this.artistTrackedInfo.custom_search_alias || '';
                         this.customDeezerId = this.artistTrackedInfo.deezer_id || '';
@@ -356,12 +356,13 @@ document.addEventListener('alpine:init', () => {
         },
 
         async saveCustomLinks() {
-            if (!this.selectedArtist) return;
+            if (!this.artistTrackedInfo?.id) return;
             try {
                 const res = await window.api.raw(`/api/radar/artists/${encodeURIComponent(this.selectedArtist)}/custom-links`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
+                        artist_id: this.artistTrackedInfo.id,
                         alias: this.customAlias.trim(),
                         deezer_id: this.customDeezerId.trim(),
                         musicbrainz_id: this.customMbId.trim(),

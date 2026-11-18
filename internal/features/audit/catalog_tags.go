@@ -472,7 +472,7 @@ func (s *Service) ApplyCatalogTags(ctx context.Context, req ApplyCatalogTagsRequ
 		}
 	}
 
-	if err := id3.WriteTags(fullPath, *tags, coverInfo); err != nil {
+	if err := s.writeLibraryTags(ctx, fullPath, *tags, coverInfo); err != nil {
 		return fmt.Errorf("failed to write tags: %w", err)
 	}
 
@@ -482,10 +482,6 @@ func (s *Service) ApplyCatalogTags(ctx context.Context, req ApplyCatalogTagsRequ
 		if _, statErr := safefs.Stat(coverFile); os.IsNotExist(statErr) {
 			_ = safefs.WriteFile(coverFile, coverInfo.Data, 0644)
 		}
-	}
-
-	if s.scanner != nil {
-		_ = s.scanner.IndexFile(fullPath, req.Path)
 	}
 
 	return nil
@@ -551,11 +547,8 @@ func (s *Service) ApplyCatalogAlbum(ctx context.Context, req ApplyCatalogAlbumRe
 			tags.Genre = id3.CanonicalizeGenre(tags.Genre)
 		}
 
-		if wErr := id3.WriteTags(fullPath, *tags, coverInfo); wErr == nil {
+		if wErr := s.writeLibraryTags(ctx, fullPath, *tags, coverInfo); wErr == nil {
 			tracksUpdated++
-			if s.scanner != nil {
-				_ = s.scanner.IndexFile(fullPath, tr.Path)
-			}
 		} else {
 			errs = append(errs, fmt.Sprintf("%s: %v", tr.Path, wErr))
 		}

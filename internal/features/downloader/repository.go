@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -41,6 +42,7 @@ type JobRepository interface {
 	ClearFinishedJobs(ctx context.Context, age time.Duration) (int64, error)
 	ClearCompletedJobs(ctx context.Context, age time.Duration) (int64, error)
 	GetMissingTracksForAlbum(ctx context.Context, folderPath string) ([]MissingTrackInfo, error)
+	GetAlbumTrackPositions(ctx context.Context, folderPath string) (map[db.TrackPosition]bool, error)
 	CheckTrackInLibrary(ctx context.Context, title, artist string) (*ExistingTrackInfo, error)
 
 	GetPinnedSource(ctx context.Context, cacheKey string) (*PinnedTrackSourceDTO, error)
@@ -54,11 +56,11 @@ type JobRepository interface {
 
 // Repository реализует персистентный слой задач загрузки в SQLite WAL.
 type Repository struct {
-	db DBTX
+	db *sql.DB
 }
 
 // NewRepository создает новый экземпляр репозитория Downloader.
-func NewRepository(db DBTX) *Repository {
+func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
@@ -93,108 +95,205 @@ func parseTimeField(raw any) (string, time.Time) {
 func scanJob(scanner interface{ Scan(dest ...any) error }) (*Job, error) {
 	var j Job
 	var statusStr string
+	var selection sql.NullString
 	var createdAtRaw, updatedAtRaw any
+	var backfill sql.NullString
 
 	err := scanner.Scan(
 		&j.ID, &statusStr, &j.Source, &j.URL, &j.Progress, &j.CurrentStep,
 		&j.TotalTracks, &j.CompletedTracks, &j.Error, &j.TargetAlbumPath,
-		&j.IsBackfill, &j.AlbumTitle, &j.ArtistName, &createdAtRaw, &updatedAtRaw,
+		&j.IsBackfill, &j.AlbumTitle, &j.ArtistName, &createdAtRaw, &updatedAtRaw, &selection, &backfill,
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	if backfill.Valid {
+		if err := json.Unmarshal([]byte(backfill.String), &j.Backfill); err != nil {
+			j.selectionCorrupt = true
+		}
+	}
 	j.Status = JobStatus(statusStr)
 	createdAtStr, _ := parseTimeField(createdAtRaw)
 	_, updatedAt := parseTimeField(updatedAtRaw)
 	j.CreatedAt = createdAtStr
 	j.UpdatedAt = updatedAt
+	if selection.Valid && !j.selectionCorrupt {
+		loadSourceSelection(&j, selection.String)
+	}
+	if j.selectionCorrupt {
+		j.Status = StatusError
+		message := ErrCorruptJobSelection.Error()
+		j.CurrentStep = message
+		j.Error = &message
+	}
 	return &j, nil
 }
 
-// CreateJob вставляет новую задачу загрузки.
-func (r *Repository) CreateJob(ctx context.Context, job *Job) error {
-	if job == nil {
-		return errors.New("job is nil")
-	}
-	snap := job.Snapshot()
-
-	query := `
+const insertJobSQL = `
 	INSERT INTO download_jobs (
 		id, status, source, url, progress, current_step,
 		total_tracks, completed_tracks, error, target_album_path,
-		is_backfill, album_title, artist_name, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
-	`
-	_, err := r.db.ExecContext(ctx, query,
-		snap.ID, string(snap.Status), snap.Source, snap.URL, snap.Progress, snap.CurrentStep,
-		snap.TotalTracks, snap.CompletedTracks, snap.Error, snap.TargetAlbumPath,
-		snap.IsBackfill, snap.AlbumTitle, snap.ArtistName,
-	)
-	return err
+		is_backfill, album_title, artist_name, backfill_selection, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+
+const updateJobSQL = `
+	UPDATE download_jobs SET
+		status=?, source=?, url=?, progress=?, current_step=?, total_tracks=?,
+		completed_tracks=?, error=?, target_album_path=?, is_backfill=?, album_title=?,
+		artist_name=?, backfill_selection=?, updated_at=CURRENT_TIMESTAMP
+	WHERE id=?`
+
+const selectJobSQL = `
+	SELECT j.id, j.status, j.source, j.url, j.progress, j.current_step,
+	       j.total_tracks, j.completed_tracks, j.error, j.target_album_path,
+	       j.is_backfill, j.album_title, j.artist_name, j.created_at, j.updated_at, s.payload_json, j.backfill_selection
+	FROM download_jobs j
+	LEFT JOIN download_source_selections s ON s.job_id=j.id`
+
+func (r *Repository) CreateJob(ctx context.Context, job *Job) error {
+	return r.createJobWithPins(ctx, job, nil)
 }
 
-// SaveJob выполняет атомарный Upsert задачи: вставляет новую запись или обновляет существующую.
-func (r *Repository) SaveJob(ctx context.Context, job *Job) error {
-	if job == nil {
-		return errors.New("job is nil")
-	}
-	snap := job.Snapshot()
-
-	query := `
-	INSERT INTO download_jobs (
-		id, status, source, url, progress, current_step,
-		total_tracks, completed_tracks, error, target_album_path,
-		is_backfill, album_title, artist_name, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-	ON CONFLICT(id) DO UPDATE SET
-		status = excluded.status,
-		progress = excluded.progress,
-		current_step = excluded.current_step,
-		total_tracks = excluded.total_tracks,
-		completed_tracks = excluded.completed_tracks,
-		error = excluded.error,
-		target_album_path = excluded.target_album_path,
-		is_backfill = excluded.is_backfill,
-		album_title = excluded.album_title,
-		artist_name = excluded.artist_name,
-		updated_at = CURRENT_TIMESTAMP;
-	`
-	_, err := r.db.ExecContext(ctx, query,
-		snap.ID, string(snap.Status), snap.Source, snap.URL, snap.Progress, snap.CurrentStep,
-		snap.TotalTracks, snap.CompletedTracks, snap.Error, snap.TargetAlbumPath,
-		snap.IsBackfill, snap.AlbumTitle, snap.ArtistName,
-	)
+func (r *Repository) createJobs(ctx context.Context, jobs []*Job) error {
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	return r.saveSourceSelections(ctx, snap)
+	defer tx.Rollback()
+	for _, job := range jobs {
+		if err := writeJobSnapshot(ctx, tx, job.Snapshot(), insertJobSQL, true); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
-// GetJob возвращает задачу по её строковому идентификатору. Если запись отсутствует, возвращает (nil, nil).
-func (r *Repository) GetJob(ctx context.Context, id string) (*Job, error) {
-	query := `
-	SELECT id, status, source, url, progress, current_step,
-	       total_tracks, completed_tracks, error, target_album_path,
-	       is_backfill, album_title, artist_name, created_at, updated_at
-	FROM download_jobs
-	WHERE id = ?;
-	`
-	row := r.db.QueryRowContext(ctx, query, id)
-	job, err := scanJob(row)
+func (r *Repository) SaveJob(ctx context.Context, job *Job) error {
+	return r.writeJob(ctx, job, insertJobSQL+`
+	ON CONFLICT(id) DO UPDATE SET
+		status=excluded.status, progress=excluded.progress, current_step=excluded.current_step,
+		total_tracks=excluded.total_tracks, completed_tracks=excluded.completed_tracks,
+		error=excluded.error, target_album_path=excluded.target_album_path,
+		is_backfill=excluded.is_backfill, album_title=excluded.album_title,
+		artist_name=excluded.artist_name, backfill_selection=excluded.backfill_selection, updated_at=CURRENT_TIMESTAMP`, true, nil)
+}
+
+func (r *Repository) createJobWithPins(ctx context.Context, job *Job, pins []PinnedTrackSourceDTO) error {
+	return r.writeJob(ctx, job, insertJobSQL, true, pins)
+}
+
+// updateProgressSnapshot only updates an existing job that is no longer queued.
+func (r *Repository) updateProgressSnapshot(ctx context.Context, job *Job) error {
+	return r.writeJob(ctx, job, updateJobSQL+" AND status <> 'QUEUED'", false, nil)
+}
+
+func (r *Repository) updateJobWithSelection(ctx context.Context, job *Job, expected JobStatus, pins []PinnedTrackSourceDTO) error {
+	return r.writeJob(ctx, job, updateJobSQL+" AND status=?", false, pins, expected)
+}
+
+func (r *Repository) writeJob(ctx context.Context, job *Job, query string, insert bool, pins []PinnedTrackSourceDTO, conditions ...any) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := writeJobSnapshot(ctx, tx, job.Snapshot(), query, insert, conditions...); err != nil {
+		return err
+	}
+	for _, pin := range pins {
+		if err := savePinnedSource(ctx, tx, pin); err != nil {
+			return fmt.Errorf("save pinned source: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func writeJobSnapshot(ctx context.Context, tx *sql.Tx, snap *Job, query string, insert bool, conditions ...any) error {
+	if snap == nil {
+		return errors.New("job is nil")
+	}
+	if snap.selectionCorrupt {
+		return ErrCorruptJobSelection
+	}
+	var backfill any
+	if snap.Backfill != nil {
+		payload, err := json.Marshal(snap.Backfill)
+		if err != nil {
+			return err
+		}
+		backfill = string(payload)
+	}
+	args := []any{snap.Status, snap.Source, snap.URL, snap.Progress, snap.CurrentStep,
+		snap.TotalTracks, snap.CompletedTracks, snap.Error, snap.TargetAlbumPath,
+		snap.IsBackfill, snap.AlbumTitle, snap.ArtistName, backfill}
+	if insert {
+		args = append([]any{snap.ID}, args...)
+	} else {
+		args = append(args, snap.ID)
+	}
+	args = append(args, conditions...)
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrJobNotFound
+	}
+	if err := saveSourceSelection(ctx, tx, snap); err != nil {
+		return fmt.Errorf("save job selection: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) ClaimNextJob(ctx context.Context) (*Job, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var id string
+	err = tx.QueryRowContext(ctx, `
+		UPDATE download_jobs SET status='RESOLVING', current_step='Определение источника и метаданных',
+		                          updated_at=CURRENT_TIMESTAMP
+		WHERE status='QUEUED' AND id=(
+		    SELECT id FROM download_jobs WHERE status='QUEUED' ORDER BY created_at,rowid LIMIT 1
+		)
+		RETURNING id`).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if err := r.loadSourceSelections(ctx, job); err != nil {
+	job, err := scanJob(tx.QueryRowContext(ctx, selectJobSQL+" WHERE j.id=?", id))
+	if err != nil {
+		return nil, err
+	}
+	if job.selectionCorrupt {
+		if _, err := tx.ExecContext(ctx, "UPDATE download_jobs SET status=?,current_step=?,error=? WHERE id=?",
+			job.Status, job.CurrentStep, job.Error, id); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return job, nil
 }
 
-// ListJobs возвращает страницу задач, отсортированных по времени создания (новые сначала).
+func (r *Repository) GetJob(ctx context.Context, id string) (*Job, error) {
+	job, err := scanJob(r.db.QueryRowContext(ctx, selectJobSQL+" WHERE j.id=?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return job, err
+}
+
 func (r *Repository) ListJobs(ctx context.Context, limit, offset int) ([]*Job, error) {
 	if limit <= 0 {
 		limit = 50
@@ -202,51 +301,19 @@ func (r *Repository) ListJobs(ctx context.Context, limit, offset int) ([]*Job, e
 	if offset < 0 {
 		offset = 0
 	}
-
-	query := `
-	SELECT id, status, source, url, progress, current_step,
-	       total_tracks, completed_tracks, error, target_album_path,
-	       is_backfill, album_title, artist_name, created_at, updated_at
-	FROM download_jobs
-	ORDER BY created_at DESC
-	LIMIT ? OFFSET ?;
-	`
-	rows, err := r.db.QueryContext(ctx, query, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var list []*Job
-	for rows.Next() {
-		j, err := scanJob(rows)
-		if err != nil {
-			return nil, err
-		}
-		list = append(list, j)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	rows.Close()
-	return r.loadSelectionsForList(ctx, list)
+	return r.listJobs(ctx, selectJobSQL+" ORDER BY j.created_at DESC,j.id LIMIT ? OFFSET ?", limit, offset)
 }
 
-// GetAllJobs возвращает полный список всех задач из базы данных.
 func (r *Repository) GetAllJobs(ctx context.Context) ([]*Job, error) {
-	query := `
-	SELECT id, status, source, url, progress, current_step,
-	       total_tracks, completed_tracks, error, target_album_path,
-	       is_backfill, album_title, artist_name, created_at, updated_at
-	FROM download_jobs
-	ORDER BY created_at DESC;
-	`
-	rows, err := r.db.QueryContext(ctx, query)
+	return r.listJobs(ctx, selectJobSQL+" ORDER BY j.created_at DESC,j.id")
+}
+
+func (r *Repository) listJobs(ctx context.Context, query string, args ...any) ([]*Job, error) {
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var list []*Job
 	for rows.Next() {
 		j, err := scanJob(rows)
@@ -255,11 +322,7 @@ func (r *Repository) GetAllJobs(ctx context.Context) ([]*Job, error) {
 		}
 		list = append(list, j)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	rows.Close()
-	return r.loadSelectionsForList(ctx, list)
+	return list, rows.Err()
 }
 
 // UpdateJobProgress обновляет текущий процент выполнения и статусную строку шага.
@@ -317,7 +380,7 @@ func (r *Repository) ResetInterruptedJobs(ctx context.Context) (int64, error) {
 	SET status = 'ERROR',
 	    current_step = 'Прервано перезапуском сервера. Нажмите «Повторить»',
 	    updated_at = CURRENT_TIMESTAMP
-	WHERE status IN ('QUEUED', 'RESOLVING', 'DOWNLOADING', 'CONVERTING', 'TAGGING');
+	WHERE status IN ('RESOLVING', 'DOWNLOADING', 'CONVERTING', 'TAGGING');
 	`
 	res, err := r.db.ExecContext(ctx, query)
 	if err != nil {
@@ -328,29 +391,9 @@ func (r *Repository) ResetInterruptedJobs(ctx context.Context) (int64, error) {
 
 // GetActiveJobs возвращает все задачи, находящиеся в процессе выполнения или очереди.
 func (r *Repository) GetActiveJobs(ctx context.Context) ([]*Job, error) {
-	query := `
-	SELECT id, status, source, url, progress, current_step,
-	       total_tracks, completed_tracks, error, target_album_path,
-	       is_backfill, album_title, artist_name, created_at, updated_at
-	FROM download_jobs
-	WHERE status IN ('QUEUED', 'RESOLVING', 'DOWNLOADING', 'CONVERTING', 'TAGGING')
-	ORDER BY created_at ASC;
-	`
-	rows, err := r.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var list []*Job
-	for rows.Next() {
-		j, err := scanJob(rows)
-		if err != nil {
-			return nil, err
-		}
-		list = append(list, j)
-	}
-	return list, nil
+	return r.listJobs(ctx, selectJobSQL+`
+	WHERE j.status IN ('QUEUED', 'RESOLVING', 'DOWNLOADING', 'CONVERTING', 'TAGGING')
+	ORDER BY j.created_at,j.id`)
 }
 
 // GetActiveJobCount возвращает количество активных задач в очереди.
@@ -400,15 +443,13 @@ func (r *Repository) ClearCompletedJobs(ctx context.Context, age time.Duration) 
 
 // GetMissingTracksForAlbum возвращает список недостающих треков для альбома из missing_tracks.
 func (r *Repository) GetMissingTracksForAlbum(ctx context.Context, folderPath string) ([]MissingTrackInfo, error) {
-	cleanPath := filepath.Clean(folderPath)
-	query := `
-	SELECT mt.title, mt.artist, mt.track_number, COALESCE(mt.expected_duration, 0), COALESCE(mt.deezer_url, '')
-	FROM missing_tracks mt
-	JOIN albums al ON mt.album_id = al.id
-	WHERE (al.folder_path = ? OR al.folder_path = ?)
-	ORDER BY mt.track_number ASC;
-	`
-	rows, err := r.db.QueryContext(ctx, query, folderPath, cleanPath)
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT mt.title, mt.artist, mt.track_number, COALESCE(mt.disc_number, 1),
+			COALESCE(mt.expected_duration, 0), COALESCE(mt.deezer_id, ''), COALESCE(mt.deezer_url, ''),
+			COALESCE(mt.isrc, ''), COALESCE(mt.pinned_source_url, '')
+		FROM missing_tracks mt JOIN albums al ON mt.album_id = al.id
+		WHERE al.folder_path = ? ORDER BY mt.disc_number, mt.track_number
+	`, db.AlbumRoot(filepath.ToSlash(folderPath)))
 	if err != nil {
 		return nil, err
 	}
@@ -417,12 +458,34 @@ func (r *Repository) GetMissingTracksForAlbum(ctx context.Context, folderPath st
 	var result []MissingTrackInfo
 	for rows.Next() {
 		var item MissingTrackInfo
-		if err := rows.Scan(&item.Title, &item.Artist, &item.TrackNumber, &item.ExpectedDuration, &item.DeezerURL); err != nil {
+		if err := rows.Scan(&item.Title, &item.Artist, &item.TrackNumber, &item.DiscNumber,
+			&item.Duration, &item.DeezerID, &item.DeezerURL, &item.ISRC, &item.PinnedURL); err != nil {
 			return nil, err
 		}
+		item.TrackPosition = db.ReleasePosition(item.DiscNumber, item.TrackNumber)
 		result = append(result, item)
 	}
-	return result, nil
+	return result, rows.Err()
+}
+
+func (r *Repository) GetAlbumTrackPositions(ctx context.Context, folderPath string) (map[db.TrackPosition]bool, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT COALESCE(t.disc_number, 1), COALESCE(t.track_number, 0)
+		FROM tracks t JOIN albums a ON a.id = t.album_id WHERE a.folder_path = ?`,
+		db.AlbumRoot(filepath.ToSlash(folderPath)))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	positions := make(map[db.TrackPosition]bool)
+	for rows.Next() {
+		var disc, track int
+		if err := rows.Scan(&disc, &track); err != nil {
+			return nil, err
+		}
+		positions[db.ReleasePosition(disc, track)] = true
+	}
+	return positions, rows.Err()
 }
 
 // GetPinnedSource возвращает зафиксированный источник трека по cache_key.
@@ -463,6 +526,10 @@ func (r *Repository) GetPinnedSource(ctx context.Context, cacheKey string) (*Pin
 
 // SavePinnedSource сохраняет или обновляет ручную привязку источника трека.
 func (r *Repository) SavePinnedSource(ctx context.Context, pin PinnedTrackSourceDTO) error {
+	return savePinnedSource(ctx, r.db, pin)
+}
+
+func savePinnedSource(ctx context.Context, writer DBTX, pin PinnedTrackSourceDTO) error {
 	query := `
 	INSERT INTO pinned_track_sources (
 		cache_key, artist_name, track_title, isrc, pinned_url, source_type, duration, updated_at
@@ -477,7 +544,7 @@ func (r *Repository) SavePinnedSource(ctx context.Context, pin PinnedTrackSource
 	if pin.ISRC != nil && *pin.ISRC != "" {
 		isrcVal = *pin.ISRC
 	}
-	_, err := r.db.ExecContext(ctx, query,
+	_, err := writer.ExecContext(ctx, query,
 		pin.CacheKey, pin.ArtistName, pin.TrackTitle, isrcVal,
 		pin.PinnedURL, pin.SourceType, pin.Duration,
 	)

@@ -6,27 +6,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
+	"path/filepath"
+	"slices"
 	"sort"
 	"time"
 
 	"music-manager/internal/core/safefs"
+	"music-manager/internal/db"
+	"music-manager/internal/services/downloadstaging"
 	"music-manager/internal/services/resolver"
 )
-
-func (s *Service) waitIfPaused(ctx context.Context) error {
-	s.pauseMu.Lock()
-	defer s.pauseMu.Unlock()
-	for s.isPaused {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if s.ctx != nil && s.ctx.Err() != nil {
-			return s.ctx.Err()
-		}
-		s.pauseCond.Wait()
-	}
-	return nil
-}
 
 // PauseQueue приостанавливает взятие новых задач воркерами.
 func (s *Service) PauseQueue() {
@@ -40,9 +30,7 @@ func (s *Service) ResumeQueue() {
 	s.pauseMu.Lock()
 	s.isPaused = false
 	s.pauseMu.Unlock()
-	if s.pauseCond != nil {
-		s.pauseCond.Broadcast()
-	}
+	s.wakeWorker()
 }
 
 // IsQueuePaused возвращает статус паузы очереди.
@@ -68,6 +56,14 @@ type JobOptions struct {
 
 // CreateJobWithOptions создает и ставит в очередь новую задачу загрузки с дополнительными опциями.
 func (s *Service) CreateJobWithOptions(ctx context.Context, rawURL, source string, opts JobOptions) (*Job, error) {
+	job, err := s.newQueuedJob(rawURL, source, opts)
+	if err != nil {
+		return nil, err
+	}
+	return s.enqueueNewJob(ctx, job)
+}
+
+func (s *Service) newQueuedJob(rawURL, source string, opts JobOptions) (*Job, error) {
 	cleanURL := resolver.ExtractURLFromInput(rawURL)
 	if cleanURL == "" {
 		return nil, errors.New("URL cannot be empty")
@@ -93,7 +89,7 @@ func (s *Service) CreateJobWithOptions(ctx context.Context, rawURL, source strin
 	}
 
 	jobID := generateUUID()
-	job := &Job{
+	return &Job{
 		ID:                   jobID,
 		Status:               StatusQueued,
 		Source:               source,
@@ -102,21 +98,34 @@ func (s *Service) CreateJobWithOptions(ctx context.Context, rawURL, source strin
 		CurrentStep:          "Задача ожидает очереди",
 		CreatedAt:            time.Now().UTC().Format(time.RFC3339Nano),
 		UpdatedAt:            time.Now().UTC(),
-		SelectedTrackIndices: opts.SelectedTrackIndices,
-	}
+		SelectedTrackIndices: slices.Clone(opts.SelectedTrackIndices),
+		SkipExisting:         opts.SkipExisting,
+	}, nil
+}
 
-	if s.repo != nil {
-		_ = s.repo.CreateJob(ctx, job)
+func (s *Service) enqueueNewJob(ctx context.Context, job *Job) (*Job, error) {
+	if err := s.enqueueNewJobs(ctx, []*Job{job}); err != nil {
+		return nil, err
 	}
-	s.AddJob(job)
-
-	select {
-	case s.workQueue <- jobID:
-	default:
-		// Очередь заполнена; задача останется со статусом QUEUED в БД
-	}
-
 	return job, nil
+}
+
+func (s *Service) enqueueNewJobs(ctx context.Context, jobs []*Job) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
+	if s.repo != nil {
+		if err := s.repo.createJobs(ctx, jobs); err != nil {
+			return fmt.Errorf("%w: %w", errQueueStorage, err)
+		}
+	}
+	for _, job := range jobs {
+		s.registerJobLocked(job)
+	}
+	s.wakeWorker()
+	return nil
 }
 
 // CreateJob создает и ставит в очередь новую задачу загрузки.
@@ -126,13 +135,16 @@ func (s *Service) CreateJob(ctx context.Context, rawURL, source string) (*Job, e
 
 // CreateBatchJobs создает пачку задач загрузки.
 func (s *Service) CreateBatchJobs(ctx context.Context, urls []string, source string) ([]*Job, error) {
-	var created []*Job
-	for _, u := range urls {
-		j, err := s.CreateJob(ctx, u, source)
+	created := make([]*Job, 0, len(urls))
+	for _, rawURL := range urls {
+		job, err := s.newQueuedJob(rawURL, source, JobOptions{})
 		if err != nil {
 			return nil, err
 		}
-		created = append(created, j)
+		created = append(created, job)
+	}
+	if err := s.enqueueNewJobs(ctx, created); err != nil {
+		return nil, err
 	}
 	return created, nil
 }
@@ -143,9 +155,19 @@ func (s *Service) CreateBackfillJob(
 	targetAlbumPath, albumTitle, artistName, deezerAlbumID string,
 	trackURLs []string,
 	trackNumbers []int,
+	positions ...db.BackfillSelection,
 ) (*Job, error) {
 	if targetAlbumPath == "" && albumTitle == "" {
 		return nil, errors.New("target album path or title required")
+	}
+
+	if targetAlbumPath != "" {
+		targetAlbumPath = db.AlbumRoot(filepath.ToSlash(targetAlbumPath))
+	}
+	selection := &BackfillRequest{AlbumID: deezerAlbumID, Positions: slices.Clone(positions),
+		TrackURLs: slices.Clone(trackURLs), TrackNumbers: slices.Clone(trackNumbers)}
+	if err := s.freezeBackfillSelection(ctx, targetAlbumPath, selection); err != nil {
+		return nil, err
 	}
 
 	jobID := generateUUID()
@@ -168,6 +190,7 @@ func (s *Service) CreateBackfillJob(
 		Progress:        0.0,
 		CurrentStep:     "Задача дозагрузки ожидает очереди",
 		IsBackfill:      true,
+		Backfill:        selection,
 		TargetAlbumPath: &tPath,
 		AlbumTitle:      &aTitle,
 		ArtistName:      &aArtist,
@@ -175,17 +198,7 @@ func (s *Service) CreateBackfillJob(
 		UpdatedAt:       time.Now().UTC(),
 	}
 
-	s.AddJob(job)
-	if s.repo != nil {
-		_ = s.repo.CreateJob(ctx, job)
-	}
-
-	select {
-	case s.workQueue <- jobID:
-	default:
-	}
-
-	return job, nil
+	return s.enqueueNewJob(ctx, job)
 }
 
 // RetryJob сбрасывает и перезапускает упавшую или отмененную задачу.
@@ -195,36 +208,42 @@ func (s *Service) RetryJob(ctx context.Context, jobID string) (*Job, error) {
 		return nil, fmt.Errorf("задача %s не найдена", jobID)
 	}
 
-	snap := job.Snapshot()
-	if snap.Status == StatusResolving || snap.Status == StatusDownloading || snap.Status == StatusConverting || snap.Status == StatusTagging {
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
+	if s.jobs[jobID] != job {
+		return nil, ErrJobNotFound
+	}
+	draft := job.Snapshot()
+	if draft.selectionCorrupt {
+		return nil, ErrCorruptJobSelection
+	}
+	switch draft.Status {
+	case StatusResolving, StatusDownloading, StatusConverting, StatusTagging:
 		return nil, errors.New("задача уже выполняется")
+	case StatusQueued:
+		return job, nil
 	}
 
-	if s.tmpSandbox != nil {
+	previous := draft.Status
+	draft.resetForQueue("Задача перезапущена, ожидает очереди")
+	if s.repo != nil {
+		if err := s.repo.updateJobWithSelection(ctx, draft, previous, nil); err != nil {
+			// Jobs registered by compatibility callers may exist only in memory.
+			if !errors.Is(err, ErrJobNotFound) {
+				return nil, fmt.Errorf("%w: %w", errQueueStorage, err)
+			}
+			if err := s.repo.CreateJob(ctx, draft); err != nil {
+				return nil, fmt.Errorf("%w: %w", errQueueStorage, err)
+			}
+		}
+	}
+	if s.tmpSandbox != nil && draft.manualTrackIndex == nil {
 		if jobDir, err := s.tmpSandbox.Resolve(jobID, false); err == nil {
 			_ = safefs.RemoveAll(jobDir)
 		}
 	}
-
-	job.mu.Lock()
-	job.Status = StatusQueued
-	job.Progress = 0.0
-	job.CurrentStep = "Задача перезапущена, ожидает очереди"
-	job.Error = nil
-	job.CompletedTracks = 0
-	job.UpdatedAt = time.Now().UTC()
-	job.mu.Unlock()
-	job.notifyUpdate()
-
-	if s.repo != nil {
-		_ = s.repo.SaveJob(ctx, job)
-	}
-
-	select {
-	case s.workQueue <- jobID:
-	default:
-	}
-
+	job.applyQueueSnapshot(draft)
+	s.wakeWorker()
 	return job, nil
 }
 
@@ -235,9 +254,13 @@ func (s *Service) RetryAllFailedJobs(ctx context.Context) ([]string, error) {
 	for _, j := range all {
 		snap := j.Snapshot()
 		if snap.Status == StatusError || snap.Status == StatusCancelled {
-			if _, err := s.RetryJob(ctx, snap.ID); err == nil {
-				retried = append(retried, snap.ID)
+			if _, err := s.RetryJob(ctx, snap.ID); err != nil {
+				if errors.Is(err, ErrCorruptJobSelection) {
+					continue
+				}
+				return retried, err
 			}
+			retried = append(retried, snap.ID)
 		}
 	}
 	return retried, nil
@@ -246,21 +269,49 @@ func (s *Service) RetryAllFailedJobs(ctx context.Context) ([]string, error) {
 // DeleteJob отменяет задачу и удаляет её из памяти, БД и песочницы.
 func (s *Service) DeleteJob(ctx context.Context, id string) error {
 	s.jobsMu.Lock()
-	job, ok := s.jobs[id]
-	if ok {
-		delete(s.jobs, id)
-	}
-	s.jobsMu.Unlock()
+	defer s.jobsMu.Unlock()
+	return s.deleteJobLocked(ctx, id, true)
+}
 
-	if ok && job != nil {
-		job.Cancel()
+// FinishImport drops a ready job from the queue once its staged tracks have been consumed.
+func (s *Service) FinishImport(ctx context.Context, id string) (bool, error) {
+	if _, ok := s.GetJob(id); !ok {
+		return true, nil
 	}
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
+	job := s.jobs[id]
+	if job == nil {
+		return true, nil
+	}
+	status := job.Snapshot().Status
+	if status != StatusReady && status != StatusPartialReady {
+		return false, nil
+	}
+	pending, err := downloadstaging.HasPendingImport(s.tmpSandbox, id)
+	if err != nil || pending {
+		return false, err
+	}
+	if err := s.deleteJobLocked(ctx, id, false); err != nil {
+		return false, err
+	}
+	return true, nil
+}
 
+func (s *Service) deleteJobLocked(ctx context.Context, id string, removeStaging bool) error {
 	if s.repo != nil {
-		_ = s.repo.DeleteJob(ctx, id)
+		if err := s.repo.DeleteJob(ctx, id); err != nil {
+			return err
+		}
+	}
+	if job := s.jobs[id]; job != nil {
+		delete(s.jobs, id)
+		if removeStaging {
+			job.Cancel()
+		}
 	}
 
-	if s.tmpSandbox != nil {
+	if removeStaging && s.tmpSandbox != nil {
 		if jobDir, err := s.tmpSandbox.Resolve(id, false); err == nil {
 			_ = safefs.RemoveAll(jobDir)
 		}
@@ -278,13 +329,16 @@ func (s *Service) DeleteJob(ctx context.Context, id string) error {
 
 // ClearCompletedJobs очищает завершенные, упавшие и отмененные задачи.
 func (s *Service) ClearCompletedJobs(ctx context.Context) int {
-	all := s.GetAllJobs()
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
 	count := 0
-	for _, j := range all {
-		snap := j.Snapshot()
-		if snap.Status == StatusReady || snap.Status == StatusPartialReady || snap.Status == StatusError || snap.Status == StatusCancelled {
-			_ = s.DeleteJob(ctx, snap.ID)
-			count++
+	for id, job := range s.jobs {
+		switch job.Snapshot().Status {
+		case StatusReady, StatusPartialReady, StatusError, StatusCancelled:
+			pending, err := downloadstaging.HasPendingImport(s.tmpSandbox, id)
+			if err == nil && !pending && s.deleteJobLocked(ctx, id, true) == nil {
+				count++
+			}
 		}
 	}
 	return count
@@ -296,33 +350,36 @@ func (s *Service) AddJob(job *Job) {
 		return
 	}
 	s.jobsMu.Lock()
-	s.jobs[job.ID] = job
-	s.jobsMu.Unlock()
+	defer s.jobsMu.Unlock()
+	s.registerJobLocked(job)
+}
 
-	job.SetOnUpdate(func() {
-		s.syncJobDebounced(job)
-	})
+func (s *Service) registerJobLocked(job *Job) {
+	s.jobs[job.ID] = job
+	job.SetOnUpdate(func() { s.syncJobDebounced(job) })
 }
 
 // GetJob возвращает задачу по ID.
 func (s *Service) GetJob(id string) (*Job, bool) {
 	s.jobsMu.RLock()
-	j, ok := s.jobs[id]
+	job := s.jobs[id]
 	s.jobsMu.RUnlock()
-	if ok {
-		return j, true
+	if job != nil || s.repo == nil {
+		return job, job != nil
 	}
-
-	if s.repo != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if fromDB, err := s.repo.GetJob(ctx, id); err == nil && fromDB != nil {
-			s.AddJob(fromDB)
-			return fromDB, true
-		}
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
+	if job := s.jobs[id]; job != nil {
+		return job, true
 	}
-
-	return nil, false
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	job, err := s.repo.GetJob(ctx, id)
+	if err != nil || job == nil {
+		return nil, false
+	}
+	s.registerJobLocked(job)
+	return job, true
 }
 
 // GetAllJobs возвращает снимок всех задач из памяти.
@@ -412,12 +469,23 @@ func (s *Service) syncJobDebounced(job *Job) {
 	}
 
 	snap := job.Snapshot()
-	isTerminal := snap.Status == StatusReady || snap.Status == StatusPartialReady || snap.Status == StatusError || snap.Status == StatusCancelled
+	isTerminal := snap.Status == StatusReady || snap.Status == StatusPartialReady || snap.Status == StatusError || snap.Status == StatusCancelled || snap.Status == StatusWaitingSource
 
 	saveFn := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		_ = s.repo.SaveJob(ctx, job.Snapshot())
+		s.jobsMu.Lock()
+		defer s.jobsMu.Unlock()
+		if s.jobs[job.ID] != job {
+			return
+		}
+		current := job.Snapshot()
+		if current.Status == StatusQueued || current.selectionCorrupt {
+			return
+		}
+		if err := s.repo.updateProgressSnapshot(ctx, current); err != nil && !errors.Is(err, ErrJobNotFound) {
+			log.Printf("[Downloader] failed to persist job %s: %v", job.ID, err)
+		}
 	}
 
 	if isTerminal {

@@ -367,7 +367,7 @@
                                                     <template x-if="cand.url !== track.audio_source_url">
                                                         <button
                                                             type="button"
-                                                            @click="switchTrackVersion(track, cand.url)"
+                                                            @click="switchTrackVersion(track, cand.url, job.id)"
                                                             aria-label="Выбрать эту версию аудио"
                                                             :disabled="switchingTrackId === track.track_id"
                                                             class="px-2 py-0.5 bg-surface-elevated hover:bg-white hover:text-zinc-950 text-content-secondary rounded-sm text-xs font-semibold border border-surface-border transition shadow-xs flex items-center space-x-1 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-white/40"

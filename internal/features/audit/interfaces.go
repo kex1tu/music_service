@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"music-manager/internal/db"
 
 	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/organizer"
@@ -19,6 +20,7 @@ type BackfillStarter interface {
 		targetAlbumPath, albumTitle, artistName, deezerAlbumID string,
 		trackURLs []string,
 		trackNumbers []int,
+		positions ...db.BackfillSelection,
 	) (jobID string, err error)
 }
 
@@ -43,4 +45,9 @@ type LibraryScanner interface {
 type LyricsService interface {
 	SearchLyrics(ctx context.Context, artist, title, album string, duration int) (*lyrics.LyricsSearchResult, error)
 	SaveLyrics(relPath string, content string, kind string) error
+}
+
+// LibraryDeletionIndex coordinates a filesystem deletion and SQLite cleanup.
+type LibraryDeletionIndex interface {
+	DeletePath(context.Context, string, bool, func() error) (int64, error)
 }

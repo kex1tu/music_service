@@ -5,18 +5,18 @@
         <div>
             <h3 class="text-sm font-bold text-content-primary">Дубликаты треков в рамках одного релиза</h3>
             <p class="text-xs text-content-secondary mt-0.5">
-                Поиск дубликатов ограничен пределами одного альбома. Вы можете автоматически оставить лучшую копию трека.
+                Поиск дубликатов ограничен пределами одного альбома. Автоматически удаляются только побайтные копии с совместимыми сопутствующими файлами.
             </p>
         </div>
         <button
             @click="fixAllDuplicates()"
             :disabled="isFixingDuplicates || !duplicatesData.groups || duplicatesData.groups.length === 0"
-            aria-label="Удалить все обнаруженные дубликаты"
+            aria-label="Удалить подтверждённые копии"
             class="px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-2 shadow-lg shrink-0">
             <svg class="w-4 h-4" :class="{'animate-spin': isFixingDuplicates}" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
             </svg>
-            <span x-text="isFixingDuplicates ? 'Удаление дубликатов...' : 'Удалить все дубликаты'"></span>
+            <span x-text="isFixingDuplicates ? 'Проверка копий...' : 'Удалить подтверждённые копии'"></span>
         </button>
     </div>
 
@@ -59,12 +59,12 @@
                             <button
                                 @click="fixDuplicateGroup(grp)"
                                 :disabled="grp._isFixing"
-                                :aria-label="'Оставить лучшую копию трека ' + grp.title"
+                                :aria-label="'Проверить копии трека ' + grp.title"
                                 class="px-3 py-1.5 bg-brand/10 hover:bg-brand/20 text-brand hover:text-brand-hover border border-brand/30 rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 disabled:opacity-50 shadow-sm active:scale-95">
                                 <svg class="w-3.5 h-3.5" :class="{'animate-spin': grp._isFixing}" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
                                 </svg>
-                                <span x-text="grp._isFixing ? 'Исправление...' : 'Оставить лучшую копию'"></span>
+                                <span x-text="grp._isFixing ? 'Исправление...' : 'Проверить и удалить копии'"></span>
                             </button>
                         </div>
                     </div>

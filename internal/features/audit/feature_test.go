@@ -2,6 +2,7 @@ package audit_test
 
 import (
 	"context"
+	"music-manager/internal/db"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,6 +29,7 @@ func (m *mockBackfillStarter) CreateBackfillJob(
 	targetAlbumPath, albumTitle, artistName, deezerAlbumID string,
 	trackURLs []string,
 	trackNumbers []int,
+	positions ...db.BackfillSelection,
 ) (string, error) {
 	m.calls = append(m.calls, albumTitle)
 	return m.jobID, nil

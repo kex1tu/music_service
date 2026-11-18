@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"music-manager/internal/core/safefs"
+	"music-manager/internal/db"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
@@ -26,8 +27,15 @@ func (s *Service) GetIncompleteAlbums(ctx context.Context) (*IncompleteAlbumsRes
 	totalMissing := 0
 
 	for _, a := range dtos {
-		nums, _ := s.repo.GetMissingTrackNumbers(ctx, a.ID)
-		if len(nums) == 0 && a.ExpectedCount > a.PresentCount {
+		missing, err := s.repo.GetMissingTracksForAlbum(ctx, a.FolderPath)
+		if err != nil {
+			return nil, err
+		}
+		nums := make([]int, 0, len(missing))
+		for _, track := range missing {
+			nums = append(nums, track.TrackNumber)
+		}
+		if len(nums) == 0 && a.TotalDiscs <= 1 && a.ExpectedCount > a.PresentCount {
 			present, _ := s.repo.GetPresentTrackNumbers(ctx, a.ID)
 			presentMap := make(map[int]bool)
 			for _, p := range present {
@@ -52,6 +60,7 @@ func (s *Service) GetIncompleteAlbums(ctx context.Context) (*IncompleteAlbumsRes
 			PresentCount:        a.PresentCount,
 			ExpectedCount:       a.ExpectedCount,
 			MissingTrackNumbers: nums,
+			MissingTracks:       missing,
 			IsCatalogMatched:    isCatMatched,
 			DeezerAlbumID:       a.DeezerAlbumID,
 		})
@@ -102,116 +111,37 @@ func (s *Service) CatalogMatchAlbum(ctx context.Context, albumPath, deezerID str
 
 	cover := matchedAlbum.BestCoverURL()
 	year := matchedAlbum.ReleaseYear()
-	expectedCount := matchedAlbum.NbTracks
-
-	presentNums, _ := s.repo.GetPresentTrackNumbers(ctx, meta.ID)
-	presentMap := make(map[int]bool)
-	for _, p := range presentNums {
-		presentMap[p] = true
+	catalog, err := resolver.DeezerCatalogTracks(matchedAlbum)
+	if err != nil {
+		return nil, err
 	}
+	s.enrichCatalogArtists(ctx, catalog)
 
-	var allTracks []map[string]any
-	var missingTracks []map[string]any
-	var missingNums []int
-	var missingDTOs []MissingTrackEntityDTO
-	presentCount := 0
-
-	if matchedAlbum.Tracks != nil {
-		type detailedTrackInfo struct {
-			contributors []resolver.DeezerArtist
-		}
-		trackDetails := make([]detailedTrackInfo, len(matchedAlbum.Tracks.Data))
-		if s.deezer != nil {
-			var wg sync.WaitGroup
-			sem := make(chan struct{}, 3) // Ограничение: максимум 3 параллельных запроса для защиты от Rate-Limit
-			for i, t := range matchedAlbum.Tracks.Data {
-				if t.ID <= 0 {
-					continue
-				}
-				wg.Add(1)
-				go func(idx int, trackID int64) {
-					defer wg.Done()
-					sem <- struct{}{}
-					defer func() { <-sem }()
-
-					tCtx, tCancel := context.WithTimeout(ctx, 3*time.Second)
-					defer tCancel()
-					if tr, trErr := s.deezer.GetTrack(tCtx, strconv.FormatInt(trackID, 10)); trErr == nil && tr != nil {
-						trackDetails[idx] = detailedTrackInfo{contributors: tr.Contributors}
-					}
-				}(i, t.ID)
-			}
-			wg.Wait()
-		}
-
-		for i, t := range matchedAlbum.Tracks.Data {
-			pos := t.TrackPosition
-			if pos == 0 {
-				pos = i + 1
-			}
-			isPresent := presentMap[pos]
-			if isPresent {
-				presentCount++
-			} else {
-				missingNums = append(missingNums, pos)
-			}
-
-			discNum := t.DiskNumber
-			if discNum <= 0 {
-				discNum = 1
-			}
-
-			trackArtist := t.Artist.Name
-			var contribs []resolver.DeezerArtist
-			if i < len(trackDetails) && len(trackDetails[i].contributors) > 0 {
-				contribs = trackDetails[i].contributors
-			} else if len(t.Contributors) > 0 {
-				contribs = t.Contributors
-			}
-			if len(contribs) > 0 {
-				var artList []string
-				for _, c := range contribs {
-					if c.Name != "" {
-						artList = append(artList, c.Name)
-					}
-				}
-				if len(artList) > 0 {
-					trackArtist = id3.FormatMultiValue(artList)
-				}
-			}
-
-			trInfo := map[string]any{
-				"track_number": pos,
-				"disc_number":  discNum,
-				"title":        id3.CleanTitle(t.Title, ""),
-				"artist":       trackArtist,
-				"duration":     t.Duration,
-				"deezer_id":    strconv.FormatInt(t.ID, 10),
-				"deezer_url":   fmt.Sprintf("https://www.deezer.com/track/%d", t.ID),
-				"is_present":   isPresent,
-			}
-			allTracks = append(allTracks, trInfo)
-			if !isPresent {
-				missingTracks = append(missingTracks, trInfo)
-				missingDTOs = append(missingDTOs, MissingTrackEntityDTO{
-					AlbumID:          meta.ID,
-					Title:            id3.CleanTitle(t.Title, ""),
-					Artist:           trackArtist,
-					TrackNumber:      pos,
-					DiscNumber:       discNum,
-					ExpectedDuration: t.Duration,
-					DeezerID:         strconv.FormatInt(t.ID, 10),
-					DeezerURL:        fmt.Sprintf("https://www.deezer.com/track/%d", t.ID),
-				})
-			}
-		}
-	}
-
-	isComplete := len(missingTracks) == 0 && (expectedCount <= 1 || presentCount >= expectedCount)
+	matched := make(map[db.TrackPosition]bool)
 	if meta.ID > 0 {
-		_ = s.repo.UpdateAlbumVerification(ctx, meta.ID, expectedCount, presentCount, strconv.FormatInt(matchedAlbum.ID, 10), isComplete)
-		_ = s.repo.ReplaceMissingTracks(ctx, meta.ID, missingDTOs)
+		matched, err = s.repo.VerifyCatalog(ctx, meta.ID, strconv.FormatInt(matchedAlbum.ID, 10), catalog)
+		if err != nil {
+			return nil, err
+		}
 	}
+
+	allTracks := make([]map[string]any, 0, len(catalog))
+	missingTracks := make([]map[string]any, 0)
+	missingNums := make([]int, 0)
+	for _, t := range catalog {
+		present := matched[t.TrackPosition]
+		info := map[string]any{
+			"track_number": t.TrackNumber, "disc_number": t.DiscNumber, "title": t.Title,
+			"artist": t.Artist, "duration": t.Duration, "deezer_id": t.DeezerID,
+			"deezer_url": t.DeezerURL, "is_present": present, "isrc": t.ISRC,
+		}
+		allTracks = append(allTracks, info)
+		if !present {
+			missingNums = append(missingNums, t.TrackNumber)
+			missingTracks = append(missingTracks, info)
+		}
+	}
+	presentCount, expectedCount := len(matched), len(catalog)
 
 	return map[string]any{
 		"path":                  albumPath,
@@ -230,20 +160,90 @@ func (s *Service) CatalogMatchAlbum(ctx context.Context, albumPath, deezerID str
 	}, nil
 }
 
+func (s *Service) enrichCatalogArtists(ctx context.Context, catalog []db.CatalogTrack) {
+	sem := make(chan struct{}, 3)
+	var wg sync.WaitGroup
+	for i := range catalog {
+		if catalog[i].DeezerID == "" {
+			continue
+		}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Wait()
+			return
+		}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			trackCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			track, err := s.deezer.GetTrack(trackCtx, catalog[i].DeezerID)
+			if err != nil || track == nil {
+				return
+			}
+			var names []string
+			for _, contributor := range track.Contributors {
+				if contributor.Name != "" {
+					names = append(names, contributor.Name)
+				}
+			}
+			if len(names) > 0 {
+				catalog[i].Artist = id3.FormatMultiValue(names)
+			}
+			if track.ISRC != "" {
+				catalog[i].ISRC = track.ISRC
+			}
+		})
+	}
+	wg.Wait()
+}
+
 func (s *Service) GetBackfillEditorData(ctx context.Context, albumPath, jobID string) (*BackfillEditorDataResponse, error) {
 	var localTracks []id3.TrackTags
 	var backfillTracks []id3.TrackTags
 
 	if albumPath != "" && s.musicSandbox != nil {
-		if fullPath, err := s.musicSandbox.Resolve(albumPath, true); err == nil {
-			entries, _ := safefs.ReadDir(fullPath)
-			for _, e := range entries {
-				if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".mp3") {
-					itemRel := filepath.Join(albumPath, e.Name())
-					itemFull := filepath.Join(fullPath, e.Name())
-					if t, err := id3.ReadTags(itemFull, itemRel); err == nil {
-						localTracks = append(localTracks, *t)
-					}
+		if _, err := s.musicSandbox.Resolve(albumPath, true); err != nil {
+			albumPath = ""
+		}
+	}
+	if albumPath != "" && s.musicSandbox != nil {
+		albumPath = db.AlbumRoot(filepath.ToSlash(albumPath))
+		dirs := []string{albumPath}
+		root, err := s.musicSandbox.Resolve(albumPath, true)
+		if err != nil {
+			return nil, err
+		}
+		entries, err := safefs.ReadDir(root)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() && db.DiscFolderNumber(entry.Name()) > 0 {
+				dirs = append(dirs, filepath.Join(albumPath, entry.Name()))
+			}
+		}
+		for _, dir := range dirs {
+			full, err := s.musicSandbox.Resolve(dir, true)
+			if err != nil {
+				return nil, err
+			}
+			items, err := safefs.ReadDir(full)
+			if err != nil {
+				return nil, err
+			}
+			for _, entry := range items {
+				if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".mp3") {
+					continue
+				}
+				rel := filepath.Join(dir, entry.Name())
+				item, err := s.musicSandbox.Resolve(rel, false)
+				if err != nil {
+					continue
+				}
+				if track, err := id3.ReadTags(item, rel); err == nil {
+					track.DiscNumber = db.LocalDiscNumber(filepath.ToSlash(dir), track.DiscNumber)
+					localTracks = append(localTracks, *track)
 				}
 			}
 		}
@@ -375,6 +375,20 @@ func (s *Service) DownloadMissing(ctx context.Context, req DownloadMissingReques
 		return nil, errors.New("backfill starter is not configured")
 	}
 
+	if req.Path != "" {
+		if s.musicSandbox != nil {
+			full, err := s.musicSandbox.Resolve(req.Path, true)
+			if err != nil {
+				return nil, err
+			}
+			req.Path, err = s.musicSandbox.ToRelative(full)
+			if err != nil {
+				return nil, err
+			}
+		}
+		req.Path = db.AlbumRoot(filepath.ToSlash(req.Path))
+	}
+
 	meta, _ := s.repo.GetAlbumMetadataByPath(ctx, req.Path)
 	albumTitle := ""
 	artistName := ""
@@ -401,6 +415,7 @@ func (s *Service) DownloadMissing(ctx context.Context, req DownloadMissingReques
 		deezerID,
 		req.TrackURLs,
 		req.TrackNumbers,
+		req.Positions...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to trigger backfill job: %w", err)

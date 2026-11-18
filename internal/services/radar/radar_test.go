@@ -322,9 +322,13 @@ func TestRadar_Reconcile_RemovesExistingReleases(t *testing.T) {
 		ReleaseType: "album",
 		ReleaseDate: time.Now().Format("2006-01-02"),
 		Year:        time.Now().Year(),
-		SourceURL:   "https://example.com/bangarang",
-		Status:      "new",
-		IsRadar:     true,
+		Tracklist: []db.CatalogTrack{{
+			BackfillSelection: db.BackfillSelection{TrackPosition: db.ReleasePosition(1, 1)},
+			Title:             "Bangarang",
+		}},
+		SourceURL: "https://example.com/bangarang",
+		Status:    "new",
+		IsRadar:   true,
 	}
 	if err := database.UpsertRadarRelease(ctx, rel); err != nil {
 		t.Fatalf("UpsertRadarRelease failed: %v", err)
@@ -570,6 +574,3 @@ func TestRadar_ScanAll_ProgressUpdate(t *testing.T) {
 
 	service.CancelScan()
 }
-
-
-

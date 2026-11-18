@@ -1,11 +1,17 @@
 package downloader
 
 import (
+	"errors"
+	"fmt"
+	"log"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"music-manager/internal/core/httputil"
+	"music-manager/internal/services/downloadstaging"
+	"music-manager/internal/services/resolver"
 )
 
 // Preflight выполняет предполетную проверку релиза перед загрузкой (список треков, статусы в медиатеке).
@@ -40,7 +46,7 @@ func (m *Module) CreateJob(w http.ResponseWriter, r *http.Request) {
 		SkipExisting:         req.SkipExisting,
 	})
 	if err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, err.Error())
+		respondQueueChangeError(w, err)
 		return
 	}
 
@@ -63,7 +69,7 @@ func (m *Module) CreateBatch(w http.ResponseWriter, r *http.Request) {
 
 	jobs, err := m.service.CreateBatchJobs(r.Context(), req.URLs, req.Source)
 	if err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, err.Error())
+		respondQueueChangeError(w, err)
 		return
 	}
 
@@ -173,6 +179,12 @@ func (m *Module) GetJobTracks(w http.ResponseWriter, r *http.Request) {
 		coverURL = &c
 	}
 
+	if snap.Status == StatusReady || snap.Status == StatusPartialReady {
+		snap.Tracks = slices.DeleteFunc(snap.Tracks, func(track resolver.ResolvedTrack) bool {
+			return track.ConvertedPath != nil && downloadstaging.TrackMissing(m.service.tmpSandbox, *track.ConvertedPath)
+		})
+	}
+
 	resp := DownloadTracksResponse{
 		JobID:           snap.ID,
 		AlbumArtist:     albumArtist,
@@ -200,7 +212,21 @@ func (m *Module) GetDownloadTracks(w http.ResponseWriter, r *http.Request) {
 // DELETE /downloads/{id}
 func (m *Module) DeleteJob(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	_ = m.service.DeleteJob(r.Context(), id)
+	if r.URL.Query().Get("imported") == "true" {
+		finished, err := m.service.FinishImport(r.Context(), id)
+		if err != nil {
+			httputil.RespondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !finished {
+			httputil.RespondJSON(w, http.StatusOK, DeleteResponse{Status: "pending", JobID: id})
+			return
+		}
+	} else if err := m.service.DeleteJob(r.Context(), id); err != nil {
+		respondQueueChangeError(w, fmt.Errorf("%w: %w", errQueueStorage, err))
+		return
+	}
+
 	httputil.RespondJSON(w, http.StatusOK, DeleteResponse{Status: "deleted", JobID: id})
 }
 
@@ -215,7 +241,7 @@ func (m *Module) RetryJob(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	job, err := m.service.RetryJob(r.Context(), id)
 	if err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, err.Error())
+		respondQueueChangeError(w, err)
 		return
 	}
 
@@ -266,7 +292,7 @@ func (m *Module) ResumeQueue(w http.ResponseWriter, r *http.Request) {
 func (m *Module) RetryAllFailed(w http.ResponseWriter, r *http.Request) {
 	jobIDs, err := m.service.RetryAllFailedJobs(r.Context())
 	if err != nil {
-		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
+		respondQueueChangeError(w, err)
 		return
 	}
 	httputil.RespondJSON(w, http.StatusOK, RetryFailedResponse{
@@ -275,6 +301,20 @@ func (m *Module) RetryAllFailed(w http.ResponseWriter, r *http.Request) {
 		RetriedCount: len(jobIDs),
 		JobIDs:       jobIDs,
 	})
+}
+
+func respondQueueChangeError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errQueueStorage):
+		log.Printf("[Downloader] %v", err)
+		httputil.RespondError(w, http.StatusInternalServerError, errQueueStorage.Error())
+	case errors.Is(err, ErrJobNotFound):
+		httputil.RespondError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, errSelectionConflict):
+		httputil.RespondError(w, http.StatusConflict, err.Error())
+	default:
+		httputil.RespondError(w, http.StatusBadRequest, err.Error())
+	}
 }
 
 // UploadTorrent обрабатывает загрузку .torrent файла.

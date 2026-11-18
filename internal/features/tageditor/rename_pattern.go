@@ -2,6 +2,10 @@ package tageditor
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"music-manager/internal/services/organizer"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -143,35 +147,43 @@ func (s *Service) RenamePattern(ctx context.Context, req RenamePatternRequest) (
 			continue
 		}
 
-		// 7. Выполняем переименование основного файла
-		if err := safefs.Rename(currentFull, targetFull); err != nil {
+		rename := func() error {
+			if currentFull != targetFull {
+				if _, err := safefs.Lstat(targetFull); err == nil {
+					return fmt.Errorf("target file already exists")
+				} else if !errors.Is(err, os.ErrNotExist) {
+					return err
+				}
+			}
+			if err := safefs.Rename(currentFull, targetFull); err != nil {
+				return fmt.Errorf("failed to rename file: %w", err)
+			}
+			// 8. Переименовываем сопутствующие файлы текстов (.lrc, .txt), если они существуют
+			currentBase := strings.TrimSuffix(currentFull, filepath.Ext(currentFull))
+			targetBase := strings.TrimSuffix(targetFull, filepath.Ext(targetFull))
+			for _, lyricsExt := range []string{".lrc", ".txt"} {
+				curLyr := currentBase + lyricsExt
+				tarLyr := targetBase + lyricsExt
+				if _, err := safefs.Stat(curLyr); err == nil {
+					_ = safefs.Rename(curLyr, tarLyr)
+				}
+			}
+
+			return nil
+		}
+		err = organizer.ApplyTrackChange(ctx, s.trackIndex, currentFull, targetFull, false, rename)
+		if err == nil && s.trackIndex == nil && s.repo != nil {
+			currentRel, _ := s.musicSandbox.ToRelative(currentFull)
+			err = s.repo.UpdateTrackFilePath(ctx, currentRel, targetRel)
+		}
+		if err != nil {
 			results = append(results, RenamePatternResult{
 				CurrentPath: item.CurrentPath,
 				NewPath:     targetRel,
 				Status:      "error",
-				Error:       "failed to rename file: " + err.Error(),
+				Error:       err.Error(),
 			})
 			continue
-		}
-
-		// 8. Переименовываем сопутствующие файлы текстов (.lrc, .txt), если они существуют
-		currentBase := strings.TrimSuffix(currentFull, filepath.Ext(currentFull))
-		targetBase := strings.TrimSuffix(targetFull, filepath.Ext(targetFull))
-		for _, lyricsExt := range []string{".lrc", ".txt"} {
-			curLyr := currentBase + lyricsExt
-			tarLyr := targetBase + lyricsExt
-			if _, err := safefs.Stat(curLyr); err == nil {
-				_ = safefs.Rename(curLyr, tarLyr)
-			}
-		}
-
-		// 9. Обновляем пути в БД через репозиторий
-		currentRel, err := s.musicSandbox.ToRelative(currentFull)
-		if err != nil || currentRel == "" {
-			currentRel = itemCurrent
-		}
-		if s.repo != nil {
-			_ = s.repo.UpdateTrackFilePath(ctx, currentRel, targetRel)
 		}
 
 		results = append(results, RenamePatternResult{

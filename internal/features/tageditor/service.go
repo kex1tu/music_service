@@ -10,6 +10,8 @@ import (
 
 	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
+	"music-manager/internal/services/organizer"
+	"music-manager/internal/services/resolver"
 )
 
 var (
@@ -35,6 +37,7 @@ type ServiceConfig struct {
 	TmpSandbox      *sandbox.PathSandbox
 	Repo            TagRepository
 	Organizer       PathOrganizer
+	TrackIndex      organizer.TrackChanger
 	Deezer          DeezerCatalog
 	MusicBrainz     MusicBrainzCatalog
 	Shazam          ShazamCatalog
@@ -53,6 +56,7 @@ type Service struct {
 	tmpSandbox   *sandbox.PathSandbox
 	repo         TagRepository
 	organizer    PathOrganizer
+	trackIndex   organizer.TrackChanger
 	deezer       DeezerCatalog
 	musicbrainz  MusicBrainzCatalog
 	shazam       ShazamCatalog
@@ -86,11 +90,18 @@ func NewService(cfg ServiceConfig) *Service {
 		}
 	}
 
+	// The real client persists login and refresh before publishing the new session.
+	if client, ok := cfg.MusicBrainz.(*resolver.MusicBrainzClient); ok && tokStore != nil {
+		client.SetPersistence(tokStore)
+		tokStore = nil
+	}
+
 	return &Service{
 		musicSandbox: cfg.MusicSandbox,
 		tmpSandbox:   cfg.TmpSandbox,
 		repo:         cfg.Repo,
 		organizer:    cfg.Organizer,
+		trackIndex:   cfg.TrackIndex,
 		deezer:       cfg.Deezer,
 		musicbrainz:  cfg.MusicBrainz,
 		shazam:       cfg.Shazam,

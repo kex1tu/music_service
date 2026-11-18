@@ -81,6 +81,7 @@ type RenameResponse struct {
 	NewPath        string   `json:"newPath"`
 	AffectedFiles  []string `json:"affected_files,omitempty"`
 	AffectedTracks int      `json:"affected_tracks,omitempty"`
+	Error          string   `json:"error,omitempty"`
 }
 
 // DeleteRequest содержит путь или список путей для удаления.

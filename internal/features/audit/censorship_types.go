@@ -31,13 +31,15 @@ type CensorshipEvidence struct {
 }
 
 type CensorshipResult struct {
-	Verdict        string               `json:"verdict"`
-	Algorithm      string               `json:"algorithm"`
-	Coverage       string               `json:"coverage"`
-	Limitations    []string             `json:"limitations"`
-	Evidence       []CensorshipEvidence `json:"evidence"`
-	CheckedWindows int                  `json:"checked_windows"`
-	TotalWindows   int                  `json:"total_windows"`
+	AudioHash          string               `json:"audio_hash,omitempty"`
+	ReferenceAudioHash string               `json:"reference_audio_hash,omitempty"`
+	Verdict            string               `json:"verdict"`
+	Algorithm          string               `json:"algorithm"`
+	Coverage           string               `json:"coverage"`
+	Limitations        []string             `json:"limitations"`
+	Evidence           []CensorshipEvidence `json:"evidence"`
+	CheckedWindows     int                  `json:"checked_windows"`
+	TotalWindows       int                  `json:"total_windows"`
 }
 
 type CensorshipItem struct {

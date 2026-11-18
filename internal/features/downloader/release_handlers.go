@@ -9,6 +9,7 @@ import (
 
 	"music-manager/internal/core/httputil"
 	"music-manager/internal/core/safefs"
+	"music-manager/internal/db"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
@@ -22,6 +23,7 @@ func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
 	album := strings.TrimSpace(httputil.QueryString(r, "album", ""))
 	jobID := strings.TrimSpace(httputil.QueryString(r, "job_id", ""))
 	path := strings.TrimSpace(httputil.QueryString(r, "path", ""))
+	missingOnly := httputil.QueryBool(r, "missing_only", false)
 
 	var targetTracks []resolver.ResolvedTrack
 
@@ -38,8 +40,43 @@ func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var present map[db.TrackPosition]bool
+	if missingOnly {
+		if path == "" || m.service.MusicSandbox() == nil || m.service.Repo() == nil {
+			httputil.RespondError(w, http.StatusBadRequest, "укажите папку целевого релиза")
+			return
+		}
+		full, err := m.service.MusicSandbox().Resolve(path, true)
+		if err != nil {
+			httputil.RespondError(w, http.StatusBadRequest, "недопустимый путь целевого альбома")
+			return
+		}
+		path, err = m.service.MusicSandbox().ToRelative(full)
+		if err != nil {
+			httputil.RespondError(w, http.StatusBadRequest, "недопустимый путь целевого альбома")
+			return
+		}
+		missing, err := m.service.Repo().GetMissingTracksForAlbum(r.Context(), path)
+		if err != nil {
+			httputil.RespondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		for _, gap := range missing {
+			track := resolvedBackfillTrack(gap.CatalogTrack, "")
+			track.Album, track.AlbumArtist = album, artist
+			targetTracks = append(targetTracks, track)
+		}
+		if len(targetTracks) == 0 {
+			present, err = m.service.Repo().GetAlbumTrackPositions(r.Context(), path)
+			if err != nil {
+				httputil.RespondError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+	}
+
 	// 2. Если указан path папки в библиотеке — считываем MP3 через песочницу
-	if len(targetTracks) == 0 && path != "" && m.service.MusicSandbox() != nil {
+	if !missingOnly && len(targetTracks) == 0 && path != "" && m.service.MusicSandbox() != nil {
 		if realPath, err := m.service.MusicSandbox().Resolve(path, false); err == nil {
 			if entries, err := safefs.ReadDir(realPath); err == nil {
 				for _, e := range entries {
@@ -72,18 +109,24 @@ func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
 	if len(targetTracks) == 0 && artist != "" && album != "" && m.deezerClient != nil {
 		if albums, err := m.deezerClient.SearchAlbums(r.Context(), fmt.Sprintf("%s %s", artist, album)); err == nil && len(albums) > 0 {
 			if dAlbum, err := m.deezerClient.GetAlbum(r.Context(), strconv.FormatInt(albums[0].ID, 10)); err == nil && dAlbum != nil {
-				for _, dt := range dAlbum.Tracks.Data {
-					targetTracks = append(targetTracks, resolver.ResolvedTrack{
-						TrackID:     fmt.Sprintf("dz_%d", dt.ID),
-						TrackNumber: dt.TrackPosition,
-						Title:       dt.Title,
-						Artist:      dt.Artist.Name,
-						Album:       dAlbum.Title,
-						Duration:    dt.Duration,
-					})
+				catalog, err := resolver.DeezerCatalogTracks(dAlbum)
+				if err == nil {
+					for _, item := range catalog {
+						if present[item.TrackPosition] {
+							continue
+						}
+						track := resolvedBackfillTrack(item, "")
+						track.Album, track.AlbumArtist = dAlbum.Title, dAlbum.Artist.Name
+						targetTracks = append(targetTracks, track)
+					}
 				}
 			}
 		}
+	}
+
+	if missingOnly && len(targetTracks) == 0 {
+		httputil.RespondError(w, http.StatusNotFound, "не найдены пропуски для докачки")
+		return
 	}
 
 	if artist == "" && album == "" && len(targetTracks) == 0 {
@@ -173,7 +216,7 @@ func (m *Module) SwitchReleaseSource(w http.ResponseWriter, r *http.Request) {
 
 	result, err := m.service.SwitchReleaseSource(r.Context(), req)
 	if err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, err.Error())
+		respondQueueChangeError(w, err)
 		return
 	}
 

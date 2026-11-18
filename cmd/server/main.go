@@ -66,14 +66,6 @@ func main() {
 	}
 	defer database.Close()
 
-	// Reset library cache tables on startup (preserving download_jobs) and rebuild from filesystem
-	log.Println("[Main] Resetting library metadata cache tables on startup (preserving download_jobs)...")
-	if err := database.ResetLibraryTables(context.Background()); err != nil {
-		log.Printf("[Main] Warning: Failed to reset library cache tables: %v", err)
-	} else {
-		log.Println("[Main] Library metadata cache tables reset")
-	}
-
 	// 4. Initialize services and root context
 	appCtx, appCancel := context.WithCancel(context.Background())
 	defer appCancel()
@@ -103,7 +95,9 @@ func main() {
 	)
 	defer downloadService.Close()
 
+	scannerService := scanner.NewScanner(musicSandbox, database, deezerClient, tmpSandbox)
 	organizerService := organizer.NewService(musicSandbox, tmpSandbox)
+	organizerService.SetTrackChanger(scannerService)
 	lyricsService := lyrics.NewService(musicSandbox)
 	yandexClient := resolver.NewYandexMusicClient(cfg.YandexMusicToken, cfg.YandexMusicProxy)
 	yandexClient.SetSignKey(cfg.YandexLyricsSignKey)
@@ -123,12 +117,16 @@ func main() {
 		MaxConcurrent: cfg.MaxConcurrentDownloads,
 	})
 	if err := downloaderFeatureSvc.Start(appCtx); err != nil {
-		log.Printf("[Main] Warning: downloader vertical slice service failed to start: %v", err)
+		log.Fatalf("[Main] Downloader service failed to start: %v", err)
 	}
 	defer downloaderFeatureSvc.Close()
 	downloaderModule := featureDownloader.NewModule(downloaderFeatureSvc, deezerClient)
 
-	scannerService := scanner.NewScanner(musicSandbox, database, deezerClient)
+	if err := scannerService.RetryPending(appCtx); err != nil {
+		log.Printf("[Main] Pending library index changes will be retried: %v", err)
+	}
+
+	go scannerService.RunIndexRecovery(appCtx)
 
 	// 5. Start background scanner and fsnotify watcher
 	if err := scannerService.StartWatcher(appCtx); err != nil {
@@ -162,19 +160,13 @@ func main() {
 	itunesClient := resolver.NewITunesClient(nil)
 	mbClient := resolver.NewMusicBrainzClient(cfg.MusicBrainzUserToken)
 	mbClient.SetOAuthConfig(cfg.MusicBrainzClientID, cfg.MusicBrainzClientSecret, cfg.MusicBrainzRedirectURI)
-	if database != nil {
-		mbClient.SetPersistence(&dbTokenPersistence{db: database})
-		if savedAccess, err := database.GetSetting(appCtx, "mb_access_token"); err == nil && savedAccess != "" {
-			savedRefresh, _ := database.GetSetting(appCtx, "mb_refresh_token")
-			savedExpStr, _ := database.GetSetting(appCtx, "mb_expires_at")
-			savedUser, _ := database.GetSetting(appCtx, "mb_username")
-			var exp time.Time
-			if savedExpStr != "" {
-				exp, _ = time.Parse(time.RFC3339, savedExpStr)
-			}
-			mbClient.SetTokens(savedAccess, savedRefresh, exp, savedUser)
-			log.Printf("[MusicBrainz] Loaded persisted OAuth session for user: %s", savedUser)
-		}
+	tagRepo := featureTagEditor.NewRepository(database.Conn())
+	savedAccess, savedRefresh, savedUser, expiresAt, err := tagRepo.LoadMusicBrainzTokens(appCtx)
+	if err != nil {
+		log.Printf("[MusicBrainz] Failed to load persisted OAuth session: %v", err)
+	} else if savedAccess != "" {
+		mbClient.SetTokens(savedAccess, savedRefresh, expiresAt, savedUser)
+		log.Printf("[MusicBrainz] Loaded persisted OAuth session for user: %s", savedUser)
 	}
 	shazamProvider := resolver.NewShazamProvider(itunesClient)
 
@@ -227,6 +219,8 @@ func main() {
 		BackfillStarter: auditAdapter,
 		Organizer:       organizerService,
 		Scanner:         scannerService,
+		TrackIndex:      scannerService,
+		DeletionIndex:   scannerService,
 		Lyrics:          lyricsService,
 		Enricher:        sourceResolver.Enricher(),
 		Deezer:          deezerClient,
@@ -238,11 +232,11 @@ func main() {
 	auditModule := featureAudit.NewModule(auditFeatureSvc)
 
 	// Initialize TagEditor Vertical Feature Slice
-	tagRepo := featureTagEditor.NewRepository(database.Conn())
 	tagFeatureSvc := featureTagEditor.NewService(featureTagEditor.ServiceConfig{
 		MusicSandbox: musicSandbox,
 		TmpSandbox:   tmpSandbox,
 		Repo:         tagRepo,
+		TrackIndex:   scannerService,
 		Organizer:    organizerService,
 		Deezer:       deezerClient,
 		MusicBrainz:  mbClient,
@@ -265,7 +259,8 @@ func main() {
 		MusicSandbox: musicSandbox,
 		TmpSandbox:   tmpSandbox,
 		Repo:         fileManagerRepo,
-		Organizer:    &fileManagerOrganizerAdapter{sb: musicSandbox},
+		Organizer:    &fileManagerOrganizerAdapter{sb: musicSandbox, index: scannerService},
+		LibraryIndex: scannerService,
 		Scanner:      &fileManagerScannerAdapter{scanner: scannerService, sb: musicSandbox},
 		JobCreator:   &downloaderBackfillAdapter{svc: downloaderFeatureSvc},
 		SourceFinder: &fileManagerSourceFinder{deezer: deezerClient, matcher: audioMatcher},
@@ -277,7 +272,11 @@ func main() {
 	lastfmClient := resolver.NewLastfmClient(cfg.LastfmAPIKey)
 	similarityEngine := resolver.NewSimilarityEngine(deezerClient, lastfmClient, database)
 
-	navidromeReader := radio.NewNavidromeReader(cfg.NavidromeDBPath)
+	navidromeMusicRoot := cfg.NavidromeMusicRoot
+	if navidromeMusicRoot == "" {
+		navidromeMusicRoot = musicSandbox.Root()
+	}
+	navidromeReader := radio.NewNavidromeReader(cfg.NavidromeDBPath, navidromeMusicRoot)
 	navidromeSubsonic := radio.NewNavidromeSubsonicClient(cfg.NavidromeURL, cfg.NavidromeUser, cfg.NavidromePassword)
 
 	waveSelector := radio.NewWaveSelector(database, navidromeReader, similarityEngine)
@@ -392,26 +391,6 @@ func main() {
 	log.Println("[Main] Server stopped.")
 }
 
-type dbTokenPersistence struct {
-	db *db.DB
-}
-
-func (p *dbTokenPersistence) SaveTokens(ctx context.Context, accessToken, refreshToken string, expiresAt time.Time, username string) error {
-	_ = p.db.SetSetting(ctx, "mb_access_token", accessToken)
-	_ = p.db.SetSetting(ctx, "mb_refresh_token", refreshToken)
-	_ = p.db.SetSetting(ctx, "mb_expires_at", expiresAt.Format(time.RFC3339))
-	_ = p.db.SetSetting(ctx, "mb_username", username)
-	return nil
-}
-
-func (p *dbTokenPersistence) ClearTokens(ctx context.Context) error {
-	_ = p.db.DeleteSetting(ctx, "mb_access_token")
-	_ = p.db.DeleteSetting(ctx, "mb_refresh_token")
-	_ = p.db.DeleteSetting(ctx, "mb_expires_at")
-	_ = p.db.DeleteSetting(ctx, "mb_username")
-	return nil
-}
-
 type downloaderBackfillAdapter struct {
 	svc *featureDownloader.Service
 }
@@ -429,8 +408,9 @@ func (a *downloaderBackfillAdapter) CreateBackfillJob(
 	targetAlbumPath, albumTitle, artistName, deezerAlbumID string,
 	trackURLs []string,
 	trackNumbers []int,
+	positions ...db.BackfillSelection,
 ) (string, error) {
-	job, err := a.svc.CreateBackfillJob(ctx, targetAlbumPath, albumTitle, artistName, deezerAlbumID, trackURLs, trackNumbers)
+	job, err := a.svc.CreateBackfillJob(ctx, targetAlbumPath, albumTitle, artistName, deezerAlbumID, trackURLs, trackNumbers, positions...)
 	if err != nil {
 		return "", err
 	}
@@ -438,7 +418,8 @@ func (a *downloaderBackfillAdapter) CreateBackfillJob(
 }
 
 type fileManagerOrganizerAdapter struct {
-	sb *sandbox.PathSandbox
+	sb    *sandbox.PathSandbox
+	index organizer.TrackChanger
 }
 
 func (a *fileManagerOrganizerAdapter) RenameFile(oldRel, newRel string) ([]string, error) {
@@ -450,12 +431,12 @@ func (a *fileManagerOrganizerAdapter) RenameFile(oldRel, newRel string) ([]strin
 	if err != nil {
 		return nil, err
 	}
-	target, err := organizer.MoveTrackWithCompanions(oldFull, newFull, false)
-	if err != nil {
+	target, err := organizer.MoveIndexedTrack(context.Background(), a.index, oldFull, newFull, false, nil)
+	if target == "" {
 		return nil, err
 	}
 	relTarget, _ := a.sb.ToRelative(target)
-	return []string{relTarget}, nil
+	return []string{relTarget}, err
 }
 
 func (a *fileManagerOrganizerAdapter) SyncCompanions(oldBaseRel, newBaseRel string) error {

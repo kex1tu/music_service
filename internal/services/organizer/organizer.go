@@ -1,8 +1,10 @@
 package organizer
 
 import (
+	"context"
+	"errors"
 	"fmt"
-
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -34,12 +36,28 @@ type BatchSaveRequest struct {
 
 // OrganizerResult contains details of the organized files and destination directory.
 type OrganizerResult struct {
-	DestinationDir string      `json:"destination_dir"` // Canonical relative directory (e.g. "Album Name")
-	Tracks         []TrackTags `json:"tracks"`          // List of tracks with updated paths and tags
+	DestinationDir string        `json:"destination_dir"` // Canonical relative directory (e.g. "Album Name")
+	Tracks         []TrackTags   `json:"tracks"`          // Tracks whose tags were saved
+	TrackResults   []TrackResult `json:"track_results"`
+}
+
+type TrackResult struct {
+	SourcePath      string `json:"source_path"`
+	DestinationPath string `json:"destination_path,omitempty"`
+	Status          string `json:"status"`
+	Error           string `json:"error,omitempty"`
+}
+
+func (r *OrganizerResult) Complete() bool {
+	for _, track := range r.TrackResults {
+		if track.Status != "moved" {
+			return false
+		}
+	}
+	return true
 }
 
 type targetAlbumInfo struct {
-	dirName    string
 	fullDir    string
 	sourceDirs map[string]bool
 }
@@ -48,6 +66,8 @@ type targetAlbumInfo struct {
 type Service struct {
 	musicSandbox *sandbox.PathSandbox
 	tmpSandbox   *sandbox.PathSandbox
+	moveMu       sync.Mutex
+	trackIndex   TrackChanger
 }
 
 // NewService creates a new Organizer Service instance.
@@ -56,6 +76,11 @@ func NewService(musicSandbox, tmpSandbox *sandbox.PathSandbox) *Service {
 		musicSandbox: musicSandbox,
 		tmpSandbox:   tmpSandbox,
 	}
+}
+
+// SetTrackChanger wires the library index before the organizer starts serving requests.
+func (s *Service) SetTrackChanger(index TrackChanger) {
+	s.trackIndex = index
 }
 
 // SaveBatch organizes and saves a batch of tracks according to the BatchSaveRequest specification.
@@ -131,6 +156,15 @@ func (s *Service) SaveBatch(req BatchSaveRequest) (*OrganizerResult, error) {
 // Canonical structure: music_library / {Album} - {Album Artist} / {TrackNumber:02d}. {Title}.mp3.
 // For singles without an explicit album, album name is set to the track's title.
 func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist string, tracks []TrackTags, coverBase64 string) (*OrganizerResult, error) {
+	return s.MoveAlbumContext(context.Background(), sourceDir, fallbackAlbum, fallbackAlbumArtist, tracks, coverBase64)
+}
+
+// MoveAlbumContext organizes tracks and returns the filesystem and index outcome for each track.
+func (s *Service) MoveAlbumContext(ctx context.Context, sourceDir, fallbackAlbum, fallbackAlbumArtist string, tracks []TrackTags, coverBase64 string) (*OrganizerResult, error) {
+	return s.moveAlbum(ctx, sourceDir, fallbackAlbum, fallbackAlbumArtist, tracks, coverBase64, nil)
+}
+
+func (s *Service) moveAlbum(ctx context.Context, sourceDir, fallbackAlbum, fallbackAlbumArtist string, tracks []TrackTags, coverBase64 string, backfill *backfillDestination) (*OrganizerResult, error) {
 	if len(tracks) == 1 {
 		if strings.TrimSpace(fallbackAlbumArtist) == "" && strings.TrimSpace(tracks[0].Artist) != "" {
 			fallbackAlbumArtist = strings.TrimSpace(tracks[0].Artist)
@@ -146,7 +180,6 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 		defaultDir := s.ComputeAlbumDir(fallbackAlbumArtist, fallbackAlbum)
 		return &OrganizerResult{
 			DestinationDir: defaultDir,
-			Tracks:         nil,
 		}, nil
 	}
 
@@ -185,6 +218,9 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 		}
 
 		targetDir := s.ComputeAlbumDir(trArtist, trAlbum)
+		if backfill != nil {
+			targetDir = backfill.root
+		}
 		uniqueAlbumDirsMap[targetDir] = true
 	}
 
@@ -194,6 +230,11 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 	}
 	// Sort directory keys to ensure deadlock-free locking
 	sort.Strings(uniqueAlbumDirs)
+
+	// Serialize MoveAlbum requests even when they choose different destinations
+	// for the same staging input.
+	s.moveMu.Lock()
+	defer s.moveMu.Unlock()
 
 	// 2. Acquire directory mutex locks in deterministic sorted order
 	var locks []*sync.Mutex
@@ -208,61 +249,25 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 		}
 	}()
 
-	// 3. Resolve and create all target album directories inside music sandbox
 	albumInfoMap := make(map[string]*targetAlbumInfo)
-	for _, dir := range uniqueAlbumDirs {
-		targetFullDir, err := s.musicSandbox.Resolve(dir, true)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve target album directory '%s': %w", dir, err)
-		}
-		if err := safefs.MkdirAll(targetFullDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create album directory '%s': %w", dir, err)
-		}
-		_ = safefs.Chmod(targetFullDir, 0755)
-		albumInfoMap[dir] = &targetAlbumInfo{
-			dirName:    dir,
-			fullDir:    targetFullDir,
-			sourceDirs: make(map[string]bool),
-		}
-	}
-
-	isTmp := strings.HasPrefix(sourceDir, "tmp_downloads") || strings.HasPrefix(sourceDir, "tmp/") || (strings.Contains(sourceDir, "-") && len(sourceDir) == 36)
 	var updatedTracks []TrackTags
-	var movedSourceDirs []string
+	trackResults := make([]TrackResult, len(tracks))
+	movedSourceDirs := make(map[string]*sandbox.PathSandbox)
 
-	// 4. Move and tag each track
-	for _, tr := range tracks {
-		origPath := tr.Path
-		var srcFullPath string
+	for i, tr := range tracks {
+		result := &trackResults[i]
+		result.SourcePath = tr.Path
+		result.Status = "failed"
 
-		isTmpTrack := isTmp || strings.HasPrefix(origPath, "tmp_downloads/") || strings.HasPrefix(origPath, "tmp/")
-
-		if isTmpTrack && s.tmpSandbox != nil {
-			cleanRel := strings.TrimPrefix(origPath, "tmp_downloads/")
-			cleanRel = strings.TrimPrefix(cleanRel, "tmp/")
-			if p, err := s.tmpSandbox.Resolve(cleanRel, false); err == nil && fileExists(p) {
-				srcFullPath = p
+		srcFullPath, sourceSandbox, err := s.resolveTrackSource(sourceDir, tr.Path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				result.Status = "missing"
 			}
+			result.Error = err.Error()
+			continue
 		}
-
-		if srcFullPath == "" && s.tmpSandbox != nil {
-			if p, err := s.tmpSandbox.Resolve(origPath, false); err == nil && fileExists(p) {
-				srcFullPath = p
-			}
-		}
-
-		if srcFullPath == "" {
-			if p, err := s.musicSandbox.Resolve(origPath, false); err == nil && fileExists(p) {
-				srcFullPath = p
-			}
-		}
-
-		if srcFullPath == "" || !fileExists(srcFullPath) {
-			continue // skip missing files safely
-		}
-
 		srcDir := filepath.Dir(srcFullPath)
-		movedSourceDirs = append(movedSourceDirs, srcDir)
 
 		// Determine target metadata per track
 		trTitle := CleanTitle(tr.Title, filepath.Base(srcFullPath))
@@ -294,43 +299,74 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 		}
 
 		albumDir, targetRel := s.ComputeTargetPath(trAlbumArtist, trAlbum, tr.TrackNumber, trTitle, filepath.Base(srcFullPath))
-
-		if info, ok := albumInfoMap[albumDir]; ok {
-			info.sourceDirs[srcDir] = true
-			parentDir := filepath.Dir(srcDir)
-			if parentDir != "." && parentDir != "/" {
-				info.sourceDirs[parentDir] = true
+		if backfill != nil {
+			albumDir = backfill.root
+			existing, _ := s.musicSandbox.ToRelative(srcFullPath)
+			targetRel = backfill.trackPath(existing, tr.DiscNumber, filepath.Base(targetRel))
+			dir, err := s.musicSandbox.Resolve(filepath.Dir(targetRel), true)
+			if err != nil {
+				return nil, err
+			}
+			if err := safefs.MkdirAll(dir, 0755); err != nil {
+				return nil, err
 			}
 		}
 
-		destFullPath, err := s.musicSandbox.Resolve(targetRel, true)
+		destFullPath, err := s.musicSandbox.Resolve(targetRel, false)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve destination track path: %w", err)
+			result.Error = err.Error()
+			continue
 		}
 
-		// Safely move MP3 file with collision detection, deduplication, and companion lyrics
-		actualDestFull, err := MoveTrackWithCompanions(srcFullPath, destFullPath, false)
-		if err != nil {
-			return nil, fmt.Errorf("failed to move audio file %s to %s: %w", srcFullPath, destFullPath, err)
-		}
-
-		// Calculate actual relative path inside music sandbox
-		actualRel, _ := s.musicSandbox.ToRelative(actualDestFull)
-
-		// Update track tags on disk
 		trCopy := tr
-		trCopy.Path = actualRel
 		trCopy.Album = trAlbum
 		trCopy.AlbumArtist = trAlbumArtist
 		trCopy.Title = trTitle
 		if trCopy.TrackNumber <= 0 {
 			trCopy.TrackNumber = 1
 		}
+		var tagErr error
+		actualDestFull, err := MoveIndexedTrack(ctx, s.trackIndex, srcFullPath, destFullPath, false, func(actual string) error {
+			trCopy.Path, _ = s.musicSandbox.ToRelative(actual)
+			if err := id3.WriteTags(actual, trCopy, nil); err != nil {
+				tagErr = fmt.Errorf("failed to write tags: %w", err)
+			}
+			return tagErr
+		})
+		if err != nil {
+			result.Error = err.Error()
+		}
+		if actualDestFull == "" {
+			continue
+		}
 
-		// Write ID3v2.4 tags to disk
-		_ = id3.WriteTags(actualDestFull, trCopy, nil)
+		result.DestinationPath = trCopy.Path
+		switch {
+		case tagErr != nil:
+			result.Status = "tag_error"
+		case err != nil:
+			result.Status = "index_error"
+		default:
+			result.Status = "moved"
+		}
+		if tagErr == nil {
+			updatedTracks = append(updatedTracks, trCopy)
+		}
 
-		updatedTracks = append(updatedTracks, trCopy)
+		movedSourceDirs[srcDir] = sourceSandbox
+		info := albumInfoMap[albumDir]
+		if info == nil {
+			info = &targetAlbumInfo{
+				fullDir:    filepath.Dir(actualDestFull),
+				sourceDirs: make(map[string]bool),
+			}
+			albumInfoMap[albumDir] = info
+		}
+		info.sourceDirs[srcDir] = true
+		parentDir := filepath.Dir(srcDir)
+		if parentDir != srcDir {
+			info.sourceDirs[parentDir] = true
+		}
 	}
 
 	// 5. Handle cover art for each album directory and its tracks
@@ -355,36 +391,59 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 		syncTrackNamedCovers(info.fullDir)
 	}
 
-	// 6. Clean up empty source directories
-	for _, srcDir := range movedSourceDirs {
-		removeIfEmpty(srcDir)
-		parentDir := filepath.Dir(srcDir)
-		if parentDir != "." && parentDir != "/" {
-			removeIfEmpty(parentDir)
-		}
+	for srcDir, sourceSandbox := range movedSourceDirs {
+		CleanEmptyParents(srcDir, sourceSandbox.Root())
 	}
 
-	if isTmp && sourceDir != "" && s.tmpSandbox != nil {
-		cleanRel := strings.TrimPrefix(sourceDir, "tmp_downloads/")
-		cleanRel = strings.TrimPrefix(cleanRel, "tmp/")
-		if jobFull, err := s.tmpSandbox.Resolve(cleanRel, false); err == nil {
-			_ = safefs.RemoveAll(jobFull)
+	destinationDir := s.ComputeAlbumDir(fallbackAlbumArtist, fallbackAlbum)
+	for _, dir := range uniqueAlbumDirs {
+		if _, moved := albumInfoMap[dir]; moved {
+			destinationDir = dir
+			break
 		}
-	} else if !isTmp && sourceDir != "" && sourceDir != "." {
-		if srcDirFull, err := s.musicSandbox.Resolve(sourceDir, false); err == nil {
-			removeIfEmpty(srcDirFull)
-		}
-	}
-
-	destinationDir := ""
-	if len(uniqueAlbumDirs) >= 1 {
-		destinationDir = uniqueAlbumDirs[0]
-	} else {
-		destinationDir = s.ComputeAlbumDir(fallbackAlbumArtist, fallbackAlbum)
 	}
 
 	return &OrganizerResult{
 		DestinationDir: destinationDir,
 		Tracks:         updatedTracks,
+		TrackResults:   trackResults,
 	}, nil
+}
+
+func (s *Service) resolveTrackSource(sourceDir, path string) (string, *sandbox.PathSandbox, error) {
+	isStaging := func(p string) bool {
+		return p == "tmp_downloads" || strings.HasPrefix(p, "tmp_downloads/") ||
+			p == "tmp" || strings.HasPrefix(p, "tmp/")
+	}
+
+	if isStaging(sourceDir) || isStaging(path) || (len(sourceDir) == 36 && strings.Contains(sourceDir, "-")) {
+		cleanPath := strings.TrimPrefix(strings.TrimPrefix(path, "tmp_downloads/"), "tmp/")
+		return regularTrackPath(s.tmpSandbox, cleanPath)
+	}
+
+	// Older import clients send a bare job directory and relative staging paths.
+	if s.tmpSandbox != nil {
+		if full, source, err := regularTrackPath(s.tmpSandbox, path); err == nil {
+			return full, source, nil
+		}
+	}
+	return regularTrackPath(s.musicSandbox, path)
+}
+
+func regularTrackPath(source *sandbox.PathSandbox, path string) (string, *sandbox.PathSandbox, error) {
+	if source == nil {
+		return "", nil, fmt.Errorf("source sandbox not configured")
+	}
+	full, err := source.Resolve(path, false)
+	if err != nil {
+		return "", nil, err
+	}
+	info, err := safefs.Lstat(full)
+	if err != nil {
+		return "", nil, err
+	}
+	if !info.Mode().IsRegular() || !strings.EqualFold(filepath.Ext(full), ".mp3") {
+		return "", nil, fmt.Errorf("source is not a regular MP3: %s", path)
+	}
+	return full, source, nil
 }

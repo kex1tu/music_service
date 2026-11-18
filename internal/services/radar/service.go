@@ -28,9 +28,9 @@ type ScanProgress struct {
 
 // ScanArtistResult содержит результаты сканирования дискографии одного исполнителя.
 type ScanArtistResult struct {
-	ArtistName      string                     `json:"artist_name"`
-	TotalDiscovered int                        `json:"total_discovered"`
-	NewReleases     int                        `json:"new_releases"`
+	ArtistName      string                       `json:"artist_name"`
+	TotalDiscovered int                          `json:"total_discovered"`
+	NewReleases     int                          `json:"new_releases"`
 	Releases        []resolver.AggregatedRelease `json:"releases"`
 }
 
@@ -245,6 +245,7 @@ func (s *Service) ScanArtist(ctx context.Context, artistName string) (*ScanArtis
 			SourceURL:       rel.SourceURL,
 			Status:          rel.Status,
 			IsRadar:         rel.IsRadar,
+			Tracklist:       rel.Tracklist,
 		}
 
 		if err := s.db.UpsertRadarRelease(ctx, &entity); err != nil {
@@ -252,7 +253,7 @@ func (s *Service) ScanArtist(ctx context.Context, artistName string) (*ScanArtis
 			continue
 		}
 
-		if rel.Status == "new" {
+		if entity.Status == "new" {
 			newCount++
 			// Проверяем возможность автозагрузки
 			autoDownload := false
@@ -271,7 +272,11 @@ func (s *Service) ScanArtist(ctx context.Context, artistName string) (*ScanArtis
 		}
 	}
 
-	_ = s.db.UpdateArtistLastChecked(ctx, artistName)
+	if tracked != nil {
+		if err := s.db.UpdateArtistLastCheckedByID(ctx, tracked.ID); err != nil {
+			log.Printf("[Radar] Ошибка обновления времени проверки %q: %v", artistName, err)
+		}
+	}
 
 	return &ScanArtistResult{
 		ArtistName:      artistName,
