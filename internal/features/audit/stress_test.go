@@ -50,13 +50,13 @@ func (m *stressMockLyricsService) SaveLyrics(relPath string, content string, kin
 }
 
 type stressTestRig struct {
-	env         *testkit.TestEnv
-	repo        *audit.Repository
-	service     *audit.Service
-	module      *audit.Module
-	mockLyrics  *stressMockLyricsService
-	scannerSvc  *scanner.Scanner
-	organizer   *organizer.Service
+	env        *testkit.TestEnv
+	repo       *audit.Repository
+	service    *audit.Service
+	module     *audit.Module
+	mockLyrics *stressMockLyricsService
+	scannerSvc *scanner.Scanner
+	organizer  *organizer.Service
 }
 
 func setupStressTestRig(t *testing.T, lyricsDelay time.Duration) *stressTestRig {
@@ -381,22 +381,23 @@ func TestAuditStress_ConcurrentCompanionDeletion(t *testing.T) {
 // ============================================================================
 
 func TestAuditStress_RapidCancellationBatchWorkers(t *testing.T) {
-	// Set a 10ms delay in mock lyrics to simulate active network I/O
-	rig := setupStressTestRig(t, 10*time.Millisecond)
-	ctx := context.Background()
-
-	// Seed 20 tracks missing lyrics and missing covers
-	for i := 0; i < 20; i++ {
-		relMP3 := fmt.Sprintf("BatchArtist/Album %d/%02d. Song %d.mp3", i/5, i%5+1, i+1)
-		rig.env.CreateDummyMP3(relMP3, fmt.Sprintf("Song %d", i+1), "BatchArtist", fmt.Sprintf("Album %d", i/5))
-	}
-
-	if _, err := rig.scannerSvc.ScanAll(ctx); err != nil {
-		t.Fatalf("ScanAll failed: %v", err)
+	// Each scenario owns its workers; a burst can leave its last job running.
+	setupRig := func(t *testing.T) *stressTestRig {
+		t.Helper()
+		rig := setupStressTestRig(t, 10*time.Millisecond)
+		for i := 0; i < 20; i++ {
+			relMP3 := fmt.Sprintf("BatchArtist/Album %d/%02d. Song %d.mp3", i/5, i%5+1, i+1)
+			rig.env.CreateDummyMP3(relMP3, fmt.Sprintf("Song %d", i+1), "BatchArtist", fmt.Sprintf("Album %d", i/5))
+		}
+		if _, err := rig.scannerSvc.ScanAll(context.Background()); err != nil {
+			t.Fatalf("ScanAll failed: %v", err)
+		}
+		return rig
 	}
 
 	// Subtest 3.1: High frequency start/cancel burst on lyrics worker
 	t.Run("LyricsWorkerBurstStartCancel", func(t *testing.T) {
+		rig := setupRig(t)
 		var wg sync.WaitGroup
 		startBarrier := make(chan struct{})
 
@@ -441,6 +442,7 @@ func TestAuditStress_RapidCancellationBatchWorkers(t *testing.T) {
 
 	// Subtest 3.2: High frequency start/cancel burst on covers worker
 	t.Run("CoversWorkerBurstStartCancel", func(t *testing.T) {
+		rig := setupRig(t)
 		var wg sync.WaitGroup
 		startBarrier := make(chan struct{})
 
@@ -485,6 +487,7 @@ func TestAuditStress_RapidCancellationBatchWorkers(t *testing.T) {
 
 	// Subtest 3.3: Immediate start after cancel state machine test
 	t.Run("ImmediateStartAfterCancel", func(t *testing.T) {
+		rig := setupRig(t)
 		// Start batch lyrics
 		p1, err := rig.service.StartBatchLyrics(context.Background())
 		if err != nil {
@@ -521,6 +524,7 @@ func TestAuditStress_RapidCancellationBatchWorkers(t *testing.T) {
 
 	// Subtest 3.4: Graceful Close() while workers are active
 	t.Run("GracefulCloseWhileRunning", func(t *testing.T) {
+		rig := setupRig(t)
 		_, _ = rig.service.StartBatchLyrics(context.Background())
 		_, _ = rig.service.StartBatchCovers(context.Background())
 
