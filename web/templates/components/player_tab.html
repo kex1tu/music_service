@@ -131,7 +131,8 @@
             </div>
 
             <!-- Стерео VU-метр (Analog Peak LED Bar) -->
-            <div class="bg-surface-input p-3.5 rounded-xl border border-surface-border space-y-2.5">
+            <div x-init="$store.player.observeAudioDisplay($el)"
+                 class="bg-surface-input p-3.5 rounded-xl border border-surface-border space-y-2.5">
                 <div class="flex items-center justify-between text-xs font-mono text-content-muted">
                     <span>ANALOG PEAK LEVEL</span>
                     <span>-48dB  -12dB  0dB  +3dB</span>
