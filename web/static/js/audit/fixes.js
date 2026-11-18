@@ -159,7 +159,9 @@ window.AuditFixes = {
             });
             if (res.ok) {
                 const data = await res.json();
-                Alpine.store('app').toast(`Успешно удалено дубликатов: ${data.deleted_count}`, 'success');
+                const review = data.review_groups || 0;
+                const suffix = review ? `. Групп для ручной проверки — ${review}` : '';
+                Alpine.store('app').toast(`Удалено копий — ${data.deleted_count}${suffix}`, review ? 'warning' : 'success');
                 if (this.loadDuplicates) await this.loadDuplicates();
                 if (this.loadSummary) await this.loadSummary();
                 window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
@@ -182,7 +184,7 @@ window.AuditFixes = {
     async fixAllDuplicates() {
         if (this.isFixingDuplicates) return;
         this.isFixingDuplicates = true;
-        Alpine.store('app').toast('Удаление всех дубликатов в медиатеке...', 'info');
+        Alpine.store('app').toast('Проверка групп и удаление совпадающих копий...', 'info');
         try {
             const res = await window.api.raw('/files/audit/duplicates/fix-all', {
                 method: 'POST',
@@ -190,7 +192,9 @@ window.AuditFixes = {
             });
             if (res.ok) {
                 const data = await res.json();
-                Alpine.store('app').toast(`Успешно удалено избыточных файлов: ${data.deleted_count}`, 'success');
+                const review = data.review_groups || 0;
+                const suffix = review ? `. Групп для ручной проверки — ${review}` : '';
+                Alpine.store('app').toast(`Удалено копий — ${data.deleted_count}${suffix}`, review ? 'warning' : 'success');
                 if (this.loadDuplicates) await this.loadDuplicates();
                 if (this.loadSummary) await this.loadSummary();
                 window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));

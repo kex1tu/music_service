@@ -212,8 +212,13 @@ window.DownloaderPolling = {
                 throw new Error(err.error || 'Ошибка перемещения в медиатеку');
             }
 
-            Alpine.store('app').toast('Релиз успешно принят в медиатеку!', 'success');
-            await window.api.raw(`/downloads/${jobId}`, { method: 'DELETE' });
+            window.api.tags.requireCompleteBatch(await saveRes.json());
+            const result = await window.api.downloader.finishImport(jobId);
+            if (result.status === 'pending') {
+                Alpine.store('app').toast('Треки перенесены. Часть файлов ещё ожидает импорта', 'warning');
+            } else {
+                Alpine.store('app').toast('Релиз успешно принят в медиатеку!', 'success');
+            }
             if (Alpine.store('app').queue) {
                 await Alpine.store('app').queue.fetchQueue();
             }

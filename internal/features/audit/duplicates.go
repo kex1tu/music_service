@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"music-manager/internal/core/safefs"
@@ -113,7 +114,12 @@ func (s *Service) deleteTrackAndCompanions(ctx context.Context, relPath string) 
 	return nil
 }
 
+var duplicateMutationMu sync.Mutex
+
 func (s *Service) FixDuplicates(ctx context.Context, pathsToDelete []string) (*FixDuplicatesResponse, error) {
+	duplicateMutationMu.Lock()
+	defer duplicateMutationMu.Unlock()
+
 	var deleted []string
 	var errs []string
 
@@ -134,40 +140,61 @@ func (s *Service) FixDuplicates(ctx context.Context, pathsToDelete []string) (*F
 }
 
 func (s *Service) FixAllDuplicates(ctx context.Context) (*FixDuplicatesResponse, error) {
+	return s.fixDuplicateGroups(ctx, "")
+}
+
+func (s *Service) FixDuplicateGroup(ctx context.Context, groupKey string) (*FixDuplicatesResponse, error) {
+	if groupKey == "" {
+		return &FixDuplicatesResponse{Success: true}, nil
+	}
+	return s.fixDuplicateGroups(ctx, groupKey)
+}
+
+func (s *Service) fixDuplicateGroups(ctx context.Context, groupKey string) (*FixDuplicatesResponse, error) {
+	duplicateMutationMu.Lock()
+	defer duplicateMutationMu.Unlock()
+
 	report, err := s.GetDuplicates(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	var deleted []string
-	var errs []string
-
+	result := &FixDuplicatesResponse{}
 	for _, grp := range report.Groups {
-		if len(grp.Tracks) < 2 {
+		if err := ctx.Err(); err != nil {
+			result.Errors = append(result.Errors, err.Error())
+			break
+		}
+		if groupKey != "" && grp.Key != groupKey {
 			continue
 		}
 
-		canonicalIdx := s.selectCanonicalTrack(grp.Tracks)
-
-		for i, tr := range grp.Tracks {
-			if i == canonicalIdx {
-				continue // Preserve canonical track
+		keep := s.selectCanonicalTrack(grp.Tracks)
+		paths := []string{grp.Tracks[keep].Path}
+		for i, track := range grp.Tracks {
+			if i != keep {
+				paths = append(paths, track.Path)
 			}
+		}
 
-			if err := s.deleteTrackAndCompanions(ctx, tr.Path); err != nil {
-				errs = append(errs, fmt.Sprintf("%s: %v", tr.Path, err))
-			} else {
-				deleted = append(deleted, tr.Path)
+		removed, err := organizer.MergeDuplicateGroup(s.musicSandbox, paths)
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", grp.Key, err))
+		}
+		if len(removed) < len(paths)-1 {
+			result.ReviewGroups++
+		}
+		for _, path := range removed {
+			result.DeletedFiles = append(result.DeletedFiles, path)
+			if err := s.repo.DeleteTrackAndCleanup(ctx, path); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", path, err))
 			}
 		}
 	}
 
-	return &FixDuplicatesResponse{
-		Success:      len(errs) == 0,
-		DeletedCount: len(deleted),
-		DeletedFiles: deleted,
-		Errors:       errs,
-	}, nil
+	result.DeletedCount = len(result.DeletedFiles)
+	result.Success = len(result.Errors) == 0
+	return result, nil
 }
 
 func (s *Service) ResolveDuplicates(ctx context.Context, groupKey, keepPath string, pathsToDelete []string) (*FixDuplicatesResponse, error) {
