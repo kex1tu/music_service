@@ -71,7 +71,10 @@ func (s *Service) AddTrackedArtist(ctx context.Context, name string) error {
 }
 
 // FollowArtist включает или отключает отслеживание артиста.
-func (s *Service) FollowArtist(ctx context.Context, name string, followed bool) error {
+func (s *Service) FollowArtist(ctx context.Context, name string, followed bool, artistID int64) error {
+	if artistID > 0 && s.repo != nil {
+		return s.repo.SetArtistFollowed(ctx, artistID, followed)
+	}
 	if s.scanner == nil {
 		return fmt.Errorf("scanner engine unavailable")
 	}
@@ -79,7 +82,10 @@ func (s *Service) FollowArtist(ctx context.Context, name string, followed bool) 
 }
 
 // SetAutoDownload включает или отключает автозагрузку новых релизов артиста.
-func (s *Service) SetAutoDownload(ctx context.Context, name string, auto bool) error {
+func (s *Service) SetAutoDownload(ctx context.Context, name string, auto bool, artistID int64) error {
+	if artistID > 0 && s.repo != nil {
+		return s.repo.SetArtistAutoDownload(ctx, artistID, auto)
+	}
 	if s.scanner == nil {
 		return fmt.Errorf("scanner engine unavailable")
 	}
@@ -87,7 +93,10 @@ func (s *Service) SetAutoDownload(ctx context.Context, name string, auto bool) e
 }
 
 // UpdateCustomLinks обновляет пользовательские идентификаторы артиста в каталогах.
-func (s *Service) UpdateCustomLinks(ctx context.Context, name, alias, deezerID, mbID, yandexID string) error {
+func (s *Service) UpdateCustomLinks(ctx context.Context, name, alias, deezerID, mbID, yandexID string, artistID int64) error {
+	if artistID > 0 && s.repo != nil {
+		return s.repo.SetArtistLinks(ctx, artistID, alias, deezerID, mbID, yandexID)
+	}
 	if s.scanner == nil {
 		return fmt.Errorf("scanner engine unavailable")
 	}

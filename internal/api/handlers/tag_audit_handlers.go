@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -408,19 +407,15 @@ func (h *FileHandler) ApplyCatalogTags(w http.ResponseWriter, r *http.Request) {
 
 	var coverInfo *id3.CoverInfo
 	if req.CoverURL != "" {
-		// Скачиваем обложку для вшивания через переиспользуемый HTTP клиент
+		// Скачиваем обложку для вшивания через переиспользуемый HTTP клиент с лимитами
 		client := h.httpClient
 		if client == nil {
 			client = &http.Client{Timeout: 15 * time.Second}
 		}
-		if cResp, cErr := client.Get(req.CoverURL); cErr == nil && cResp.StatusCode == http.StatusOK {
-			b, _ := io.ReadAll(cResp.Body)
-			cResp.Body.Close()
-			if len(b) > 0 {
-				coverInfo = &id3.CoverInfo{
-					MimeType: "image/jpeg",
-					Data:     b,
-				}
+		if b, mime, cErr := downloadImageWithMime(r.Context(), client, req.CoverURL); cErr == nil && len(b) > 0 {
+			coverInfo = &id3.CoverInfo{
+				MimeType: mime,
+				Data:     b,
 			}
 		}
 	}

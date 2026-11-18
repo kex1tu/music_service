@@ -7,8 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"music-manager/internal/core/sandbox"
+	"music-manager/internal/db"
+	"music-manager/internal/services/resolver"
 )
 
 func TestSwitchTrackVersion_Validation(t *testing.T) {
@@ -102,5 +105,125 @@ func TestMeasureAudioDuration(t *testing.T) {
 	_, err = measureAudioDuration(filepath.Join(tmpDir, "non_existent.wav"))
 	if err == nil {
 		t.Errorf("expected error measuring non-existent file, got nil")
+	}
+}
+
+func TestSwitchTrackVersion_PreviewSnippetRegression(t *testing.T) {
+	fakeDir := setupMockMediaBinaries(t)
+
+	// Override ffprobe in fakeDir to return actual duration 30.0s (a short preview snippet)
+	ffprobeScript := `#!/bin/sh
+echo '{"format":{"duration":"30.0","bit_rate":"320000"},"streams":[{"codec_name":"mp3","bit_rate":"320000","sample_rate":"44100"}]}'
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(fakeDir, "ffprobe"), []byte(ffprobeScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "test_switch.db")
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	ctx := context.Background()
+
+	// Candidate on SoundCloud has duration 30s (snippet!)
+	candURL := "https://soundcloud.com/test-artist/snippet-candidate"
+	cacheKey := resolver.BuildCacheKey("", "Test Artist", "Long Song")
+	_ = database.SaveSoundCloudCache(ctx, db.SoundCloudCacheEntry{
+		CacheKey:    cacheKey,
+		TrackTitle:  "Long Song",
+		ArtistName:  "Test Artist",
+		SelectedURL: candURL,
+		Status:      "found",
+		Duration:    30,
+		Candidates: []db.SoundCloudCandidateItem{
+			{URL: candURL, Title: "Long Song (Snippet)", Duration: 30},
+		},
+		CheckedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+
+	tmpDir := t.TempDir()
+	musicDir := t.TempDir()
+	tmpSb, _ := sandbox.NewPathSandbox(tmpDir)
+	musicSb, _ := sandbox.NewPathSandbox(musicDir)
+
+	jobMgr := NewJobManager(database)
+	svc := NewService(ctx, jobMgr, nil, tmpSb, musicSb, "", 1)
+	defer svc.Close()
+
+	// Track in job has expected duration 180s (> 60s)
+	job := &DownloadJob{
+		ID:     "switch-job-1",
+		Status: StatusDownloading,
+		URL:    "https://www.deezer.com/album/456",
+		Tracks: []resolver.ResolvedTrack{
+			{
+				TrackID:        "track-long-1",
+				Title:          "Long Song",
+				Artist:         "Test Artist",
+				Duration:       180, // Expected 180 seconds!
+				AudioSourceURL: "https://soundcloud.com/test-artist/original",
+				Status:         "waiting_source",
+			},
+		},
+		TotalTracks: 1,
+	}
+	jobMgr.Add(job)
+
+	// User switches version to candURL (which has 30s candidate in DB and 30.0s actual duration from ffprobe)
+	_, sErr := svc.SwitchTrackVersion(ctx, "track-long-1", candURL)
+	if sErr == nil {
+		t.Fatal("expected SwitchTrackVersion to fail because of preview snippet, got nil")
+	}
+	if !strings.Contains(sErr.Error(), "detected 30s preview snippet") {
+		t.Fatalf("expected error containing 'detected 30s preview snippet', got: %v", sErr)
+	}
+
+	// Verify job track state after refusal:
+	snap := job.Snapshot()
+	if snap.Tracks[0].Status == "ready" {
+		t.Fatalf("expected track NOT to be ready after preview failure, got status %q", snap.Tracks[0].Status)
+	}
+	if snap.Tracks[0].Status != "waiting_source" {
+		t.Errorf("expected track status 'waiting_source', got %q", snap.Tracks[0].Status)
+	}
+	if snap.Tracks[0].AudioSourceURL != candURL {
+		t.Errorf("expected AudioSourceURL to be preserved as %q, got %q", candURL, snap.Tracks[0].AudioSourceURL)
+	}
+	if snap.Tracks[0].VersionStatus != "manual" {
+		t.Errorf("expected VersionStatus to be 'manual', got %q", snap.Tracks[0].VersionStatus)
+	}
+	if snap.Tracks[0].Error == nil || !strings.Contains(*snap.Tracks[0].Error, "detected 30s preview snippet") {
+		t.Errorf("expected track.Error to contain snippet message, got: %v", snap.Tracks[0].Error)
+	}
+
+	// 2. Now test that switching to a full track (duration 180s) succeeds
+	fullFFprobe := `#!/bin/sh
+echo '{"format":{"duration":"180.0","bit_rate":"320000"},"streams":[{"codec_name":"mp3","bit_rate":"320000","sample_rate":"44100"}]}'
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(fakeDir, "ffprobe"), []byte(fullFFprobe), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	fullURL := "https://soundcloud.com/test-artist/full-candidate"
+	res, fErr := svc.SwitchTrackVersion(ctx, "track-long-1", fullURL)
+	if fErr != nil {
+		t.Fatalf("expected SwitchTrackVersion to succeed for full candidate, got: %v", fErr)
+	}
+	if res.Status != "manual" {
+		t.Errorf("expected status 'manual', got %q", res.Status)
+	}
+
+	snapFull := job.Snapshot()
+	if snapFull.Tracks[0].Status != "ready" {
+		t.Errorf("expected track status 'ready' after full audio, got %q", snapFull.Tracks[0].Status)
+	}
+	if snapFull.Tracks[0].AudioSourceURL != fullURL {
+		t.Errorf("expected AudioSourceURL to be %q, got %q", fullURL, snapFull.Tracks[0].AudioSourceURL)
 	}
 }

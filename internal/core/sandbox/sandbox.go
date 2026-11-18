@@ -68,35 +68,42 @@ func (s *PathSandbox) Root() string {
 	return s.root
 }
 
-// Resolve разрешает относительный путь внутри песочницы с защитой от traversal, symlink bypass и null-byte.
-func (s *PathSandbox) Resolve(relativePath string, allowRoot bool) (string, error) {
+type PathSyntax int
+
+// LiteralPath tells Resolve that the path already contains actual filesystem names.
+const LiteralPath PathSyntax = 1
+
+// Resolve разрешает относительный путь внутри песочницы с защитой от выхода за её границы.
+func (s *PathSandbox) Resolve(relativePath string, allowRoot bool, syntax ...PathSyntax) (string, error) {
 	if strings.Contains(relativePath, "\x00") {
 		return "", fmt.Errorf("%w: обнаружен нулевой байт", ErrPathTraversal)
 	}
 
-	// 1. Итеративное URL-декодирование (защита от многократного кодирования %252e%252e)
 	cleaned := relativePath
-	for i := 0; i < 10; i++ {
-		if strings.Contains(cleaned, "%") {
-			if decoded, err := url.QueryUnescape(cleaned); err == nil && decoded != cleaned {
-				cleaned = decoded
-				continue
+	if len(syntax) == 0 || syntax[0] != LiteralPath {
+		// 1. Итеративное URL-декодирование (защита от многократного кодирования %252e%252e)
+		for i := 0; i < 10; i++ {
+			if strings.Contains(cleaned, "%") {
+				if decoded, err := url.QueryUnescape(cleaned); err == nil && decoded != cleaned {
+					cleaned = decoded
+					continue
+				}
 			}
+			break
 		}
-		break
+
+		if strings.Contains(cleaned, "\x00") {
+			return "", fmt.Errorf("%w: обнаружен нулевой байт после URL-декодирования", ErrPathTraversal)
+		}
+
+		// 2. Нормализация Unicode fullwidth слэшей и точек
+		cleaned = strings.ReplaceAll(cleaned, "\uff0f", "/") // ／
+		cleaned = strings.ReplaceAll(cleaned, "\uff3c", "/") // ＼
+		cleaned = strings.ReplaceAll(cleaned, "\uff0e", ".") // ．
+
+		// 3. Нормализация слэшей
+		cleaned = strings.ReplaceAll(cleaned, "\\", "/")
 	}
-
-	if strings.Contains(cleaned, "\x00") {
-		return "", fmt.Errorf("%w: обнаружен нулевой байт после URL-декодирования", ErrPathTraversal)
-	}
-
-	// 2. Нормализация Unicode fullwidth слэшей и точек
-	cleaned = strings.ReplaceAll(cleaned, "\uff0f", "/") // ／
-	cleaned = strings.ReplaceAll(cleaned, "\uff3c", "/") // ＼
-	cleaned = strings.ReplaceAll(cleaned, "\uff0e", ".") // ．
-
-	// 3. Нормализация слэшей
-	cleaned = strings.ReplaceAll(cleaned, "\\", "/")
 	cleaned = strings.TrimLeft(cleaned, "/")
 	cleaned = filepath.Clean(cleaned)
 

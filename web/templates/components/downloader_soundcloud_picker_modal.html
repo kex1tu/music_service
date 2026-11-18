@@ -1,0 +1,299 @@
+{{ define "downloader_soundcloud_picker_modal" }}
+<!-- ==================== МОДАЛЬНОЕ ОКНО: ПРЯМОЙ ПОИСК В SOUNDCLOUD ==================== -->
+<div
+    x-show="$store.soundCloudPicker && $store.soundCloudPicker.isOpen"
+    x-cloak
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="soundcloud-picker-modal-title"
+    class="fixed inset-0 z-[60] overflow-y-auto bg-black/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6"
+    @keydown.escape.window.capture="if ($store.soundCloudPicker.isOpen) {
+        $event.stopImmediatePropagation();
+        $event.preventDefault();
+        $store.soundCloudPicker.close();
+    }"
+    @keydown.tab="$store.soundCloudPicker.trapFocus($event)"
+    @click.self.stop="$store.soundCloudPicker.close()">
+
+    <div
+        class="bg-surface-panel border border-surface-border rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] max-sm:h-full max-sm:max-h-full max-sm:rounded-none animate-scale-up"
+        @click.stop>
+
+        <!-- 1. ШАПКА МОДАЛЬНОГО ОКНА -->
+        <div class="p-4 sm:p-5 border-b border-surface-border bg-surface-elevated/60 flex items-start justify-between gap-4">
+            <div class="min-w-0 flex-1 space-y-1">
+                <div class="flex items-center space-x-2.5">
+                    <span class="p-1.5 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center justify-center">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                        </svg>
+                    </span>
+                    <h2 id="soundcloud-picker-modal-title" class="text-base font-bold text-white tracking-tight">
+                        Поиск в SoundCloud
+                    </h2>
+                    <span class="px-2 py-0.5 rounded text-[11px] font-bold border"
+                        :class="$store.soundCloudPicker.mode === 'track' ? 'bg-amber-500/10 text-amber-300 border-amber-500/30' : 'bg-brand/10 text-brand border-brand/30'"
+                        x-text="$store.soundCloudPicker.mode === 'track' ? 'Выбор дорожки' : 'Выбор релиза'">
+                    </span>
+                </div>
+                <p class="text-xs text-content-secondary truncate"
+                    x-text="$store.soundCloudPicker.mode === 'track' ?
+                        ('Трек: ' + ($store.soundCloudPicker.parentContext?.artist || '') + ' — ' + ($store.soundCloudPicker.parentContext?.title || '')) :
+                        ('Релиз: ' + ($store.soundCloudPicker.parentContext?.artist || '') + ' — ' + ($store.soundCloudPicker.parentContext?.album || ''))">
+                </p>
+            </div>
+
+            <!-- Кнопка закрытия -->
+            <button
+                type="button"
+                @click="$store.soundCloudPicker.close()"
+                class="p-2 text-content-muted hover:text-white rounded-lg hover:bg-surface-hover transition"
+                aria-label="Закрыть поиск SoundCloud"
+                title="Закрыть окно">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                </svg>
+            </button>
+        </div>
+
+        <!-- 2. СТРОКА ПОИСКА И ВКЛАДКИ -->
+        <div class="p-4 sm:p-5 border-b border-surface-border bg-surface-base space-y-3">
+            <form @submit.prevent="$store.soundCloudPicker.search()" class="flex gap-2">
+                <div class="relative flex-1">
+                    <input
+                        id="soundcloud-picker-query-input"
+                        type="search"
+                        x-model="$store.soundCloudPicker.query"
+                        maxlength="200"
+                        required
+                        aria-label="Поисковый запрос в SoundCloud"
+                        placeholder="Исполнитель, трек, альбом или плейлист..."
+                        class="min-h-[44px] w-full pl-9 pr-3 py-2 rounded-xl bg-surface-input border border-surface-border text-xs sm:text-sm text-content-primary placeholder-content-muted focus:border-brand focus:ring-1 focus:ring-brand outline-hidden transition">
+                    <svg class="w-4 h-4 text-content-muted absolute left-3 top-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                    </svg>
+                </div>
+                <button
+                    type="submit"
+                    :disabled="$store.soundCloudPicker.loading"
+                    class="min-h-[44px] px-4 sm:px-5 rounded-xl bg-brand hover:bg-brand-hover text-zinc-950 font-bold text-xs sm:text-sm transition shadow-md shadow-brand/20 disabled:opacity-50 shrink-0 flex items-center justify-center space-x-1.5">
+                    <template x-if="$store.soundCloudPicker.loading">
+                        <svg class="w-4 h-4 animate-spin text-zinc-950" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
+                        </svg>
+                    </template>
+                    <span x-text="$store.soundCloudPicker.loading ? 'Поиск...' : 'Найти'"></span>
+                </button>
+            </form>
+
+            <!-- Переключатель категорий -->
+            <div class="flex flex-wrap gap-2 pt-1" role="tablist">
+                <button
+                    type="button"
+                    role="tab"
+                    :aria-selected="$store.soundCloudPicker.activeTab === 'track'"
+                    @click="$store.soundCloudPicker.switchTab('track')"
+                    class="min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-semibold border transition flex items-center space-x-2"
+                    :class="$store.soundCloudPicker.activeTab === 'track' ?
+                        'bg-surface-elevated text-white border-brand shadow-sm ring-1 ring-brand' :
+                        'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-elevated hover:text-white'">
+                    <span>Треки</span>
+                    <span class="px-1.5 py-0.2 rounded-full bg-surface-base text-[10px] font-mono"
+                        x-text="$store.soundCloudPicker.getTabCount('track')"></span>
+                </button>
+
+                <button
+                    type="button"
+                    role="tab"
+                    :aria-selected="$store.soundCloudPicker.activeTab === 'album'"
+                    @click="$store.soundCloudPicker.switchTab('album')"
+                    class="min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-semibold border transition flex items-center space-x-2"
+                    :class="$store.soundCloudPicker.activeTab === 'album' ?
+                        'bg-surface-elevated text-white border-brand shadow-sm ring-1 ring-brand' :
+                        'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-elevated hover:text-white'">
+                    <span>Альбомы</span>
+                    <span class="px-1.5 py-0.2 rounded-full bg-surface-base text-[10px] font-mono"
+                        x-text="$store.soundCloudPicker.getTabCount('album')"></span>
+                </button>
+
+                <button
+                    type="button"
+                    role="tab"
+                    :aria-selected="$store.soundCloudPicker.activeTab === 'playlist'"
+                    @click="$store.soundCloudPicker.switchTab('playlist')"
+                    class="min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-semibold border transition flex items-center space-x-2"
+                    :class="$store.soundCloudPicker.activeTab === 'playlist' ?
+                        'bg-surface-elevated text-white border-brand shadow-sm ring-1 ring-brand' :
+                        'bg-surface-input text-content-secondary border-surface-border hover:bg-surface-elevated hover:text-white'">
+                    <span>Плейлисты</span>
+                    <span class="px-1.5 py-0.2 rounded-full bg-surface-base text-[10px] font-mono"
+                        x-text="$store.soundCloudPicker.getTabCount('playlist')"></span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 3. ТЕЛО СО СПИСКОМ РЕЗУЛЬТАТОВ -->
+        <div class="p-4 sm:p-5 flex-1 overflow-y-auto space-y-3">
+            <!-- Ошибки -->
+            <template x-if="$store.soundCloudPicker.error">
+                <div class="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs" role="alert">
+                    <span x-text="$store.soundCloudPicker.error"></span>
+                </div>
+            </template>
+            <template x-if="$store.soundCloudPicker.detailsError">
+                <div class="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-center justify-between gap-2" role="alert">
+                    <span x-text="$store.soundCloudPicker.detailsError"></span>
+                    <button type="button" @click="$store.soundCloudPicker.detailsError = ''" class="text-amber-300/70 hover:text-white text-xs underline shrink-0">Скрыть</button>
+                </div>
+            </template>
+
+            <!-- Состояние загрузки активной группы -->
+            <template x-if="$store.soundCloudPicker.loading && ($store.soundCloudPicker.currentGroup()?.items.length || 0) === 0">
+                <div class="py-12 flex flex-col items-center justify-center space-y-3 text-content-muted">
+                    <svg class="animate-spin h-6 w-6 text-brand" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
+                    </svg>
+                    <p class="text-xs">Запрос результатов SoundCloud...</p>
+                </div>
+            </template>
+
+            <!-- Пустой результат -->
+            <template x-if="!$store.soundCloudPicker.loading && ($store.soundCloudPicker.currentGroup()?.items.length || 0) === 0 && !$store.soundCloudPicker.currentGroup()?.error">
+                <div class="py-12 text-center space-y-2">
+                    <p class="text-xs text-content-muted">Ничего не найдено в этой категории.</p>
+                    <p class="text-[11px] text-content-muted">Попробуйте изменить поисковый запрос или переключить вкладку.</p>
+                </div>
+            </template>
+
+            <!-- Ошибка конкретной группы -->
+            <template x-if="$store.soundCloudPicker.currentGroup()?.error">
+                <div class="p-4 rounded-xl bg-surface-elevated border border-surface-border text-center space-y-2">
+                    <p class="text-xs text-amber-300" x-text="$store.soundCloudPicker.currentGroup()?.error"></p>
+                    <button
+                        type="button"
+                        @click="$store.soundCloudPicker.retryActiveTab()"
+                        class="min-h-[44px] px-4 rounded-xl bg-surface-hover text-xs font-semibold text-content-primary hover:bg-surface-border transition">
+                        Повторить попытку
+                    </button>
+                </div>
+            </template>
+
+            <!-- Список элементов текущей активной вкладки -->
+            <template x-if="($store.soundCloudPicker.currentGroup()?.items.length || 0) > 0">
+                <div class="space-y-2">
+                    <template x-for="item in $store.soundCloudPicker.currentGroup()?.items || []" :key="item.url">
+                        <div class="p-3 rounded-xl bg-surface-base border border-surface-border hover:border-surface-borderSubtle transition flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div class="flex items-start space-x-3 min-w-0 flex-1">
+                                <!-- Обложка / иконка -->
+                                <div class="w-12 h-12 rounded-lg bg-surface-elevated border border-surface-border shrink-0 overflow-hidden relative flex items-center justify-center">
+                                    <template x-if="item.artwork_url || item.avatar_url">
+                                        <img :src="item.artwork_url || item.avatar_url" alt="" class="w-full h-full object-cover">
+                                    </template>
+                                    <template x-if="!item.artwork_url && !item.avatar_url">
+                                        <svg class="w-5 h-5 text-content-muted" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                                        </svg>
+                                    </template>
+                                </div>
+
+                                <!-- Метаданные -->
+                                <div class="min-w-0 flex-1 space-y-0.5">
+                                    <h4 class="text-xs font-bold text-white truncate" x-text="item.title" :title="item.title"></h4>
+                                    <div class="flex items-center gap-1.5 text-[11px] text-content-secondary truncate">
+                                        <span x-text="item.artist || item.uploader"></span>
+                                        <template x-if="item.verified">
+                                            <svg class="w-3.5 h-3.5 text-blue-400 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" title="Подтвержденный автор">
+                                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                                            </svg>
+                                        </template>
+                                        <template x-if="item.uploader && item.uploader !== item.artist">
+                                            <span class="text-content-muted text-[10px]" x-text="'(загрузил: ' + item.uploader + ')'"></span>
+                                        </template>
+                                    </div>
+                                    <div class="flex items-center gap-2 pt-0.5">
+                                        <span class="font-mono text-[10px] text-content-muted"
+                                            x-text="$store.soundCloudPicker.activeTab === 'track' ?
+                                                (item.duration ? (window.AppFormatters ? window.AppFormatters.formatDuration(item.duration) : item.duration + 'с') : '') :
+                                                (item.track_count ? item.track_count + ' треков' : '')">
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Действия карточки -->
+                            <div class="flex items-center space-x-2 shrink-0 self-end sm:self-center">
+                                <!-- Ссылка на SoundCloud -->
+                                <a
+                                    :href="item.url"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="min-h-[44px] min-w-[44px] flex items-center justify-center p-2 rounded-xl text-content-muted hover:text-amber-400 hover:bg-surface-hover transition"
+                                    title="Открыть страницу на SoundCloud"
+                                    aria-label="Открыть страницу на SoundCloud">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                        <path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/>
+                                    </svg>
+                                </a>
+
+                                <!-- Кнопка выбора -->
+                                <template x-if="$store.soundCloudPicker.canSelect(item, $store.soundCloudPicker.activeTab)">
+                                    <button
+                                        type="button"
+                                        @click="$store.soundCloudPicker.selectItem(item, $store.soundCloudPicker.activeTab)"
+                                        :disabled="Boolean($store.soundCloudPicker.detailsLoadingId)"
+                                        class="min-h-[44px] px-4 py-2 rounded-xl bg-brand hover:bg-brand-hover text-zinc-950 font-bold text-xs transition flex items-center space-x-1.5 shadow-md shadow-brand/20 disabled:opacity-50">
+                                        <template x-if="$store.soundCloudPicker.detailsLoadingId === item.url">
+                                            <span class="flex items-center space-x-1.5">
+                                                <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                    <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
+                                                </svg>
+                                                <span>Анализ...</span>
+                                            </span>
+                                        </template>
+                                        <template x-if="$store.soundCloudPicker.detailsLoadingId !== item.url">
+                                            <span>Выбрать</span>
+                                        </template>
+                                    </button>
+                                </template>
+
+                                <!-- Запрещенный выбор для текущего режима -->
+                                <template x-if="!$store.soundCloudPicker.canSelect(item, $store.soundCloudPicker.activeTab)">
+                                    <button
+                                        type="button"
+                                        @click="$store.soundCloudPicker.selectItem(item, $store.soundCloudPicker.activeTab)"
+                                        class="min-h-[44px] px-3.5 py-2 rounded-xl bg-surface-elevated/40 text-content-muted text-xs border border-surface-borderSubtle hover:bg-surface-elevated transition"
+                                        :title="$store.soundCloudPicker.mode === 'track' ? 'Коллекцию нельзя привязать как одиночный трек' : 'Одиночный трек нельзя привязать как целый релиз'">
+                                        <span x-text="$store.soundCloudPicker.mode === 'track' ? 'Только для релиза' : 'Только для трека'"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <!-- Кнопка «Загрузить ещё» активной вкладки -->
+            <template x-if="!$store.soundCloudPicker.currentGroup()?.exhausted && (($store.soundCloudPicker.currentGroup()?.next_offset ?? -1) >= 0 || Boolean($store.soundCloudPicker.currentGroup()?.next_token))">
+                <button
+                    type="button"
+                    :disabled="$store.soundCloudPicker.currentGroup()?.loading"
+                    @click="$store.soundCloudPicker.loadMoreActiveTab()"
+                    class="min-h-[44px] w-full py-2.5 rounded-xl bg-surface-elevated hover:bg-surface-hover text-xs font-semibold text-content-primary disabled:opacity-50 transition border border-surface-border flex items-center justify-center space-x-2">
+                    <template x-if="$store.soundCloudPicker.currentGroup()?.loading">
+                        <svg class="w-3.5 h-3.5 animate-spin text-brand" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v6h-6V8h3.2q-.8-1.4-2.187-2.2T12 5Q9.075 5 7.038 7.038T5 12t2.038 4.963T12 19q2.625 0 4.588-1.7t2.312-4.3h2.05q-.375 3.475-2.95 5.738T12 20"/>
+                        </svg>
+                    </template>
+                    <span x-text="$store.soundCloudPicker.currentGroup()?.loading ? 'Загрузка...' : 'Загрузить ещё (' + $store.soundCloudPicker.labels[$store.soundCloudPicker.activeTab] + ')'"></span>
+                </button>
+            </template>
+
+            <!-- Финал выдачи -->
+            <p x-show="$store.soundCloudPicker.currentGroup()?.exhausted && ($store.soundCloudPicker.currentGroup()?.items.length || 0) > 0"
+                class="text-center text-xs text-content-muted py-2">
+                Все результаты категории загружены
+            </p>
+        </div>
+    </div>
+</div>
+{{ end }}

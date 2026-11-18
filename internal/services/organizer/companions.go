@@ -47,8 +47,17 @@ func maxCompanionExtLen(primaryExt string) int {
 // - If different, a unique canonical path "{base} ({N}).mp3" is selected.
 // Any companion files are moved along with the matching suffix.
 func MoveTrackWithCompanions(srcMP3, destMP3 string, overwrite bool) (string, error) {
+	return moveTrackWithCompanions(srcMP3, destMP3, overwrite, func(target string, _ bool, move func() error) (string, error) {
+		if err := move(); err != nil {
+			return "", err
+		}
+		return target, nil
+	})
+}
+
+func moveTrackWithCompanions(srcMP3, destMP3 string, overwrite bool, apply func(string, bool, func() error) (string, error)) (string, error) {
 	if srcMP3 == destMP3 {
-		return destMP3, nil
+		return apply(destMP3, false, func() error { return nil })
 	}
 	if !fileExists(srcMP3) {
 		return "", fmt.Errorf("source track does not exist: %s", srcMP3)
@@ -70,23 +79,17 @@ func MoveTrackWithCompanions(srcMP3, destMP3 string, overwrite bool) (string, er
 	}
 
 	if fileExists(targetMP3) && !overwrite {
-		// Compare size and hash
-		srcStat, err1 := safefs.Stat(srcMP3)
-		destStat, err2 := safefs.Stat(targetMP3)
-		if err1 == nil && err2 == nil && srcStat.Size() == destStat.Size() {
-			srcHash, hErr1 := FileSHA256(srcMP3)
-			destHash, hErr2 := FileSHA256(targetMP3)
-			if hErr1 == nil && hErr2 == nil && srcHash == destHash && companionsCompatible(srcMP3, targetMP3) {
-				// Merge companions before removing the duplicate audio. On failure
-				// the original audio remains available for a retry.
+		if sameTrackFiles(srcMP3, targetMP3) && companionsCompatible(srcMP3, targetMP3) {
+			return apply(targetMP3, true, func() error {
+				// Recheck under the index lock before removing the source.
+				if !sameTrackFiles(srcMP3, targetMP3) {
+					return fmt.Errorf("duplicate track changed before merge: %s", srcMP3)
+				}
 				if err := cleanCompanionFiles(srcMP3, targetMP3); err != nil {
-					return "", err
+					return err
 				}
-				if err := safefs.Remove(srcMP3); err != nil {
-					return "", err
-				}
-				return targetMP3, nil
-			}
+				return safefs.Remove(srcMP3)
+			})
 		}
 
 		// Files differ or cannot be compared: find unique suffixed name
@@ -120,27 +123,49 @@ func MoveTrackWithCompanions(srcMP3, destMP3 string, overwrite bool) (string, er
 		}
 	}
 
-	// Ensure destination directory exists
-	if err := safefs.MkdirAll(filepath.Dir(targetMP3), 0755); err != nil {
-		return "", err
-	}
+	return apply(targetMP3, false, func() error {
+		// The collision check preceded the index lock. A concurrent move may
+		// have claimed this path while we waited to record the intent.
+		if !overwrite && fileExists(targetMP3) {
+			return fmt.Errorf("destination track already exists: %s", targetMP3)
+		}
+		// Ensure destination directory exists
+		if err := safefs.MkdirAll(filepath.Dir(targetMP3), 0755); err != nil {
+			return err
+		}
 
-	if err := moveFile(srcMP3, targetMP3); err != nil {
-		return "", fmt.Errorf("failed to move audio file %s to %s: %w", srcMP3, targetMP3, err)
-	}
+		if err := moveFile(srcMP3, targetMP3); err != nil {
+			return fmt.Errorf("failed to move audio file %s to %s: %w", srcMP3, targetMP3, err)
+		}
 
-	// Move companion files (.lrc, .txt, .jpg, .png, etc.)
-	if err := moveCompanionFiles(srcMP3, targetMP3); err != nil {
-		rollback := moveFile(targetMP3, srcMP3)
-		return "", errors.Join(err, rollback)
-	}
+		// Move companion files (.lrc, .txt, .jpg, .png, etc.)
+		if err := moveCompanionFiles(srcMP3, targetMP3); err != nil {
+			rollback := moveFile(targetMP3, srcMP3)
+			return errors.Join(err, rollback)
+		}
 
-	return targetMP3, nil
+		return nil
+	})
+}
+
+func sameTrackFiles(src, dest string) bool {
+	sourceInfo, sourceErr := safefs.Stat(src)
+	destInfo, destErr := safefs.Stat(dest)
+	if sourceErr != nil || destErr != nil || sourceInfo.Size() != destInfo.Size() {
+		return false
+	}
+	sourceHash, sourceErr := FileSHA256(src)
+	destHash, destErr := FileSHA256(dest)
+	return sourceErr == nil && destErr == nil && sourceHash == destHash
 }
 
 func cleanCompanionFiles(srcAudio, destAudio string) error {
 	srcBase := strings.TrimSuffix(srcAudio, filepath.Ext(srcAudio))
 	destBase := strings.TrimSuffix(destAudio, filepath.Ext(destAudio))
+
+	if srcBase == destBase {
+		return nil
+	}
 
 	for _, ext := range companionExtensions {
 		srcComp := srcBase + ext

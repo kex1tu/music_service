@@ -65,16 +65,19 @@ type AddTrackedArtistRequest struct {
 
 // FollowArtistRequest управляет статусом отслеживания артиста.
 type FollowArtistRequest struct {
-	Followed bool `json:"followed"`
+	ArtistID int64 `json:"artist_id"`
+	Followed bool  `json:"followed"`
 }
 
 // AutoDownloadRequest управляет автозагрузкой новых релизов артиста.
 type AutoDownloadRequest struct {
-	AutoDownload bool `json:"auto_download"`
+	ArtistID     int64 `json:"artist_id"`
+	AutoDownload bool  `json:"auto_download"`
 }
 
 // CustomLinksRequest обновляет пользовательские идентификаторы артиста в каталогах.
 type CustomLinksRequest struct {
+	ArtistID      int64  `json:"artist_id"`
 	Alias         string `json:"alias"`
 	DeezerID      string `json:"deezer_id"`
 	MusicBrainzID string `json:"musicbrainz_id"`

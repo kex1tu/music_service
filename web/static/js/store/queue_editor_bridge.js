@@ -134,6 +134,7 @@ window.QueueEditorBridge = {
             }));
             const releases = [{
                 jobId: job.id,
+                targetAlbumPath: data.source_dir || albumPath,
                 album: album.album || 'Unknown Album',
                 album_artist: album.album_artist || 'Unknown Artist',
                 albumArtist: album.album_artist || 'Unknown Artist',
@@ -236,6 +237,7 @@ window.QueueEditorBridge = {
 
                     releases.push({
                         jobId: jobId,
+                        targetAlbumPath: data.source_dir || job.target_album_path,
                         album: album.album || 'Unknown Album',
                         album_artist: album.album_artist || 'Unknown Artist',
                         albumArtist: album.album_artist || 'Unknown Artist',

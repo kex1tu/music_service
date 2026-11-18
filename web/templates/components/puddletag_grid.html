@@ -1,6 +1,6 @@
 {{ define "puddletag_grid" }}
 <!-- ==================== ИНТЕРАКТИВНАЯ ТАБЛИЦА-СЕТКА (DENSE DATA GRID) ==================== -->
-<div class="flex-1 flex flex-col bg-surface-panel border border-surface-border rounded-lg overflow-hidden shadow-panel min-w-0">
+<div class="flex-1 flex flex-col bg-surface-panel border border-surface-border rounded-lg md:overflow-hidden shadow-panel min-w-0">
 
     <!-- Панель переключения релизов (Release Pill-Tabs при открытии нескольких релизов через «В теги все») -->
     <template x-if="isDownloaderMode && releases && releases.length > 1">
@@ -32,11 +32,12 @@
         </div>
     </template>
 
-    <div class="flex-1 overflow-x-auto md:overflow-y-auto md:max-h-[calc(100vh-230px)] relative select-none">
-        <table class="w-full text-left text-xs text-content-secondary border-collapse table-auto md:min-w-[900px] transition-colors"
+    <div class="flex-1 md:overflow-auto md:max-h-[calc(100vh-230px)] relative select-none">
+        <table class="w-full text-left text-xs text-content-secondary border-collapse table-fixed md:table-auto md:min-w-[900px] transition-colors"
                :class="gridDensity === 'compact' ? 'table-dense' : ''">
             <!-- Липкая шапка таблицы (Sticky Header) -->
-            <thead class="sticky top-0 z-20 bg-surface-panel/95 backdrop-blur-md text-xs font-mono uppercase tracking-wider text-content-muted border-b border-surface-border">
+            <thead :class="isDownloaderMode ? 'top-0' : 'top-[calc(3.5rem+1px)] md:top-0'"
+                   class="sticky z-20 bg-surface-panel/95 backdrop-blur-md text-xs font-mono uppercase tracking-wider text-content-muted border-b border-surface-border">
                 <tr>
                     <th class="py-2 px-0 w-12 md:w-8 text-center">
                         <label class="touch-target-44 sm:h-auto sm:w-auto flex items-center justify-center cursor-pointer m-0">
@@ -298,7 +299,7 @@
 
                         <!-- Название (Title) + подстрочник на мобилке -->
                         <td
-                            class="py-1.5 px-3 min-w-[150px] max-w-[220px] sm:max-w-none"
+                            class="py-1.5 px-2 md:px-3 md:min-w-[150px]"
                             :class="isCellDirty(track._trackIndex, 'title') ? 'text-amber-400 font-bold bg-amber-500/10' : ''"
                             @dblclick="startEdit(track._trackIndex, 'title', $event)">
                             <template x-if="editingCell && editingCell.index === track._trackIndex && editingCell.field === 'title'">

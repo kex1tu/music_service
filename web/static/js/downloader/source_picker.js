@@ -35,6 +35,7 @@ document.addEventListener('alpine:init', () => {
         },
         isLoadingCandidates: false,
         candidates: [],
+        manualSoundCloudCandidate: null,
         candidatesError: null,
         previewingUrl: null,
 
@@ -73,9 +74,11 @@ document.addEventListener('alpine:init', () => {
             const tit = track.title || `Трек #${track.track_number}`;
             this.context = {
                 jobId: null,
-                trackId: track.track_number ? `missing_${track.track_number}` : '',
+                trackId: track.track_number ? `missing_${track.disc_number || 1}_${track.track_number}` : '',
                 isrc: track.isrc || '',
                 trackNumber: track.track_number || 1,
+                discNumber: track.disc_number || 1,
+                deezerId: track.deezer_id || '',
                 title: tit,
                 artist: art,
                 album: album.album || '',
@@ -98,6 +101,8 @@ document.addEventListener('alpine:init', () => {
         },
 
         reset() {
+            const picker = Alpine.store('soundCloudPicker');
+            if (picker?.mode === 'track') picker.close(false);
             this.soundCloudLimit = 30;
             this.hasMoreSoundCloud = false;
             this.searchSerial++;
@@ -106,12 +111,50 @@ document.addEventListener('alpine:init', () => {
             this.searchQuery = '';
             this.isLoadingCandidates = false;
             this.candidates = [];
+            this.manualSoundCloudCandidate = null;
             this.candidatesError = null;
             this.previewingUrl = null;
             this.isSubmitting = false;
             this.submitStep = '';
             this.submitError = null;
             this.submitSuccess = false;
+        },
+
+        openSoundCloudSearch() {
+            const scp = Alpine.store('soundCloudPicker');
+            if (scp) {
+                scp.openForTrack(this.context, document.getElementById('btn-source-picker-sc-search'));
+            }
+        },
+
+        addCustomSoundCloudTrack(item) {
+            if (!item || !item.url) return;
+            const dur = item.duration || 0;
+            const delta = (this.context.expectedDuration > 0 && dur > 0) ? (dur - this.context.expectedDuration) : 0;
+            const cand = {
+                id: item.id || ('sc_' + Math.random().toString(36).slice(2, 8)),
+                source: 'soundcloud',
+                title: item.title,
+                uploader: item.uploader || item.artist || 'SoundCloud',
+                url: item.url,
+                duration: dur,
+                delta_seconds: delta,
+                is_topic: false,
+                score: 100,
+                saved_selection: false,
+                search_incomplete: false,
+            };
+            const existingIdx = this.candidates.findIndex(c => c.url === cand.url);
+            if (existingIdx >= 0) {
+                this.candidates.splice(existingIdx, 1);
+            }
+            this.manualSoundCloudCandidate = cand;
+            this.candidates.unshift(cand);
+            this.activeTab = 'search';
+            this.candidatesError = null;
+            if (Alpine.store('app') && typeof Alpine.store('app').toast === 'function') {
+                Alpine.store('app').toast('Трек SoundCloud добавлен в список кандидатов', 'info');
+            }
         },
 
         loadMoreCandidates() {
@@ -152,6 +195,8 @@ document.addEventListener('alpine:init', () => {
                 if (serial !== this.searchSerial) return;
                 this.candidates = data.candidates || [];
                 this.hasMoreSoundCloud = this.soundCloudLimit < 100 && this.candidates.filter(candidate => candidate.source === 'soundcloud').length >= this.soundCloudLimit;
+                const manual = this.manualSoundCloudCandidate;
+                if (manual) this.candidates = [manual, ...this.candidates.filter(candidate => candidate.url !== manual.url)];
                 if (this.candidates.length === 0) {
                     this.candidatesError = 'По запросу кандидатов не найдено. Попробуйте уточнить поисковый запрос.';
                 }
@@ -222,6 +267,9 @@ document.addEventListener('alpine:init', () => {
                         artist_name: this.context.artist,
                         track_title: this.context.title,
                         track_number: this.context.trackNumber,
+                        isrc: this.context.isrc || undefined,
+                        disc_number: this.context.discNumber,
+                        deezer_id: this.context.deezerId,
                         target_url: targetUrl,
                         version_policy: this.versionPolicy,
                         duration: this.context.expectedDuration,
@@ -242,11 +290,11 @@ document.addEventListener('alpine:init', () => {
                     this.submitStep = 'Трек успешно привязан и отправлен в очередь!';
                 } else {
                     // Режим трека из очереди
-                    this.submitStep = 'Скачивание и накат ID3v2.4 тегов...';
+                    this.submitStep = 'Постановка в очередь...';
                     const res = await window.api.raw(`/api/downloads/tracks/${encodeURIComponent(this.context.trackId)}/bind-source`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ target_url: targetUrl, version_policy: this.versionPolicy }),
+                        body: JSON.stringify({ target_url: targetUrl, version_policy: this.versionPolicy, job_id: this.context.jobId }),
                     });
 
                     if (!res.ok) {
@@ -255,7 +303,7 @@ document.addEventListener('alpine:init', () => {
                     }
 
                     this.submitSuccess = true;
-                    this.submitStep = 'Трек успешно скачан и обновлен!';
+                    this.submitStep = 'Источник сохранён. Трек поставлен в очередь.';
                 }
 
                 // Обновляем очередь и аудит

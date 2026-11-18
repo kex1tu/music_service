@@ -14,6 +14,7 @@ import (
 	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
+	"music-manager/internal/services/downloadstaging"
 	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/resolver"
 )
@@ -261,6 +262,24 @@ func (s *Service) DeleteJob(id string) error {
 	return nil
 }
 
+// FinishImport drops a ready job from the queue while preserving staging leftovers.
+func (s *Service) FinishImport(id string) (bool, error) {
+	job, ok := s.jobs.Get(id)
+	if !ok {
+		return true, nil
+	}
+	status := job.Snapshot().Status
+	if status != StatusReady && status != StatusPartialReady {
+		return false, nil
+	}
+	pending, err := downloadstaging.HasPendingImport(s.tmpSandbox, id)
+	if err != nil || pending {
+		return false, err
+	}
+	s.jobs.Delete(id)
+	return true, nil
+}
+
 // PauseQueue приостанавливает запуск новых задач в очереди. Активные задачи завершают текущий шаг.
 func (s *Service) PauseQueue() {
 	s.pauseMu.Lock()
@@ -306,20 +325,18 @@ func (s *Service) waitIfPaused(ctx context.Context) error {
 
 // ClearCompletedJobs очищает завершенные, ошибочные и отмененные задачи из памяти, БД и удаляет временные директории.
 func (s *Service) ClearCompletedJobs() int {
-	allJobs := s.jobs.GetAll()
-	clearedIDs := make([]string, 0)
-	for _, j := range allJobs {
-		snap := j.Snapshot()
-		if snap.Status == StatusReady || snap.Status == StatusError || snap.Status == StatusCancelled {
-			clearedIDs = append(clearedIDs, snap.ID)
-		}
-	}
-
-	count := s.jobs.ClearCompleted()
-	for _, id := range clearedIDs {
-		jobDir, err := s.tmpSandbox.Resolve(id, false)
-		if err == nil {
-			_ = safefs.RemoveAll(jobDir)
+	count := 0
+	for _, job := range s.jobs.GetAll() {
+		snap := job.Snapshot()
+		switch snap.Status {
+		case StatusReady, StatusPartialReady, StatusError, StatusCancelled:
+			pending, err := downloadstaging.HasPendingImport(s.tmpSandbox, snap.ID)
+			if err == nil && !pending && s.jobs.Delete(snap.ID) {
+				if jobDir, err := s.tmpSandbox.Resolve(snap.ID, false); err == nil {
+					_ = safefs.RemoveAll(jobDir)
+				}
+				count++
+			}
 		}
 	}
 	return count

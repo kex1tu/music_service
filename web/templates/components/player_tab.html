@@ -339,17 +339,17 @@
             <div class="relative flex-1 min-h-[320px] max-h-[460px] bg-surface-base border border-surface-border rounded-xl p-4 flex flex-col shadow-inner overflow-hidden">
                 
                 <!-- РЕЖИМ 1: CANVAS СПЕКТРОАНАЛИЗАТОР -->
-                <div x-show="$store.player.centerDeckMode === 'spectrum'" class="w-full h-full flex flex-col justify-between">
+                <div x-show="$store.player.centerDeckMode === 'spectrum'" class="w-full min-h-0 flex-1 flex flex-col">
                     <div class="flex items-center justify-between text-xs font-mono text-content-muted mb-2">
                         <span>REAL-TIME FFT • 32 BINS</span>
                         <span class="text-brand font-semibold" x-text="$store.player.isPlaying ? 'SIGNAL LOCKED' : 'SIGNAL IDLE'"></span>
                     </div>
 
-                    <div class="flex-1 relative w-full flex items-center justify-center">
+                    <div class="flex-1 relative w-full">
                         <canvas
                             x-ref="visualizerCanvas"
                             x-init="$store.player.bindCanvas($refs.visualizerCanvas)"
-                            class="w-full h-full block">
+                            class="absolute inset-0 w-full h-full block">
                         </canvas>
                     </div>
 

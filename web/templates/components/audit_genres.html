@@ -38,7 +38,7 @@
             <div>
                 <!-- Мобильный вид (< md) -->
                 <div class="md:hidden divide-y divide-surface-borderSubtle">
-                    <template x-for="item in nonEnGenres" :key="'mob-' + item.path + item.current_genre">
+                    <template x-for="item in ($store.app.isDesktopLayout ? [] : nonEnGenres)" :key="'mob-' + item.path + item.current_genre">
                         <div class="p-3.5 space-y-2">
                             <div class="flex items-start justify-between gap-2">
                                 <div class="text-xs font-mono text-content-secondary break-all flex-1" x-text="item.path"></div>
@@ -76,7 +76,7 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-surface-borderSubtle">
-                        <template x-for="item in nonEnGenres" :key="item.path + item.current_genre">
+                        <template x-for="item in ($store.app.isDesktopLayout ? nonEnGenres : [])" :key="item.path + item.current_genre">
                             <tr class="hover:bg-surface-elevated/60 transition">
                                 <td class="p-3 font-mono text-content-secondary max-w-xs truncate" x-text="item.path" :title="item.path"></td>
                                 <td class="p-3 font-medium" :class="item.is_auto_fixed ? 'text-content-secondary' : 'text-rose-400'" x-text="item.current_genre"></td>

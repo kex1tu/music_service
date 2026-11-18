@@ -133,7 +133,8 @@ func (h *TagHandler) BatchSaveTags(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"success":         true,
+		"success":         res.Complete(),
+		"track_results":   res.TrackResults,
 		"destination_dir": res.DestinationDir,
 		"tracks":          res.Tracks,
 	})

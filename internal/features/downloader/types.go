@@ -3,6 +3,7 @@ package downloader
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -58,6 +59,7 @@ type Job struct {
 	CompletedTracks      int                      `json:"completed_tracks"`
 	Error                *string                  `json:"error,omitempty"`
 	TargetAlbumPath      *string                  `json:"target_album_path,omitempty"`
+	Backfill             *BackfillRequest         `json:"backfill,omitempty"`
 	IsBackfill           bool                     `json:"is_backfill"`
 	AlbumTitle           *string                  `json:"album_title,omitempty"`
 	ArtistName           *string                  `json:"artist_name,omitempty"`
@@ -67,9 +69,14 @@ type Job struct {
 	AlbumMetadata        resolver.ReleaseMetadata `json:"-"`
 	SelectedTrackIndices []int                    `json:"selected_track_indices,omitempty"`
 	Tracks               []resolver.ResolvedTrack `json:"tracks,omitempty"`
-	trackProgress        []float64                `json:"-"`
-	cancelFunc           func()                   `json:"-"`
-	onUpdate             func()                   `json:"-"`
+	SkipExisting         bool                     `json:"skip_existing,omitempty"`
+	selectionCorrupt     bool
+	manualTrackIndex     *int
+	backfillTrackNumbers []int
+	backfillTrackURLs    []string
+	trackProgress        []float64 `json:"-"`
+	cancelFunc           func()    `json:"-"`
+	onUpdate             func()    `json:"-"`
 }
 
 // DownloadJob является алиасом Job для совместимости.
@@ -104,20 +111,25 @@ func (j *Job) Snapshot() *Job {
 	defer j.mu.RUnlock()
 
 	snap := &Job{
-		ID:                j.ID,
-		Status:            j.Status,
-		Source:            j.Source,
-		URL:               j.URL,
-		Progress:          j.Progress,
-		CurrentStep:       j.CurrentStep,
-		TotalTracks:       j.TotalTracks,
-		CompletedTracks:   j.CompletedTracks,
-		IsBackfill:        j.IsBackfill,
-		CreatedAt:         j.CreatedAt,
-		UpdatedAt:         j.UpdatedAt,
-		CoverRelativePath: j.CoverRelativePath,
-		AlbumMetadata:     j.AlbumMetadata,
-		cancelFunc:        j.cancelFunc,
+		ID:                   j.ID,
+		Status:               j.Status,
+		Source:               j.Source,
+		URL:                  j.URL,
+		Progress:             j.Progress,
+		CurrentStep:          j.CurrentStep,
+		TotalTracks:          j.TotalTracks,
+		CompletedTracks:      j.CompletedTracks,
+		IsBackfill:           j.IsBackfill,
+		CreatedAt:            j.CreatedAt,
+		UpdatedAt:            j.UpdatedAt,
+		CoverRelativePath:    j.CoverRelativePath,
+		AlbumMetadata:        j.AlbumMetadata,
+		SkipExisting:         j.SkipExisting,
+		selectionCorrupt:     j.selectionCorrupt,
+		manualTrackIndex:     j.manualTrackIndex,
+		backfillTrackNumbers: j.backfillTrackNumbers,
+		backfillTrackURLs:    j.backfillTrackURLs,
+		cancelFunc:           j.cancelFunc,
 	}
 	if j.Error != nil {
 		errCopy := *j.Error
@@ -135,6 +147,13 @@ func (j *Job) Snapshot() *Job {
 		pathCopy := *j.TargetAlbumPath
 		snap.TargetAlbumPath = &pathCopy
 	}
+	if j.Backfill != nil {
+		selection := *j.Backfill
+		selection.Positions = slices.Clone(j.Backfill.Positions)
+		selection.TrackURLs = slices.Clone(j.Backfill.TrackURLs)
+		selection.TrackNumbers = slices.Clone(j.Backfill.TrackNumbers)
+		snap.Backfill = &selection
+	}
 	if len(j.Tracks) > 0 {
 		snap.Tracks = make([]resolver.ResolvedTrack, len(j.Tracks))
 		copy(snap.Tracks, j.Tracks)
@@ -144,6 +163,37 @@ func (j *Job) Snapshot() *Job {
 		copy(snap.SelectedTrackIndices, j.SelectedTrackIndices)
 	}
 	return snap
+}
+
+// resetForQueue is used on an unpublished snapshot before committing the transition.
+func (j *Job) resetForQueue(step string) {
+	j.Status = StatusQueued
+	j.CurrentStep = step
+	j.Progress = 0
+	j.CompletedTracks = 0
+	j.Error = nil
+	j.UpdatedAt = time.Now().UTC()
+}
+
+func (j *Job) applyQueueSnapshot(snap *Job) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.Status = snap.Status
+	j.CurrentStep = snap.CurrentStep
+	j.Progress = snap.Progress
+	j.TotalTracks = snap.TotalTracks
+	j.CompletedTracks = snap.CompletedTracks
+	j.Error = snap.Error
+	j.UpdatedAt = snap.UpdatedAt
+	j.Tracks = snap.Tracks
+	j.AlbumMetadata = snap.AlbumMetadata
+	j.SelectedTrackIndices = snap.SelectedTrackIndices
+	j.SkipExisting = snap.SkipExisting
+	j.selectionCorrupt = snap.selectionCorrupt
+	j.manualTrackIndex = snap.manualTrackIndex
+	j.Backfill = snap.Backfill
+	j.backfillTrackNumbers = snap.backfillTrackNumbers
+	j.backfillTrackURLs = snap.backfillTrackURLs
 }
 
 // SetOnUpdate устанавливает функцию обратного вызова при изменении задачи.
@@ -460,20 +510,24 @@ type BatchJobRequest = CreateBatchJobRequest
 
 // SwitchVersionRequest — запрос на переключение источника трека.
 type SwitchVersionRequest struct {
+	JobID         string                 `json:"job_id,omitempty"`
 	VersionPolicy resolver.VersionPolicy `json:"version_policy"`
 	TargetURL     string                 `json:"target_url"`
 }
 
 // BindBackfillSourceRequest — запрос на привязку источника к недостающему треку бэкфилла.
 type BindBackfillSourceRequest struct {
+	ISRC          *string                `json:"isrc,omitempty"`
 	VersionPolicy resolver.VersionPolicy `json:"version_policy"`
-	Duration int `json:"duration"`
-	Path        string `json:"path"`
-	AlbumTitle  string `json:"album_title"`
-	ArtistName  string `json:"artist_name"`
-	TrackTitle  string `json:"track_title"`
-	TrackNumber int    `json:"track_number"`
-	TargetURL   string `json:"target_url"`
+	Duration      int                    `json:"duration"`
+	Path          string                 `json:"path"`
+	AlbumTitle    string                 `json:"album_title"`
+	ArtistName    string                 `json:"artist_name"`
+	TrackTitle    string                 `json:"track_title"`
+	TrackNumber   int                    `json:"track_number"`
+	TargetURL     string                 `json:"target_url"`
+	DiscNumber    int                    `json:"disc_number"`
+	DeezerID      string                 `json:"deezer_id,omitempty"`
 }
 
 // --- Response DTOs ---
@@ -596,13 +650,18 @@ type DiscographyRelease struct {
 	TrackCount int    `json:"track_count"`
 }
 
-// MissingTrackInfo — DTO информации о недостающем треке для бэкфилла из базы данных.
+// BackfillRequest stores the immutable selection for initial execution and retries.
+type BackfillRequest struct {
+	AlbumID      string                 `json:"deezer_album_id,omitempty"`
+	Positions    []db.BackfillSelection `json:"positions,omitempty"`
+	TrackURLs    []string               `json:"track_urls,omitempty"`
+	TrackNumbers []int                  `json:"track_numbers,omitempty"`
+}
+
+// MissingTrackInfo is a catalog gap and its optional manually pinned audio source.
 type MissingTrackInfo struct {
-	Title            string `json:"title"`
-	Artist           string `json:"artist"`
-	TrackNumber      int    `json:"track_number"`
-	ExpectedDuration int    `json:"expected_duration"`
-	DeezerURL        string `json:"deezer_url"`
+	db.CatalogTrack
+	PinnedURL string
 }
 
 // PinnedTrackSourceDTO — DTO для сохранения и чтения ручной привязки трека.
@@ -635,13 +694,18 @@ type SoundCloudCacheDTO struct {
 
 // ReleaseCandidatesResponse — ответ поиска цельных источников релиза.
 type ReleaseCandidatesResponse struct {
-	VersionPolicy resolver.VersionPolicy          `json:"version_policy"`
-	Selection     string                          `json:"selection"`
-	Artist        string                          `json:"artist"`
-	Album         string                          `json:"album"`
-	IsCyrillic    bool                            `json:"is_cyrillic"`
-	TargetTracks  []resolver.ResolvedTrack        `json:"target_tracks"`
-	Candidates    []resolver.ReleaseCandidateItem `json:"candidates"`
+	VersionPolicy     resolver.VersionPolicy          `json:"version_policy"`
+	Selection         string                          `json:"selection"`
+	Artist            string                          `json:"artist"`
+	Album             string                          `json:"album"`
+	IsCyrillic        bool                            `json:"is_cyrillic"`
+	TargetTracks      []resolver.ResolvedTrack        `json:"target_tracks"`
+	Candidates        []resolver.ReleaseCandidateItem `json:"candidates"`
+	HasMoreSoundCloud bool                            `json:"has_more_soundcloud"`
+	AlbumOffset       int                             `json:"album_offset"`
+	PlaylistOffset    int                             `json:"playlist_offset"`
+	AlbumToken        string                          `json:"album_token,omitempty"`
+	PlaylistToken     string                          `json:"playlist_token,omitempty"`
 }
 
 // ParseReleaseURLRequest — запрос разбора произвольной ссылки на релиз.
@@ -654,6 +718,8 @@ type ParseReleaseURLRequest struct {
 
 // SwitchReleaseSourceRequest — запрос применения источника цельного релиза.
 type SwitchReleaseSourceRequest struct {
+	MissingOnly   bool                     `json:"missing_only,omitempty"`
+	Backfill      []db.BackfillSelection   `json:"-"`
 	TargetTracks  []resolver.ResolvedTrack `json:"target_tracks,omitempty"`
 	VersionPolicy resolver.VersionPolicy   `json:"version_policy"`
 	JobID         string                   `json:"job_id"`

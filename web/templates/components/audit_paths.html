@@ -38,7 +38,7 @@
             <div>
                 <!-- Мобильный вид (< md) -->
                 <div class="md:hidden divide-y divide-surface-borderSubtle">
-                    <template x-for="item in invalidPaths.slice(0, 100)" :key="'mob-' + item.path">
+                    <template x-for="item in ($store.app.isDesktopLayout ? [] : invalidPaths.slice(0, 100))" :key="'mob-' + item.path">
                         <div class="p-3.5 space-y-2">
                             <div class="text-xs font-mono text-amber-300 break-all" x-text="item.path"></div>
                             <div class="text-xs text-content-secondary" x-text="item.reason || 'Нарушение формата имени или каталога'"></div>
@@ -74,7 +74,7 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-surface-borderSubtle">
-                        <template x-for="item in invalidPaths.slice(0, 100)" :key="item.path">
+                        <template x-for="item in ($store.app.isDesktopLayout ? invalidPaths.slice(0, 100) : [])" :key="item.path">
                             <tr class="hover:bg-surface-elevated/60 transition">
                                 <td class="p-3 font-mono text-amber-300 max-w-xs truncate" x-text="item.path" :title="item.path"></td>
                                 <td class="p-3 text-content-secondary" x-text="item.reason || 'Нарушение формата имени или каталога'"></td>

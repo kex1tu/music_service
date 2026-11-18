@@ -20,6 +20,8 @@
                     </template>
                 </div>
 
+                <p x-show="$store.radio.stats.navidrome_warning" role="status" class="text-sm text-amber-300 break-words" x-text="$store.radio.stats.navidrome_warning" x-cloak></p>
+
                 <h2 class="text-3xl font-extrabold text-white tracking-tight">Моя Волна</h2>
                 <p class="text-sm text-content-secondary leading-relaxed">
                     Персональный бесконечный поток вашей локальной медиатеки.

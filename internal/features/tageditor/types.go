@@ -2,6 +2,7 @@ package tageditor
 
 import (
 	"music-manager/internal/id3"
+	"music-manager/internal/services/organizer"
 	"music-manager/internal/services/resolver"
 )
 
@@ -58,7 +59,8 @@ type SaveTagsResponse struct {
 
 // BatchSaveRequest представляет тело запроса пакетного сохранения тегов и раскладки альбома.
 type BatchSaveRequest struct {
-	Album struct {
+	TargetAlbumPath string `json:"target_album_path,omitempty"`
+	Album           struct {
 		AlbumArtist string `json:"album_artist"`
 		Album       string `json:"album"`
 		Year        *int   `json:"year"`
@@ -73,10 +75,11 @@ type BatchSaveRequest struct {
 
 // BatchSaveResponse представляет результат пакетного сохранения тегов.
 type BatchSaveResponse struct {
-	Success        bool        `json:"success"`
-	DestinationDir string      `json:"destination_dir"`
-	Tracks         []TrackTags `json:"tracks"`
-	Error          string      `json:"error,omitempty"`
+	TrackResults   []organizer.TrackResult `json:"track_results,omitempty"`
+	Success        bool                    `json:"success"`
+	DestinationDir string                  `json:"destination_dir"`
+	Tracks         []TrackTags             `json:"tracks"`
+	Error          string                  `json:"error,omitempty"`
 }
 
 // CoverSearchResultItem результат онлайн-поиска обложек (Deezer, iTunes, MusicBrainz).

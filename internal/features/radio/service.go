@@ -104,12 +104,13 @@ func (s *Service) GetWaveStats(ctx context.Context) (*WaveStatsResponse, error) 
 		topGenres = []string{}
 	}
 
-	naviAvailable := s.navidromeReader != nil && s.navidromeReader.IsAvailable()
+	naviAvailable, naviWarning := s.navidromeReader.ListeningStatus(ctx)
 	subsonicConfigured := s.subsonic != nil && s.subsonic.IsConfigured()
 
 	return &WaveStatsResponse{
 		TopGenres:          topGenres,
 		NavidromeAvailable: naviAvailable,
+		NavidromeWarning:   naviWarning,
 		SubsonicConfigured: subsonicConfigured,
 		WaveSize:           s.radioWaveSize,
 		StreamTokenSet:     s.radioStreamToken != "",

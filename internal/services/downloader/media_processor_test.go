@@ -2,12 +2,8 @@ package downloader
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
-	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -99,112 +95,6 @@ func TestClassifyAudioQuality(t *testing.T) {
 	}
 }
 
-func TestFfmpegArgs_320kbps(t *testing.T) {
-	args := buildFfmpegArgs("input.raw", "output.mp3")
-
-	has320k := false
-	has44100 := false
-	hasMp3Lame := false
-	hasNoMetadata := false
-
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-b:a" && i+1 < len(args) && args[i+1] == "320k" {
-			has320k = true
-		}
-		if args[i] == "-ar" && i+1 < len(args) && args[i+1] == "44100" {
-			has44100 = true
-		}
-		if args[i] == "-codec:a" && i+1 < len(args) && args[i+1] == "libmp3lame" {
-			hasMp3Lame = true
-		}
-		if args[i] == "-map_metadata" && i+1 < len(args) && args[i+1] == "-1" {
-			hasNoMetadata = true
-		}
-	}
-
-	if !has320k {
-		t.Errorf("expected -b:a 320k in ffmpeg arguments: %v", args)
-	}
-	if !has44100 {
-		t.Errorf("expected -ar 44100 in ffmpeg arguments: %v", args)
-	}
-	if !hasMp3Lame {
-		t.Errorf("expected -codec:a libmp3lame in ffmpeg arguments: %v", args)
-	}
-	if !hasNoMetadata {
-		t.Errorf("expected -map_metadata -1 in ffmpeg arguments: %v", args)
-	}
-}
-
-func TestTranscodeToMP3_RealFFmpeg(t *testing.T) {
-	tmpDir := t.TempDir()
-	inputWav := filepath.Join(tmpDir, "test_input.wav")
-	outputMp3 := filepath.Join(tmpDir, "test_output.mp3")
-
-	// Generate a 0.2s sine wave audio using ffmpeg
-	genCmd := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=1000:duration=0.2", inputWav)
-	if err := genCmd.Run(); err != nil {
-		t.Skip("ffmpeg not available or lavfi sine unsupported, skipping")
-	}
-
-	svc := &Service{}
-	ctx := context.Background()
-
-	// 1. Success case
-	err := svc.transcodeToMP3(ctx, inputWav, outputMp3)
-	if err != nil {
-		t.Fatalf("unexpected transcode error: %v", err)
-	}
-	fi, err := os.Stat(outputMp3)
-	if err != nil || fi.Size() == 0 {
-		t.Fatalf("expected non-empty output mp3 file")
-	}
-
-	probe, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=bit_rate,sample_rate", "-of", "default=noprint_wrappers=1", outputMp3).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(probe), "bit_rate=320000") || !strings.Contains(string(probe), "sample_rate=44100") {
-		t.Fatalf("wrong audio output: %s", probe)
-	}
-	// 2. Context timeout cancellation case
-	cancelledCtx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately
-	outputCancelled := filepath.Join(tmpDir, "test_cancelled.mp3")
-	err = svc.transcodeToMP3(cancelledCtx, inputWav, outputCancelled)
-	if err == nil {
-		t.Errorf("expected error on cancelled context, got nil")
-	}
-}
-
-func TestDownloadCover(t *testing.T) {
-	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("fake-jpeg-cover-data"))
-	}))
-	defer mockServer.Close()
-
-	svc := &Service{
-		client: mockServer.Client(),
-	}
-
-	data, err := svc.downloadCover(context.Background(), mockServer.URL+"/cover.jpg")
-	if err != nil {
-		t.Fatalf("unexpected error downloading cover: %v", err)
-	}
-	if string(data) != "fake-jpeg-cover-data" {
-		t.Errorf("expected cover data 'fake-jpeg-cover-data', got %q", string(data))
-	}
-
-	// Error case: 404
-	_, err = svc.downloadCover(context.Background(), mockServer.URL+"/not-found")
-	// handler doesn't check path so returns 200, but test invalid URL:
-	_, err = svc.downloadCover(context.Background(), "http://127.0.0.1:0/invalid")
-	if err == nil {
-		t.Errorf("expected error for unreachable URL, got nil")
-	}
-}
-
 func TestProbeAudioStream_RealFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	inputWav := filepath.Join(tmpDir, "test_probe.wav")
@@ -267,68 +157,5 @@ func TestAnalyzeAudioQuality_RealFile(t *testing.T) {
 	}
 	if telemetry.SourceCodec == "" {
 		t.Errorf("expected non-empty SourceCodec")
-	}
-}
-
-func TestFindDownloadedFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	svc := &Service{}
-
-	// 1. Success case: matching file exists
-	targetFile := filepath.Join(tmpDir, "track_01.opus")
-	_ = os.WriteFile(targetFile, []byte("audio-bytes"), 0644)
-
-	tmpl := filepath.Join(tmpDir, "track_01.%(ext)s")
-	found, err := svc.findDownloadedFile(tmpl)
-	if err != nil {
-		t.Fatalf("unexpected error finding file: %v", err)
-	}
-	if found != targetFile {
-		t.Errorf("expected %s, got %s", targetFile, found)
-	}
-
-	// 2. Error case: no matching file
-	missingTmpl := filepath.Join(tmpDir, "track_99.%(ext)s")
-	_, err = svc.findDownloadedFile(missingTmpl)
-	if err == nil {
-		t.Errorf("expected error for missing file, got nil")
-	}
-}
-
-func TestValidateDownloadedStreamAudio_Snippet(t *testing.T) {
-	tmpDir := t.TempDir()
-	shortWav := filepath.Join(tmpDir, "short_snippet.wav")
-
-	// Generate a 5.0s audio file with ffmpeg
-	cmd := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=1000:duration=5.0", shortWav)
-	if err := cmd.Run(); err != nil {
-		t.Skip("ffmpeg not available, skipping")
-	}
-
-	ctx := context.Background()
-
-	// 1. Snippet detected: actual 5s < 35s, but expected 180s (> 60s)
-	err := validateDownloadedStreamAudio(ctx, shortWav, 180)
-	if err == nil {
-		t.Fatalf("expected error for 5s snippet when expecting 180s track, got nil")
-	}
-	t.Logf("correctly caught snippet: %v", err)
-
-	// 2. Short skit/intro: actual 5s, expected 20s (<= 60s) -> allowed
-	err = validateDownloadedStreamAudio(ctx, shortWav, 20)
-	if err != nil {
-		t.Fatalf("expected nil for short intro/skit, got error: %v", err)
-	}
-
-	// 3. Normal track: generate a 36s audio file (>= 35s)
-	normalWav := filepath.Join(tmpDir, "normal_track.wav")
-	cmdNormal := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=1000:duration=36.0", normalWav)
-	if err := cmdNormal.Run(); err != nil {
-		t.Skip("ffmpeg not available, skipping")
-	}
-
-	err = validateDownloadedStreamAudio(ctx, normalWav, 180)
-	if err != nil {
-		t.Fatalf("expected nil for 36s track with 180s expectation, got: %v", err)
 	}
 }

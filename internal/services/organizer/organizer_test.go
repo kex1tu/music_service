@@ -406,9 +406,9 @@ func TestOrganizer_Component_LongCyrillicAndEmojiWithCompanions(t *testing.T) {
 	_ = os.MkdirAll(jobDir, 0755)
 
 	longArtist := strings.Repeat("ОченьДлинныйИсполнительРусскогоРока", 10) // 350 runes, 700 bytes
-	longAlbum := strings.Repeat("НевероятноДлинноеНазваниеАльбома", 10)      // 320 runes, 640 bytes
+	longAlbum := strings.Repeat("НевероятноДлинноеНазваниеАльбома", 10)     // 320 runes, 640 bytes
 	longTitle1 := strings.Repeat("ДлиннейшаяПесняНаКириллице", 12)          // 300 runes, 600 bytes
-	longTitle2 := strings.Repeat("🎧🔥МузыкаБудущего🎵🚀", 15)                // 210 runes, 540 bytes
+	longTitle2 := strings.Repeat("🎧🔥МузыкаБудущего🎵🚀", 15)                  // 210 runes, 540 bytes
 
 	// Staging files
 	track1Path := filepath.Join(jobDir, "1.mp3")
@@ -565,3 +565,46 @@ func TestOrganizer_Component_LongCyrillicAndEmojiWithCompanions(t *testing.T) {
 	}
 }
 
+func TestMoveAlbumIntoKeepsEditionsAndDiscsSeparate(t *testing.T) {
+	music, staging := t.TempDir(), t.TempDir()
+	musicSandbox, err := sandbox.NewPathSandbox(music)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpSandbox, err := sandbox.NewPathSandbox(staging)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTrack := func(sb *sandbox.PathSandbox, rel, content string) {
+		t.Helper()
+		full, err := sb.Resolve(rel, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeTrack(musicSandbox, "Digital edition/Disc 1/01. Intro.mp3", "digital edition")
+	writeTrack(musicSandbox, "CD edition/Disc 1/01. Intro.mp3", "first disc")
+	writeTrack(tmpSandbox, "job/converted/02-01. Intro.mp3", "second disc")
+
+	org := NewService(musicSandbox, tmpSandbox)
+	result, err := org.MoveAlbumInto("CD edition", "Live", "Band", []id3.TrackTags{
+		{Path: "CD edition/Disc 1/01. Intro.mp3", DiscNumber: 1, TrackNumber: 1, Title: "Intro"},
+		{Path: "tmp_downloads/job/converted/02-01. Intro.mp3", DiscNumber: 2, TrackNumber: 1, Title: "Intro"},
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.DestinationDir != "CD edition" || len(result.Tracks) != 2 || result.Tracks[1].Path != "CD edition/CD2/01. Intro.mp3" {
+		t.Fatalf("backfill moved into the wrong edition or disc: %+v", result)
+	}
+	other, err := os.ReadFile(filepath.Join(music, "Digital edition", "Disc 1", "01. Intro.mp3"))
+	if err != nil || string(other) != "digital edition" {
+		t.Fatalf("the other edition was touched: %q, %v", other, err)
+	}
+}

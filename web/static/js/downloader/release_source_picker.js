@@ -20,10 +20,14 @@ document.addEventListener('alpine:init', () => {
         targetTracks: [],
         candidates: [],
         selectedCandidateIndex: -1,
- versionPolicy: "release",
+        versionPolicy: "release",
         searchSerial: 0,
         soundCloudLimit: 30,
         hasMoreSoundCloud: false,
+        albumOffset: 0,
+        playlistOffset: 0,
+        albumToken: '',
+        playlistToken: '',
         manualOverrides: {}, // targetIdx -> candTrack object
         activeRemapTargetIdx: null,
 
@@ -47,6 +51,7 @@ document.addEventListener('alpine:init', () => {
             if (!album) return;
             this.reset();
             this.jobId = null;
+            this.missingOnly = true;
             this.targetPath = album.path || null;
             this.artist = album.artist || '';
             this.album = album.album || '';
@@ -70,8 +75,14 @@ document.addEventListener('alpine:init', () => {
         },
 
         reset() {
+            const picker = Alpine.store('soundCloudPicker');
+            if (picker?.mode === 'release') picker.close(false);
             this.soundCloudLimit = 30;
             this.hasMoreSoundCloud = false;
+            this.albumOffset = 0;
+            this.playlistOffset = 0;
+            this.albumToken = '';
+            this.playlistToken = '';
             this.searchSerial++;
             this.versionPolicy = 'release';
             this.isLoading = false;
@@ -80,6 +91,7 @@ document.addEventListener('alpine:init', () => {
             this.activeTab = 'candidates';
             this.jobId = null;
             this.targetPath = null;
+            this.missingOnly = false;
             this.artist = '';
             this.album = '';
             this.isCyrillic = false;
@@ -106,14 +118,18 @@ document.addEventListener('alpine:init', () => {
 
         loadMoreCandidates() {
             if (this.isLoading || !this.hasMoreSoundCloud) return;
-            this.soundCloudLimit = Math.min(100, this.soundCloudLimit + 30);
             this.loadCandidates(true);
         },
 
         async loadCandidates(expand = false) {
-            const serial=++this.searchSerial;
-            const selectedURL = expand ? this.currentCandidate()?.url : null;
-            if (!expand) this.soundCloudLimit = 30;
+            const serial = ++this.searchSerial;
+            if (!expand) {
+                this.soundCloudLimit = 30;
+                this.albumOffset = 0;
+                this.playlistOffset = 0;
+                this.albumToken = '';
+                this.playlistToken = '';
+            }
             this.isLoading = true;
             this.errorMessage = '';
             if (!expand) {
@@ -126,10 +142,17 @@ document.addEventListener('alpine:init', () => {
                 const params = new URLSearchParams();
                 if (this.artist) params.append('artist', this.artist);
                 if (this.album) params.append('album', this.album);
-                params.append("version_policy",this.versionPolicy);
-                params.append('soundcloud_limit', this.soundCloudLimit);
+                params.append("version_policy", this.versionPolicy);
+                params.append('soundcloud_limit', '30');
+                if (expand) {
+                    params.append('album_offset', String(this.albumOffset));
+                    params.append('playlist_offset', String(this.playlistOffset));
+                    if (this.albumToken) params.append('album_token', this.albumToken);
+                    if (this.playlistToken) params.append('playlist_token', this.playlistToken);
+                }
                 if (this.jobId) params.append('job_id', this.jobId);
                 if (this.targetPath) params.append('path', this.targetPath);
+                if (this.missingOnly) params.set('missing_only', 'true');
 
                 const res = await window.api.raw(`/api/downloads/release-candidates?${params.toString()}`);
                 if (!res.ok) {
@@ -138,16 +161,37 @@ document.addEventListener('alpine:init', () => {
                 }
 
                 const data = await res.json();
-                if(serial !== this.searchSerial)return;
+                if (serial !== this.searchSerial) return;
                 this.artist = data.artist || this.artist;
                 this.album = data.album || this.album;
                 this.isCyrillic = Boolean(data.is_cyrillic);
                 if (data.target_tracks && data.target_tracks.length > 0) {
                     this.targetTracks = data.target_tracks;
                 }
-                this.candidates = data.candidates || [];
-                if (expand) this.selectedCandidateIndex = this.candidates.findIndex(candidate => candidate.url === selectedURL);
-                this.hasMoreSoundCloud = this.soundCloudLimit < 100 && this.candidates.filter(candidate => candidate.source === 'soundcloud_set').length >= this.soundCloudLimit;
+
+                const newCandidates = data.candidates || [];
+                if (expand || this.candidates.length) {
+                    const selectedURL = this.currentCandidate()?.url;
+                    const existingUrls = new Set(this.candidates.map(candidate => candidate.url));
+                    for (const cand of newCandidates) {
+                        if (!existingUrls.has(cand.url)) {
+                            this.candidates.push(cand);
+                            existingUrls.add(cand.url);
+                        }
+                    }
+                    if (selectedURL) {
+                        this.selectedCandidateIndex = this.candidates.findIndex(candidate => candidate.url === selectedURL);
+                    }
+                } else {
+                    this.candidates = newCandidates;
+                }
+
+                this.hasMoreSoundCloud = Boolean(data.has_more_soundcloud);
+                this.albumOffset = data.album_offset ?? -1;
+                this.playlistOffset = data.playlist_offset ?? -1;
+                this.albumToken = data.album_token || '';
+                this.playlistToken = data.playlist_token || '';
+
                 if (this.candidates.length === 0) {
                     this.errorMessage = 'Кандидатов цельного релиза не найдено. Вы можете вставить прямую ссылку на сет или альбом.';
                 }
@@ -156,7 +200,7 @@ document.addEventListener('alpine:init', () => {
                 console.error('[ReleaseSourcePicker] loadCandidates error:', err);
                 this.errorMessage = err.message || 'Сбой загрузки кандидатов релиза';
             } finally {
-                if(serial === this.searchSerial)this.isLoading = false;
+                if (serial === this.searchSerial) this.isLoading = false;
             }
         },
 
@@ -303,6 +347,7 @@ document.addEventListener('alpine:init', () => {
                     target_tracks: this.targetTracks,
                     job_id: this.jobId || '',
                     target_path: this.targetPath || '',
+                    missing_only: this.missingOnly,
                     source_url: cand ? (cand.url || '') : '',
                     track_mapping: trackMapping,
                 };
@@ -335,6 +380,31 @@ document.addEventListener('alpine:init', () => {
             } finally {
                 this.isApplying = false;
             }
+        },
+
+        openSoundCloudSearch() {
+            const picker = Alpine.store('soundCloudPicker');
+            if (picker) {
+                picker.openForRelease({
+                    artist: this.artist,
+                    album: this.album,
+                }, document.getElementById('btn-release-picker-sc-search'));
+            }
+        },
+
+        applyCustomCandidate(cand) {
+            if (!cand) return;
+            const existingIdx = this.candidates.findIndex(c => c.url === cand.url);
+            if (existingIdx >= 0) {
+                this.candidates[existingIdx] = cand;
+                this.selectedCandidateIndex = existingIdx;
+            } else {
+                this.candidates.unshift(cand);
+                this.selectedCandidateIndex = 0;
+            }
+            this.manualOverrides = {};
+            this.activeRemapTargetIdx = null;
+            this.activeTab = 'candidates';
         },
     });
 });

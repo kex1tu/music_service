@@ -5,9 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"music-manager/internal/core/textkey"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"music-manager/internal/db"
 )
 
 var (
@@ -227,13 +230,13 @@ func (r *SQLiteRepository) ListLibraryTracks(ctx context.Context, query string, 
 	var countArgs []any
 
 	if strings.TrimSpace(query) != "" {
-		term := "%" + strings.TrimSpace(query) + "%"
+		term := textkey.Search(query)
 		countQuery = `
 		SELECT COUNT(*)
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists ar ON t.artist_id = ar.id
-		WHERE t.title LIKE ? OR ar.name LIKE ? OR al.title LIKE ?;
+		WHERE instr(t.search_title, ?) > 0 OR instr(ar.clean_name, ?) > 0 OR instr(al.search_title, ?) > 0;
 		`
 		countArgs = []any{term, term, term}
 
@@ -243,7 +246,7 @@ func (r *SQLiteRepository) ListLibraryTracks(ctx context.Context, query string, 
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists ar ON t.artist_id = ar.id
-		WHERE t.title LIKE ? OR ar.name LIKE ? OR al.title LIKE ?
+		WHERE instr(t.search_title, ?) > 0 OR instr(ar.clean_name, ?) > 0 OR instr(al.search_title, ?) > 0
 		ORDER BY ar.name ASC, al.title ASC, t.track_number ASC
 		LIMIT ? OFFSET ?;
 		`
@@ -296,7 +299,7 @@ func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limi
 	if limit <= 0 {
 		limit = 50
 	}
-	term := "%" + strings.TrimSpace(query) + "%"
+	term := textkey.Search(query)
 
 	result := &SearchLibraryResult{
 		Tracks:  make([]SearchTrackItem, 0),
@@ -311,7 +314,7 @@ func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limi
 	FROM tracks t
 	JOIN albums al ON t.album_id = al.id
 	JOIN artists ar ON t.artist_id = ar.id
-	WHERE t.title LIKE ? OR t.clean_title LIKE ?
+	WHERE instr(t.search_title, ?) > 0 OR instr(t.search_clean_title, ?) > 0
 	LIMIT ?;
 	`
 	tRows, err := r.db.QueryContext(ctx, trackQuery, term, term, limit)
@@ -333,7 +336,7 @@ func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limi
 	FROM albums al
 	JOIN artists ar ON al.artist_id = ar.id
 	LEFT JOIN tracks t ON t.album_id = al.id
-	WHERE al.title LIKE ? OR al.clean_title LIKE ?
+	WHERE instr(al.search_title, ?) > 0 OR instr(al.search_clean_title, ?) > 0
 	GROUP BY al.id
 	LIMIT ?;
 	`
@@ -355,11 +358,11 @@ func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limi
 	       COALESCE((SELECT t.file_path FROM tracks t WHERE t.artist_id = ar.id LIMIT 1), '')
 	FROM artists ar
 	LEFT JOIN tracks t ON t.artist_id = ar.id
-	WHERE ar.name LIKE ? OR ar.clean_name LIKE ?
+	WHERE instr(ar.clean_name, ?) > 0
 	GROUP BY ar.id
 	LIMIT ?;
 	`
-	arRows, err := r.db.QueryContext(ctx, artistQuery, term, term, limit)
+	arRows, err := r.db.QueryContext(ctx, artistQuery, term, limit)
 	if err == nil {
 		defer arRows.Close()
 		for arRows.Next() {
@@ -375,66 +378,12 @@ func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limi
 
 // DeleteTrackByPath удаляет трек по относительному пути и атомарно очищает осиротевшие альбомы и артистов.
 func (r *SQLiteRepository) DeleteTrackByPath(ctx context.Context, relPath string) (int64, error) {
-	var trackID int64
-	var albumID int64
-	err := r.db.QueryRowContext(ctx, "SELECT id, album_id FROM tracks WHERE file_path = ?", relPath).Scan(&trackID, &albumID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, nil
-		}
-		return 0, err
-	}
-
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM audit_issues WHERE (entity_type = 'track' AND entity_id = ?) OR file_path = ?", trackID, relPath)
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM track_genres WHERE track_id = ?", trackID)
-	res, err := r.db.ExecContext(ctx, "DELETE FROM tracks WHERE id = ?", trackID)
-	if err != nil {
-		return 0, err
-	}
-	deleted, _ := res.RowsAffected()
-
-	if albumID > 0 {
-		var remainingTracks int
-		_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM tracks WHERE album_id = ?", albumID).Scan(&remainingTracks)
-		if remainingTracks == 0 {
-			_, _ = r.db.ExecContext(ctx, "DELETE FROM albums WHERE id = ?", albumID)
-			_, _ = r.db.ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id = ?", albumID)
-			_, _ = r.db.ExecContext(ctx, "DELETE FROM audit_issues WHERE (entity_type = 'album' AND entity_id = ?)", albumID)
-		}
-	}
-
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM artists WHERE (SELECT COUNT(*) FROM albums WHERE artist_id = artists.id) = 0")
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums)")
-
-	return deleted, nil
+	return db.DeleteLibraryTracks(ctx, r.db, relPath, false)
 }
 
-// DeleteDirectoryRecords удаляет все треки и альбомы внутри заданной директории.
+// DeleteDirectoryRecords удаляет индекс треков внутри заданной директории.
 func (r *SQLiteRepository) DeleteDirectoryRecords(ctx context.Context, dirRelPath string) (int64, error) {
-	prefix := dirRelPath + "/%"
-	_, _ = r.db.ExecContext(ctx, `
-		DELETE FROM audit_issues
-		WHERE file_path = ? OR file_path LIKE ?
-		   OR entity_id IN (SELECT id FROM tracks WHERE file_path = ? OR file_path LIKE ?)
-		   OR entity_id IN (SELECT id FROM albums WHERE folder_path = ? OR folder_path LIKE ?)
-	`, dirRelPath, prefix, dirRelPath, prefix, dirRelPath, prefix)
-
-	_, _ = r.db.ExecContext(ctx, `
-		DELETE FROM track_genres
-		WHERE track_id IN (SELECT id FROM tracks WHERE file_path = ? OR file_path LIKE ?)
-	`, dirRelPath, prefix)
-
-	res, err := r.db.ExecContext(ctx, "DELETE FROM tracks WHERE file_path = ? OR file_path LIKE ?", dirRelPath, prefix)
-	if err != nil {
-		return 0, err
-	}
-	deletedTracks, _ := res.RowsAffected()
-
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM albums WHERE folder_path = ? OR folder_path LIKE ? OR id NOT IN (SELECT DISTINCT album_id FROM tracks)", dirRelPath, prefix)
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums)")
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM albums)")
-
-	return deletedTracks, nil
+	return db.DeleteLibraryTracks(ctx, r.db, dirRelPath, true)
 }
 
 // UpdateTrackPath обновляет путь к файлу трека и связанные задачи аудита.
@@ -513,4 +462,3 @@ func (r *SQLiteRepository) GetAlbumDetailsForRedownload(ctx context.Context, dir
 	err = row2.Scan(&artist, &album, &deezerID)
 	return
 }
-

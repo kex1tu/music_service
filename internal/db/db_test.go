@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -111,6 +112,35 @@ func TestAppSettings(t *testing.T) {
 	val, err = database.GetSetting(ctx, "mb_token")
 	if err != nil || val != "" {
 		t.Errorf("expected empty string after deletion, got %s", val)
+	}
+}
+
+func TestResetLibraryTablesRollsBackOnFailure(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "library.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	ctx := context.Background()
+	if _, err := database.conn.ExecContext(ctx, `
+		INSERT INTO audit_issues (issue_type, entity_type) VALUES ('test', 'track');
+		INSERT INTO artists (name, clean_name) VALUES ('Test Artist', 'test artist');
+		CREATE TRIGGER fail_artist_delete BEFORE DELETE ON artists
+		BEGIN SELECT RAISE(ABORT, 'test delete failure'); END;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.ResetLibraryTables(ctx); err == nil {
+		t.Fatal("expected cache reset to fail")
+	}
+
+	var issueCount int
+	if err := database.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_issues").Scan(&issueCount); err != nil {
+		t.Fatal(err)
+	}
+	if issueCount != 1 {
+		t.Fatalf("expected audit issue to survive failed cache reset, got %d", issueCount)
 	}
 }
 
@@ -770,9 +800,17 @@ func TestRadarAndRadioQueries(t *testing.T) {
 	// Тест ReconcileAllRadarReleases
 	// Вставляем артиста и альбом в albums с clean_title = 'random access memories' (соответствует rel1, который со статусом downloaded)
 	_, _ = database.Conn().ExecContext(ctx, "INSERT OR IGNORE INTO artists (id, name, clean_name) VALUES (1, 'Daft Punk', 'daft punk');")
-	_, err = database.Conn().ExecContext(ctx, "INSERT INTO albums (title, clean_title, album_artist, artist_id, folder_path) VALUES ('Random Access Memories', 'random access memories', 'Daft Punk', 1, 'path');")
+	_, err = database.Conn().ExecContext(ctx, "INSERT INTO albums (title, clean_title, album_artist, artist_id, folder_path, deezer_id, expected_tracks_count) VALUES ('Random Access Memories (10th Anniversary)', 'random access memories', 'Daft Punk', 1, 'path', 'dz-ram', 13);")
 	if err != nil {
 		t.Fatalf("failed to insert album for reconcile test: %v", err)
+	}
+	for number := 1; number <= rel1.TrackCount; number++ {
+		if _, err := database.Conn().ExecContext(ctx, `
+			INSERT INTO tracks (album_id, artist_id, title, clean_title, track_number, file_path, file_size, mtime)
+			SELECT id, artist_id, 'Track', 'track', ?, ?, 1000, 1 FROM albums WHERE folder_path = 'path'`,
+			number, fmt.Sprintf("path/%02d.mp3", number)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	fixedCount, err := database.ReconcileAllRadarReleases(ctx)
 	if err != nil {
@@ -863,6 +901,3 @@ func TestRadarAndRadioQueries(t *testing.T) {
 		t.Fatalf("radar_releases lost after ResetLibraryTables: err=%v, unread=%d", err, unreadAfterReset)
 	}
 }
-
-
-

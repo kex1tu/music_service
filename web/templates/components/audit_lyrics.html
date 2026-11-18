@@ -65,7 +65,7 @@
             <div>
                 <!-- Мобильный вид (< md) -->
                 <div class="md:hidden divide-y divide-surface-borderSubtle">
-                    <template x-for="item in missingLyrics" :key="'mob-' + item.path">
+                    <template x-for="item in ($store.app.isDesktopLayout ? [] : missingLyrics)" :key="'mob-' + item.path">
                         <div class="p-3.5 space-y-2.5">
                             <div class="min-w-0">
                                 <div class="text-sm font-semibold text-content-primary truncate" x-text="item.title" :title="item.title"></div>
@@ -110,7 +110,7 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-surface-borderSubtle">
-                        <template x-for="item in missingLyrics" :key="item.path">
+                        <template x-for="item in ($store.app.isDesktopLayout ? missingLyrics : [])" :key="item.path">
                             <tr class="hover:bg-surface-elevated/60 transition">
                                 <td class="p-3 font-semibold text-content-primary max-w-xs truncate" x-text="item.title" :title="item.title"></td>
                                 <td class="p-3 text-content-secondary max-w-xs truncate" x-text="item.artist" :title="item.artist"></td>
