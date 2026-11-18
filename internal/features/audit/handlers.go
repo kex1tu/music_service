@@ -155,7 +155,13 @@ func (m *Module) FixDuplicates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := m.service.FixDuplicates(r.Context(), req.PathsToDelete)
+	var res *FixDuplicatesResponse
+	var err error
+	if len(req.PathsToDelete) == 0 {
+		res, err = m.service.FixDuplicateGroup(r.Context(), req.GroupKey)
+	} else {
+		res, err = m.service.FixDuplicates(r.Context(), req.PathsToDelete)
+	}
 	if err != nil {
 		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
 		return

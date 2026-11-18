@@ -142,6 +142,10 @@ func cleanCompanionFiles(srcAudio, destAudio string) error {
 	srcBase := strings.TrimSuffix(srcAudio, filepath.Ext(srcAudio))
 	destBase := strings.TrimSuffix(destAudio, filepath.Ext(destAudio))
 
+	if srcBase == destBase {
+		return nil
+	}
+
 	for _, ext := range companionExtensions {
 		srcComp := srcBase + ext
 		destComp := destBase + ext

@@ -110,6 +110,7 @@
             create: (url, source = 'auto') => request('/downloads', { method: 'POST', body: { url, source } }),
             batch: (urls, source = 'auto') => request('/downloads/batch', { method: 'POST', body: { urls, source } }),
             delete: (id) => request(`/downloads/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+            finishImport: (id) => request(`/downloads/${encodeURIComponent(id)}?imported=true`, { method: 'DELETE' }),
             retry: (id) => request(`/downloads/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
             tracks: (id) => request(`/downloads/${encodeURIComponent(id)}/tracks`),
             preview: (url) => request(`/downloads/preview?url=${encodeURIComponent(url)}`),
@@ -132,6 +133,15 @@
             get: (path) => request(`/tags?path=${encodeURIComponent(path)}`),
             save: (payload) => request('/tags', { method: 'POST', body: payload }),
             batchSave: (payload) => request('/tags/batch', { method: 'POST', body: payload }),
+            requireCompleteBatch: (result) => {
+                if (result.success !== false) return;
+                const failed = (result.track_results || []).filter((track) => track.status !== 'moved');
+                const names = failed.map((track) => track.source_path.split('/').pop()).join(', ');
+                if (result.tracks?.length) {
+                    window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: result.destination_dir }));
+                }
+                throw new Error(names ? `Сохранение завершено не для всех треков. Проверьте ${names}` : 'Ошибка сохранения треков');
+            },
             recognizeAudio: (path) => request('/tags/recognize-audio', { method: 'POST', body: { path } }),
             getCover: (path) => request(`/tags/cover?path=${encodeURIComponent(path)}`),
             searchCovers: (query) => request(`/tags/covers/search?query=${encodeURIComponent(query)}`),

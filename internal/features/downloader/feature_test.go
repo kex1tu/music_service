@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -980,7 +981,46 @@ func TestDownloader_ParseReleaseURL(t *testing.T) {
 	}
 }
 
+func TestDownloader_FinishImportRetainsUnselectedTracks(t *testing.T) {
+	env, mod := setupTestModule(t)
+	first, second := "job/converted/first.mp3", "job/converted/second.mp3"
+	secondFile := env.CreateDummyFile(env.TmpSandbox, second, []byte("not yet imported"))
+	notes := env.CreateDummyFile(env.TmpSandbox, "job/notes.dat", []byte("keep"))
+	mod.Service().AddJob(&downloader.Job{
+		ID:     "job",
+		Status: downloader.StatusPartialReady,
+		Tracks: []resolver.ResolvedTrack{
+			{Title: "First", ConvertedPath: &first},
+			{Title: "Second", ConvertedPath: &second},
+		},
+	})
 
-
-
-
+	finish := func(want string) {
+		t.Helper()
+		resp := env.Do(env.NewRequest(http.MethodDelete, "/downloads/job?imported=true", nil))
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("unexpected status %d: %s", resp.StatusCode, env.ReadBody(resp))
+		}
+		var result downloader.DeleteResponse
+		env.DecodeJSON(resp, &result)
+		if result.Status != want {
+			t.Fatalf("finish status = %q, want %q", result.Status, want)
+		}
+	}
+	finish("pending")
+	var tracks downloader.DownloadTracksResponse
+	env.DecodeJSON(env.Get("/downloads/job/tracks"), &tracks)
+	if len(tracks.Tracks) != 1 || tracks.Tracks[0].Title != "Second" {
+		t.Fatalf("expected just the remaining track, got %+v", tracks.Tracks)
+	}
+	if err := os.Remove(secondFile); err != nil {
+		t.Fatal(err)
+	}
+	finish("deleted")
+	if resp := env.Get("/downloads/job"); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("finished job still in queue: %d", resp.StatusCode)
+	}
+	if _, err := os.Stat(notes); err != nil {
+		t.Fatalf("finalization removed unrelated staging files: %v", err)
+	}
+}

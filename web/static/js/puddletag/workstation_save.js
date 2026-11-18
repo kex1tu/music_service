@@ -67,6 +67,7 @@ const puddletagWorkstationSave = {
                             const err = await res.json().catch(() => ({}));
                             throw new Error(err.error || `Ошибка сохранения релиза ${releaseAlbum.album}`);
                         }
+                        window.api.tags.requireCompleteBatch(await res.json());
                     }
                 } else {
                     // Одиночный релиз
@@ -104,6 +105,7 @@ const puddletagWorkstationSave = {
                         const err = await res.json().catch(() => ({}));
                         throw new Error(err.error || 'Ошибка перемещения в медиатеку');
                     }
+                    window.api.tags.requireCompleteBatch(await res.json());
                 }
 
                 Alpine.store('app').toast(
@@ -118,7 +120,7 @@ const puddletagWorkstationSave = {
                 const jobIdsToClean = (this.jobIds && this.jobIds.length > 0) ? this.jobIds : (this.jobId ? [this.jobId] : []);
                 if (jobIdsToClean.length > 0) {
                     try {
-                        await Promise.allSettled(jobIdsToClean.map(jid => window.api.raw(`/downloads/${jid}`, { method: 'DELETE' })));
+                        await Promise.allSettled(jobIdsToClean.map(jid => window.api.downloader.finishImport(jid)));
                         if (Alpine.store('app').queue) {
                             await Alpine.store('app').queue.fetchQueue();
                         }
@@ -154,6 +156,7 @@ const puddletagWorkstationSave = {
                     const err = await res.json().catch(() => ({}));
                     throw new Error(err.error || 'Ошибка записи ID3-тегов');
                 }
+                window.api.tags.requireCompleteBatch(await res.json());
 
                 Alpine.store('app').toast(`Успешно сохранено ${dirtyTracksList.length} файлов! (ID3v2.4)`, 'success');
                 this.dirtyIndices.clear();

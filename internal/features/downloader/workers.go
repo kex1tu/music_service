@@ -4,11 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"path/filepath"
 	"sync/atomic"
 	"time"
 
-	"music-manager/internal/core/safefs"
+	"music-manager/internal/services/downloadstaging"
 )
 
 // Start запускает воркер-пул, фоновую очистку и сбрасывает зависшие задачи в БД.
@@ -144,26 +143,19 @@ func (s *Service) cleanerLoop(ctx context.Context) {
 }
 
 func (s *Service) cleanOldTempDirs() {
-	if s.tmpSandbox == nil {
-		return
-	}
-	root := s.tmpSandbox.Root()
-	entries, err := safefs.ReadDir(root)
-	if err != nil {
-		return
-	}
-	cutoff := time.Now().Add(-s.cleanerMaxAge)
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	downloadstaging.CleanOldDirs(s.tmpSandbox, s.cleanerMaxAge, func(id string) bool {
+		s.jobsMu.RLock()
+		job := s.jobs[id]
+		s.jobsMu.RUnlock()
+		if job != nil && job.Snapshot().Status != StatusCancelled {
+			return false
 		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
+		if s.repo == nil {
+			return true
 		}
-		if info.ModTime().Before(cutoff) {
-			dirPath := filepath.Join(root, entry.Name())
-			_ = safefs.RemoveAll(dirPath)
-		}
-	}
+		stored, err := s.repo.GetJob(ctx, id)
+		return err == nil && (stored == nil || stored.Status == StatusCancelled)
+	})
 }

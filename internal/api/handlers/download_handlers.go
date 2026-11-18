@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"music-manager/internal/db"
 	"music-manager/internal/services/downloader"
+	"music-manager/internal/services/downloadstaging"
 	"music-manager/internal/services/resolver"
 )
 
@@ -171,6 +173,12 @@ func (h *DownloadHandler) GetDownloadTracks(w http.ResponseWriter, r *http.Reque
 		coverURL = &c
 	}
 
+	if snap.Status == downloader.StatusReady || snap.Status == downloader.StatusPartialReady {
+		snap.Tracks = slices.DeleteFunc(snap.Tracks, func(track resolver.ResolvedTrack) bool {
+			return track.ConvertedPath != nil && downloadstaging.TrackMissing(h.service.TmpSandbox(), *track.ConvertedPath)
+		})
+	}
+
 	resp := map[string]any{
 		"job_id":       snap.ID,
 		"album_artist": albumArtist,
@@ -190,9 +198,22 @@ func (h *DownloadHandler) GetDownloadTracks(w http.ResponseWriter, r *http.Reque
 
 func (h *DownloadHandler) DeleteDownload(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	_ = h.service.DeleteJob(id)
+	status := "deleted"
+	if r.URL.Query().Get("imported") == "true" {
+		finished, err := h.service.FinishImport(id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !finished {
+			status = "pending"
+		}
+	} else {
+		_ = h.service.DeleteJob(id)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "job_id": id})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": status, "job_id": id})
 }
 
 func (h *DownloadHandler) RetryDownload(w http.ResponseWriter, r *http.Request) {
