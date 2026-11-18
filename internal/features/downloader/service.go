@@ -15,6 +15,11 @@ import (
 // ErrInvalidURL возвращается при недопустимом или потенциально опасном URL.
 var ErrInvalidURL = errors.New("untrusted or invalid target_url")
 
+var (
+	errSelectionConflict = errors.New("укажите задачу для выбора источника или дождитесь завершения обработки")
+	errQueueStorage      = errors.New("не удалось сохранить задачу в очереди")
+)
+
 // JobStarter определяет потребительский интерфейс для постановки задач другими модулями (radar, audit).
 type JobStarter interface {
 	CreateJob(ctx context.Context, rawURL, source string) (*Job, error)
@@ -46,16 +51,15 @@ type Service struct {
 
 	// Bounded worker pool
 	workersCount int
-	workQueue    chan string
+	wake         chan struct{}
 	wg           sync.WaitGroup
 	ctx          context.Context
 	cancel       context.CancelFunc
 	stopped      int32
 
 	// Управление паузой очереди
-	pauseMu   sync.RWMutex
-	isPaused  bool
-	pauseCond *sync.Cond
+	pauseMu  sync.RWMutex
+	isPaused bool
 
 	// In-memory реестр задач
 	jobsMu sync.RWMutex
@@ -103,7 +107,7 @@ func NewService(cfg ServiceConfig) *Service {
 		musicSandbox:    cfg.MusicSandbox,
 		cookiesPath:     cfg.CookiesPath,
 		workersCount:    maxConcurrent,
-		workQueue:       make(chan string, 1024),
+		wake:            make(chan struct{}, maxConcurrent),
 		jobs:            make(map[string]*Job),
 		syncTimers:      make(map[string]*time.Timer),
 		resolveCache:    make(map[string]*cachedResolveResult),
@@ -111,7 +115,6 @@ func NewService(cfg ServiceConfig) *Service {
 		cleanerMaxAge:   cleanerAge,
 		cleanerInterval: cleanerInt,
 	}
-	svc.pauseCond = sync.NewCond(&svc.pauseMu)
 	return svc
 }
 

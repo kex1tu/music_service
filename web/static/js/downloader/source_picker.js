@@ -265,6 +265,7 @@ document.addEventListener('alpine:init', () => {
                         artist_name: this.context.artist,
                         track_title: this.context.title,
                         track_number: this.context.trackNumber,
+                        isrc: this.context.isrc || undefined,
                         target_url: targetUrl,
                         version_policy: this.versionPolicy,
                         duration: this.context.expectedDuration,
@@ -285,11 +286,11 @@ document.addEventListener('alpine:init', () => {
                     this.submitStep = 'Трек успешно привязан и отправлен в очередь!';
                 } else {
                     // Режим трека из очереди
-                    this.submitStep = 'Скачивание и накат ID3v2.4 тегов...';
+                    this.submitStep = 'Постановка в очередь...';
                     const res = await window.api.raw(`/api/downloads/tracks/${encodeURIComponent(this.context.trackId)}/bind-source`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ target_url: targetUrl, version_policy: this.versionPolicy }),
+                        body: JSON.stringify({ target_url: targetUrl, version_policy: this.versionPolicy, job_id: this.context.jobId }),
                     });
 
                     if (!res.ok) {
@@ -298,7 +299,7 @@ document.addEventListener('alpine:init', () => {
                     }
 
                     this.submitSuccess = true;
-                    this.submitStep = 'Трек успешно скачан и обновлен!';
+                    this.submitStep = 'Источник сохранён. Трек поставлен в очередь.';
                 }
 
                 // Обновляем очередь и аудит

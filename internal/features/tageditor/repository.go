@@ -705,68 +705,93 @@ func (r *Repository) DeleteSetting(ctx context.Context, key string) error {
 	return err
 }
 
-// SaveMusicBrainzTokens сохраняет токены MusicBrainz OAuth в app_settings (поддерживая оба формата ключей).
+const musicBrainzTokenKeys = `'mb_access_token','mb_refresh_token','mb_expires_at','mb_username',
+	'musicbrainz_access_token','musicbrainz_refresh_token','musicbrainz_expires_at','musicbrainz_username'`
+
+// SaveMusicBrainzTokens updates both compatible key sets in one transaction.
 func (r *Repository) SaveMusicBrainzTokens(ctx context.Context, accessToken, refreshToken string, expiresAt time.Time, username string) error {
-	expStr := expiresAt.UTC().Format(time.RFC3339)
-	_ = r.SetSetting(ctx, "mb_access_token", accessToken)
-	_ = r.SetSetting(ctx, "mb_refresh_token", refreshToken)
-	_ = r.SetSetting(ctx, "mb_expires_at", expStr)
-	_ = r.SetSetting(ctx, "mb_username", username)
-
-	_ = r.SetSetting(ctx, "musicbrainz_access_token", accessToken)
-	_ = r.SetSetting(ctx, "musicbrainz_refresh_token", refreshToken)
-	_ = r.SetSetting(ctx, "musicbrainz_expires_at", expStr)
-	return r.SetSetting(ctx, "musicbrainz_username", username)
+	return r.writeMusicBrainzTokens(ctx, `
+	INSERT INTO app_settings(key, value, updated_at) VALUES
+	    ('mb_access_token', ?1, CURRENT_TIMESTAMP), ('mb_refresh_token', ?2, CURRENT_TIMESTAMP),
+	    ('mb_expires_at', ?3, CURRENT_TIMESTAMP), ('mb_username', ?4, CURRENT_TIMESTAMP),
+	    ('musicbrainz_access_token', ?1, CURRENT_TIMESTAMP), ('musicbrainz_refresh_token', ?2, CURRENT_TIMESTAMP),
+	    ('musicbrainz_expires_at', ?3, CURRENT_TIMESTAMP), ('musicbrainz_username', ?4, CURRENT_TIMESTAMP)
+	ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
+		accessToken, refreshToken, expiresAt.UTC().Format(time.RFC3339), username)
 }
 
-// LoadMusicBrainzTokens загружает сохраненные токены MusicBrainz OAuth из app_settings.
-func (r *Repository) LoadMusicBrainzTokens(ctx context.Context) (accessToken, refreshToken, username string, expiresAt time.Time, err error) {
-	accessToken, _ = r.GetSetting(ctx, "mb_access_token")
-	if accessToken == "" {
-		accessToken, _ = r.GetSetting(ctx, "musicbrainz_access_token")
-	}
-
-	refreshToken, _ = r.GetSetting(ctx, "mb_refresh_token")
-	if refreshToken == "" {
-		refreshToken, _ = r.GetSetting(ctx, "musicbrainz_refresh_token")
-	}
-
-	username, _ = r.GetSetting(ctx, "mb_username")
-	if username == "" {
-		username, _ = r.GetSetting(ctx, "musicbrainz_username")
-	}
-
-	expStr, _ := r.GetSetting(ctx, "mb_expires_at")
-	if expStr == "" {
-		expStr, _ = r.GetSetting(ctx, "musicbrainz_expires_at")
-	}
-
-	if expStr != "" {
-		if t, parseErr := time.Parse(time.RFC3339Nano, expStr); parseErr == nil {
-			expiresAt = t.UTC()
-		} else if t, parseErr := time.Parse(time.RFC3339, expStr); parseErr == nil {
-			expiresAt = t.UTC()
+func (r *Repository) writeMusicBrainzTokens(ctx context.Context, query string, args ...any) error {
+	if conn, ok := r.db.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	}); ok {
+		tx, err := conn.BeginTx(ctx, nil)
+		if err != nil {
+			return err
 		}
+		defer tx.Rollback()
+		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
-	return accessToken, refreshToken, username, expiresAt, nil
+
+	// WithTx already owns the connection. A savepoint rolls back this write alone.
+	tx, ok := r.db.(*sql.Tx)
+	if !ok {
+		return errors.New("OAuth storage requires a SQLite transaction")
+	}
+	if _, err := tx.ExecContext(ctx, "SAVEPOINT musicbrainz_oauth"); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		_, rollbackErr := tx.ExecContext(cleanupCtx, "ROLLBACK TO musicbrainz_oauth")
+		_, releaseErr := tx.ExecContext(cleanupCtx, "RELEASE musicbrainz_oauth")
+		return errors.Join(err, rollbackErr, releaseErr)
+	}
+	_, err := tx.ExecContext(ctx, "RELEASE musicbrainz_oauth")
+	return err
 }
 
-// ClearMusicBrainzTokens удаляет все сохраненные токены авторизации MusicBrainz.
+// LoadMusicBrainzTokens reads one snapshot and chooses the active key set.
+func (r *Repository) LoadMusicBrainzTokens(ctx context.Context) (accessToken, refreshToken, username string, expiresAt time.Time, err error) {
+	rows, err := r.db.QueryContext(ctx, "SELECT key,value FROM app_settings WHERE key IN ("+musicBrainzTokenKeys+")")
+	if err != nil {
+		return "", "", "", time.Time{}, err
+	}
+	defer rows.Close()
+	settings := make(map[string]string)
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return "", "", "", time.Time{}, err
+		}
+		settings[key] = value
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", "", time.Time{}, err
+	}
+	prefix := "mb_"
+	if settings[prefix+"access_token"] == "" {
+		prefix = "musicbrainz_"
+	}
+	if settings[prefix+"access_token"] == "" {
+		return "", "", "", time.Time{}, nil
+	}
+	expiresAt, _ = time.Parse(time.RFC3339Nano, settings[prefix+"expires_at"])
+	return settings[prefix+"access_token"], settings[prefix+"refresh_token"], settings[prefix+"username"], expiresAt.UTC(), nil
+}
+
+// ClearMusicBrainzTokens deletes both key sets atomically.
 func (r *Repository) ClearMusicBrainzTokens(ctx context.Context) error {
-	_ = r.DeleteSetting(ctx, "mb_access_token")
-	_ = r.DeleteSetting(ctx, "mb_refresh_token")
-	_ = r.DeleteSetting(ctx, "mb_expires_at")
-	_ = r.DeleteSetting(ctx, "mb_username")
-	_ = r.DeleteSetting(ctx, "musicbrainz_access_token")
-	_ = r.DeleteSetting(ctx, "musicbrainz_refresh_token")
-	_ = r.DeleteSetting(ctx, "musicbrainz_expires_at")
-	return r.DeleteSetting(ctx, "musicbrainz_username")
+	return r.writeMusicBrainzTokens(ctx, "DELETE FROM app_settings WHERE key IN ("+musicBrainzTokenKeys+")")
 }
 
 // Compile-time checks for interface conformance
 var (
-	_ TagRepository                       = (*Repository)(nil)
-	_ TokenPersistence                    = (*Repository)(nil)
+	_ TagRepository                        = (*Repository)(nil)
+	_ TokenPersistence                     = (*Repository)(nil)
 	_ resolver.MusicBrainzTokenPersistence = (*Repository)(nil)
 )
 

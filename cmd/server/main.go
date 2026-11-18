@@ -123,7 +123,7 @@ func main() {
 		MaxConcurrent: cfg.MaxConcurrentDownloads,
 	})
 	if err := downloaderFeatureSvc.Start(appCtx); err != nil {
-		log.Printf("[Main] Warning: downloader vertical slice service failed to start: %v", err)
+		log.Fatalf("[Main] Downloader service failed to start: %v", err)
 	}
 	defer downloaderFeatureSvc.Close()
 	downloaderModule := featureDownloader.NewModule(downloaderFeatureSvc, deezerClient)
@@ -162,19 +162,13 @@ func main() {
 	itunesClient := resolver.NewITunesClient(nil)
 	mbClient := resolver.NewMusicBrainzClient(cfg.MusicBrainzUserToken)
 	mbClient.SetOAuthConfig(cfg.MusicBrainzClientID, cfg.MusicBrainzClientSecret, cfg.MusicBrainzRedirectURI)
-	if database != nil {
-		mbClient.SetPersistence(&dbTokenPersistence{db: database})
-		if savedAccess, err := database.GetSetting(appCtx, "mb_access_token"); err == nil && savedAccess != "" {
-			savedRefresh, _ := database.GetSetting(appCtx, "mb_refresh_token")
-			savedExpStr, _ := database.GetSetting(appCtx, "mb_expires_at")
-			savedUser, _ := database.GetSetting(appCtx, "mb_username")
-			var exp time.Time
-			if savedExpStr != "" {
-				exp, _ = time.Parse(time.RFC3339, savedExpStr)
-			}
-			mbClient.SetTokens(savedAccess, savedRefresh, exp, savedUser)
-			log.Printf("[MusicBrainz] Loaded persisted OAuth session for user: %s", savedUser)
-		}
+	tagRepo := featureTagEditor.NewRepository(database.Conn())
+	savedAccess, savedRefresh, savedUser, expiresAt, err := tagRepo.LoadMusicBrainzTokens(appCtx)
+	if err != nil {
+		log.Printf("[MusicBrainz] Failed to load persisted OAuth session: %v", err)
+	} else if savedAccess != "" {
+		mbClient.SetTokens(savedAccess, savedRefresh, expiresAt, savedUser)
+		log.Printf("[MusicBrainz] Loaded persisted OAuth session for user: %s", savedUser)
 	}
 	shazamProvider := resolver.NewShazamProvider(itunesClient)
 
@@ -238,7 +232,6 @@ func main() {
 	auditModule := featureAudit.NewModule(auditFeatureSvc)
 
 	// Initialize TagEditor Vertical Feature Slice
-	tagRepo := featureTagEditor.NewRepository(database.Conn())
 	tagFeatureSvc := featureTagEditor.NewService(featureTagEditor.ServiceConfig{
 		MusicSandbox: musicSandbox,
 		TmpSandbox:   tmpSandbox,
@@ -390,26 +383,6 @@ func main() {
 		log.Printf("[Main] Server shutdown error: %v", err)
 	}
 	log.Println("[Main] Server stopped.")
-}
-
-type dbTokenPersistence struct {
-	db *db.DB
-}
-
-func (p *dbTokenPersistence) SaveTokens(ctx context.Context, accessToken, refreshToken string, expiresAt time.Time, username string) error {
-	_ = p.db.SetSetting(ctx, "mb_access_token", accessToken)
-	_ = p.db.SetSetting(ctx, "mb_refresh_token", refreshToken)
-	_ = p.db.SetSetting(ctx, "mb_expires_at", expiresAt.Format(time.RFC3339))
-	_ = p.db.SetSetting(ctx, "mb_username", username)
-	return nil
-}
-
-func (p *dbTokenPersistence) ClearTokens(ctx context.Context) error {
-	_ = p.db.DeleteSetting(ctx, "mb_access_token")
-	_ = p.db.DeleteSetting(ctx, "mb_refresh_token")
-	_ = p.db.DeleteSetting(ctx, "mb_expires_at")
-	_ = p.db.DeleteSetting(ctx, "mb_username")
-	return nil
 }
 
 type downloaderBackfillAdapter struct {

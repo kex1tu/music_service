@@ -32,7 +32,7 @@ window.DownloaderVersions = {
         return this.activeVersionsTrackId === trackId;
     },
 
-    async switchTrackVersion(track, targetUrl) {
+    async switchTrackVersion(track, targetUrl, jobId) {
         if (!track || !track.track_id || !targetUrl) return;
         if (this.switchingTrackId === track.track_id) return;
 
@@ -41,7 +41,7 @@ window.DownloaderVersions = {
             const res = await window.api.raw(`/api/downloads/tracks/${encodeURIComponent(track.track_id)}/switch-version`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ target_url: targetUrl }),
+                body: JSON.stringify({ target_url: targetUrl, job_id: jobId }),
             });
 
             if (!res.ok) {

@@ -18,8 +18,23 @@ import (
 	"music-manager/internal/services/censorcheck"
 )
 
-// NewCensorshipAudit owns one worker and resumes only previously running local
-// jobs. Cloud jobs restart in waiting state to avoid ambiguous paid retries.
+const (
+	censorshipAttemptTimeout = 10 * time.Minute
+	censorshipLeaseDuration  = 15 * time.Minute
+)
+
+// The v1 token starts with a fixed-width Unix deadline so it can be compared
+// in SQLite alongside legacy tokens, which have no lease.
+func censorshipLeasePrefix(deadline time.Time) string {
+	return fmt.Sprintf("v1:%020d:", deadline.Unix())
+}
+
+const recoverCensorshipItems = `
+	UPDATE censorship_items SET state='queued',attempt_token=''
+	WHERE state='running' AND (attempt_token NOT GLOB 'v1:*' OR attempt_token < ?)`
+
+// NewCensorshipAudit resumes expired attempts. Legacy cloud runs lacking a
+// lease still require explicit confirmation before another paid attempt.
 func NewCensorshipAudit(db *sql.DB, sb *sandbox.PathSandbox, clouds map[string]censorcheck.Transcriber, dailySeconds int) (*CensorshipAudit, error) {
 	if db == nil || sb == nil {
 		return nil, fmt.Errorf("audit storage and sandbox required")
@@ -35,14 +50,18 @@ func NewCensorshipAudit(db *sql.DB, sb *sandbox.PathSandbox, clouds map[string]c
 		return nil, e
 	}
 	defer tx.Rollback()
-	for _, q := range []string{
-		"UPDATE censorship_runs SET state='waiting' WHERE provider!='local' AND state='running'",
-		"UPDATE censorship_items SET state='queued',attempt_token='' WHERE state='running'",
-	} {
-		if _, e = tx.ExecContext(ctx, q); e != nil {
-			cancel()
-			return nil, e
-		}
+	if _, e = tx.ExecContext(ctx, `
+		UPDATE censorship_runs SET state='waiting'
+		WHERE provider!='local' AND state='running' AND EXISTS (
+		    SELECT 1 FROM censorship_items WHERE run_id=censorship_runs.id
+		    AND state='running' AND attempt_token NOT GLOB 'v1:*'
+		)`); e != nil {
+		cancel()
+		return nil, e
+	}
+	if _, e = tx.ExecContext(ctx, recoverCensorshipItems, censorshipLeasePrefix(time.Now())); e != nil {
+		cancel()
+		return nil, e
 	}
 	if e = tx.Commit(); e != nil {
 		cancel()
@@ -191,19 +210,24 @@ func (a *CensorshipAudit) Control(ctx context.Context, id, action string) error 
 		return e
 	}
 	defer tx.Rollback()
-	var current string
-	if e = tx.QueryRowContext(ctx, "SELECT state FROM censorship_runs WHERE id=?", id).Scan(&current); e != nil {
+	res, e := tx.ExecContext(ctx, `
+		UPDATE censorship_runs SET state=?,updated_at=CURRENT_TIMESTAMP
+		WHERE id=? AND state!='cancelled' AND (state!='completed' OR ?='retry')`, state, id, action)
+	if e != nil {
 		return e
 	}
-	if current == "cancelled" || (current == "completed" && action != "retry") {
+	n, e := res.RowsAffected()
+	if e != nil {
+		return e
+	}
+	if n == 0 {
+		var current string
+		if err := tx.QueryRowContext(ctx, "SELECT state FROM censorship_runs WHERE id=?", id).Scan(&current); err != nil {
+			return err
+		}
 		return ErrAuditState
 	}
 	if action == "pause" || action == "cancel" {
-		a.mu.Lock()
-		if a.activeRun == id && a.activeCancel != nil {
-			a.activeCancel()
-		}
-		a.mu.Unlock()
 		next := "queued"
 		if action == "cancel" {
 			next = "cancelled"
@@ -217,11 +241,15 @@ func (a *CensorshipAudit) Control(ctx context.Context, id, action string) error 
 			return e
 		}
 	}
-	if _, e = tx.ExecContext(ctx, "UPDATE censorship_runs SET state=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", state, id); e != nil {
-		return e
-	}
 	if e = tx.Commit(); e != nil {
 		return e
+	}
+	if action == "pause" || action == "cancel" {
+		a.mu.Lock()
+		if a.activeRun == id && a.activeCancel != nil {
+			a.activeCancel()
+		}
+		a.mu.Unlock()
 	}
 	a.notify()
 	return nil
@@ -252,85 +280,144 @@ func (a *CensorshipAudit) loop() {
 func (a *CensorshipAudit) step() (bool, error) {
 	var id int64
 	var run, path, ref, provider string
-	e := a.db.QueryRowContext(a.ctx, `SELECT i.id,i.run_id,i.file_path,i.reference_path,r.provider FROM censorship_items i JOIN censorship_runs r ON r.id=i.run_id WHERE i.state='queued' AND r.state='running' ORDER BY r.created_at,i.id LIMIT 1`).Scan(&id, &run, &path, &ref, &provider)
-	if errors.Is(e, sql.ErrNoRows) {
-		_, e = a.db.ExecContext(a.ctx, `UPDATE censorship_runs SET state='completed',updated_at=CURRENT_TIMESTAMP WHERE state='running' AND NOT EXISTS(SELECT 1 FROM censorship_items WHERE run_id=censorship_runs.id AND state IN ('queued','running'))`)
-		return false, e
+	now := time.Now()
+	deadline := now.Add(censorshipLeaseDuration)
+	token := censorshipLeasePrefix(deadline) + uuid.NewString()
+	// A single write claims queued or expired work. Another worker can only
+	// finalize or release its own token.
+	err := a.db.QueryRowContext(a.ctx, `
+		UPDATE censorship_items SET state='running',attempt_token=?
+		WHERE id=(
+		    SELECT i.id FROM censorship_items i
+		    JOIN censorship_runs r ON r.id=i.run_id
+		    WHERE r.state='running' AND (i.state='queued' OR
+		      (i.state='running' AND (i.attempt_token NOT GLOB 'v1:*' OR i.attempt_token < ?)))
+		    ORDER BY r.created_at,i.id LIMIT 1
+		)
+		RETURNING id,run_id,file_path,reference_path,
+		          (SELECT provider FROM censorship_runs WHERE id=censorship_items.run_id)`,
+		token, censorshipLeasePrefix(now)).Scan(&id, &run, &path, &ref, &provider)
+	if errors.Is(err, sql.ErrNoRows) {
+		_, err = a.db.ExecContext(a.ctx, `UPDATE censorship_runs SET state='completed',updated_at=CURRENT_TIMESTAMP WHERE state='running' AND NOT EXISTS(SELECT 1 FROM censorship_items WHERE run_id=censorship_runs.id AND state IN ('queued','running'))`)
+		return false, err
 	}
-	if e != nil {
-		return false, e
+	if err != nil {
+		return false, err
 	}
-	token := uuid.NewString()
-	res, e := a.db.ExecContext(a.ctx, "UPDATE censorship_items SET state='running',attempt_token=? WHERE id=? AND state='queued' AND EXISTS(SELECT 1 FROM censorship_runs WHERE id=? AND state='running')", token, id, run)
-	if e != nil {
-		return false, e
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return true, nil
-	}
-	ctx, cancel := context.WithCancel(a.ctx)
+
+	ctx, cancel := context.WithDeadline(a.ctx, now.Add(censorshipAttemptTimeout))
 	a.mu.Lock()
 	a.activeRun = run
 	a.activeCancel = cancel
 	a.mu.Unlock()
-	// Pause may have raced with publication of activeCancel; state/token guards
-	// and cancellation checks prevent stale results from being committed.
+	// Pause or cancellation may have committed before activeCancel was set.
 	var active int
-	if e = a.db.QueryRowContext(ctx, "SELECT count(*) FROM censorship_items i JOIN censorship_runs r ON r.id=i.run_id WHERE i.id=? AND i.attempt_token=? AND i.state='running' AND r.state='running'", id, token).Scan(&active); e != nil || active == 0 {
-		cancel()
+	err = a.db.QueryRowContext(ctx, `
+		SELECT count(*) FROM censorship_items i JOIN censorship_runs r ON r.id=i.run_id
+		WHERE i.id=? AND i.attempt_token=? AND i.state='running' AND r.state='running'`, id, token).Scan(&active)
+	var result CensorshipResult
+	var analysisErr error
+	if err == nil && active > 0 {
+		result, analysisErr = a.analyze(ctx, path, ref, provider)
 	}
-	result, analysisErr := a.analyze(ctx, path, ref, provider)
-	wasCancelled := ctx.Err() != nil
+	interrupted := ctx.Err() != nil && !errors.Is(ctx.Err(), context.DeadlineExceeded)
+	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	cancel()
 	a.mu.Lock()
 	a.activeRun = ""
 	a.activeCancel = nil
 	a.mu.Unlock()
-	if wasCancelled {
-		return true, nil
+
+	if err != nil || active == 0 || interrupted {
+		releaseCtx, releaseCancel := context.WithTimeout(context.WithoutCancel(a.ctx), time.Second)
+		defer releaseCancel()
+		_, releaseErr := a.db.ExecContext(releaseCtx, `
+			UPDATE censorship_items SET state='queued',attempt_token=''
+			WHERE id=? AND attempt_token=? AND state='running'`, id, token)
+		return true, errors.Join(err, releaseErr)
 	}
+	if timedOut {
+		analysisErr = context.DeadlineExceeded
+	}
+	// Keep retrying the same result without repeating analysis or transcription.
+	finishCtx, finishCancel := context.WithTimeout(a.ctx, 8*time.Second)
+	defer finishCancel()
+	return true, retryCensorshipWrite(finishCtx, func() error {
+		return a.finishAttempt(finishCtx, id, run, token, result, analysisErr)
+	})
+}
+
+func (a *CensorshipAudit) finishAttempt(ctx context.Context, id int64, run, token string, result CensorshipResult, analysisErr error) error {
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	if errors.Is(analysisErr, censorcheck.ErrCloudWaiting) {
-		tx, e := a.db.BeginTx(a.ctx, nil)
-		if e != nil {
-			return false, e
+		res, err := tx.ExecContext(ctx, `
+			UPDATE censorship_items SET state='queued',attempt_token='',error=?
+			WHERE id=? AND attempt_token=? AND state='running'`, analysisErr.Error(), id, token)
+		if err != nil {
+			return err
 		}
-		defer tx.Rollback()
-		res, e = tx.ExecContext(a.ctx, "UPDATE censorship_items SET state='queued',attempt_token='',error=? WHERE id=? AND attempt_token=? AND state='running'", analysisErr.Error(), id, token)
-		if e != nil {
-			return false, e
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
 		}
-		n, _ = res.RowsAffected()
 		if n > 0 {
-			if _, e = tx.ExecContext(a.ctx, "UPDATE censorship_runs SET state='waiting' WHERE id=? AND state='running'", run); e != nil {
-				return false, e
+			if _, err := tx.ExecContext(ctx, "UPDATE censorship_runs SET state='waiting' WHERE id=? AND state='running'", run); err != nil {
+				return err
 			}
 		}
-		return true, tx.Commit()
+		return tx.Commit()
 	}
+
 	state, errText := "done", ""
 	if analysisErr != nil {
 		state = "error"
 		errText = "Не удалось прочитать или проанализировать аудио; файл сохранён"
 	}
-	raw, _ := json.Marshal(result)
-	tx, e := a.db.BeginTx(a.ctx, nil)
-	if e != nil {
-		return false, e
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return err
 	}
-	defer tx.Rollback()
-	res, e = tx.ExecContext(a.ctx, "UPDATE censorship_items SET state=?,verdict=?,result_json=?,error=?,attempt_token='' WHERE id=? AND attempt_token=? AND state='running'", state, result.Verdict, string(raw), errText, id, token)
-	if e != nil {
-		return false, e
+	res, err := tx.ExecContext(ctx, `
+		UPDATE censorship_items SET state=?,verdict=?,result_json=?,error=?,attempt_token=''
+		WHERE id=? AND attempt_token=? AND state='running'`, state, result.Verdict, string(raw), errText, id, token)
+	if err != nil {
+		return err
 	}
-	n, _ = res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
 	if n > 0 {
 		for _, ev := range result.Evidence {
-			b, _ := json.Marshal(ev)
-			if _, e = tx.ExecContext(a.ctx, "INSERT INTO censorship_evidence(item_id,evidence_json) VALUES(?,?)", id, string(b)); e != nil {
-				return false, e
+			encoded, err := json.Marshal(ev)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO censorship_evidence(item_id,evidence_json) VALUES(?,?)", id, string(encoded)); err != nil {
+				return err
 			}
 		}
 	}
-	return true, tx.Commit()
+	return tx.Commit()
+}
+
+func retryCensorshipWrite(ctx context.Context, write func() error) error {
+	for {
+		err := write()
+		if err == nil {
+			return nil
+		}
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return errors.Join(err, ctx.Err())
+		case <-timer.C:
+		}
+	}
 }

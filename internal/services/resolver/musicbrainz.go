@@ -70,7 +70,8 @@ type MusicBrainzClient struct {
 	lastRequest time.Time
 	minInterval time.Duration
 
-	oauthMu sync.RWMutex
+	oauthMu       sync.RWMutex
+	oauthChangeMu sync.Mutex
 
 	cacheMu sync.RWMutex
 	cache   map[string]mbCacheEntry
@@ -186,21 +187,17 @@ func (c *MusicBrainzClient) GetOAuthStatus() MusicBrainzOAuthStatus {
 
 // Disconnect сбрасывает токены авторизации и очищает персистентное хранилище.
 func (c *MusicBrainzClient) Disconnect(ctx context.Context) error {
-	c.oauthMu.Lock()
-	c.token = ""
-	c.refreshToken = ""
-	c.username = ""
-	c.tokenExpiresAt = time.Time{}
+	c.oauthChangeMu.Lock()
+	defer c.oauthChangeMu.Unlock()
+	c.oauthMu.RLock()
 	persistence := c.persistence
-	c.oauthMu.Unlock()
-
-	c.mu.Lock()
-	c.minInterval = 1050 * time.Millisecond
-	c.mu.Unlock()
-
+	c.oauthMu.RUnlock()
 	if persistence != nil {
-		return persistence.ClearTokens(ctx)
+		if err := persistence.ClearTokens(ctx); err != nil {
+			return fmt.Errorf("clear MusicBrainz OAuth session: %w", err)
+		}
 	}
+	c.SetTokens("", "", time.Time{}, "")
 	return nil
 }
 
@@ -231,6 +228,8 @@ func (c *MusicBrainzClient) GetAuthorizationURL(state string, overrideRedirectUR
 
 // ExchangeCode обменивает authorization code на пару access и refresh токенов.
 func (c *MusicBrainzClient) ExchangeCode(ctx context.Context, code string, redirectURI string) (*OAuthTokenResponse, error) {
+	c.oauthChangeMu.Lock()
+	defer c.oauthChangeMu.Unlock()
 	c.oauthMu.RLock()
 	clientID := c.clientID
 	clientSecret := c.clientSecret
@@ -283,41 +282,27 @@ func (c *MusicBrainzClient) ExchangeCode(ctx context.Context, code string, redir
 		expiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
 	}
 
-	c.oauthMu.Lock()
-	c.token = tokenResp.AccessToken
-	if tokenResp.RefreshToken != "" {
-		c.refreshToken = tokenResp.RefreshToken
+	username := ""
+	if userInfo, err := c.fetchUserInfo(ctx, oauthBase, tokenResp.AccessToken); err == nil {
+		username = userInfo.Sub
 	}
-	c.tokenExpiresAt = expiresAt
+	c.oauthMu.RLock()
 	persistence := c.persistence
-	c.oauthMu.Unlock()
-
-	c.mu.Lock()
-	c.minInterval = 250 * time.Millisecond
-	c.mu.Unlock()
-
-	// Попытка извлечь имя пользователя
-	if userInfo, uErr := c.FetchUserInfo(ctx); uErr == nil && userInfo != nil && userInfo.Sub != "" {
-		c.oauthMu.Lock()
-		c.username = userInfo.Sub
-		c.oauthMu.Unlock()
-	}
-
+	c.oauthMu.RUnlock()
 	if persistence != nil {
-		c.oauthMu.RLock()
-		acc := c.token
-		ref := c.refreshToken
-		exp := c.tokenExpiresAt
-		user := c.username
-		c.oauthMu.RUnlock()
-		_ = persistence.SaveTokens(ctx, acc, ref, exp, user)
+		if err := persistence.SaveTokens(ctx, tokenResp.AccessToken, tokenResp.RefreshToken, expiresAt, username); err != nil {
+			return nil, fmt.Errorf("save MusicBrainz OAuth session: %w", err)
+		}
 	}
+	c.SetTokens(tokenResp.AccessToken, tokenResp.RefreshToken, expiresAt, username)
 
 	return &tokenResp, nil
 }
 
 // RefreshToken обновляет access token с использованием refresh token.
 func (c *MusicBrainzClient) RefreshToken(ctx context.Context, refreshToken string) (*OAuthTokenResponse, error) {
+	c.oauthChangeMu.Lock()
+	defer c.oauthChangeMu.Unlock()
 	c.oauthMu.RLock()
 	clientID := c.clientID
 	clientSecret := c.clientSecret
@@ -370,27 +355,19 @@ func (c *MusicBrainzClient) RefreshToken(ctx context.Context, refreshToken strin
 		expiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
 	}
 
-	c.oauthMu.Lock()
-	c.token = tokenResp.AccessToken
-	if tokenResp.RefreshToken != "" {
-		c.refreshToken = tokenResp.RefreshToken
+	newRefresh := tokenResp.RefreshToken
+	if newRefresh == "" {
+		newRefresh = rf
 	}
-	c.tokenExpiresAt = expiresAt
+	c.oauthMu.RLock()
 	username := c.username
-	c.oauthMu.Unlock()
-
-	c.mu.Lock()
-	c.minInterval = 250 * time.Millisecond
-	c.mu.Unlock()
-
+	c.oauthMu.RUnlock()
 	if persistence != nil {
-		c.oauthMu.RLock()
-		acc := c.token
-		newRef := c.refreshToken
-		exp := c.tokenExpiresAt
-		c.oauthMu.RUnlock()
-		_ = persistence.SaveTokens(ctx, acc, newRef, exp, username)
+		if err := persistence.SaveTokens(ctx, tokenResp.AccessToken, newRefresh, expiresAt, username); err != nil {
+			return nil, fmt.Errorf("save refreshed MusicBrainz OAuth session: %w", err)
+		}
 	}
+	c.SetTokens(tokenResp.AccessToken, newRefresh, expiresAt, username)
 
 	return &tokenResp, nil
 }
@@ -402,6 +379,10 @@ func (c *MusicBrainzClient) FetchUserInfo(ctx context.Context) (*MusicBrainzUser
 	oauthBase := c.oauthBaseURL
 	c.oauthMu.RUnlock()
 
+	return c.fetchUserInfo(ctx, oauthBase, tok)
+}
+
+func (c *MusicBrainzClient) fetchUserInfo(ctx context.Context, oauthBase, tok string) (*MusicBrainzUserInfo, error) {
 	if tok == "" {
 		return nil, fmt.Errorf("MusicBrainz: отсутствует активный токен для userinfo")
 	}
@@ -437,11 +418,10 @@ func (c *MusicBrainzClient) FetchUserInfo(ctx context.Context) (*MusicBrainzUser
 func (c *MusicBrainzClient) ensureToken(ctx context.Context) {
 	c.oauthMu.RLock()
 	needRefresh := c.token != "" && c.refreshToken != "" && !c.tokenExpiresAt.IsZero() && time.Until(c.tokenExpiresAt) < 1*time.Minute
-	rf := c.refreshToken
 	c.oauthMu.RUnlock()
 
 	if needRefresh {
-		_, _ = c.RefreshToken(ctx, rf)
+		_, _ = c.RefreshToken(ctx, "")
 	}
 }
 
@@ -896,4 +876,3 @@ func (c *MusicBrainzClient) GetArtistReleaseGroups(ctx context.Context, mbid str
 	}
 	return results, nil
 }
-

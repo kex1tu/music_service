@@ -10,6 +10,7 @@ import (
 
 	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
+	"music-manager/internal/services/resolver"
 )
 
 var (
@@ -84,6 +85,12 @@ func NewService(cfg ServiceConfig) *Service {
 		if ts, ok := cfg.Repo.(TokenPersistence); ok {
 			tokStore = ts
 		}
+	}
+
+	// The real client persists login and refresh before publishing the new session.
+	if client, ok := cfg.MusicBrainz.(*resolver.MusicBrainzClient); ok && tokStore != nil {
+		client.SetPersistence(tokStore)
+		tokStore = nil
 	}
 
 	return &Service{

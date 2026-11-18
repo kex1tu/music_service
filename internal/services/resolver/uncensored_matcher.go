@@ -27,7 +27,7 @@ func BuildCacheKey(isrc, artist, title string) string {
 		return "isrc:" + strings.ToUpper(isrc)
 	}
 	cleanArt := strings.ToLower(CleanQueryText(ExtractPrimaryArtist(artist)))
-	cleanTit := strings.ToLower(CleanQueryText(title))
+	cleanTit := strings.ToLower(CleanQueryTextFull(title))
 	return fmt.Sprintf("track:%s:%s", cleanArt, cleanTit)
 }
 

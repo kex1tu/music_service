@@ -9,44 +9,48 @@ import (
 	"music-manager/internal/services/resolver"
 )
 
+var ErrCorruptJobSelection = errors.New("сохранённый треклист задачи повреждён")
+
 type sourceSelectionPayload struct {
-	Tracks   []resolver.ResolvedTrack `json:"tracks"`
-	Metadata resolver.ReleaseMetadata `json:"metadata"`
+	Tracks               []resolver.ResolvedTrack `json:"tracks"`
+	Metadata             resolver.ReleaseMetadata `json:"metadata"`
+	SelectedTrackIndices []int                    `json:"selected_track_indices,omitempty"`
+	SkipExisting         bool                     `json:"skip_existing,omitempty"`
+	ManualTrackIndex     *int                     `json:"manual_track_index,omitempty"`
+	BackfillTrackNumbers []int                    `json:"backfill_track_numbers,omitempty"`
+	BackfillTrackURLs    []string                 `json:"backfill_track_urls,omitempty"`
 }
 
-func (r *Repository) saveSourceSelections(ctx context.Context, snapshot *Job) error {
-	if len(snapshot.Tracks) == 0 {
-		return nil
+func saveSourceSelection(ctx context.Context, tx *sql.Tx, job *Job) error {
+	raw, err := json.Marshal(sourceSelectionPayload{
+		Tracks: job.Tracks, Metadata: job.AlbumMetadata,
+		SelectedTrackIndices: job.SelectedTrackIndices, SkipExisting: job.SkipExisting,
+		ManualTrackIndex: job.manualTrackIndex, BackfillTrackNumbers: job.backfillTrackNumbers, BackfillTrackURLs: job.backfillTrackURLs,
+	})
+	if err != nil {
+		return err
 	}
-	raw, e := json.Marshal(sourceSelectionPayload{snapshot.Tracks, snapshot.AlbumMetadata})
-	if e != nil {
-		return e
-	}
-	_, e = r.db.ExecContext(ctx, "INSERT INTO download_source_selections(job_id,payload_json) VALUES(?,?) ON CONFLICT(job_id) DO UPDATE SET payload_json=excluded.payload_json", snapshot.ID, string(raw))
-	return e
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO download_source_selections(job_id,payload_json) VALUES(?,?)
+		ON CONFLICT(job_id) DO UPDATE SET payload_json=excluded.payload_json`, job.ID, string(raw))
+	return err
 }
-func (r *Repository) loadSourceSelections(ctx context.Context, j *Job) error {
-	var raw string
-	e := r.db.QueryRowContext(ctx, "SELECT payload_json FROM download_source_selections WHERE job_id=?", j.ID).Scan(&raw)
-	if errors.Is(e, sql.ErrNoRows) {
-		return nil
+
+func loadSourceSelection(job *Job, raw string) {
+	var selection *sourceSelectionPayload
+	if err := json.Unmarshal([]byte(raw), &selection); err != nil || selection == nil {
+		message := ErrCorruptJobSelection.Error()
+		job.Status = StatusError
+		job.CurrentStep = message
+		job.Error = &message
+		job.selectionCorrupt = true
+		return
 	}
-	if e != nil {
-		return e
-	}
-	var p sourceSelectionPayload
-	if e = json.Unmarshal([]byte(raw), &p); e != nil {
-		return e
-	}
-	j.Tracks = p.Tracks
-	j.AlbumMetadata = p.Metadata
-	return nil
-}
-func (r *Repository) loadSelectionsForList(ctx context.Context, list []*Job) ([]*Job, error) {
-	for _, j := range list {
-		if e := r.loadSourceSelections(ctx, j); e != nil {
-			return nil, e
-		}
-	}
-	return list, nil
+	job.Tracks = selection.Tracks
+	job.AlbumMetadata = selection.Metadata
+	job.SelectedTrackIndices = selection.SelectedTrackIndices
+	job.SkipExisting = selection.SkipExisting
+	job.manualTrackIndex = selection.ManualTrackIndex
+	job.backfillTrackNumbers = selection.BackfillTrackNumbers
+	job.backfillTrackURLs = selection.BackfillTrackURLs
 }

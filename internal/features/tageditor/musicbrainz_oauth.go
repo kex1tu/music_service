@@ -1,9 +1,6 @@
 package tageditor
 
-import (
-	"context"
-	"time"
-)
+import "context"
 
 // GetMusicBrainzStatus возвращает статус OAuth подключения к MusicBrainz.
 func (s *Service) GetMusicBrainzStatus() MusicBrainzOAuthStatus {
@@ -46,8 +43,9 @@ func (s *Service) HandleMusicBrainzCallback(ctx context.Context, code, redirectU
 
 	// Сохраняем в персистентное хранилище
 	if s.tokenStore != nil && tokenResp != nil {
-		exp := time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
-		_ = s.tokenStore.SaveTokens(ctx, tokenResp.AccessToken, tokenResp.RefreshToken, exp, username)
+		if err := s.tokenStore.SaveTokens(ctx, tokenResp.AccessToken, tokenResp.RefreshToken, status.ExpiresAt, username); err != nil {
+			return "", err
+		}
 	}
 
 	return username, nil
@@ -55,11 +53,13 @@ func (s *Service) HandleMusicBrainzCallback(ctx context.Context, code, redirectU
 
 // DisconnectMusicBrainz сбрасывает токены OAuth и возвращает клиент в анонимный режим.
 func (s *Service) DisconnectMusicBrainz(ctx context.Context) error {
-	if s.musicbrainz != nil {
-		_ = s.musicbrainz.Disconnect(ctx)
-	}
 	if s.tokenStore != nil {
-		_ = s.tokenStore.ClearTokens(ctx)
+		if err := s.tokenStore.ClearTokens(ctx); err != nil {
+			return err
+		}
+	}
+	if s.musicbrainz != nil {
+		return s.musicbrainz.Disconnect(ctx)
 	}
 	return nil
 }
