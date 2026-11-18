@@ -54,13 +54,14 @@ type Config struct {
 	UncensoredDistributors      []string
 
 	// Radio & Wave Settings
-	RadioStreamToken  string
-	RadioWaveSize     int
-	NavidromeDBPath   string
-	NavidromeURL      string
-	NavidromeUser     string
-	NavidromePassword string
-	LastfmAPIKey      string
+	RadioStreamToken   string
+	RadioWaveSize      int
+	NavidromeDBPath    string
+	NavidromeMusicRoot string
+	NavidromeURL       string
+	NavidromeUser      string
+	NavidromePassword  string
+	LastfmAPIKey       string
 
 	// Radar Settings
 	RadarScanIntervalHours int
@@ -149,6 +150,7 @@ func loadEnvironment() (*Config, error) {
 		RadioStreamToken:            radioToken,
 		RadioWaveSize:               radioWaveSize,
 		NavidromeDBPath:             getEnv("NAVIDROME_DB_PATH", ""),
+		NavidromeMusicRoot:          getEnv("NAVIDROME_MUSIC_ROOT", ""),
 		NavidromeURL:                getEnv("NAVIDROME_URL", ""),
 		NavidromeUser:               getEnv("NAVIDROME_USER", ""),
 		NavidromePassword:           getEnv("NAVIDROME_PASSWORD", ""),

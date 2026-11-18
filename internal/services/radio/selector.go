@@ -84,10 +84,7 @@ func (s *WaveSelector) GeneratePlaylist(ctx context.Context, count int) ([]*db.T
 		return nil, fmt.Errorf("library is empty")
 	}
 
-	var stats *NavidromeStats
-	if s.navidrome != nil && s.navidrome.IsAvailable() {
-		stats, _ = s.navidrome.GetUserListeningStats(ctx)
-	}
+	stats, _ := s.navidrome.loadStats(ctx)
 
 	// Разделение по сегментам (Comfort 45%, Forgotten 30%, Discovery 25%)
 	var comfort, forgotten, discovery []db.TrackEntity
@@ -186,10 +183,7 @@ func (s *WaveSelector) selectWaveTrack(ctx context.Context) (*db.TrackEntity, er
 		return nil, fmt.Errorf("no tracks in library")
 	}
 
-	var stats *NavidromeStats
-	if s.navidrome != nil && s.navidrome.IsAvailable() {
-		stats, _ = s.navidrome.GetUserListeningStats(ctx)
-	}
+	stats, _ := s.navidrome.loadStats(ctx)
 
 	// Выбор целевого сегмента по весам (45% Comfort, 30% Forgotten, 25% Discovery)
 	roll := s.rnd.Float64()

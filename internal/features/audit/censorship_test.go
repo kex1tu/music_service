@@ -124,6 +124,18 @@ func TestCensorshipQueueEvidenceCacheAndReadOnly(t *testing.T) {
 	if cloud.calls.Load() != 1 {
 		t.Fatalf("tags repeated cloud call: %d", cloud.calls.Load())
 	}
+	if _, e = database.Conn().Exec(`UPDATE censorship_cache SET result_json=json_remove(result_json,'$.audio_hash')`); e != nil {
+		t.Fatal(e)
+	}
+	id, e = a.Start(context.Background(), CensorshipOptions{Paths: []string{"track.mp3"}, Provider: "gemini"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	awaitCensorState(t, a, id, "completed")
+	fresh, e := a.Items(context.Background(), id, "", 100, 0)
+	if e != nil || len(fresh) != 1 || fresh[0].Result.AudioHash == "" || cloud.calls.Load() != 1 {
+		t.Fatalf("legacy result cache was not rebuilt from audio and cached transcription: %+v err=%v calls=%d", fresh, e, cloud.calls.Load())
+	}
 	if _, e = a.Start(context.Background(), CensorshipOptions{Paths: []string{"../../escape.mp3"}}); e == nil {
 		t.Fatal("path traversal accepted")
 	}

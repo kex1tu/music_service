@@ -24,7 +24,12 @@ func ReadTags(filePath string, relPath string) (*TrackTags, error) {
 		return nil, fmt.Errorf("не удалось открыть файл '%s': %w", filePath, err)
 	}
 	defer file.Close()
+	return ReadTagsFromFile(file, relPath)
+}
 
+// ReadTagsFromFile reads tags from an open MP3 positioned at the start.
+func ReadTagsFromFile(file *os.File, relPath string) (*TrackTags, error) {
+	filePath := file.Name()
 	stat, err := file.Stat()
 	if err != nil {
 		return nil, err

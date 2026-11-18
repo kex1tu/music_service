@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
+	"os/exec"
 	"sort"
 	"strconv"
 	"time"
 
-	"music-manager/internal/core/mediaexec"
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 )
 
@@ -72,18 +74,42 @@ func AuditWindows(spots []QuickListenSpot, duration float64) []Window {
 	return out
 }
 
-// AudioDigest hashes the demuxed audio payload, excluding ID3 and container tags.
-func AudioDigest(ctx context.Context, sb *sandbox.PathSandbox, rel string) (string, error) {
-	p, e := sb.Resolve(rel, false)
-	if e != nil {
-		return "", e
+// OpenAudio pins a regular media file inside the library sandbox.
+func OpenAudio(sb *sandbox.PathSandbox, rel string) (*os.File, error) {
+	p, err := sb.Resolve(rel, false)
+	if err != nil {
+		return nil, err
 	}
+	f, err := safefs.Open(p)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		f.Close()
+		return nil, fmt.Errorf("audio is not a readable regular file")
+	}
+	return f, nil
+}
+
+// ffmpeg opens the inherited descriptor independently, so decoding and
+// hashing leave the caller's file offset intact.
+const audioDescriptor = "/proc/self/fd/3"
+
+func audioCommand(ctx context.Context, f *os.File, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd.ExtraFiles = []*os.File{f}
+	return cmd
+}
+
+// AudioDigest hashes the demuxed audio payload, excluding ID3 and container tags.
+func AudioDigest(ctx context.Context, f *os.File) (string, error) {
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	cmd := mediaexec.CommandContext(cctx, "ffmpeg", "-nostdin", "-v", "error", "-i", p, "-map", "0:a:0", "-c:a", "copy", "-f", "data", "pipe:1")
+	cmd := audioCommand(cctx, f, "-nostdin", "-v", "error", "-i", audioDescriptor, "-map", "0:a:0", "-c:a", "copy", "-f", "data", "pipe:1")
 	h := sha256.New()
 	cmd.Stdout = h
-	if e = cmd.Run(); e != nil {
+	if e := cmd.Run(); e != nil {
 		return "", fmt.Errorf("audio digest failed: %w", e)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
@@ -91,17 +117,13 @@ func AudioDigest(ctx context.Context, sb *sandbox.PathSandbox, rel string) (stri
 
 // DecodeWindow passes a sandbox-pinned media descriptor to ffmpeg. PCM is
 // bounded to 60 seconds; no decoded media or transcripts enter MUSIC_DIR.
-func DecodeWindow(ctx context.Context, sb *sandbox.PathSandbox, rel string, w Window) ([]byte, error) {
+func DecodeWindow(ctx context.Context, f *os.File, w Window) ([]byte, error) {
 	if w.Start < 0 || w.End <= w.Start || w.End-w.Start > 60 {
 		return nil, fmt.Errorf("invalid audio window")
 	}
-	p, e := sb.Resolve(rel, false)
-	if e != nil {
-		return nil, e
-	}
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	cmd := mediaexec.CommandContext(cctx, "ffmpeg", "-nostdin", "-v", "error", "-ss", strconv.FormatFloat(w.Start, 'f', 3, 64), "-i", p, "-t", strconv.FormatFloat(w.End-w.Start, 'f', 3, 64), "-vn", "-ac", "1", "-ar", strconv.Itoa(SampleRate), "-f", "s16le", "pipe:1")
+	cmd := audioCommand(cctx, f, "-nostdin", "-v", "error", "-ss", strconv.FormatFloat(w.Start, 'f', 3, 64), "-i", audioDescriptor, "-t", strconv.FormatFloat(w.End-w.Start, 'f', 3, 64), "-vn", "-ac", "1", "-ar", strconv.Itoa(SampleRate), "-f", "s16le", "pipe:1")
 	b, e := cmd.Output()
 	if e != nil {
 		return nil, fmt.Errorf("audio decode failed: %w", e)
@@ -169,17 +191,12 @@ func InspectPCM(pcm []byte, offset float64) []Signal {
 
 // ScanSignals streams a full track when lyric guidance is absent. Memory stays
 // bounded; the result remains explicitly limited evidence.
-func ScanSignals(ctx context.Context, sb *sandbox.PathSandbox, rel string) ([]Signal, error) {
-	p, e := sb.Resolve(rel, false)
-	if e != nil {
-		return nil, e
-	}
+func ScanSignals(ctx context.Context, f *os.File) ([]Signal, error) {
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	cmd := mediaexec.CommandContext(cctx, "ffmpeg", "-nostdin", "-v", "error", "-i", p, "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "pipe:1")
+	cmd := audioCommand(cctx, f, "-nostdin", "-v", "error", "-i", audioDescriptor, "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "pipe:1")
 	pipe, e := cmd.StdoutPipe()
 	if e != nil {
-		cmd.Close()
 		return nil, e
 	}
 	if e = cmd.Start(); e != nil {

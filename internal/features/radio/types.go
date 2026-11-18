@@ -4,6 +4,7 @@ package radio
 type WaveStatsResponse struct {
 	TopGenres          []string `json:"top_genres"`
 	NavidromeAvailable bool     `json:"navidrome_available"`
+	NavidromeWarning   string   `json:"navidrome_warning,omitempty"`
 	SubsonicConfigured bool     `json:"subsonic_configured"`
 	WaveSize           int      `json:"wave_size"`
 	StreamTokenSet     bool     `json:"stream_token_set"`
