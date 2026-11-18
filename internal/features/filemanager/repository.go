@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"music-manager/internal/db"
 )
 
 var (
@@ -375,66 +377,12 @@ func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limi
 
 // DeleteTrackByPath удаляет трек по относительному пути и атомарно очищает осиротевшие альбомы и артистов.
 func (r *SQLiteRepository) DeleteTrackByPath(ctx context.Context, relPath string) (int64, error) {
-	var trackID int64
-	var albumID int64
-	err := r.db.QueryRowContext(ctx, "SELECT id, album_id FROM tracks WHERE file_path = ?", relPath).Scan(&trackID, &albumID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, nil
-		}
-		return 0, err
-	}
-
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM audit_issues WHERE (entity_type = 'track' AND entity_id = ?) OR file_path = ?", trackID, relPath)
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM track_genres WHERE track_id = ?", trackID)
-	res, err := r.db.ExecContext(ctx, "DELETE FROM tracks WHERE id = ?", trackID)
-	if err != nil {
-		return 0, err
-	}
-	deleted, _ := res.RowsAffected()
-
-	if albumID > 0 {
-		var remainingTracks int
-		_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM tracks WHERE album_id = ?", albumID).Scan(&remainingTracks)
-		if remainingTracks == 0 {
-			_, _ = r.db.ExecContext(ctx, "DELETE FROM albums WHERE id = ?", albumID)
-			_, _ = r.db.ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id = ?", albumID)
-			_, _ = r.db.ExecContext(ctx, "DELETE FROM audit_issues WHERE (entity_type = 'album' AND entity_id = ?)", albumID)
-		}
-	}
-
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM artists WHERE (SELECT COUNT(*) FROM albums WHERE artist_id = artists.id) = 0")
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums)")
-
-	return deleted, nil
+	return db.DeleteLibraryTracks(ctx, r.db, relPath, false)
 }
 
-// DeleteDirectoryRecords удаляет все треки и альбомы внутри заданной директории.
+// DeleteDirectoryRecords удаляет индекс треков внутри заданной директории.
 func (r *SQLiteRepository) DeleteDirectoryRecords(ctx context.Context, dirRelPath string) (int64, error) {
-	prefix := dirRelPath + "/%"
-	_, _ = r.db.ExecContext(ctx, `
-		DELETE FROM audit_issues
-		WHERE file_path = ? OR file_path LIKE ?
-		   OR entity_id IN (SELECT id FROM tracks WHERE file_path = ? OR file_path LIKE ?)
-		   OR entity_id IN (SELECT id FROM albums WHERE folder_path = ? OR folder_path LIKE ?)
-	`, dirRelPath, prefix, dirRelPath, prefix, dirRelPath, prefix)
-
-	_, _ = r.db.ExecContext(ctx, `
-		DELETE FROM track_genres
-		WHERE track_id IN (SELECT id FROM tracks WHERE file_path = ? OR file_path LIKE ?)
-	`, dirRelPath, prefix)
-
-	res, err := r.db.ExecContext(ctx, "DELETE FROM tracks WHERE file_path = ? OR file_path LIKE ?", dirRelPath, prefix)
-	if err != nil {
-		return 0, err
-	}
-	deletedTracks, _ := res.RowsAffected()
-
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM albums WHERE folder_path = ? OR folder_path LIKE ? OR id NOT IN (SELECT DISTINCT album_id FROM tracks)", dirRelPath, prefix)
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id NOT IN (SELECT id FROM albums)")
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM albums)")
-
-	return deletedTracks, nil
+	return db.DeleteLibraryTracks(ctx, r.db, dirRelPath, true)
 }
 
 // UpdateTrackPath обновляет путь к файлу трека и связанные задачи аудита.
@@ -513,4 +461,3 @@ func (r *SQLiteRepository) GetAlbumDetailsForRedownload(ctx context.Context, dir
 	err = row2.Scan(&artist, &album, &deezerID)
 	return
 }
-

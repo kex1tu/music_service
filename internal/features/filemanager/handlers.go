@@ -122,6 +122,13 @@ func (m *Module) RenameFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !res.Success {
+		httputil.RespondJSON(w, http.StatusConflict, struct {
+			*RenameResponse
+			Detail string `json:"detail"`
+		}{res, res.Error})
+		return
+	}
 	httputil.RespondJSON(w, http.StatusOK, res)
 }
 
@@ -311,4 +318,3 @@ func (m *Module) Redownload(w http.ResponseWriter, r *http.Request) {
 
 	httputil.RespondJSON(w, http.StatusOK, res)
 }
-

@@ -1,6 +1,7 @@
 package organizer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +15,11 @@ import (
 // MergeDuplicateGroup keeps the first track. A group with differing audio or
 // sidecars is left intact. Returned paths identify the audio files actually removed.
 func MergeDuplicateGroup(sb *sandbox.PathSandbox, paths []string) (removed []string, err error) {
+	return MergeIndexedDuplicateGroup(context.Background(), nil, sb, paths)
+}
+
+// MergeIndexedDuplicateGroup journals each merged track and retains the survivor's index ID.
+func MergeIndexedDuplicateGroup(ctx context.Context, index TrackChanger, sb *sandbox.PathSandbox, paths []string) (removed []string, err error) {
 	if len(paths) < 2 {
 		return nil, nil
 	}
@@ -72,13 +78,22 @@ func MergeDuplicateGroup(sb *sandbox.PathSandbox, paths []string) (removed []str
 	}
 
 	for i, full := range fullPaths[1:] {
-		if err := cleanCompanionFiles(full, fullPaths[0]); err != nil {
+		err := ApplyTrackChange(ctx, index, full, fullPaths[0], true, func() error {
+			if !sameTrackFiles(full, fullPaths[0]) {
+				return fmt.Errorf("duplicate track changed before merge: %s", paths[i+1])
+			}
+			if err := cleanCompanionFiles(full, fullPaths[0]); err != nil {
+				return err
+			}
+			if err := safefs.Remove(full); err != nil {
+				return err
+			}
+			removed = append(removed, paths[i+1])
+			return nil
+		})
+		if err != nil {
 			return removed, err
 		}
-		if err := safefs.Remove(full); err != nil {
-			return removed, err
-		}
-		removed = append(removed, paths[i+1])
 	}
 	return removed, nil
 }

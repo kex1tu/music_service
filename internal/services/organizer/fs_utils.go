@@ -3,7 +3,6 @@ package organizer
 import (
 	"errors"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -47,18 +46,28 @@ func moveFile(src, dest string) error {
 	}
 	defer in.Close()
 
-	out, err := safefs.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	// Publish the destination only once a full copy has reached disk. After
+	// an interrupted copy a recovery scan must never see an incomplete MP3.
+	out, err := safefs.CreateTemp(filepath.Dir(dest), ".move-*.tmp")
 	if err != nil {
 		return err
 	}
+	tmp := out.Name()
+	defer safefs.Remove(tmp)
 	_, err = io.Copy(out, in)
+	if err == nil {
+		err = out.Chmod(0644)
+	}
 	if err == nil {
 		err = out.Sync()
 	}
-	if err = errors.Join(err, out.Close()); err == nil {
-		err = safefs.Remove(src)
+	if err = errors.Join(err, out.Close()); err != nil {
+		return err
 	}
-	if err != nil {
+	if err := safefs.Link(tmp, dest); err != nil {
+		return err
+	}
+	if err := safefs.Remove(src); err != nil {
 		return errors.Join(err, safefs.Remove(dest))
 	}
 	return nil

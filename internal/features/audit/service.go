@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"music-manager/internal/core/sandbox"
+	"music-manager/internal/services/organizer"
 	"music-manager/internal/services/resolver"
 )
 
@@ -31,6 +32,8 @@ type ServiceConfig struct {
 	BackfillStarter BackfillStarter
 	Organizer       PathOrganizer
 	Scanner         LibraryScanner
+	TrackIndex      organizer.TrackChanger
+	DeletionIndex   LibraryDeletionIndex
 	Lyrics          LyricsService
 	Enricher        ArtistEnricher
 	Deezer          *resolver.DeezerClient
@@ -52,6 +55,8 @@ type Service struct {
 	backfillStarter BackfillStarter
 	organizer       PathOrganizer
 	scanner         LibraryScanner
+	trackIndex      organizer.TrackChanger
+	deletionIndex   LibraryDeletionIndex
 	lyrics          LyricsService
 	enricher        ArtistEnricher
 	deezer          *resolver.DeezerClient
@@ -94,6 +99,8 @@ func NewService(cfg ServiceConfig) *Service {
 		backfillStarter: cfg.BackfillStarter,
 		organizer:       cfg.Organizer,
 		scanner:         cfg.Scanner,
+		trackIndex:      cfg.TrackIndex,
+		deletionIndex:   cfg.DeletionIndex,
 		lyrics:          cfg.Lyrics,
 		enricher:        cfg.Enricher,
 		deezer:          cfg.Deezer,

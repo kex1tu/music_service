@@ -1,11 +1,10 @@
 package scanner
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
 
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"music-manager/internal/core/safefs"
@@ -15,19 +14,30 @@ import (
 	"music-manager/internal/services/resolver"
 )
 
-var cleanMetaRegex = regexp.MustCompile(`[\p{P}\s_]+`)
-
-func cleanString(s string) string {
-	s = strings.ToLower(s)
-	return cleanMetaRegex.ReplaceAllString(s, "")
-}
-
 // IndexFile indexes or re-indexes a single MP3 file in the SQLite database.
-func (s *Scanner) IndexFile(fullPath, relPath string) error {
-	return s.indexFile(fullPath, relPath)
+func (s *Scanner) IndexFile(_ string, relPath string) error {
+	return s.indexPath(context.Background(), relPath)
 }
 
-func (s *Scanner) indexFile(fullPath, relPath string) error {
+func (s *Scanner) indexPath(ctx context.Context, relPath string) error {
+	s.indexMu.Lock()
+	defer s.indexMu.Unlock()
+	pending, err := s.hasPendingChange(ctx, relPath)
+	if err != nil {
+		return err
+	}
+	if pending {
+		return errIndexPending
+	}
+	return s.indexFileLocked(ctx, relPath, "", "", false)
+}
+
+// indexFileLocked reads the file before opening the SQLite write transaction.
+func (s *Scanner) indexFileLocked(ctx context.Context, relPath, oldPath, pendingPath string, merged bool) error {
+	fullPath, err := s.resolveIndexedPath(relPath)
+	if err != nil {
+		return err
+	}
 	tags, err := id3.ReadTags(fullPath, relPath)
 	if err != nil {
 		return err
@@ -63,34 +73,6 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		albumDir = ""
 	}
 
-	// 1. Get or create primary artist for the track (avoiding composite 'Artist 1\\Artist 2' in artists table)
-	primaryTrackArtist := resolver.ExtractPrimaryArtist(artistName)
-	if primaryTrackArtist == "" {
-		primaryTrackArtist = "Unknown Artist"
-	}
-	artistID, err := s.getOrCreateArtist(primaryTrackArtist)
-	if err != nil {
-		return err
-	}
-
-	// 2. Get or create primary artist for the album and resolve album ID
-	effectiveAlbumArtist := resolver.ExtractPrimaryArtist(albumArtist)
-	if effectiveAlbumArtist == "" {
-		effectiveAlbumArtist = resolver.ExtractPrimaryArtist(artistName)
-	}
-	if effectiveAlbumArtist == "" {
-		effectiveAlbumArtist = "Unknown Artist"
-	}
-	albumArtistID, err := s.getOrCreateArtist(effectiveAlbumArtist)
-	if err != nil {
-		return err
-	}
-
-	albumID, err := s.getOrCreateAlbum(albumTitle, albumArtistID, effectiveAlbumArtist, tags.Year, albumDir, tags.HasCover)
-	if err != nil {
-		return err
-	}
-
 	// 3. Compute canonical path and validate path conformity
 	effAlbum := strings.TrimSpace(tags.Album)
 	if effAlbum == "" || strings.EqualFold(effAlbum, "single") || strings.EqualFold(effAlbum, "singles") {
@@ -123,6 +105,45 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		cleanTitle = strings.ToLower(tags.Title)
 	}
 	fileHash := db.TrackHash(relPath)
+	tx, err := s.database.Conn().BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	previousAlbum, previousArtist, err := db.PrepareLibraryTrackUpdate(ctx, tx, oldPath, relPath, merged)
+	if err != nil {
+		return err
+	}
+
+	// 1. Get or create primary artist for the track (avoiding composite 'Artist 1\\Artist 2' in artists table)
+	primaryTrackArtist := resolver.ExtractPrimaryArtist(artistName)
+	if primaryTrackArtist == "" {
+		primaryTrackArtist = "Unknown Artist"
+	}
+	artistID, err := getOrCreateArtist(ctx, tx, primaryTrackArtist)
+	if err != nil {
+		return err
+	}
+
+	// 2. Get or create primary artist for the album and resolve album ID
+	effectiveAlbumArtist := resolver.ExtractPrimaryArtist(albumArtist)
+	if effectiveAlbumArtist == "" {
+		effectiveAlbumArtist = resolver.ExtractPrimaryArtist(artistName)
+	}
+	if effectiveAlbumArtist == "" {
+		effectiveAlbumArtist = "Unknown Artist"
+	}
+	albumArtistID, err := getOrCreateArtist(ctx, tx, effectiveAlbumArtist)
+	if err != nil {
+		return err
+	}
+
+	albumID, err := getOrCreateAlbum(ctx, tx, albumTitle, albumArtistID, effectiveAlbumArtist, tags.Year, albumDir, tags.HasCover)
+	if err != nil {
+		return err
+	}
+
 	query := `
 	INSERT INTO tracks (
 		album_id, artist_id, title, clean_title, track_number, track_total,
@@ -147,12 +168,13 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 		lyrics_status = excluded.lyrics_status,
 		is_path_valid = excluded.is_path_valid,
 		path_violation_reason = excluded.path_violation_reason,
-		suggested_path = excluded.suggested_path
+		suggested_path = excluded.suggested_path,
+        updated_at = CURRENT_TIMESTAMP
 	RETURNING id;
 	`
 
 	var trackID int64
-	err = s.database.Conn().QueryRow(
+	err = tx.QueryRowContext(ctx,
 		query,
 		albumID,
 		artistID,
@@ -179,14 +201,20 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 	}
 
 	// 4. Clear old issues for this track and re-populate
-	_, _ = s.database.Conn().Exec("DELETE FROM audit_issues WHERE entity_id = ? AND entity_type = 'track'", trackID)
-	_, _ = s.database.Conn().Exec("DELETE FROM track_genres WHERE track_id = ?", trackID)
+	if _, err := tx.ExecContext(ctx, "DELETE FROM audit_issues WHERE entity_id = ? AND entity_type = 'track'", trackID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM track_genres WHERE track_id = ?", trackID); err != nil {
+		return err
+	}
 
 	if !isPathValid {
-		_, _ = s.database.Conn().Exec(`
+		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO audit_issues (issue_type, entity_type, entity_id, file_path, details)
 			VALUES ('invalid_path', 'track', ?, ?, ?)
-		`, trackID, relPath, pathViolationReason)
+		`, trackID, relPath, pathViolationReason); err != nil {
+			return err
+		}
 	}
 
 	// Genre handling & normalization
@@ -221,24 +249,19 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 			isValidEn := !genreRes.HasCyrillic && !genreRes.IsNonCanonical
 
 			var genreID int64
-			err := s.database.Conn().QueryRow("SELECT id FROM genres WHERE name = ?", rawName).Scan(&genreID)
-			if err == sql.ErrNoRows {
-				res, insErr := s.database.Conn().Exec(
-					"INSERT INTO genres (name, is_valid_en, canonical_en_name) VALUES (?, ?, ?)",
-					rawName, isValidEn, canonName,
-				)
-				if insErr == nil {
-					genreID, _ = res.LastInsertId()
-				}
-			} else if err == nil {
-				_, _ = s.database.Conn().Exec(
-					"UPDATE genres SET is_valid_en = ?, canonical_en_name = ? WHERE id = ?",
-					isValidEn, canonName, genreID,
-				)
+			if err := tx.QueryRowContext(ctx, `
+				INSERT INTO genres (name, is_valid_en, canonical_en_name) VALUES (?, ?, ?)
+				ON CONFLICT(name) DO UPDATE SET is_valid_en = excluded.is_valid_en, canonical_en_name = excluded.canonical_en_name
+				RETURNING id
+			`, rawName, isValidEn, canonName).Scan(&genreID); err != nil {
+				return err
 			}
-
-			if genreID > 0 {
-				_, _ = s.database.Conn().Exec("INSERT OR IGNORE INTO track_genres (track_id, genre_id) VALUES (?, ?)", trackID, genreID)
+			_, err := tx.ExecContext(ctx, `
+				INSERT INTO track_genres (track_id, genre_id) VALUES (?, ?)
+				ON CONFLICT(track_id, genre_id) DO NOTHING
+			`, trackID, genreID)
+			if err != nil {
+				return err
 			}
 		}
 
@@ -248,50 +271,56 @@ func (s *Scanner) indexFile(fullPath, relPath string) error {
 			if isAllAutoFixable && fullRes.IsAutoFixable {
 				isAutoFixed = 1
 			}
-			_, _ = s.database.Conn().Exec(`
+			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO audit_issues (issue_type, entity_type, entity_id, file_path, details, is_auto_fixed, is_resolved)
 				VALUES ('non_en_genre', 'track', ?, ?, ?, ?, ?)
-			`, trackID, relPath, "Русскоязычный / неканонический жанр: "+genreStr+" -> "+fullRes.CanonicalGenre, isAutoFixed, isAutoFixed)
+			`, trackID, relPath, "Русскоязычный / неканонический жанр: "+genreStr+" -> "+fullRes.CanonicalGenre, isAutoFixed, isAutoFixed); err != nil {
+				return err
+			}
 		}
 	}
 
 	// 5. Audit issues for cover & lyrics
 	if !tags.HasCover {
-		_, _ = s.database.Conn().Exec(`
+		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO audit_issues (issue_type, entity_type, entity_id, file_path, details)
 			VALUES ('missing_cover', 'track', ?, ?, 'Отсутствует графическая обложка')
-		`, trackID, relPath)
+		`, trackID, relPath); err != nil {
+			return err
+		}
 	}
 	if tags.LyricsStatus == "none" {
-		_, _ = s.database.Conn().Exec(`
+		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO audit_issues (issue_type, entity_type, entity_id, file_path, details)
 			VALUES ('missing_lyrics', 'track', ?, ?, 'Отсутствует текст песни (.lrc/.txt)')
-		`, trackID, relPath)
+		`, trackID, relPath); err != nil {
+			return err
+		}
 	}
 
-	// 6. Update album statistics
-	_, _ = s.database.Conn().Exec(`
-		UPDATE albums SET
-			present_tracks_count = (SELECT COUNT(*) FROM tracks WHERE album_id = ?),
-			total_tracks = CASE
-				WHEN total_tracks <= 0 THEN COALESCE((SELECT MAX(track_total) FROM tracks WHERE album_id = ?), 0)
-				ELSE total_tracks
-			END,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`, albumID, albumID, albumID)
-
-	_, _ = s.database.Conn().Exec(`
-		UPDATE albums SET
-			is_complete = CASE
-				WHEN (SELECT COUNT(*) FROM missing_tracks WHERE album_id = ?) > 0 THEN 0
-				WHEN total_tracks > 1 AND present_tracks_count < total_tracks THEN 0
-				WHEN (total_tracks <= 1 OR total_tracks IS NULL) AND present_tracks_count >= 1 THEN 1
-				ELSE 1
-			END,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`, albumID, albumID)
-
+	if err := db.RefreshLibraryAlbum(ctx, tx, albumID); err != nil {
+		return err
+	}
+	if previousAlbum != 0 && previousAlbum != albumID {
+		if err := db.RefreshLibraryAlbum(ctx, tx, previousAlbum); err != nil {
+			return err
+		}
+	}
+	if previousArtist != 0 && previousArtist != artistID {
+		if err := db.PruneLibraryArtist(ctx, tx, previousArtist); err != nil {
+			return err
+		}
+	}
+	if pendingPath != "" {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM library_index_pending WHERE target_path = ?", pendingPath); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if s.scanChanges != nil {
+		s.scanChanges[relPath] = true
+	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package organizer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -36,7 +37,7 @@ type BatchSaveRequest struct {
 // OrganizerResult contains details of the organized files and destination directory.
 type OrganizerResult struct {
 	DestinationDir string        `json:"destination_dir"` // Canonical relative directory (e.g. "Album Name")
-	Tracks         []TrackTags   `json:"tracks"`          // Tracks moved to the library
+	Tracks         []TrackTags   `json:"tracks"`          // Tracks whose tags were saved
 	TrackResults   []TrackResult `json:"track_results"`
 }
 
@@ -66,6 +67,7 @@ type Service struct {
 	musicSandbox *sandbox.PathSandbox
 	tmpSandbox   *sandbox.PathSandbox
 	moveMu       sync.Mutex
+	trackIndex   TrackChanger
 }
 
 // NewService creates a new Organizer Service instance.
@@ -74,6 +76,11 @@ func NewService(musicSandbox, tmpSandbox *sandbox.PathSandbox) *Service {
 		musicSandbox: musicSandbox,
 		tmpSandbox:   tmpSandbox,
 	}
+}
+
+// SetTrackChanger wires the library index before the organizer starts serving requests.
+func (s *Service) SetTrackChanger(index TrackChanger) {
+	s.trackIndex = index
 }
 
 // SaveBatch organizes and saves a batch of tracks according to the BatchSaveRequest specification.
@@ -149,6 +156,11 @@ func (s *Service) SaveBatch(req BatchSaveRequest) (*OrganizerResult, error) {
 // Canonical structure: music_library / {Album} - {Album Artist} / {TrackNumber:02d}. {Title}.mp3.
 // For singles without an explicit album, album name is set to the track's title.
 func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist string, tracks []TrackTags, coverBase64 string) (*OrganizerResult, error) {
+	return s.MoveAlbumContext(context.Background(), sourceDir, fallbackAlbum, fallbackAlbumArtist, tracks, coverBase64)
+}
+
+// MoveAlbumContext organizes tracks and returns the filesystem and index outcome for each track.
+func (s *Service) MoveAlbumContext(ctx context.Context, sourceDir, fallbackAlbum, fallbackAlbumArtist string, tracks []TrackTags, coverBase64 string) (*OrganizerResult, error) {
 	if len(tracks) == 1 {
 		if strings.TrimSpace(fallbackAlbumArtist) == "" && strings.TrimSpace(tracks[0].Artist) != "" {
 			fallbackAlbumArtist = strings.TrimSpace(tracks[0].Artist)
@@ -287,11 +299,41 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 			continue
 		}
 
-		actualDestFull, err := MoveTrackWithCompanions(srcFullPath, destFullPath, false)
+		trCopy := tr
+		trCopy.Album = trAlbum
+		trCopy.AlbumArtist = trAlbumArtist
+		trCopy.Title = trTitle
+		if trCopy.TrackNumber <= 0 {
+			trCopy.TrackNumber = 1
+		}
+		var tagErr error
+		actualDestFull, err := MoveIndexedTrack(ctx, s.trackIndex, srcFullPath, destFullPath, false, func(actual string) error {
+			trCopy.Path, _ = s.musicSandbox.ToRelative(actual)
+			if err := id3.WriteTags(actual, trCopy, nil); err != nil {
+				tagErr = fmt.Errorf("failed to write tags: %w", err)
+			}
+			return tagErr
+		})
 		if err != nil {
 			result.Error = err.Error()
+		}
+		if actualDestFull == "" {
 			continue
 		}
+
+		result.DestinationPath = trCopy.Path
+		switch {
+		case tagErr != nil:
+			result.Status = "tag_error"
+		case err != nil:
+			result.Status = "index_error"
+		default:
+			result.Status = "moved"
+		}
+		if tagErr == nil {
+			updatedTracks = append(updatedTracks, trCopy)
+		}
+
 		movedSourceDirs[srcDir] = sourceSandbox
 		info := albumInfoMap[albumDir]
 		if info == nil {
@@ -306,29 +348,6 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 		if parentDir != srcDir {
 			info.sourceDirs[parentDir] = true
 		}
-
-		// Calculate actual relative path inside music sandbox
-		actualRel, _ := s.musicSandbox.ToRelative(actualDestFull)
-
-		// Update track tags on disk
-		trCopy := tr
-		trCopy.Path = actualRel
-		trCopy.Album = trAlbum
-		trCopy.AlbumArtist = trAlbumArtist
-		trCopy.Title = trTitle
-		if trCopy.TrackNumber <= 0 {
-			trCopy.TrackNumber = 1
-		}
-
-		// Write ID3v2.4 tags to disk
-		result.Status = "moved"
-		result.DestinationPath = actualRel
-		if err := id3.WriteTags(actualDestFull, trCopy, nil); err != nil {
-			result.Status = "tag_error"
-			result.Error = err.Error()
-		}
-
-		updatedTracks = append(updatedTracks, trCopy)
 	}
 
 	// 5. Handle cover art for each album directory and its tracks

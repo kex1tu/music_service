@@ -362,8 +362,7 @@ func (db *DB) UpdateTrackPath(ctx context.Context, oldPath, newPath string) erro
 
 // DeleteTrack удаляет запись о треке по пути к файлу.
 func (db *DB) DeleteTrack(ctx context.Context, path string) error {
-	query := `DELETE FROM tracks WHERE file_path = ?;`
-	_, err := db.conn.ExecContext(ctx, query, path)
+	_, err := DeleteLibraryTracks(ctx, db.conn, path, false)
 	return err
 }
 
@@ -393,7 +392,7 @@ func CleanString(s string) string {
 	return fmt.Sprintf("%s", s)
 }
 
-// ResetLibraryTables атомарно очищает таблицы кэша медиатеки при запуске сервиса.
+// ResetLibraryTables атомарно очищает перестраиваемый индекс медиатеки.
 func (db *DB) ResetLibraryTables(ctx context.Context) error {
 	tx, err := db.conn.BeginTx(ctx, nil)
 	if err != nil {

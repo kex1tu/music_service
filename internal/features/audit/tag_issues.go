@@ -99,12 +99,8 @@ func (s *Service) FixTagIssue(ctx context.Context, req FixTagIssueRequest) (*id3
 		}
 	}
 
-	if err := id3.WriteTags(fullPath, *tags, nil); err != nil {
+	if err := s.writeLibraryTags(ctx, fullPath, *tags, nil); err != nil {
 		return nil, fmt.Errorf("failed to write tags: %w", err)
-	}
-
-	if s.scanner != nil {
-		_ = s.scanner.IndexFile(fullPath, req.Path)
 	}
 
 	return tags, nil
@@ -142,14 +138,11 @@ func (s *Service) FixSafeTagIssues(ctx context.Context) (*FixBatchResponse, erro
 			tags.AlbumArtist = item.Proposed.AlbumArtist
 		}
 
-		if err := id3.WriteTags(fullPath, *tags, nil); err != nil {
+		if err := s.writeLibraryTags(ctx, fullPath, *tags, nil); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", item.FilePath, err))
 			continue
 		}
 
-		if s.scanner != nil {
-			_ = s.scanner.IndexFile(fullPath, item.FilePath)
-		}
 		fixedCount++
 	}
 
@@ -221,14 +214,11 @@ func (s *Service) FixAllTagIssues(ctx context.Context) (*FixBatchResponse, error
 			tags.Year = item.Proposed.Year
 		}
 
-		if err := id3.WriteTags(fullPath, *tags, nil); err != nil {
+		if err := s.writeLibraryTags(ctx, fullPath, *tags, nil); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", item.FilePath, err))
 			continue
 		}
 
-		if s.scanner != nil {
-			_ = s.scanner.IndexFile(fullPath, item.FilePath)
-		}
 		fixedCount++
 	}
 
@@ -238,4 +228,24 @@ func (s *Service) FixAllTagIssues(ctx context.Context) (*FixBatchResponse, error
 		TotalFound: len(report.Issues),
 		Errors:     errs,
 	}, nil
+}
+
+func (s *Service) writeLibraryTags(ctx context.Context, fullPath string, tags id3.TrackTags, cover *id3.CoverInfo) error {
+	write := func() error {
+		if err := id3.WriteTags(fullPath, tags, cover); err != nil {
+			return fmt.Errorf("failed to write tags: %w", err)
+		}
+		return nil
+	}
+	if s.trackIndex != nil {
+		return s.trackIndex.ChangeTrack(ctx, fullPath, fullPath, false, write)
+	}
+	if err := write(); err != nil {
+		return err
+	}
+	if s.scanner != nil {
+		relative, _ := s.musicSandbox.ToRelative(fullPath)
+		return s.scanner.IndexFile(fullPath, relative)
+	}
+	return nil
 }

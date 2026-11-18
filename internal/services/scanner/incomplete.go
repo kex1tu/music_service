@@ -191,7 +191,6 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 			continue
 		}
 
-
 		// Update album total tracks and Deezer ID
 		if album.TotalTracks <= 0 && remoteAlbum.NbTracks > 0 {
 			_, _ = s.database.Conn().ExecContext(ctx, `
@@ -205,7 +204,6 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 		// Clear previous missing tracks
 		_, _ = s.database.Conn().ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id = ?", album.ID)
 
-		missingCount := 0
 		for i, rt := range remoteAlbum.Tracks.Data {
 			pos := rt.TrackPosition
 			if pos == 0 {
@@ -276,7 +274,6 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 			}
 
 			if !isMatch {
-				missingCount++
 				artistName := rt.Artist.Name
 				if artistName == "" {
 					artistName = album.Artist
@@ -298,12 +295,14 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 			}
 		}
 
-		isComplete := 1
-		if missingCount > 0 || (remoteAlbum.NbTracks > 1 && len(localTracks) < remoteAlbum.NbTracks) {
-			isComplete = 0
-		}
 		_, _ = s.database.Conn().ExecContext(ctx, `
-			UPDATE albums SET is_complete = ?, expected_tracks_count = ?, present_tracks_count = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-		`, isComplete, remoteAlbum.NbTracks, len(localTracks), album.ID)
+			UPDATE albums SET
+				is_complete = NOT EXISTS (SELECT 1 FROM missing_tracks WHERE album_id = albums.id)
+					AND ? <= (SELECT COUNT(*) FROM tracks WHERE album_id = albums.id),
+				expected_tracks_count = ?,
+				present_tracks_count = (SELECT COUNT(*) FROM tracks WHERE album_id = albums.id),
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?
+		`, remoteAlbum.NbTracks, remoteAlbum.NbTracks, album.ID)
 	}
 }

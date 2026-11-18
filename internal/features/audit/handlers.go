@@ -93,6 +93,13 @@ func (m *Module) FixPath(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if !res.Success {
+		httputil.RespondJSON(w, http.StatusConflict, struct {
+			*FixPathResponse
+			Detail string `json:"detail"`
+		}{res, res.Message})
+		return
+	}
 	httputil.RespondJSON(w, http.StatusOK, res)
 }
 

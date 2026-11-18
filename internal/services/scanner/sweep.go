@@ -1,0 +1,88 @@
+package scanner
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+
+	"music-manager/internal/core/safefs"
+	"music-manager/internal/db"
+)
+
+func (s *Scanner) deleteMissingFiles(ctx context.Context, seen, unread map[string]bool) error {
+	rows, err := s.database.Conn().QueryContext(ctx, "SELECT id, file_path FROM tracks")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		id   int64
+		path string
+	}
+	var missing []candidate
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.id, &c.path); err != nil {
+			return err
+		}
+		if !seen[c.path] && !underUnreadPath(c.path, unread) {
+			missing = append(missing, c)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, c := range missing {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := s.sweepTrack(ctx, c.id, c.path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func underUnreadPath(path string, unread map[string]bool) bool {
+	for {
+		if unread[path] {
+			return true
+		}
+		if path == "." || path == "/" {
+			return false
+		}
+		path = filepath.Dir(path)
+	}
+}
+
+func (s *Scanner) sweepTrack(ctx context.Context, id int64, relPath string) error {
+	s.indexMu.Lock()
+	defer s.indexMu.Unlock()
+	if s.scanChanges[relPath] {
+		return nil
+	}
+	missing, err := s.pathMissing(ctx, relPath)
+	if err != nil || !missing {
+		return err
+	}
+	return db.DeleteIndexedTrack(ctx, s.database.Conn(), id, relPath)
+}
+
+func (s *Scanner) pathMissing(ctx context.Context, relPath string) (bool, error) {
+	pending, err := s.hasPendingChange(ctx, relPath)
+	if err != nil || pending {
+		return false, err
+	}
+	full, err := s.resolveIndexedPath(relPath)
+	if err != nil {
+		return false, err
+	}
+	_, err = safefs.Lstat(full)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	return false, err
+}
