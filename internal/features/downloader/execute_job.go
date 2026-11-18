@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"music-manager/internal/core/safefs"
-	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
 
@@ -108,84 +106,10 @@ func (s *Service) executeBackfill(ctx context.Context, job *Job) {
 	job.SetStatus(StatusResolving)
 	job.UpdateProgress(5.0, "Определение недостающих треков для дозагрузки")
 
-	var meta *resolver.ReleaseMetadata
-	var tracks []resolver.ResolvedTrack
-
-	if s.repo != nil && job.TargetAlbumPath != nil && *job.TargetAlbumPath != "" {
-		missing, err := s.repo.GetMissingTracksForAlbum(ctx, *job.TargetAlbumPath)
-		if err == nil {
-			for _, m := range missing {
-				tracks = append(tracks, resolver.ResolvedTrack{
-					TrackNumber:    m.TrackNumber,
-					Title:          m.Title,
-					Artist:         m.Artist,
-					Duration:       m.ExpectedDuration,
-					AudioSourceURL: m.DeezerURL,
-					Status:         "pending",
-				})
-			}
-		}
-	}
-
-	if len(tracks) == 0 && s.resolver != nil {
-		deezerURL := job.URL
-		if deezerURL == "" && job.AlbumTitle != nil && *job.AlbumTitle != "" && s.resolver.Deezer() != nil {
-			art := ""
-			if job.ArtistName != nil {
-				art = *job.ArtistName
-			}
-			q := fmt.Sprintf(`artist:"%s" album:"%s"`, art, *job.AlbumTitle)
-			albums, sErr := s.resolver.Deezer().SearchAlbums(ctx, q)
-			if sErr != nil || len(albums) == 0 {
-				albums, sErr = s.resolver.Deezer().SearchAlbums(ctx, fmt.Sprintf("%s %s", art, *job.AlbumTitle))
-			}
-			if sErr == nil && len(albums) > 0 {
-				deezerURL = fmt.Sprintf("https://www.deezer.com/album/%d", albums[0].ID)
-			}
-		}
-
-		if deezerURL != "" {
-			m, allTracks, err := s.resolver.Resolve(ctx, deezerURL, "deezer")
-			if err == nil && m != nil {
-				meta = m
-				existingNumbers := make(map[int]bool)
-				if s.musicSandbox != nil && job.TargetAlbumPath != nil && *job.TargetAlbumPath != "" {
-					if fullPath, err := s.musicSandbox.Resolve(*job.TargetAlbumPath, true); err == nil {
-						if entries, err := safefs.ReadDir(fullPath); err == nil {
-							for _, e := range entries {
-								if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".mp3") {
-									itemFull := filepath.Join(fullPath, e.Name())
-									if t, err := id3.ReadTags(itemFull, e.Name()); err == nil && t.TrackNumber > 0 {
-										existingNumbers[t.TrackNumber] = true
-									}
-								}
-							}
-						}
-					}
-				}
-
-				for _, t := range allTracks {
-					if !existingNumbers[t.TrackNumber] {
-						tracks = append(tracks, t)
-					}
-				}
-			}
-		}
-	}
-
-	snapshot := job.Snapshot()
-	if len(snapshot.backfillTrackNumbers) > 0 {
-		tracks = slices.DeleteFunc(tracks, func(track resolver.ResolvedTrack) bool {
-			return !slices.Contains(snapshot.backfillTrackNumbers, track.TrackNumber)
-		})
-		if len(snapshot.backfillTrackURLs) == len(snapshot.backfillTrackNumbers) {
-			for i := range tracks {
-				index := slices.Index(snapshot.backfillTrackNumbers, tracks[i].TrackNumber)
-				if source := snapshot.backfillTrackURLs[index]; source != "" && resolver.IsAllowedURL(source) {
-					tracks[i].AudioSourceURL = source
-				}
-			}
-		}
+	meta, tracks, err := s.resolveBackfill(ctx, job.Snapshot())
+	if err != nil {
+		job.SetError(err.Error())
+		return
 	}
 
 	if meta == nil {

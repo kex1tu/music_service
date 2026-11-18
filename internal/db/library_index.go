@@ -5,24 +5,14 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
-	"time"
 )
 
 //go:embed library_index.sql
 var libraryIndexSchema string
 
-func initializeLibraryIndex(conn *sql.DB) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, libraryIndexSchema); err != nil {
-		return err
-	}
-	return tx.Commit()
+func migrateLibraryIndex(ctx context.Context, conn *sql.Conn) error {
+	_, err := conn.ExecContext(ctx, libraryIndexSchema)
+	return err
 }
 
 type libraryTrackQuerier interface {

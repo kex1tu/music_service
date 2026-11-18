@@ -293,3 +293,33 @@ func TestRadar_Scan_Progress_And_Cancel(t *testing.T) {
 		t.Errorf("expected scanner.isRunning to be false after cancel")
 	}
 }
+
+func TestRadarUpdatesSelectedUnicodeSubscription(t *testing.T) {
+	env, _, _ := setupRadarEnv(t)
+	if _, err := env.DB.Conn().Exec(`
+		INSERT INTO tracked_artists (id, name, clean_name, deezer_id)
+		VALUES (1, 'Ёлка', 'ёлка', '100'), (2, 'ЁЛКА', 'ёлка', '200')
+	`); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{"ЁЛКА", "ёлка"} {
+		resp := env.Get("/api/radar/artists?search=" + url.QueryEscape(query))
+		var artists featureRadar.TrackedArtistsResponse
+		if err := json.Unmarshal(env.ReadBody(resp), &artists); err != nil || artists.Total != 2 {
+			t.Fatalf("Unicode search %q: %+v, %v", query, artists, err)
+		}
+	}
+	resp := env.PostJSON("/api/radar/artists/"+url.PathEscape("ЁЛКА")+"/follow",
+		featureRadar.FollowArtistRequest{ArtistID: 2, Followed: false})
+	body := env.ReadBody(resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("follow failed: %s", body)
+	}
+	var first, second bool
+	if err := env.DB.Conn().QueryRow(`SELECT
+		(SELECT is_followed FROM tracked_artists WHERE id=1),
+		(SELECT is_followed FROM tracked_artists WHERE id=2)`).Scan(&first, &second); err != nil ||
+		!first || second {
+		t.Fatalf("follow changed the wrong subscription: %v %v %v", first, second, err)
+	}
+}

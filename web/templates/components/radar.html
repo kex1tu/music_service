@@ -300,6 +300,7 @@
                 <input
                     type="text"
                     x-model="$store.radar.artistsSearch"
+                    @input.debounce.250ms="$store.radar.fetchArtists()"
                     placeholder="Фильтр артистов..."
                     aria-label="Фильтр артистов"
                     class="bg-surface-input border border-surface-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-content-muted focus:outline-none focus:border-brand">
@@ -321,7 +322,7 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-surface-borderSubtle">
-                        <template x-for="art in $store.radar.filteredArtists()" :key="art.id || art.name">
+                        <template x-for="art in $store.radar.artists" :key="art.id || art.name">
                             <tr class="hover:bg-surface-hover/50 transition">
                                 <td class="p-3.5">
                                     <div class="flex items-center space-x-3">
@@ -371,7 +372,7 @@
                                             </svg>
                                         </button>
                                         <button
-                                            @click="$store.radar.openDiscography(art.name)"
+                                            @click="$store.radar.openDiscography(art)"
                                             class="px-3 py-1.5 rounded-lg bg-surface-elevated hover:bg-surface-hover text-white transition text-xs font-semibold">
                                             Дискография
                                         </button>

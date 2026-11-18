@@ -325,20 +325,18 @@ func (s *Service) waitIfPaused(ctx context.Context) error {
 
 // ClearCompletedJobs очищает завершенные, ошибочные и отмененные задачи из памяти, БД и удаляет временные директории.
 func (s *Service) ClearCompletedJobs() int {
-	allJobs := s.jobs.GetAll()
-	clearedIDs := make([]string, 0)
-	for _, j := range allJobs {
-		snap := j.Snapshot()
-		if snap.Status == StatusReady || snap.Status == StatusError || snap.Status == StatusCancelled {
-			clearedIDs = append(clearedIDs, snap.ID)
-		}
-	}
-
-	count := s.jobs.ClearCompleted()
-	for _, id := range clearedIDs {
-		jobDir, err := s.tmpSandbox.Resolve(id, false)
-		if err == nil {
-			_ = safefs.RemoveAll(jobDir)
+	count := 0
+	for _, job := range s.jobs.GetAll() {
+		snap := job.Snapshot()
+		switch snap.Status {
+		case StatusReady, StatusPartialReady, StatusError, StatusCancelled:
+			pending, err := downloadstaging.HasPendingImport(s.tmpSandbox, snap.ID)
+			if err == nil && !pending && s.jobs.Delete(snap.ID) {
+				if jobDir, err := s.tmpSandbox.Resolve(snap.ID, false); err == nil {
+					_ = safefs.RemoveAll(jobDir)
+				}
+				count++
+			}
 		}
 	}
 	return count

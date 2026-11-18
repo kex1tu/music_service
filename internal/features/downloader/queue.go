@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
 	"slices"
 	"sort"
 	"time"
 
 	"music-manager/internal/core/safefs"
+	"music-manager/internal/db"
 	"music-manager/internal/services/downloadstaging"
 	"music-manager/internal/services/resolver"
 )
@@ -153,9 +155,19 @@ func (s *Service) CreateBackfillJob(
 	targetAlbumPath, albumTitle, artistName, deezerAlbumID string,
 	trackURLs []string,
 	trackNumbers []int,
+	positions ...db.BackfillSelection,
 ) (*Job, error) {
 	if targetAlbumPath == "" && albumTitle == "" {
 		return nil, errors.New("target album path or title required")
+	}
+
+	if targetAlbumPath != "" {
+		targetAlbumPath = db.AlbumRoot(filepath.ToSlash(targetAlbumPath))
+	}
+	selection := &BackfillRequest{AlbumID: deezerAlbumID, Positions: slices.Clone(positions),
+		TrackURLs: slices.Clone(trackURLs), TrackNumbers: slices.Clone(trackNumbers)}
+	if err := s.freezeBackfillSelection(ctx, targetAlbumPath, selection); err != nil {
+		return nil, err
 	}
 
 	jobID := generateUUID()
@@ -171,20 +183,19 @@ func (s *Service) CreateBackfillJob(
 	tPath := targetAlbumPath
 
 	job := &Job{
-		ID:                   jobID,
-		Status:               StatusQueued,
-		Source:               "deezer",
-		URL:                  primaryURL,
-		Progress:             0.0,
-		CurrentStep:          "Задача дозагрузки ожидает очереди",
-		IsBackfill:           true,
-		backfillTrackNumbers: slices.Clone(trackNumbers),
-		backfillTrackURLs:    slices.Clone(trackURLs),
-		TargetAlbumPath:      &tPath,
-		AlbumTitle:           &aTitle,
-		ArtistName:           &aArtist,
-		CreatedAt:            time.Now().UTC().Format(time.RFC3339Nano),
-		UpdatedAt:            time.Now().UTC(),
+		ID:              jobID,
+		Status:          StatusQueued,
+		Source:          "deezer",
+		URL:             primaryURL,
+		Progress:        0.0,
+		CurrentStep:     "Задача дозагрузки ожидает очереди",
+		IsBackfill:      true,
+		Backfill:        selection,
+		TargetAlbumPath: &tPath,
+		AlbumTitle:      &aTitle,
+		ArtistName:      &aArtist,
+		CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
+		UpdatedAt:       time.Now().UTC(),
 	}
 
 	return s.enqueueNewJob(ctx, job)
@@ -257,13 +268,20 @@ func (s *Service) RetryAllFailedJobs(ctx context.Context) ([]string, error) {
 
 // DeleteJob отменяет задачу и удаляет её из памяти, БД и песочницы.
 func (s *Service) DeleteJob(ctx context.Context, id string) error {
-	return s.deleteJob(ctx, id, true)
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
+	return s.deleteJobLocked(ctx, id, true)
 }
 
 // FinishImport drops a ready job from the queue once its staged tracks have been consumed.
 func (s *Service) FinishImport(ctx context.Context, id string) (bool, error) {
-	job, ok := s.GetJob(id)
-	if !ok {
+	if _, ok := s.GetJob(id); !ok {
+		return true, nil
+	}
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
+	job := s.jobs[id]
+	if job == nil {
 		return true, nil
 	}
 	status := job.Snapshot().Status
@@ -274,15 +292,13 @@ func (s *Service) FinishImport(ctx context.Context, id string) (bool, error) {
 	if err != nil || pending {
 		return false, err
 	}
-	if err := s.deleteJob(ctx, id, false); err != nil {
+	if err := s.deleteJobLocked(ctx, id, false); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func (s *Service) deleteJob(ctx context.Context, id string, removeStaging bool) error {
-	s.jobsMu.Lock()
-	defer s.jobsMu.Unlock()
+func (s *Service) deleteJobLocked(ctx context.Context, id string, removeStaging bool) error {
 	if s.repo != nil {
 		if err := s.repo.DeleteJob(ctx, id); err != nil {
 			return err
@@ -313,12 +329,14 @@ func (s *Service) deleteJob(ctx context.Context, id string, removeStaging bool) 
 
 // ClearCompletedJobs очищает завершенные, упавшие и отмененные задачи.
 func (s *Service) ClearCompletedJobs(ctx context.Context) int {
-	all := s.GetAllJobs()
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
 	count := 0
-	for _, j := range all {
-		snap := j.Snapshot()
-		if snap.Status == StatusReady || snap.Status == StatusPartialReady || snap.Status == StatusError || snap.Status == StatusCancelled {
-			if err := s.DeleteJob(ctx, snap.ID); err == nil {
+	for id, job := range s.jobs {
+		switch job.Snapshot().Status {
+		case StatusReady, StatusPartialReady, StatusError, StatusCancelled:
+			pending, err := downloadstaging.HasPendingImport(s.tmpSandbox, id)
+			if err == nil && !pending && s.deleteJobLocked(ctx, id, true) == nil {
 				count++
 			}
 		}

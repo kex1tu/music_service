@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"music-manager/internal/core/httputil"
+	"music-manager/internal/core/textkey"
 )
 
 // GetFeed обрабатывает GET /api/radar/feed.
@@ -51,6 +52,17 @@ func (m *Module) GetTrackedArtists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if term := textkey.Search(r.URL.Query().Get("search")); term != "" {
+		filtered := make([]TrackedArtist, 0)
+		for _, artist := range artists {
+			if strings.Contains(textkey.Search(artist.Name), term) ||
+				strings.Contains(textkey.Search(artist.CustomSearchAlias), term) {
+				filtered = append(filtered, artist)
+			}
+		}
+		artists = filtered
+	}
+
 	httputil.RespondJSON(w, http.StatusOK, TrackedArtistsResponse{
 		Items: artists,
 		Total: len(artists),
@@ -82,7 +94,7 @@ func (m *Module) FollowArtist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := m.service.FollowArtist(r.Context(), name, req.Followed); err != nil {
+	if err := m.service.FollowArtist(r.Context(), name, req.Followed, req.ArtistID); err != nil {
 		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -99,7 +111,7 @@ func (m *Module) SetAutoDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := m.service.SetAutoDownload(r.Context(), name, req.AutoDownload); err != nil {
+	if err := m.service.SetAutoDownload(r.Context(), name, req.AutoDownload, req.ArtistID); err != nil {
 		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -116,7 +128,7 @@ func (m *Module) UpdateCustomLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := m.service.UpdateCustomLinks(r.Context(), name, req.Alias, req.DeezerID, req.MusicBrainzID, req.YandexID); err != nil {
+	if err := m.service.UpdateCustomLinks(r.Context(), name, req.Alias, req.DeezerID, req.MusicBrainzID, req.YandexID, req.ArtistID); err != nil {
 		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

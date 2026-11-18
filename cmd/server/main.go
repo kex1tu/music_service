@@ -408,8 +408,9 @@ func (a *downloaderBackfillAdapter) CreateBackfillJob(
 	targetAlbumPath, albumTitle, artistName, deezerAlbumID string,
 	trackURLs []string,
 	trackNumbers []int,
+	positions ...db.BackfillSelection,
 ) (string, error) {
-	job, err := a.svc.CreateBackfillJob(ctx, targetAlbumPath, albumTitle, artistName, deezerAlbumID, trackURLs, trackNumbers)
+	job, err := a.svc.CreateBackfillJob(ctx, targetAlbumPath, albumTitle, artistName, deezerAlbumID, trackURLs, trackNumbers, positions...)
 	if err != nil {
 		return "", err
 	}

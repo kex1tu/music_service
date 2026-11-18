@@ -161,6 +161,10 @@ func (s *Service) MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist
 
 // MoveAlbumContext organizes tracks and returns the filesystem and index outcome for each track.
 func (s *Service) MoveAlbumContext(ctx context.Context, sourceDir, fallbackAlbum, fallbackAlbumArtist string, tracks []TrackTags, coverBase64 string) (*OrganizerResult, error) {
+	return s.moveAlbum(ctx, sourceDir, fallbackAlbum, fallbackAlbumArtist, tracks, coverBase64, nil)
+}
+
+func (s *Service) moveAlbum(ctx context.Context, sourceDir, fallbackAlbum, fallbackAlbumArtist string, tracks []TrackTags, coverBase64 string, backfill *backfillDestination) (*OrganizerResult, error) {
 	if len(tracks) == 1 {
 		if strings.TrimSpace(fallbackAlbumArtist) == "" && strings.TrimSpace(tracks[0].Artist) != "" {
 			fallbackAlbumArtist = strings.TrimSpace(tracks[0].Artist)
@@ -214,6 +218,9 @@ func (s *Service) MoveAlbumContext(ctx context.Context, sourceDir, fallbackAlbum
 		}
 
 		targetDir := s.ComputeAlbumDir(trArtist, trAlbum)
+		if backfill != nil {
+			targetDir = backfill.root
+		}
 		uniqueAlbumDirsMap[targetDir] = true
 	}
 
@@ -292,6 +299,18 @@ func (s *Service) MoveAlbumContext(ctx context.Context, sourceDir, fallbackAlbum
 		}
 
 		albumDir, targetRel := s.ComputeTargetPath(trAlbumArtist, trAlbum, tr.TrackNumber, trTitle, filepath.Base(srcFullPath))
+		if backfill != nil {
+			albumDir = backfill.root
+			existing, _ := s.musicSandbox.ToRelative(srcFullPath)
+			targetRel = backfill.trackPath(existing, tr.DiscNumber, filepath.Base(targetRel))
+			dir, err := s.musicSandbox.Resolve(filepath.Dir(targetRel), true)
+			if err != nil {
+				return nil, err
+			}
+			if err := safefs.MkdirAll(dir, 0755); err != nil {
+				return nil, err
+			}
+		}
 
 		destFullPath, err := s.musicSandbox.Resolve(targetRel, false)
 		if err != nil {

@@ -5,11 +5,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"music-manager/internal/services/organizer"
 	"path/filepath"
 	"strings"
 
 	"music-manager/internal/id3"
+	"music-manager/internal/services/organizer"
 )
 
 // SaveTags записывает теги в один файл с соблюдением стандарта ID3v2.4 и null-byte разделителей.
@@ -110,7 +110,19 @@ func (s *Service) BatchSaveTags(ctx context.Context, req BatchSaveRequest) (*Bat
 			return contextual.MoveAlbumContext(ctx, dir, album, artist, tracks, cover)
 		}
 	}
-	res, err := move(req.SourceDir, req.Album.Album, req.Album.AlbumArtist, req.Tracks, coverB64)
+	var res *organizer.OrganizerResult
+	var err error
+	if req.TargetAlbumPath != "" {
+		if contextual, ok := s.organizer.(interface {
+			MoveAlbumIntoContext(context.Context, string, string, string, []id3.TrackTags, string) (*organizer.OrganizerResult, error)
+		}); ok {
+			res, err = contextual.MoveAlbumIntoContext(ctx, req.TargetAlbumPath, req.Album.Album, req.Album.AlbumArtist, req.Tracks, coverB64)
+		} else {
+			res, err = s.organizer.MoveAlbumInto(req.TargetAlbumPath, req.Album.Album, req.Album.AlbumArtist, req.Tracks, coverB64)
+		}
+	} else {
+		res, err = move(req.SourceDir, req.Album.Album, req.Album.AlbumArtist, req.Tracks, coverB64)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("organizer move album failed: %w", err)
 	}

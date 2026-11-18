@@ -130,6 +130,8 @@ func TestDiscographyAggregator_DeduplicationAndReconcile(t *testing.T) {
 		INSERT INTO artists (id, name, clean_name) VALUES (1, 'Daft Punk', 'daft punk');
 		INSERT INTO albums (id, title, clean_title, album_artist, artist_id, year, folder_path)
 		VALUES (1, 'Discovery', 'discovery', 'Daft Punk', 1, 2001, 'Daft Punk - Discovery');
+		INSERT INTO tracks (album_id, artist_id, title, clean_title, file_path, file_size, mtime)
+		VALUES (1, 1, 'One More Time', 'one more time', 'Daft Punk - Discovery/01.mp3', 1000, 1);
 	`)
 	if err != nil {
 		t.Fatalf("failed to insert album: %v", err)
@@ -146,12 +148,16 @@ func TestDiscographyAggregator_DeduplicationAndReconcile(t *testing.T) {
 			CleanTitle:  CleanReleaseTitle("Discovery"),
 			Year:        2001,
 			DeezerID:    "1001",
+			Tracklist: []db.CatalogTrack{{
+				BackfillSelection: db.BackfillSelection{TrackPosition: db.ReleasePosition(1, 1)}, Title: "One More Time",
+			}},
 		},
 		{
 			ArtistName:    "Daft Punk",
 			CleanArtist:   "daft punk",
-			Title:         "Discovery (Remastered)",
-			CleanTitle:    CleanReleaseTitle("Discovery (Remastered)"),
+			Title:         "Discovery",
+			DeezerID:      "1001",
+			CleanTitle:    CleanReleaseTitle("Discovery"),
 			Year:          2001,
 			MusicBrainzID: "mb-disc",
 		},
@@ -293,7 +299,8 @@ func TestReconcileWithLibrary_MultiArtistAndTracks(t *testing.T) {
 		
 		-- Дорожка сингла "Вместе" в таблице tracks
 		INSERT INTO tracks (id, album_id, artist_id, title, clean_title, file_path, file_size, mtime)
-		VALUES (1, 2, 2, 'Вместе', 'вместе', 'Aarne/Singles/01. Вместе.mp3', 1000, 1.0);
+		VALUES (1, 2, 2, 'Вместе', 'вместе', 'Aarne/Singles/01. Вместе.mp3', 1000, 1.0),
+		       (2, 1, 1, 'Bandana', 'bandana', 'Bandana I/01.mp3', 1000, 1.0);
 	`)
 	if err != nil {
 		t.Fatalf("failed to setup test database: %v", err)
@@ -310,6 +317,9 @@ func TestReconcileWithLibrary_MultiArtistAndTracks(t *testing.T) {
 			CleanTitle:  CleanReleaseTitle("Bandana I"),
 			Year:        2021,
 			DeezerID:    "1111",
+			Tracklist: []db.CatalogTrack{{
+				BackfillSelection: db.BackfillSelection{TrackPosition: db.ReleasePosition(1, 1)}, Title: "Bandana",
+			}},
 		},
 		// Релиз 2: Сингл "Вместе" (Aarne, Big Baby Tape), проверяется для Big Baby Tape
 		// В albums альбом называется "Singles", но в tracks есть дорожка "Вместе"
@@ -317,6 +327,7 @@ func TestReconcileWithLibrary_MultiArtistAndTracks(t *testing.T) {
 			ArtistName:  "Big Baby Tape, Aarne",
 			CleanArtist: "big baby tape",
 			Title:       "Вместе",
+			ReleaseType: "single",
 			CleanTitle:  CleanReleaseTitle("Вместе"),
 			Year:        2024,
 			DeezerID:    "2222",
@@ -559,6 +570,7 @@ func TestDeduplicateReleases(t *testing.T) {
 			ArtistName:    "Daft Punk, Romanthony",
 			Year:          2001,
 			MusicBrainzID: "mb-disc-101",
+			DeezerID:      "101",
 			TrackCount:    14,
 		},
 		{

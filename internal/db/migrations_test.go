@@ -128,7 +128,7 @@ func TestSQLiteMigrationVariants(t *testing.T) {
 
 			database := openMigrated(t, path)
 			conn := database.Conn()
-			requireScalar(t, conn, "PRAGMA user_version", 2)
+			requireScalar(t, conn, "PRAGMA user_version", 4)
 			requireScalar(t, conn, "SELECT count(*) FROM pragma_table_info('albums') WHERE name = 'youtube_id'", 1)
 			requireScalar(t, conn, "SELECT count(*) FROM pragma_foreign_key_check", 0)
 			if fixture.ddl == "" {
@@ -177,7 +177,7 @@ func TestSQLiteMigrationVariants(t *testing.T) {
 				t.Fatal(err)
 			}
 			reopened := openMigrated(t, path)
-			requireScalar(t, reopened.Conn(), "PRAGMA user_version", 2)
+			requireScalar(t, reopened.Conn(), "PRAGMA user_version", 4)
 			requireTrackedArtistSettings(t, reopened.Conn())
 			requireScalar(t, reopened.Conn(), "SELECT count(*) FROM tracked_artists WHERE name = 'Artist'", 1)
 			checkMigrationQueries(t, reopened, 5)
@@ -188,7 +188,7 @@ func TestSQLiteMigrationVariants(t *testing.T) {
 func requireTrackedArtistSettings(t *testing.T, conn *sql.DB) {
 	t.Helper()
 	requireScalar(t, conn, `SELECT count(*) FROM tracked_artists
-		WHERE name = 'Artist' AND clean_name = 'custom-clean' AND is_followed = 0 AND auto_download = 1
+		WHERE name = 'Artist' AND is_followed = 0 AND auto_download = 1
 		AND custom_search_alias = 'alias' AND deezer_id = '123' AND musicbrainz_id = 'mb-123'
 		AND yandex_id = 'ya-123' AND last_checked_at = '2025-02-03 00:00:00'
 		AND updated_at = '2025-02-03 01:00:00'`, 1)
@@ -216,12 +216,18 @@ func checkMigrationQueries(t *testing.T, database *db.DB, position int) {
 	}
 	requireScalar(t, conn, "SELECT count(*) FROM audit_issues WHERE id = ?", 0, issueID)
 
-	track := audit.MissingTrackEntityDTO{Title: "First", Artist: "Artist", TrackNumber: position, DiscNumber: 1, ExpectedDuration: 180}
+	track := db.CatalogTrack{
+		BackfillSelection: db.BackfillSelection{TrackPosition: db.ReleasePosition(1, position)},
+		Title:             "First", Artist: "Artist", Duration: 180,
+	}
 	updated := track
 	updated.Title = "Updated"
-	discTwo := track
+	discTwo := updated
 	discTwo.DiscNumber = 2
-	if err := repo.ReplaceMissingTracks(ctx, 21, []audit.MissingTrackEntityDTO{track, updated, discTwo}); err != nil {
+	if _, err := repo.VerifyCatalog(ctx, 21, "123", []db.CatalogTrack{track, discTwo}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.VerifyCatalog(ctx, 21, "123", []db.CatalogTrack{updated, discTwo}); err != nil {
 		t.Fatal(err)
 	}
 	missing, err := repo.GetMissingTracksForAlbum(ctx, "Artist/Album")
@@ -290,7 +296,7 @@ func TestSQLiteMigrationRollsBackOnForeignKeyFailure(t *testing.T) {
 
 	execMigrationSQL(t, raw, "UPDATE tracks SET album_id = 21 WHERE id = 32")
 	reopened := openMigrated(t, path)
-	requireScalar(t, reopened.Conn(), "PRAGMA user_version", 2)
+	requireScalar(t, reopened.Conn(), "PRAGMA user_version", 4)
 	requireScalar(t, reopened.Conn(), "SELECT status FROM missing_tracks WHERE id = 41", "queued")
 	requireScalar(t, reopened.Conn(), "SELECT count(*) FROM pragma_foreign_key_check", 0)
 }
@@ -347,7 +353,7 @@ func TestSQLiteMigrationRestoredWALBackup(t *testing.T) {
 	}
 
 	migrated := openMigrated(t, restoredPath)
-	requireScalar(t, migrated.Conn(), "PRAGMA user_version", 2)
+	requireScalar(t, migrated.Conn(), "PRAGMA user_version", 4)
 	requireScalar(t, migrated.Conn(), "PRAGMA integrity_check", "ok")
 	requireScalar(t, migrated.Conn(), "SELECT count(*) FROM pragma_foreign_key_check", 0)
 	requireScalar(t, migrated.Conn(), "SELECT status FROM missing_tracks WHERE id = 41", "queued")

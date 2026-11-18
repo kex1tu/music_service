@@ -110,7 +110,8 @@ func seedAlbumIndexFixture(t testing.TB, albums int) string {
 				CASE i WHEN 1 THEN 'Release' ELSE 'p'||i END FROM s`, albums},
 		{`WITH RECURSIVE s(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM s WHERE i<?)
 			INSERT INTO tracks(album_id,artist_id,title,clean_title,file_size,mtime,file_path)
-			SELECT i/10+1,1,'T','t',1,1,'f'||i FROM s`, 10*albums - 1},
+			SELECT a.id,1,'T','t',1,1,a.folder_path||'/f'||i||'.mp3'
+			FROM s JOIN albums a ON a.id = i/10+1`, 10*albums - 1},
 	} {
 		if _, err := conn.Exec(seed.query, seed.count); err != nil {
 			t.Fatal(err)

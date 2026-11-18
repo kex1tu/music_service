@@ -69,9 +69,7 @@ func (s *Scanner) indexFileLocked(ctx context.Context, relPath, oldPath, pending
 	}
 
 	albumDir := filepath.Dir(relPath)
-	if albumDir == "." {
-		albumDir = ""
-	}
+	tags.DiscNumber = db.LocalDiscNumber(filepath.ToSlash(albumDir), tags.DiscNumber)
 
 	// 3. Compute canonical path and validate path conformity
 	effAlbum := strings.TrimSpace(tags.Album)
@@ -139,7 +137,11 @@ func (s *Scanner) indexFileLocked(ctx context.Context, relPath, oldPath, pending
 		return err
 	}
 
-	albumID, err := getOrCreateAlbum(ctx, tx, albumTitle, albumArtistID, effectiveAlbumArtist, tags.Year, albumDir, tags.HasCover)
+	displayAlbumArtist := strings.TrimSpace(albumArtist)
+	if displayAlbumArtist == "" {
+		displayAlbumArtist = effectiveAlbumArtist
+	}
+	albumID, err := getOrCreateAlbum(ctx, tx, albumTitle, albumArtistID, displayAlbumArtist, tags.Year, albumDir, tags.HasCover)
 	if err != nil {
 		return err
 	}

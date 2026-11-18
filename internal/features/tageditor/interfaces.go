@@ -12,6 +12,7 @@ import (
 
 // PathOrganizer определяет контракт для перемещения и канонической раскладки альбомов.
 type PathOrganizer interface {
+	MoveAlbumInto(target, fallbackAlbum, fallbackAlbumArtist string, tracks []id3.TrackTags, coverBase64 string) (*organizer.OrganizerResult, error)
 	MoveAlbum(sourceDir string, fallbackAlbum, fallbackAlbumArtist string, tracks []id3.TrackTags, coverBase64 string) (*organizer.OrganizerResult, error)
 }
 

@@ -164,6 +164,9 @@ func (s *Service) processSingleTrack(
 	job.SetStepAndStatus(fmt.Sprintf("Конвертация трека %d/%d: %s в MP3 320k", trackIdx, total, track.Title), StatusConverting)
 	cleanTitle := id3.CleanTitle(track.Title, fmt.Sprintf("Track_%02d", trackIdx))
 	trackPrefix := fmt.Sprintf("%02d. ", track.TrackNumber)
+	if job.IsBackfill && track.DiscNumber > 0 {
+		trackPrefix = fmt.Sprintf("%02d-%02d. ", track.DiscNumber, track.TrackNumber)
+	}
 	maxTitleBytes := 255 - len(trackPrefix) - len(".mp3")
 	if maxTitleBytes <= 0 {
 		maxTitleBytes = 1

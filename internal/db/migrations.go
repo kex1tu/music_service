@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"time"
 )
@@ -11,10 +12,12 @@ import (
 var migrations = [...]func(context.Context, *sql.Conn) error{
 	migrateUnversioned,
 	migrateTracksAlbumIndex,
+	migrateLibraryIndex,
+	migrateReleaseModel,
 }
 
 func (db *DB) migrate() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
 	conn, err := db.conn.Conn(ctx)
@@ -23,6 +26,16 @@ func (db *DB) migrate() error {
 	}
 	defer conn.Close()
 
+	// The release migration rebuilds parent tables. Keep foreign-key actions
+	// disabled on this pinned connection and validate every version before commit.
+	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+		return fmt.Errorf("отключение каскадов на время миграции: %w", err)
+	}
+	defer func() {
+		if _, err := conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON"); err != nil {
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
+	}()
 	// Reserve the writer before inspecting the schema so concurrent opens
 	// cannot classify the same unversioned database and race to change it.
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {

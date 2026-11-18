@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math"
+	"music-manager/internal/db"
 	"strconv"
 	"strings"
 
@@ -17,12 +17,6 @@ type incompleteAlbum struct {
 	Title       string
 	TotalTracks int
 	DeezerID    string
-}
-
-type localTrackItem struct {
-	TrackNumber int
-	Title       string
-	Duration    float64
 }
 
 func selectBestDeezerAlbumScanner(candidates []resolver.DeezerAlbum, dbArtist, dbAlbum string, localTrackCount int) *resolver.DeezerAlbum {
@@ -103,8 +97,12 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
 		WHERE (al.is_complete = 0 AND al.total_tracks > 1)
-		   OR (SELECT COUNT(*) FROM missing_tracks WHERE album_id = al.id) > 0
+		   OR EXISTS (SELECT 1 FROM missing_tracks WHERE album_id = al.id)
 		   OR al.total_tracks = 0
+		   OR EXISTS (
+			   SELECT 1 FROM tracks t WHERE t.album_id = al.id
+			   GROUP BY t.album_id HAVING MAX(t.disc_total) > COUNT(DISTINCT t.disc_number)
+		   )
 	`)
 	if err != nil {
 		return
@@ -118,6 +116,11 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 			albums = append(albums, a)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[Scanner] failed to read incomplete albums: %v", err)
+		return
+	}
+	rows.Close()
 
 	for _, album := range albums {
 		select {
@@ -126,24 +129,8 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 		default:
 		}
 
-		// Fetch local tracks first
-		tRows, err := s.database.Conn().QueryContext(ctx, `
-			SELECT track_number, title, duration FROM tracks WHERE album_id = ?
-		`, album.ID)
-		if err != nil {
-			continue
-		}
-
-		var localTracks []localTrackItem
-		for tRows.Next() {
-			var lt localTrackItem
-			if err := tRows.Scan(&lt.TrackNumber, &lt.Title, &lt.Duration); err == nil {
-				localTracks = append(localTracks, lt)
-			}
-		}
-		tRows.Close()
-
-		if len(localTracks) == 0 {
+		var localCount int
+		if err := s.database.Conn().QueryRowContext(ctx, "SELECT COUNT(*) FROM tracks WHERE album_id = ?", album.ID).Scan(&localCount); err != nil || localCount == 0 {
 			continue
 		}
 
@@ -161,7 +148,7 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 			query := fmt.Sprintf(`artist:"%s" album:"%s"`, cleanArtist, album.Title)
 			searchResults, searchErr := s.deezerClient.SearchAlbums(ctx, query)
 			if searchErr == nil && len(searchResults) > 0 {
-				best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, len(localTracks))
+				best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, localCount)
 				if best != nil {
 					remoteAlbum, fetchErr = s.deezerClient.GetAlbum(ctx, strconv.FormatInt(best.ID, 10))
 				}
@@ -170,7 +157,7 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 				simpleQuery := fmt.Sprintf("%s %s", cleanArtist, album.Title)
 				searchResults, searchErr = s.deezerClient.SearchAlbums(ctx, simpleQuery)
 				if searchErr == nil && len(searchResults) > 0 {
-					best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, len(localTracks))
+					best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, localCount)
 					if best != nil {
 						remoteAlbum, fetchErr = s.deezerClient.GetAlbum(ctx, strconv.FormatInt(best.ID, 10))
 					}
@@ -179,7 +166,7 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 			if remoteAlbum == nil {
 				searchResults, searchErr = s.deezerClient.SearchAlbums(ctx, album.Title)
 				if searchErr == nil && len(searchResults) > 0 {
-					best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, len(localTracks))
+					best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, localCount)
 					if best != nil {
 						remoteAlbum, fetchErr = s.deezerClient.GetAlbum(ctx, strconv.FormatInt(best.ID, 10))
 					}
@@ -191,118 +178,12 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 			continue
 		}
 
-		// Update album total tracks and Deezer ID
-		if album.TotalTracks <= 0 && remoteAlbum.NbTracks > 0 {
-			_, _ = s.database.Conn().ExecContext(ctx, `
-				UPDATE albums SET total_tracks = ?, deezer_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-			`, remoteAlbum.NbTracks, strconv.FormatInt(remoteAlbum.ID, 10), album.ID)
+		catalog, err := resolver.DeezerCatalogTracks(remoteAlbum)
+		if err == nil {
+			_, err = db.VerifyCatalog(ctx, s.database.Conn(), album.ID, strconv.FormatInt(remoteAlbum.ID, 10), catalog)
 		}
-
-		// 1-to-1 matching
-		matchedLocal := make(map[int]bool) // localTracks index -> matched
-
-		// Clear previous missing tracks
-		_, _ = s.database.Conn().ExecContext(ctx, "DELETE FROM missing_tracks WHERE album_id = ?", album.ID)
-
-		for i, rt := range remoteAlbum.Tracks.Data {
-			pos := rt.TrackPosition
-			if pos == 0 {
-				pos = i + 1
-			}
-			dzTitleFull := strings.ToLower(resolver.CleanQueryTextFull(rt.Title))
-			dzTitleNoParen := strings.ToLower(resolver.CleanQueryText(rt.Title))
-
-			isMatch := false
-
-			// Phase 1: Track position match + Title check
-			for j, lt := range localTracks {
-				if matchedLocal[j] {
-					continue
-				}
-				if lt.TrackNumber > 0 && lt.TrackNumber == pos {
-					locTitleFull := strings.ToLower(resolver.CleanQueryTextFull(lt.Title))
-					locTitleNoParen := strings.ToLower(resolver.CleanQueryText(lt.Title))
-
-					if locTitleFull == dzTitleFull || locTitleNoParen == dzTitleNoParen ||
-						(len(locTitleFull) >= 3 && strings.Contains(dzTitleFull, locTitleFull)) ||
-						(len(dzTitleFull) >= 3 && strings.Contains(locTitleFull, dzTitleFull)) ||
-						(lt.Duration > 0 && rt.Duration > 0 && math.Abs(lt.Duration-float64(rt.Duration)) <= 10.0) {
-						isMatch = true
-						matchedLocal[j] = true
-						break
-					}
-				}
-			}
-
-			// Phase 2: Title match
-			if !isMatch {
-				for j, lt := range localTracks {
-					if matchedLocal[j] {
-						continue
-					}
-					locTitleFull := strings.ToLower(resolver.CleanQueryTextFull(lt.Title))
-					if locTitleFull != "" && locTitleFull == dzTitleFull {
-						isMatch = true
-						matchedLocal[j] = true
-						break
-					}
-					locTitleNoParen := strings.ToLower(resolver.CleanQueryText(lt.Title))
-					if locTitleNoParen != "" && locTitleNoParen == dzTitleNoParen && len(locTitleNoParen) >= 4 {
-						if lt.Duration <= 0 || rt.Duration <= 0 || math.Abs(lt.Duration-float64(rt.Duration)) <= 15.0 {
-							isMatch = true
-							matchedLocal[j] = true
-							break
-						}
-					}
-				}
-			}
-
-			// Phase 3: Position + strict duration
-			if !isMatch {
-				for j, lt := range localTracks {
-					if matchedLocal[j] {
-						continue
-					}
-					if lt.TrackNumber > 0 && lt.TrackNumber == pos {
-						if lt.Duration > 0 && rt.Duration > 0 && math.Abs(lt.Duration-float64(rt.Duration)) <= 5.0 {
-							isMatch = true
-							matchedLocal[j] = true
-							break
-						}
-					}
-				}
-			}
-
-			if !isMatch {
-				artistName := rt.Artist.Name
-				if artistName == "" {
-					artistName = album.Artist
-				}
-				discNum := rt.DiskNumber
-				if discNum <= 0 {
-					discNum = 1
-				}
-				if _, err := s.database.Conn().ExecContext(ctx, `
-					INSERT INTO missing_tracks (
-						album_id, title, artist, track_number, disc_number,
-						expected_duration, deezer_id, deezer_url, isrc, status, updated_at
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'missing', CURRENT_TIMESTAMP)
-					ON CONFLICT(album_id, track_number, disc_number) DO NOTHING
-				`, album.ID, rt.Title, artistName, pos, discNum, rt.Duration,
-					strconv.FormatInt(rt.ID, 10), rt.Link, rt.ISRC); err != nil {
-					log.Printf("[Scanner] failed to insert missing track %d for album %d: %v", pos, album.ID, err)
-				}
-			}
+		if err != nil {
+			log.Printf("[Scanner] failed to verify catalog for album %d: %v", album.ID, err)
 		}
-
-		_, _ = s.database.Conn().ExecContext(ctx, `
-			UPDATE albums SET
-				is_complete = NOT EXISTS (SELECT 1 FROM missing_tracks WHERE album_id = albums.id)
-					AND ? <= (SELECT COUNT(*) FROM tracks WHERE album_id = albums.id),
-				expected_tracks_count = ?,
-				present_tracks_count = (SELECT COUNT(*) FROM tracks WHERE album_id = albums.id),
-				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ?
-		`, remoteAlbum.NbTracks, remoteAlbum.NbTracks, album.ID)
 	}
 }

@@ -450,7 +450,11 @@ func TestUserJourney_CyrillicMultiArtistReconciliation(t *testing.T) {
 		ReleaseType: "album",
 		Status:      "new",
 		IsRadar:     true,
-		SourceURL:   "https://deezer.com/album/cyrillic_777",
+		Tracklist: []db.CatalogTrack{{
+			BackfillSelection: db.BackfillSelection{TrackPosition: db.ReleasePosition(1, 1)},
+			Title:             "Трек 1",
+		}},
+		SourceURL: "https://deezer.com/album/cyrillic_777",
 	}
 	if err := it.database.UpsertRadarRelease(ctx, release); err != nil {
 		t.Fatalf("failed to insert radar release: %v", err)

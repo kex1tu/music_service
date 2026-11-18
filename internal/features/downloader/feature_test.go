@@ -1022,6 +1022,9 @@ func TestDownloader_FinishImportRetainsUnselectedTracks(t *testing.T) {
 		}
 	}
 	finish("pending")
+	if cleared := mod.Service().ClearCompletedJobs(t.Context()); cleared != 0 {
+		t.Fatalf("bulk cleanup removed %d jobs with pending imports", cleared)
+	}
 	var tracks downloader.DownloadTracksResponse
 	env.DecodeJSON(env.Get("/downloads/job/tracks"), &tracks)
 	if len(tracks.Tracks) != 1 || tracks.Tracks[0].Title != "Second" {

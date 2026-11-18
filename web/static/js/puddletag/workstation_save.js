@@ -57,6 +57,7 @@ const puddletagWorkstationSave = {
                                 album: releaseAlbum,
                                 tracks: tracksToSave,
                                 source_dir: `tmp_downloads/${jid}/converted`,
+                                target_album_path: relInfo.targetAlbumPath || undefined,
                                 cover_base64: relTracks[0]?.cover_base64 || '',
                                 cover_url: relTracks[0]?.cover_url || relInfo.coverUrl || '',
                                 reorganize: true
@@ -95,6 +96,7 @@ const puddletagWorkstationSave = {
                             },
                             tracks: tracksToSave,
                             source_dir: this.currentPath,
+                            target_album_path: this.releases[0]?.targetAlbumPath || undefined,
                             cover_base64: this.tagPanel.cover_base64 || tracksToSave[0]?.cover_base64 || '',
                             cover_url: this.tagPanel.cover_url || tracksToSave[0]?.cover_url || '',
                             reorganize: true

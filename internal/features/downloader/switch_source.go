@@ -12,6 +12,7 @@ import (
 
 	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
+	"music-manager/internal/db"
 	"music-manager/internal/services/resolver"
 )
 
@@ -184,17 +185,53 @@ func (s *Service) SwitchReleaseSource(ctx context.Context, req SwitchReleaseSour
 		if !resolver.IsAllowedURL(cleanURL) || len(req.TargetTracks) == 0 {
 			return nil, errors.New("нужны исходный треклист и допустимый источник")
 		}
+		if req.MissingOnly && req.TargetPath == "" {
+			return nil, errors.New("укажите папку целевого релиза")
+		}
 		if req.TargetPath != "" {
 			if s.musicSandbox == nil {
 				return nil, ErrInvalidURL
 			}
-			if _, e := s.musicSandbox.Resolve(req.TargetPath, false); e != nil {
+			full, err := s.musicSandbox.Resolve(req.TargetPath, req.MissingOnly || len(req.Backfill) > 0)
+			if err != nil {
 				return nil, fmt.Errorf("%w: недопустимый путь целевого альбома", sandbox.ErrPathTraversal)
+			}
+			relative, err := s.musicSandbox.ToRelative(full)
+			if err != nil {
+				return nil, err
+			}
+			req.TargetPath = db.AlbumRoot(relative)
+		}
+		if req.MissingOnly {
+			req.Backfill = make([]db.BackfillSelection, len(req.TargetTracks))
+			for i, track := range req.TargetTracks {
+				position := db.ReleasePosition(track.DiscNumber, track.TrackNumber)
+				id := strings.TrimPrefix(track.TrackID, "dz_")
+				if id == track.TrackID {
+					id = ""
+				}
+				req.Backfill[i] = db.BackfillSelection{TrackPosition: position, DeezerID: id}
 			}
 		}
 		draft = &Job{ID: generateUUID(), Source: "release_picker", URL: cleanURL, Status: StatusQueued, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), UpdatedAt: time.Now().UTC(), Tracks: append([]resolver.ResolvedTrack(nil), req.TargetTracks...)}
+		if len(req.Backfill) > 0 {
+			if len(req.Backfill) != len(draft.Tracks) {
+				return nil, errors.New("позиции докачки не соответствуют треклисту")
+			}
+			draft.IsBackfill = true
+			draft.Backfill = &BackfillRequest{Positions: req.Backfill}
+			if err := s.freezeBackfillSelection(ctx, req.TargetPath, draft.Backfill); err != nil {
+				return nil, err
+			}
+		}
 		for i := range draft.Tracks {
 			draft.Tracks[i].TrackID = fmt.Sprintf("manual_%s_%d", draft.ID, i)
+			if draft.IsBackfill {
+				selection := draft.Backfill.Positions[i]
+				if selection.DeezerID != "" {
+					draft.Tracks[i].TrackID = "dz_" + selection.DeezerID
+				}
+			}
 			draft.Tracks[i].AudioSourceURL = ""
 			draft.Tracks[i].ConvertedPath = nil
 		}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"music-manager/internal/core/textkey"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -229,13 +230,13 @@ func (r *SQLiteRepository) ListLibraryTracks(ctx context.Context, query string, 
 	var countArgs []any
 
 	if strings.TrimSpace(query) != "" {
-		term := "%" + strings.TrimSpace(query) + "%"
+		term := textkey.Search(query)
 		countQuery = `
 		SELECT COUNT(*)
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists ar ON t.artist_id = ar.id
-		WHERE t.title LIKE ? OR ar.name LIKE ? OR al.title LIKE ?;
+		WHERE instr(t.search_title, ?) > 0 OR instr(ar.clean_name, ?) > 0 OR instr(al.search_title, ?) > 0;
 		`
 		countArgs = []any{term, term, term}
 
@@ -245,7 +246,7 @@ func (r *SQLiteRepository) ListLibraryTracks(ctx context.Context, query string, 
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists ar ON t.artist_id = ar.id
-		WHERE t.title LIKE ? OR ar.name LIKE ? OR al.title LIKE ?
+		WHERE instr(t.search_title, ?) > 0 OR instr(ar.clean_name, ?) > 0 OR instr(al.search_title, ?) > 0
 		ORDER BY ar.name ASC, al.title ASC, t.track_number ASC
 		LIMIT ? OFFSET ?;
 		`
@@ -298,7 +299,7 @@ func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limi
 	if limit <= 0 {
 		limit = 50
 	}
-	term := "%" + strings.TrimSpace(query) + "%"
+	term := textkey.Search(query)
 
 	result := &SearchLibraryResult{
 		Tracks:  make([]SearchTrackItem, 0),
@@ -313,7 +314,7 @@ func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limi
 	FROM tracks t
 	JOIN albums al ON t.album_id = al.id
 	JOIN artists ar ON t.artist_id = ar.id
-	WHERE t.title LIKE ? OR t.clean_title LIKE ?
+	WHERE instr(t.search_title, ?) > 0 OR instr(t.search_clean_title, ?) > 0
 	LIMIT ?;
 	`
 	tRows, err := r.db.QueryContext(ctx, trackQuery, term, term, limit)
@@ -335,7 +336,7 @@ func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limi
 	FROM albums al
 	JOIN artists ar ON al.artist_id = ar.id
 	LEFT JOIN tracks t ON t.album_id = al.id
-	WHERE al.title LIKE ? OR al.clean_title LIKE ?
+	WHERE instr(al.search_title, ?) > 0 OR instr(al.search_clean_title, ?) > 0
 	GROUP BY al.id
 	LIMIT ?;
 	`
@@ -357,11 +358,11 @@ func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limi
 	       COALESCE((SELECT t.file_path FROM tracks t WHERE t.artist_id = ar.id LIMIT 1), '')
 	FROM artists ar
 	LEFT JOIN tracks t ON t.artist_id = ar.id
-	WHERE ar.name LIKE ? OR ar.clean_name LIKE ?
+	WHERE instr(ar.clean_name, ?) > 0
 	GROUP BY ar.id
 	LIMIT ?;
 	`
-	arRows, err := r.db.QueryContext(ctx, artistQuery, term, term, limit)
+	arRows, err := r.db.QueryContext(ctx, artistQuery, term, limit)
 	if err == nil {
 		defer arRows.Close()
 		for arRows.Next() {

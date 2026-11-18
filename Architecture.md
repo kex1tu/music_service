@@ -172,12 +172,12 @@ MUSIC_DIR/
 
 ### 3.5. Схема базы данных SQLite (WAL Mode)
 - **`tracks`:** ID, FilePath, Title, Artist, Album, Year, TrackNumber, DiscNumber, Duration, Bitrate, HasCover, LyricsStatus, MTime, CreatedAt.
-- **`albums`:** ID, Title, Artist, Year, DirectoryPath, ExpectedTracksCount, IsComplete, DeezerID.
+- **`albums`:** ID локального издания, уникальный относительный корень папки, метаданные из тегов и статус сверки треклиста.
 - **`artists`:** ID, Name.
 - **`track_genres`:** Связь треков и канонических жанров (`track_id`, `genre_id`).
 - **`download_jobs`:** ID, Status, URL, Source, TargetAlbumPath, Title, Artist, TotalTracks, CompletedTracks, Progress, Error, CreatedAt.
 - **`audit_issues`:** ID, IssueType, FilePath, ExpectedPath, Details, Resolved.
-- **`missing_tracks`:** ID, AlbumID, TrackPosition, Title, Artist, ISRC, DeezerTrackID, Status.
+- **`missing_tracks`:** ID, AlbumID, позиция «диск, трек», ID трека Deezer, ISRC, статус и ручной источник. Задача докачки хранит выбранные каталожные позиции.
 
 ---
 

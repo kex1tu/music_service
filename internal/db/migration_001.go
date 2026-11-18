@@ -79,12 +79,6 @@ func migrateUnversioned(ctx context.Context, conn *sql.Conn) error {
 			return err
 		}
 	}
-	// Explicit WHERE disambiguates the upsert from a SELECT join condition.
-	if _, err := conn.ExecContext(ctx, `INSERT INTO tracked_artists (name, clean_name, is_followed)
-		SELECT name, clean_name, 1 FROM artists WHERE true
-		ON CONFLICT(name) DO NOTHING`); err != nil {
-		return fmt.Errorf("заполнение tracked_artists: %w", err)
-	}
 	return nil
 }
 
@@ -106,6 +100,21 @@ func copyMigrationRows(ctx context.Context, conn *sql.Conn, table, columns, sour
 		return fmt.Errorf("проверка переноса %s: строки исходной и целевой таблиц различаются", table)
 	}
 
+	if err := preserveSequence(ctx, conn, oldTable, table); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, "DROP TABLE "+oldTable); err != nil {
+		return fmt.Errorf("завершение переноса %s: %w", table, err)
+	}
+	for _, ddl := range indexes {
+		if _, err := conn.ExecContext(ctx, ddl); err != nil {
+			return fmt.Errorf("восстановление индекса %s: %w", table, err)
+		}
+	}
+	return nil
+}
+
+func preserveSequence(ctx context.Context, conn *sql.Conn, oldTable, table string) error {
 	// Keep the AUTOINCREMENT high-water mark, even if its last rows were removed.
 	if _, err := conn.ExecContext(ctx, `UPDATE sqlite_sequence SET seq = max(seq,
 			COALESCE((SELECT seq FROM sqlite_sequence WHERE name = ?), 0)) WHERE name = ?`, oldTable, table); err != nil {
@@ -116,14 +125,6 @@ func copyMigrationRows(ctx context.Context, conn *sql.Conn, table, columns, sour
 			AND NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = ?);`,
 		table, oldTable, table); err != nil {
 		return fmt.Errorf("перенос счётчика ID %s: %w", table, err)
-	}
-	if _, err := conn.ExecContext(ctx, "DROP TABLE "+oldTable); err != nil {
-		return fmt.Errorf("завершение переноса %s: %w", table, err)
-	}
-	for _, ddl := range indexes {
-		if _, err := conn.ExecContext(ctx, ddl); err != nil {
-			return fmt.Errorf("восстановление индекса %s: %w", table, err)
-		}
 	}
 	return nil
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"music-manager/internal/core/textkey"
 )
 
 // TrackedArtistEntity представляет персистентную запись отслеживаемого артиста.
@@ -37,25 +39,12 @@ type ArtistRelationItem struct {
 
 // CleanArtistKey приводит имя исполнителя к стандартному нижнему регистру для индексов.
 func CleanArtistKey(s string) string {
-	return strings.ToLower(strings.TrimSpace(s))
+	return textkey.Search(s)
 }
 
 // UpsertTrackedArtist добавляет артиста на отслеживание или обновляет метку времени.
 func (db *DB) UpsertTrackedArtist(ctx context.Context, name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("artist name cannot be empty")
-	}
-	cleanName := CleanArtistKey(name)
-	query := `
-	INSERT INTO tracked_artists (name, clean_name, is_followed, updated_at)
-	VALUES (?, ?, 1, CURRENT_TIMESTAMP)
-	ON CONFLICT(name) DO UPDATE SET
-		clean_name = excluded.clean_name,
-		updated_at = CURRENT_TIMESTAMP;
-	`
-	_, err := db.conn.ExecContext(ctx, query, name, cleanName)
-	return err
+	return RegisterTrackedArtist(ctx, db.conn, name)
 }
 
 // GetTrackedArtists возвращает список всех отслеживаемых артистов со статистикой пробелов.
@@ -79,10 +68,13 @@ func (db *DB) GetTrackedArtists(ctx context.Context, onlyFollowed bool) ([]Track
 		ta.created_at, ta.updated_at
 	FROM tracked_artists ta
 	LEFT JOIN (
-		SELECT ar.clean_name, COUNT(DISTINCT a.id) as cnt
-		FROM artists ar
-		JOIN albums a ON (a.artist_id = ar.id OR a.id IN (SELECT album_id FROM tracks WHERE artist_id = ar.id))
-		GROUP BY ar.clean_name
+		SELECT clean_name, COUNT(DISTINCT album_id) as cnt
+		FROM (
+			SELECT ar.clean_name, a.id AS album_id FROM albums a JOIN artists ar ON ar.id = a.artist_id
+			UNION ALL
+			SELECT ar.clean_name, t.album_id FROM tracks t JOIN artists ar ON ar.id = t.artist_id
+		)
+		GROUP BY clean_name
 	) al_cnt ON al_cnt.clean_name = ta.clean_name
 	LEFT JOIN (
 		SELECT ar.clean_name, COUNT(t.id) as cnt
@@ -147,10 +139,13 @@ func (db *DB) GetTrackedArtistByName(ctx context.Context, name string) (*Tracked
 		ta.created_at, ta.updated_at
 	FROM tracked_artists ta
 	LEFT JOIN (
-		SELECT ar.clean_name, COUNT(DISTINCT a.id) as cnt
-		FROM artists ar
-		JOIN albums a ON (a.artist_id = ar.id OR a.id IN (SELECT album_id FROM tracks WHERE artist_id = ar.id))
-		GROUP BY ar.clean_name
+		SELECT clean_name, COUNT(DISTINCT album_id) as cnt
+		FROM (
+			SELECT ar.clean_name, a.id AS album_id FROM albums a JOIN artists ar ON ar.id = a.artist_id
+			UNION ALL
+			SELECT ar.clean_name, t.album_id FROM tracks t JOIN artists ar ON ar.id = t.artist_id
+		)
+		GROUP BY clean_name
 	) al_cnt ON al_cnt.clean_name = ta.clean_name
 	LEFT JOIN (
 		SELECT ar.clean_name, COUNT(t.id) as cnt
@@ -165,13 +160,14 @@ func (db *DB) GetTrackedArtistByName(ctx context.Context, name string) (*Tracked
 		GROUP BY clean_artist_name
 	) gap_cnt ON gap_cnt.clean_artist_name = ta.clean_name
 	WHERE ta.clean_name = ?
+	ORDER BY ta.name = ? DESC, ta.id
 	LIMIT 1;
 	`
 	var a TrackedArtistEntity
 	var isFollowedInt, autoDownloadInt int
 	var lastChecked sql.NullTime
 
-	err := db.conn.QueryRowContext(ctx, query, cleanName).Scan(
+	err := db.conn.QueryRowContext(ctx, query, cleanName, strings.TrimSpace(name)).Scan(
 		&a.ID, &a.Name, &a.CleanName, &isFollowedInt, &autoDownloadInt,
 		&a.CustomSearchAlias, &a.DeezerID, &a.MusicBrainzID, &a.YandexID,
 		&lastChecked, &a.AlbumCount, &a.TrackCount, &a.GapCount, &a.CreatedAt, &a.UpdatedAt,
@@ -189,50 +185,42 @@ func (db *DB) GetTrackedArtistByName(ctx context.Context, name string) (*Tracked
 
 // SetArtistFollowed включает или отключает отслеживание артиста.
 func (db *DB) SetArtistFollowed(ctx context.Context, artistName string, followed bool) error {
-	cleanName := CleanArtistKey(artistName)
-	followedVal := 0
-	if followed {
-		followedVal = 1
+	id, err := db.trackedArtistID(ctx, artistName)
+	if err != nil {
+		return err
 	}
-	query := `UPDATE tracked_artists SET is_followed = ?, updated_at = CURRENT_TIMESTAMP WHERE clean_name = ?;`
-	_, err := db.conn.ExecContext(ctx, query, followedVal, cleanName)
-	return err
+	return SetTrackedArtistFollowed(ctx, db.conn, id, followed)
 }
 
 // SetArtistAutoDownload включает или отключает автоматическую загрузку новинок артиста.
 func (db *DB) SetArtistAutoDownload(ctx context.Context, artistName string, auto bool) error {
-	cleanName := CleanArtistKey(artistName)
-	autoVal := 0
-	if auto {
-		autoVal = 1
+	id, err := db.trackedArtistID(ctx, artistName)
+	if err != nil {
+		return err
 	}
-	query := `UPDATE tracked_artists SET auto_download = ?, updated_at = CURRENT_TIMESTAMP WHERE clean_name = ?;`
-	_, err := db.conn.ExecContext(ctx, query, autoVal, cleanName)
-	return err
+	return SetTrackedArtistAutoDownload(ctx, db.conn, id, auto)
 }
 
 // UpdateArtistCustomLinks сохраняет пользовательские связи с каталогами и псевдоним.
 func (db *DB) UpdateArtistCustomLinks(ctx context.Context, artistName, alias, deezerID, mbID, yandexID string) error {
-	cleanName := CleanArtistKey(artistName)
-	query := `
-	UPDATE tracked_artists SET
-		custom_search_alias = ?,
-		deezer_id = ?,
-		musicbrainz_id = ?,
-		yandex_id = ?,
-		updated_at = CURRENT_TIMESTAMP
-	WHERE clean_name = ?;
-	`
-	_, err := db.conn.ExecContext(ctx, query, alias, deezerID, mbID, yandexID, cleanName)
-	return err
+	id, err := db.trackedArtistID(ctx, artistName)
+	if err != nil {
+		return err
+	}
+	return SetTrackedArtistLinks(ctx, db.conn, id, alias, deezerID, mbID, yandexID)
 }
 
 // UpdateArtistLastChecked обновляет время последней проверки дискографии артиста.
 func (db *DB) UpdateArtistLastChecked(ctx context.Context, artistName string) error {
-	cleanName := CleanArtistKey(artistName)
-	query := `UPDATE tracked_artists SET last_checked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE clean_name = ?;`
-	_, err := db.conn.ExecContext(ctx, query, cleanName)
-	return err
+	id, err := db.trackedArtistID(ctx, artistName)
+	if err != nil {
+		return err
+	}
+	return db.UpdateArtistLastCheckedByID(ctx, id)
+}
+
+func (db *DB) UpdateArtistLastCheckedByID(ctx context.Context, id int64) error {
+	return updateTrackedArtist(ctx, db.conn, id, "last_checked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP")
 }
 
 // SaveArtistRelations сохраняет список похожих артистов в таблице artist_relations.

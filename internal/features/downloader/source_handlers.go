@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"music-manager/internal/core/httputil"
 	"music-manager/internal/core/mediaexec"
+	"music-manager/internal/db"
 	"music-manager/internal/services/resolver"
 )
 
@@ -232,12 +233,18 @@ func (m *Module) BindBackfillSource(w http.ResponseWriter, r *http.Request) {
 	if title == "" {
 		title = req.AlbumTitle
 	}
+
+	position := db.ReleasePosition(req.DiscNumber, req.TrackNumber)
+	var backfill []db.BackfillSelection
+	if req.Path != "" && position.TrackNumber > 0 {
+		backfill = []db.BackfillSelection{{TrackPosition: position, DeezerID: req.DeezerID}}
+	}
 	selection, err := m.service.SwitchReleaseSource(r.Context(), SwitchReleaseSourceRequest{
-		SourceURL: req.TargetURL, TargetPath: req.Path, VersionPolicy: req.VersionPolicy,
+		SourceURL: req.TargetURL, TargetPath: req.Path, VersionPolicy: req.VersionPolicy, Backfill: backfill,
 		TrackMapping: map[int]string{0: req.TargetURL},
 		TargetTracks: []resolver.ResolvedTrack{{
 			Title: title, Artist: req.ArtistName, Album: req.AlbumTitle,
-			TrackNumber: req.TrackNumber, Duration: req.Duration, ISRC: req.ISRC,
+			TrackNumber: position.TrackNumber, DiscNumber: position.DiscNumber, Duration: req.Duration, ISRC: req.ISRC,
 		}},
 	})
 	if err != nil {

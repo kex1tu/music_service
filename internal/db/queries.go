@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"music-manager/internal/core/textkey"
 )
 
 // DownloadJobEntity представляет запись задачи загрузки в SQLite.
@@ -179,7 +181,7 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (*Sear
 	if limit <= 0 {
 		limit = 50
 	}
-	term := "%" + query + "%"
+	term := textkey.Search(query)
 
 	tracks := make([]SearchTrackItem, 0)
 	albums := make([]SearchAlbumItem, 0)
@@ -191,7 +193,7 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (*Sear
 	FROM tracks t
 	JOIN albums al ON t.album_id = al.id
 	JOIN artists ar ON t.artist_id = ar.id
-	WHERE t.title LIKE ? OR t.clean_title LIKE ?
+	WHERE instr(t.search_title, ?) > 0 OR instr(t.search_clean_title, ?) > 0
 	LIMIT ?;
 	`
 	tRows, err := db.conn.QueryContext(ctx, trackQuery, term, term, limit)
@@ -235,7 +237,7 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (*Sear
 	       (SELECT COUNT(1) FROM tracks WHERE album_id = al.id) AS track_count
 	FROM albums al
 	JOIN artists ar ON al.artist_id = ar.id
-	WHERE al.title LIKE ? OR al.clean_title LIKE ?
+	WHERE instr(al.search_title, ?) > 0 OR instr(al.search_clean_title, ?) > 0
 	LIMIT ?;
 	`
 	aRows, err := db.conn.QueryContext(ctx, albumQuery, term, term, limit)
@@ -275,11 +277,11 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (*Sear
 	FROM artists ar
 	LEFT JOIN tracks t ON t.artist_id = ar.id
 	LEFT JOIN albums al ON al.artist_id = ar.id
-	WHERE ar.name LIKE ? OR ar.clean_name LIKE ?
+	WHERE instr(ar.clean_name, ?) > 0
 	GROUP BY ar.id, ar.name
 	LIMIT ?;
 	`
-	arRows, err := db.conn.QueryContext(ctx, artistQuery, term, term, limit)
+	arRows, err := db.conn.QueryContext(ctx, artistQuery, term, limit)
 	if err == nil {
 		defer arRows.Close()
 		for arRows.Next() {
