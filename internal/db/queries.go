@@ -36,12 +36,16 @@ type DownloadJobEntity struct {
 
 // SaveJob вставляет или обновляет состояние задачи в базе данных.
 func (db *DB) SaveJob(ctx context.Context, job DownloadJobEntity) error {
+	artistID := "NULL"
+	if job.ArtistName != nil && strings.TrimSpace(*job.ArtistName) != "" {
+		artistID = ArtistIDLookup("?13")
+	}
 	query := `
 	INSERT INTO download_jobs (
 		id, status, source, url, progress, current_step,
 		total_tracks, completed_tracks, error, target_album_path,
-		is_backfill, album_title, artist_name, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		is_backfill, album_title, artist_name, artist_id, updated_at
+	) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ` + artistID + `, CURRENT_TIMESTAMP)
 	ON CONFLICT(id) DO UPDATE SET
 		status = excluded.status,
 		progress = excluded.progress,
@@ -52,6 +56,8 @@ func (db *DB) SaveJob(ctx context.Context, job DownloadJobEntity) error {
 		target_album_path = excluded.target_album_path,
 		is_backfill = excluded.is_backfill,
 		album_title = excluded.album_title,
+		artist_id = CASE WHEN download_jobs.artist_name IS excluded.artist_name
+			THEN COALESCE(download_jobs.artist_id, excluded.artist_id) ELSE excluded.artist_id END,
 		artist_name = excluded.artist_name,
 		updated_at = CURRENT_TIMESTAMP;
 	`
@@ -277,7 +283,7 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (*Sear
 	FROM artists ar
 	LEFT JOIN tracks t ON t.artist_id = ar.id
 	LEFT JOIN albums al ON al.artist_id = ar.id
-	WHERE instr(ar.clean_name, ?) > 0
+	WHERE instr(ar.clean_name, ?) > 0 AND (t.id IS NOT NULL OR al.id IS NOT NULL)
 	GROUP BY ar.id, ar.name
 	LIMIT ?;
 	`
@@ -408,7 +414,7 @@ func (db *DB) ResetLibraryTables(ctx context.Context) error {
 		"DELETE FROM missing_tracks;",
 		"DELETE FROM tracks;",
 		"DELETE FROM albums;",
-		"DELETE FROM artists;",
+		"DELETE FROM artists WHERE " + unusedArtist,
 		"DELETE FROM genres;",
 	}
 	for _, q := range queries {
@@ -848,11 +854,22 @@ func (db *DB) GetPinnedSource(ctx context.Context, cacheKey string) (*PinnedTrac
 
 // SavePinnedSource сохраняет постоянную ручную привязку аудио-источника.
 func (db *DB) SavePinnedSource(ctx context.Context, pin PinnedTrackSource) error {
+	return WritePinnedSource(ctx, db.conn, pin)
+}
+
+// WritePinnedSource records the local identity when a source's artist is known.
+func WritePinnedSource(ctx context.Context, writer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, pin PinnedTrackSource) error {
 	query := `
 	INSERT INTO pinned_track_sources (
-		cache_key, artist_name, track_title, isrc, pinned_url, source_type, duration, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		cache_key, artist_name, track_title, isrc, pinned_url, source_type, duration, artist_id, updated_at
+	) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ` + ArtistIDLookup("?2") + `, CURRENT_TIMESTAMP)
 	ON CONFLICT(cache_key) DO UPDATE SET
+		artist_id = COALESCE(pinned_track_sources.artist_id, excluded.artist_id),
+		artist_name = COALESCE(NULLIF(pinned_track_sources.artist_name, ''), excluded.artist_name),
+		track_title = COALESCE(NULLIF(pinned_track_sources.track_title, ''), excluded.track_title),
+		isrc = COALESCE(NULLIF(pinned_track_sources.isrc, ''), excluded.isrc),
 		pinned_url = excluded.pinned_url,
 		source_type = excluded.source_type,
 		duration = excluded.duration,
@@ -862,7 +879,7 @@ func (db *DB) SavePinnedSource(ctx context.Context, pin PinnedTrackSource) error
 	if pin.ISRC != nil && *pin.ISRC != "" {
 		isrcVal = *pin.ISRC
 	}
-	_, err := db.conn.ExecContext(ctx, query,
+	_, err := writer.ExecContext(ctx, query,
 		pin.CacheKey, pin.ArtistName, pin.TrackTitle, isrcVal,
 		pin.PinnedURL, pin.SourceType, pin.Duration,
 	)

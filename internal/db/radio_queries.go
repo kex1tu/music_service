@@ -2,13 +2,17 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 // RecordRadioPlay фиксирует факт воспроизведения трека радиостанцией.
 func (db *DB) RecordRadioPlay(ctx context.Context, trackID int64, stationType, stationParam string) error {
-	query := `INSERT INTO radio_history (track_id, station_type, station_param) VALUES (?, ?, ?);`
+	query := `INSERT INTO radio_history (track_id, station_type, station_param) VALUES (?1, ?2, ?3)`
+	if stationType == "artist" {
+		query = `INSERT INTO radio_history (track_id, station_type, station_param, station_artist_id)
+			VALUES (?1, ?2, ?3, ` + ArtistIDLookup("?3") + `)`
+	}
 	_, err := db.conn.ExecContext(ctx, query, trackID, stationType, stationParam)
 	return err
 }
@@ -162,15 +166,11 @@ func (db *DB) GetTracksByArtists(ctx context.Context, artistNames []string, limi
 		limit = 50
 	}
 
-	var placeholders []string
-	var args []any
-	for _, a := range artistNames {
-		placeholders = append(placeholders, "?")
-		args = append(args, strings.ToLower(strings.TrimSpace(a)))
+	names, err := json.Marshal(artistNames)
+	if err != nil {
+		return nil, err
 	}
-	args = append(args, limit)
-
-	query := fmt.Sprintf(`
+	query := `
 	SELECT t.id, t.album_id, t.artist_id, t.title, ar.name AS artist, al.title AS album,
 	       t.track_number, t.duration, t.bitrate, t.file_path, t.file_size,
 	       COALESCE(t.file_hash, ''), t.has_embedded_cover, t.lyrics_status,
@@ -178,12 +178,10 @@ func (db *DB) GetTracksByArtists(ctx context.Context, artistNames []string, limi
 	FROM tracks t
 	JOIN albums al ON t.album_id = al.id
 	JOIN artists ar ON t.artist_id = ar.id
-	WHERE LOWER(ar.name) IN (%s)
+	WHERE t.artist_id IN (SELECT ` + ArtistIDLookup("names.value") + ` FROM json_each(?) names)
 	ORDER BY RANDOM()
-	LIMIT ?;
-	`, strings.Join(placeholders, ", "))
-
-	rows, err := db.conn.QueryContext(ctx, query, args...)
+	LIMIT ?;`
+	rows, err := db.conn.QueryContext(ctx, query, string(names), limit)
 	if err != nil {
 		return nil, err
 	}

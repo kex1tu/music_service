@@ -347,6 +347,11 @@ func TestScanner_RemoveFile(t *testing.T) {
 		t.Fatalf("expected present_tracks_count 2, got %d, err=%v", presentCount, err)
 	}
 
+	var artistID int64
+	if err := database.Conn().QueryRow("SELECT id FROM artists WHERE name = 'ArtistX'").Scan(&artistID); err != nil {
+		t.Fatal(err)
+	}
+
 	// Remove track 1
 	rel1 := filepath.Join("RemoveAlbum", "01. Song1.mp3")
 	if err := s.RemoveFile(rel1); err != nil {
@@ -370,15 +375,23 @@ func TestScanner_RemoveFile(t *testing.T) {
 		t.Fatalf("RemoveFile failed: %v", err)
 	}
 
-	// Verify album and artist are completely cleaned up
+	// Remove the album and retain the artist referenced by radar settings.
 	var albumCount, artistCount int
 	_ = database.Conn().QueryRow("SELECT COUNT(*) FROM albums WHERE title = 'RemoveAlbum'").Scan(&albumCount)
 	_ = database.Conn().QueryRow("SELECT COUNT(*) FROM artists WHERE name = 'ArtistX'").Scan(&artistCount)
 	if albumCount != 0 {
 		t.Errorf("expected album to be deleted, got %d", albumCount)
 	}
-	if artistCount != 0 {
-		t.Errorf("expected artist to be deleted, got %d", artistCount)
+	if artistCount != 1 {
+		t.Errorf("expected referenced artist to remain, got %d", artistCount)
+	}
+	if err := s.IndexFile(f1, rel1); err != nil {
+		t.Fatal(err)
+	}
+	var reimportedID int64
+	err = database.Conn().QueryRow("SELECT artist_id FROM tracks WHERE file_path = ?", rel1).Scan(&reimportedID)
+	if err != nil || reimportedID != artistID {
+		t.Fatalf("reimport artist id=%d, want %d (err=%v)", reimportedID, artistID, err)
 	}
 }
 
@@ -767,7 +780,3 @@ func TestScanner_StartWatcher(t *testing.T) {
 		t.Fatalf("StartWatcher failed: %v", err)
 	}
 }
-
-
-
-

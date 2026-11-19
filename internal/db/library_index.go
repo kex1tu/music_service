@@ -114,13 +114,12 @@ func deleteLibraryIssues(ctx context.Context, tx *sql.Tx, entityType string, id 
 	return err
 }
 
-// PruneLibraryArtist removes an artist only when both of its library relationships are empty.
+// PruneLibraryArtist removes an artist only when it has no library data or retained references.
 func PruneLibraryArtist(ctx context.Context, tx *sql.Tx, id int64) error {
 	var deleted int64
 	err := tx.QueryRowContext(ctx, `
 		DELETE FROM artists WHERE id = ?
-		AND NOT EXISTS (SELECT 1 FROM albums WHERE artist_id = artists.id)
-		AND NOT EXISTS (SELECT 1 FROM tracks WHERE artist_id = artists.id)
+		AND `+unusedArtist+`
 		RETURNING id
 	`, id).Scan(&deleted)
 	if err == sql.ErrNoRows {

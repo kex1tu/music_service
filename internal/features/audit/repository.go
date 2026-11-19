@@ -232,6 +232,8 @@ func (r *Repository) SearchLibrary(ctx context.Context, query string, limit int)
 	SELECT id, name
 	FROM artists
 	WHERE instr(clean_name, ?) > 0
+	  AND (EXISTS (SELECT 1 FROM tracks WHERE artist_id = artists.id)
+	       OR EXISTS (SELECT 1 FROM albums WHERE artist_id = artists.id))
 	LIMIT ?;
 	`
 	arRows, err := r.db.QueryContext(ctx, artistQuery, term, limit)

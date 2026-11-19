@@ -130,19 +130,21 @@ func scanJob(scanner interface{ Scan(dest ...any) error }) (*Job, error) {
 	return &j, nil
 }
 
-const insertJobSQL = `
+var insertJobSQL = `
 	INSERT INTO download_jobs (
 		id, status, source, url, progress, current_step,
 		total_tracks, completed_tracks, error, target_album_path,
-		is_backfill, album_title, artist_name, backfill_selection, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+		is_backfill, album_title, artist_name, backfill_selection, artist_id, updated_at
+	) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ` + db.ArtistIDLookup("?13") + `, CURRENT_TIMESTAMP)`
 
-const updateJobSQL = `
+var updateJobSQL = `
 	UPDATE download_jobs SET
-		status=?, source=?, url=?, progress=?, current_step=?, total_tracks=?,
-		completed_tracks=?, error=?, target_album_path=?, is_backfill=?, album_title=?,
-		artist_name=?, backfill_selection=?, updated_at=CURRENT_TIMESTAMP
-	WHERE id=?`
+		status=?1, source=?2, url=?3, progress=?4, current_step=?5, total_tracks=?6,
+		completed_tracks=?7, error=?8, target_album_path=?9, is_backfill=?10, album_title=?11,
+		artist_id=CASE WHEN artist_name IS ?12 AND artist_id IS NOT NULL
+			THEN artist_id ELSE ` + db.ArtistIDLookup("?12") + ` END,
+		artist_name=?12, backfill_selection=?13, updated_at=CURRENT_TIMESTAMP
+	WHERE id=?14`
 
 const selectJobSQL = `
 	SELECT j.id, j.status, j.source, j.url, j.progress, j.current_step,
@@ -176,6 +178,8 @@ func (r *Repository) SaveJob(ctx context.Context, job *Job) error {
 		total_tracks=excluded.total_tracks, completed_tracks=excluded.completed_tracks,
 		error=excluded.error, target_album_path=excluded.target_album_path,
 		is_backfill=excluded.is_backfill, album_title=excluded.album_title,
+		artist_id=CASE WHEN download_jobs.artist_name IS excluded.artist_name
+			THEN COALESCE(download_jobs.artist_id, excluded.artist_id) ELSE excluded.artist_id END,
 		artist_name=excluded.artist_name, backfill_selection=excluded.backfill_selection, updated_at=CURRENT_TIMESTAMP`, true, nil)
 }
 
@@ -444,10 +448,11 @@ func (r *Repository) ClearCompletedJobs(ctx context.Context, age time.Duration) 
 // GetMissingTracksForAlbum возвращает список недостающих треков для альбома из missing_tracks.
 func (r *Repository) GetMissingTracksForAlbum(ctx context.Context, folderPath string) ([]MissingTrackInfo, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT mt.title, mt.artist, mt.track_number, COALESCE(mt.disc_number, 1),
+		SELECT mt.title, COALESCE(ar.name, mt.artist), mt.track_number, COALESCE(mt.disc_number, 1),
 			COALESCE(mt.expected_duration, 0), COALESCE(mt.deezer_id, ''), COALESCE(mt.deezer_url, ''),
 			COALESCE(mt.isrc, ''), COALESCE(mt.pinned_source_url, '')
 		FROM missing_tracks mt JOIN albums al ON mt.album_id = al.id
+		LEFT JOIN artists ar ON ar.id = mt.artist_id
 		WHERE al.folder_path = ? ORDER BY mt.disc_number, mt.track_number
 	`, db.AlbumRoot(filepath.ToSlash(folderPath)))
 	if err != nil {
@@ -490,17 +495,25 @@ func (r *Repository) GetAlbumTrackPositions(ctx context.Context, folderPath stri
 
 // GetPinnedSource возвращает зафиксированный источник трека по cache_key.
 func (r *Repository) GetPinnedSource(ctx context.Context, cacheKey string) (*PinnedTrackSourceDTO, error) {
+	return r.getPinnedSource(ctx, cacheKey, "", "")
+}
+
+func (r *Repository) getPinnedSource(ctx context.Context, cacheKey, artist, title string) (*PinnedTrackSourceDTO, error) {
 	cacheKey = strings.TrimSpace(cacheKey)
 	if cacheKey == "" {
 		return nil, nil
 	}
 
 	query := `
-	SELECT cache_key, artist_name, track_title, isrc, pinned_url, source_type, duration, created_at, updated_at
-	FROM pinned_track_sources
-	WHERE cache_key = ?;
-	`
-	row := r.db.QueryRowContext(ctx, query, cacheKey)
+	WITH requested(id) AS (SELECT ` + db.ArtistIDLookup("?2") + `)
+	SELECT p.cache_key, p.artist_name, p.track_title, p.isrc, p.pinned_url, p.source_type, p.duration, p.created_at, p.updated_at
+	FROM pinned_track_sources p CROSS JOIN requested
+	WHERE (p.cache_key = ?1 AND (p.artist_id IS NULL OR requested.id IS NULL OR p.artist_id = requested.id OR ?1 LIKE 'isrc:%'))
+	   OR (p.artist_id = requested.id AND ?1 NOT LIKE 'isrc:%' AND NULLIF(p.isrc, '') IS NULL
+	       AND music_search_key(p.track_title) = music_search_key(?3))
+	ORDER BY p.cache_key = ?1 DESC, p.updated_at DESC, p.cache_key
+	LIMIT 1;`
+	row := r.db.QueryRowContext(ctx, query, cacheKey, artist, title)
 	var p PinnedTrackSourceDTO
 	var isrc sql.NullString
 	var createdAtRaw, updatedAtRaw any
@@ -530,25 +543,7 @@ func (r *Repository) SavePinnedSource(ctx context.Context, pin PinnedTrackSource
 }
 
 func savePinnedSource(ctx context.Context, writer DBTX, pin PinnedTrackSourceDTO) error {
-	query := `
-	INSERT INTO pinned_track_sources (
-		cache_key, artist_name, track_title, isrc, pinned_url, source_type, duration, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-	ON CONFLICT(cache_key) DO UPDATE SET
-		pinned_url = excluded.pinned_url,
-		source_type = excluded.source_type,
-		duration = excluded.duration,
-		updated_at = CURRENT_TIMESTAMP;
-	`
-	var isrcVal any
-	if pin.ISRC != nil && *pin.ISRC != "" {
-		isrcVal = *pin.ISRC
-	}
-	_, err := writer.ExecContext(ctx, query,
-		pin.CacheKey, pin.ArtistName, pin.TrackTitle, isrcVal,
-		pin.PinnedURL, pin.SourceType, pin.Duration,
-	)
-	return err
+	return db.WritePinnedSource(ctx, writer, pin)
 }
 
 // DeletePinnedSource удаляет ручную привязку аудио-источника по cache_key.

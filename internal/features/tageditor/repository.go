@@ -436,39 +436,7 @@ func (r *Repository) UpdateTrackFilePath(ctx context.Context, oldPath, newPath s
 
 // GetOrCreateArtist находит или вставляет артиста, поддерживая tracked_artists.
 func (r *Repository) GetOrCreateArtist(ctx context.Context, name string) (int64, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = "Unknown Artist"
-	}
-	cleanName := librarydb.CleanArtistKey(name)
-
-	// 1. Автоматическая регистрация в tracked_artists
-	_, _ = r.db.ExecContext(ctx, `
-		INSERT INTO tracked_artists (name, clean_name, is_followed)
-		VALUES (?, ?, 1)
-		ON CONFLICT(name) DO NOTHING;
-	`, name, cleanName)
-
-	// 2. Поиск в таблице artists
-	var id int64
-	err := r.db.QueryRowContext(ctx, "SELECT id FROM artists WHERE name = ?;", name).Scan(&id)
-	if err == nil {
-		return id, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, err
-	}
-
-	// 3. Вставка нового артиста
-	res, err := r.db.ExecContext(ctx, "INSERT INTO artists (name, clean_name) VALUES (?, ?);", name, cleanName)
-	if err != nil {
-		// Конкурентная гонка: повторная попытка чтения
-		if err2 := r.db.QueryRowContext(ctx, "SELECT id FROM artists WHERE name = ?;", name).Scan(&id); err2 == nil {
-			return id, nil
-		}
-		return 0, err
-	}
-	return res.LastInsertId()
+	return librarydb.GetOrCreateLibraryArtist(ctx, r.db, name)
 }
 
 // GetOrCreateAlbum находит или вставляет альбом.

@@ -359,6 +359,7 @@ func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limi
 	FROM artists ar
 	LEFT JOIN tracks t ON t.artist_id = ar.id
 	WHERE instr(ar.clean_name, ?) > 0
+	  AND (t.id IS NOT NULL OR EXISTS (SELECT 1 FROM albums a WHERE a.artist_id = ar.id))
 	GROUP BY ar.id
 	LIMIT ?;
 	`
@@ -415,7 +416,16 @@ func (r *SQLiteRepository) GetTrackDetailsForRedownload(ctx context.Context, rel
 		COALESCE(t.title, ''), 
 		COALESCE(al.title, ''), 
 		COALESCE(t.deezer_id, ''), 
-		COALESCE(t.pinned_source_url, ''), 
+		COALESCE(NULLIF(t.pinned_source_url, ''), (
+			SELECT pin.pinned_url FROM pinned_track_sources pin
+			WHERE pin.artist_id = t.artist_id
+			  AND ((NULLIF(t.isrc, '') IS NOT NULL AND UPPER(pin.isrc) = UPPER(t.isrc))
+			       OR (NULLIF(t.isrc, '') IS NULL AND NULLIF(pin.isrc, '') IS NULL
+			           AND music_search_key(pin.track_title) = music_search_key(t.title)
+			           AND NOT EXISTS (SELECT 1 FROM tracks other WHERE other.artist_id = t.artist_id
+			               AND other.search_title = t.search_title AND other.id <> t.id)))
+			ORDER BY (UPPER(pin.isrc) = UPPER(t.isrc)) DESC, pin.updated_at DESC, pin.cache_key LIMIT 1
+		), ''),
 		COALESCE(t.duration, 0.0), 
 		COALESCE(al.deezer_id, '')
 	FROM tracks t

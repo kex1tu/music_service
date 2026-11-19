@@ -665,17 +665,7 @@ type MissingTrackInfo struct {
 }
 
 // PinnedTrackSourceDTO — DTO для сохранения и чтения ручной привязки трека.
-type PinnedTrackSourceDTO struct {
-	CacheKey   string    `json:"cache_key"`
-	ArtistName string    `json:"artist_name"`
-	TrackTitle string    `json:"track_title"`
-	ISRC       *string   `json:"isrc,omitempty"`
-	PinnedURL  string    `json:"pinned_url"`
-	SourceType string    `json:"source_type"`
-	Duration   int       `json:"duration"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-}
+type PinnedTrackSourceDTO = db.PinnedTrackSource
 
 // SoundCloudCacheDTO — запись кэша альтернативных версий SoundCloud.
 type SoundCloudCacheDTO struct {

@@ -3,8 +3,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"strings"
 	"time"
 
 	"music-manager/internal/core/textkey"
@@ -13,6 +11,7 @@ import (
 // TrackedArtistEntity представляет персистентную запись отслеживаемого артиста.
 type TrackedArtistEntity struct {
 	ID                int64      `json:"id"`
+	ArtistID          int64      `json:"artist_id,omitempty"`
 	Name              string     `json:"name"`
 	CleanName         string     `json:"clean_name"`
 	IsFollowed        bool       `json:"is_followed"`
@@ -47,140 +46,86 @@ func (db *DB) UpsertTrackedArtist(ctx context.Context, name string) error {
 	return RegisterTrackedArtist(ctx, db.conn, name)
 }
 
-// GetTrackedArtists возвращает список всех отслеживаемых артистов со статистикой пробелов.
-func (db *DB) GetTrackedArtists(ctx context.Context, onlyFollowed bool) ([]TrackedArtistEntity, error) {
-	whereClause := ""
-	if onlyFollowed {
-		whereClause = "WHERE ta.is_followed = 1"
+const trackedArtistsQuery = `
+	SELECT ta.id, COALESCE(ta.artist_id, 0), COALESCE(ar.name, ta.name), COALESCE(ar.clean_name, ta.clean_name),
+	       ta.is_followed, ta.auto_download, COALESCE(ta.custom_search_alias, ''),
+	       COALESCE(ta.deezer_id, ''), COALESCE(ta.musicbrainz_id, ''), COALESCE(ta.yandex_id, ''), ta.last_checked_at,
+	       COALESCE(albums_by_artist.total, 0), COALESCE(tracks_by_artist.total, 0),
+	       CASE WHEN ta.artist_id IS NULL THEN (
+	           SELECT COUNT(*) FROM radar_releases rr WHERE rr.status = 'missing' AND music_radar_artist_matches(rr.artist_name, ta.name)
+	       ) ELSE COALESCE(gaps_by_artist.total, 0) END,
+	       ta.created_at, ta.updated_at
+	FROM tracked_artists ta LEFT JOIN artists ar ON ar.id = ta.artist_id
+	LEFT JOIN (
+		SELECT artist_id, COUNT(*) AS total FROM (
+			SELECT artist_id, id AS album_id FROM albums
+			UNION SELECT artist_id, album_id FROM tracks
+		) GROUP BY artist_id
+	) albums_by_artist ON albums_by_artist.artist_id = ta.artist_id
+	LEFT JOIN (
+		SELECT artist_id, COUNT(*) AS total FROM tracks GROUP BY artist_id
+	) tracks_by_artist ON tracks_by_artist.artist_id = ta.artist_id
+	LEFT JOIN (
+		SELECT credit.artist_id, COUNT(*) AS total FROM radar_release_artists credit
+		JOIN radar_releases rr ON rr.id = credit.release_id WHERE rr.status = 'missing'
+		GROUP BY credit.artist_id
+	) gaps_by_artist ON gaps_by_artist.artist_id = ta.artist_id`
+
+func readTrackedArtist(row interface{ Scan(...any) error }) (TrackedArtistEntity, error) {
+	var artist TrackedArtistEntity
+	var lastChecked sql.NullTime
+	err := row.Scan(&artist.ID, &artist.ArtistID, &artist.Name, &artist.CleanName, &artist.IsFollowed, &artist.AutoDownload,
+		&artist.CustomSearchAlias, &artist.DeezerID, &artist.MusicBrainzID, &artist.YandexID, &lastChecked,
+		&artist.AlbumCount, &artist.TrackCount, &artist.GapCount, &artist.CreatedAt, &artist.UpdatedAt)
+	if lastChecked.Valid {
+		artist.LastCheckedAt = &lastChecked.Time
 	}
+	return artist, err
+}
 
-	query := fmt.Sprintf(`
-	SELECT
-		ta.id, ta.name, ta.clean_name, ta.is_followed, ta.auto_download,
-		COALESCE(ta.custom_search_alias, ''),
-		COALESCE(ta.deezer_id, ''),
-		COALESCE(ta.musicbrainz_id, ''),
-		COALESCE(ta.yandex_id, ''),
-		ta.last_checked_at,
-		COALESCE(al_cnt.cnt, 0) as album_count,
-		COALESCE(tr_cnt.cnt, 0) as track_count,
-		COALESCE(gap_cnt.cnt, 0) as gap_count,
-		ta.created_at, ta.updated_at
-	FROM tracked_artists ta
-	LEFT JOIN (
-		SELECT clean_name, COUNT(DISTINCT album_id) as cnt
-		FROM (
-			SELECT ar.clean_name, a.id AS album_id FROM albums a JOIN artists ar ON ar.id = a.artist_id
-			UNION ALL
-			SELECT ar.clean_name, t.album_id FROM tracks t JOIN artists ar ON ar.id = t.artist_id
-		)
-		GROUP BY clean_name
-	) al_cnt ON al_cnt.clean_name = ta.clean_name
-	LEFT JOIN (
-		SELECT ar.clean_name, COUNT(t.id) as cnt
-		FROM artists ar
-		JOIN tracks t ON t.artist_id = ar.id
-		GROUP BY ar.clean_name
-	) tr_cnt ON tr_cnt.clean_name = ta.clean_name
-	LEFT JOIN (
-		SELECT clean_artist_name, COUNT(*) as cnt
-		FROM radar_releases
-		WHERE status = 'missing'
-		GROUP BY clean_artist_name
-	) gap_cnt ON gap_cnt.clean_artist_name = ta.clean_name
-	%s
-	ORDER BY ta.name COLLATE NOCASE ASC;
-	`, whereClause)
-
-	rows, err := db.conn.QueryContext(ctx, query)
+// QueryTrackedArtists returns settings together with counts grouped by the common artist ID.
+func QueryTrackedArtists(ctx context.Context, queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, onlyFollowed bool) ([]TrackedArtistEntity, error) {
+	rows, err := queryer.QueryContext(ctx, trackedArtistsQuery+`
+		WHERE (? = 0 OR ta.is_followed = 1) ORDER BY COALESCE(ar.name, ta.name) COLLATE NOCASE ASC`, onlyFollowed)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
-	var result []TrackedArtistEntity
+	artists := []TrackedArtistEntity{}
 	for rows.Next() {
-		var a TrackedArtistEntity
-		var isFollowedInt, autoDownloadInt int
-		var lastChecked sql.NullTime
-
-		err := rows.Scan(
-			&a.ID, &a.Name, &a.CleanName, &isFollowedInt, &autoDownloadInt,
-			&a.CustomSearchAlias, &a.DeezerID, &a.MusicBrainzID, &a.YandexID,
-			&lastChecked, &a.AlbumCount, &a.TrackCount, &a.GapCount, &a.CreatedAt, &a.UpdatedAt,
-		)
+		artist, err := readTrackedArtist(rows)
 		if err != nil {
 			return nil, err
 		}
-		a.IsFollowed = isFollowedInt == 1
-		a.AutoDownload = autoDownloadInt == 1
-		if lastChecked.Valid {
-			a.LastCheckedAt = &lastChecked.Time
-		}
-		result = append(result, a)
+		artists = append(artists, artist)
 	}
-	return result, rows.Err()
+	return artists, rows.Err()
 }
 
-// GetTrackedArtistByName находит запись артиста по его имени.
-func (db *DB) GetTrackedArtistByName(ctx context.Context, name string) (*TrackedArtistEntity, error) {
-	cleanName := CleanArtistKey(name)
-	query := `
-	SELECT
-		ta.id, ta.name, ta.clean_name, ta.is_followed, ta.auto_download,
-		COALESCE(ta.custom_search_alias, ''),
-		COALESCE(ta.deezer_id, ''),
-		COALESCE(ta.musicbrainz_id, ''),
-		COALESCE(ta.yandex_id, ''),
-		ta.last_checked_at,
-		COALESCE(al_cnt.cnt, 0) as album_count,
-		COALESCE(tr_cnt.cnt, 0) as track_count,
-		COALESCE(gap_cnt.cnt, 0) as gap_count,
-		ta.created_at, ta.updated_at
-	FROM tracked_artists ta
-	LEFT JOIN (
-		SELECT clean_name, COUNT(DISTINCT album_id) as cnt
-		FROM (
-			SELECT ar.clean_name, a.id AS album_id FROM albums a JOIN artists ar ON ar.id = a.artist_id
-			UNION ALL
-			SELECT ar.clean_name, t.album_id FROM tracks t JOIN artists ar ON ar.id = t.artist_id
-		)
-		GROUP BY clean_name
-	) al_cnt ON al_cnt.clean_name = ta.clean_name
-	LEFT JOIN (
-		SELECT ar.clean_name, COUNT(t.id) as cnt
-		FROM artists ar
-		JOIN tracks t ON t.artist_id = ar.id
-		GROUP BY ar.clean_name
-	) tr_cnt ON tr_cnt.clean_name = ta.clean_name
-	LEFT JOIN (
-		SELECT clean_artist_name, COUNT(*) as cnt
-		FROM radar_releases
-		WHERE status = 'missing'
-		GROUP BY clean_artist_name
-	) gap_cnt ON gap_cnt.clean_artist_name = ta.clean_name
-	WHERE ta.clean_name = ?
-	ORDER BY ta.name = ? DESC, ta.id
-	LIMIT 1;
-	`
-	var a TrackedArtistEntity
-	var isFollowedInt, autoDownloadInt int
-	var lastChecked sql.NullTime
+func (db *DB) GetTrackedArtists(ctx context.Context, onlyFollowed bool) ([]TrackedArtistEntity, error) {
+	return QueryTrackedArtists(ctx, db.conn, onlyFollowed)
+}
 
-	err := db.conn.QueryRowContext(ctx, query, cleanName, strings.TrimSpace(name)).Scan(
-		&a.ID, &a.Name, &a.CleanName, &isFollowedInt, &autoDownloadInt,
-		&a.CustomSearchAlias, &a.DeezerID, &a.MusicBrainzID, &a.YandexID,
-		&lastChecked, &a.AlbumCount, &a.TrackCount, &a.GapCount, &a.CreatedAt, &a.UpdatedAt,
-	)
+// QueryTrackedArtist resolves the local identity before reading its settings.
+// The original spelling disambiguates legacy settings with the same identity.
+func QueryTrackedArtist(ctx context.Context, queryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, name string) (*TrackedArtistEntity, error) {
+	artist, err := readTrackedArtist(queryer.QueryRowContext(ctx, trackedArtistsQuery+`
+		WHERE ta.artist_id = `+ArtistIDLookup("?1")+`
+		   OR ta.name = trim(?1)
+		   OR (ta.artist_id IS NULL AND ta.clean_name = music_search_key(?1))
+		ORDER BY ta.name = trim(?1) DESC, ta.id LIMIT 1`, name))
 	if err != nil {
 		return nil, err
 	}
-	a.IsFollowed = isFollowedInt == 1
-	a.AutoDownload = autoDownloadInt == 1
-	if lastChecked.Valid {
-		a.LastCheckedAt = &lastChecked.Time
-	}
-	return &a, nil
+	return &artist, nil
+}
+
+func (db *DB) GetTrackedArtistByName(ctx context.Context, name string) (*TrackedArtistEntity, error) {
+	return QueryTrackedArtist(ctx, db.conn, name)
 }
 
 // SetArtistFollowed включает или отключает отслеживание артиста.
@@ -230,11 +175,17 @@ func (db *DB) SaveArtistRelations(ctx context.Context, artistName string, relati
 	}
 	cleanArtist := CleanArtistKey(artistName)
 	query := `
-	INSERT INTO artist_relations (artist_name, related_name, score, source, updated_at)
-	VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+	WITH ids(artist_id, related_artist_id) AS (SELECT ` + ArtistIDLookup("?1") + `, ` + ArtistIDLookup("?2") + `)
+	INSERT INTO artist_relations (artist_name, related_name, score, source, artist_id, related_artist_id, updated_at)
+	SELECT COALESCE((SELECT name FROM artists WHERE id = ids.artist_id), music_search_key(?1)),
+	       COALESCE((SELECT name FROM artists WHERE id = ids.related_artist_id), music_search_key(?2)),
+	       ?3, ?4, ids.artist_id, ids.related_artist_id, CURRENT_TIMESTAMP
+	FROM ids WHERE ids.artist_id IS NULL OR ids.artist_id IS NOT ids.related_artist_id
 	ON CONFLICT(artist_name, related_name) DO UPDATE SET
 		score = excluded.score,
 		source = excluded.source,
+		artist_id = COALESCE(excluded.artist_id, artist_relations.artist_id),
+		related_artist_id = COALESCE(excluded.related_artist_id, artist_relations.related_artist_id),
 		updated_at = CURRENT_TIMESTAMP;
 	`
 	for _, rel := range relations {
@@ -242,7 +193,7 @@ func (db *DB) SaveArtistRelations(ctx context.Context, artistName string, relati
 		if cleanArtist == cleanRelated {
 			continue
 		}
-		_, err := db.conn.ExecContext(ctx, query, cleanArtist, cleanRelated, rel.Score, rel.Source)
+		_, err := db.conn.ExecContext(ctx, query, artistName, rel.RelatedName, rel.Score, rel.Source)
 		if err != nil {
 			return err
 		}
@@ -255,15 +206,20 @@ func (db *DB) GetRelatedArtists(ctx context.Context, artistName string, limit in
 	if limit <= 0 {
 		limit = 10
 	}
-	cleanArtist := CleanArtistKey(artistName)
 	query := `
-	SELECT related_name
-	FROM artist_relations
-	WHERE artist_name = ?
-	ORDER BY score DESC
-	LIMIT ?;
+	WITH requested(id) AS (SELECT ` + ArtistIDLookup("?1") + `)
+	SELECT COALESCE(related.name, rel.related_name)
+	FROM artist_relations rel
+	LEFT JOIN artists related ON related.id = rel.related_artist_id
+	CROSS JOIN requested
+	WHERE rel.artist_id = requested.id OR (rel.artist_id IS NULL
+		AND rel.artist_name = music_search_key(?1)
+		AND NOT EXISTS (SELECT 1 FROM artists WHERE clean_name = music_search_key(?1)))
+	GROUP BY rel.related_artist_id, COALESCE(related.name, rel.related_name)
+	ORDER BY MAX(rel.score) DESC, COALESCE(related.name, rel.related_name)
+	LIMIT ?2;
 	`
-	rows, err := db.conn.QueryContext(ctx, query, cleanArtist, limit)
+	rows, err := db.conn.QueryContext(ctx, query, artistName, limit)
 	if err != nil {
 		return nil, err
 	}

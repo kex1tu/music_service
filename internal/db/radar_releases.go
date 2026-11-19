@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -13,6 +14,7 @@ import (
 // RadarReleaseEntity представляет релиз из каталогов Радара или дискографии.
 type RadarReleaseEntity struct {
 	Tracklist       []CatalogTrack `json:"-"`
+	ScannedArtistID int64          `json:"-"`
 	ID              int64          `json:"id"`
 	ArtistName      string         `json:"artist_name"`
 	CleanArtistName string         `json:"clean_artist_name"`
@@ -61,7 +63,21 @@ func (db *DB) UpsertRadarRelease(ctx context.Context, r *RadarReleaseEntity) err
 	}
 	key := RadarIdentityKey(r.ArtistName, r.Title, r.ReleaseType, r.DeezerID, r.MusicBrainzID, r.ShazamID)
 	fallback := RadarIdentityKey(r.ArtistName, r.Title, r.ReleaseType, "", "", "")
-	return db.conn.QueryRowContext(ctx, `
+	var writer interface {
+		QueryRowContext(context.Context, string, ...any) *sql.Row
+	} = db.conn
+	var tx *sql.Tx
+	if r.ScannedArtistID > 0 {
+		var err error
+		tx, err = db.conn.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		writer = tx
+	}
+	// Credits from the provider are linked by the same SQLite statement.
+	err := writer.QueryRowContext(ctx, `
 		INSERT INTO radar_releases (artist_name, clean_artist_name, title, clean_title, release_type,
 			release_date, year, cover_url, track_count, deezer_id, musicbrainz_id, shazam_id,
 			source_url, status, is_radar, identity_key, tracklist)
@@ -103,6 +119,14 @@ func (db *DB) UpsertRadarRelease(ctx context.Context, r *RadarReleaseEntity) err
 		r.ReleaseDate, r.Year, r.CoverURL, r.TrackCount, r.DeezerID, r.MusicBrainzID, r.ShazamID,
 		r.SourceURL, r.Status, r.IsRadar && r.Status == "new", key, tracklist, fallback,
 	).Scan(&r.ID, &r.Status, &r.IsRadar)
+	if err != nil || tx == nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO radar_release_artists(release_id, credit_name, artist_id)
+		SELECT ?, name, id FROM artists WHERE id = ? ON CONFLICT DO NOTHING`, r.ID, r.ScannedArtistID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // GetRadarFeed возвращает ленту новинок (is_radar = 1) с фильтрацией и пагинацией.
@@ -183,19 +207,26 @@ func (db *DB) GetRadarFeed(ctx context.Context, releaseType, search string, limi
 
 // GetArtistDiscography возвращает все релизы дискографии артиста (включая пробелы и присутствующие на диске).
 func (db *DB) GetArtistDiscography(ctx context.Context, artistName string) ([]RadarReleaseEntity, error) {
-	cleanName := CleanArtistKey(artistName)
+	return QueryArtistDiscography(ctx, db.conn, artistName)
+}
+
+func QueryArtistDiscography(ctx context.Context, queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, artistName string) ([]RadarReleaseEntity, error) {
 	query := `
+	WITH requested(id) AS (SELECT ` + ArtistIDLookup("?1") + `)
 	SELECT
 		rr.id, rr.artist_name, rr.clean_artist_name, rr.title, rr.clean_title,
-		rr.release_type, COALESCE(rr.release_date, ''), rr.year, COALESCE(rr.cover_url, ''),
-		rr.track_count, COALESCE(rr.deezer_id, ''), COALESCE(rr.musicbrainz_id, ''),
+		rr.release_type, COALESCE(rr.release_date, ''), COALESCE(rr.year, 0), COALESCE(rr.cover_url, ''),
+		COALESCE(rr.track_count, 0), COALESCE(rr.deezer_id, ''), COALESCE(rr.musicbrainz_id, ''),
 		COALESCE(rr.shazam_id, ''), rr.source_url, rr.status, rr.is_radar,
 		rr.created_at, rr.updated_at
-	FROM radar_releases rr
-	WHERE music_radar_artist_matches(rr.artist_name, ?)
+	FROM radar_releases rr CROSS JOIN requested
+	WHERE EXISTS (SELECT 1 FROM radar_release_artists credit WHERE credit.release_id = rr.id AND credit.artist_id = requested.id)
+	   OR (requested.id IS NULL AND music_radar_artist_matches(rr.artist_name, ?1))
 	ORDER BY rr.year DESC, rr.release_date DESC;
 	`
-	rows, err := db.conn.QueryContext(ctx, query, cleanName)
+	rows, err := queryer.QueryContext(ctx, query, artistName)
 	if err != nil {
 		return nil, err
 	}

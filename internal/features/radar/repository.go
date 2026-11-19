@@ -40,10 +40,6 @@ func NewRepository(db DBTX) *SQLiteRepository {
 	return &SQLiteRepository{db: db}
 }
 
-func cleanKey(s string) string {
-	return textkey.Search(s)
-}
-
 // UpsertTrackedArtist добавляет артиста на отслеживание или обновляет метку времени.
 func (r *SQLiteRepository) UpsertTrackedArtist(ctx context.Context, name string) error {
 	return db.RegisterTrackedArtist(ctx, r.db, name)
@@ -61,146 +57,16 @@ func (r *SQLiteRepository) SetArtistLinks(ctx context.Context, id int64, alias, 
 	return db.SetTrackedArtistLinks(ctx, r.db, id, alias, deezerID, mbID, yandexID)
 }
 
-// GetTrackedArtists возвращает список всех отслеживаемых артистов со статистикой пробелов.
 func (r *SQLiteRepository) GetTrackedArtists(ctx context.Context, onlyFollowed bool) ([]TrackedArtist, error) {
-	whereClause := ""
-	if onlyFollowed {
-		whereClause = "WHERE ta.is_followed = 1"
-	}
-
-	query := fmt.Sprintf(`
-	SELECT 
-		ta.id, ta.name, ta.clean_name, ta.is_followed, ta.auto_download,
-		COALESCE(ta.custom_search_alias, ''),
-		COALESCE(ta.deezer_id, ''),
-		COALESCE(ta.musicbrainz_id, ''),
-		COALESCE(ta.yandex_id, ''),
-		ta.last_checked_at,
-		COALESCE(al_cnt.cnt, 0) as album_count,
-		COALESCE(tr_cnt.cnt, 0) as track_count,
-		COALESCE(gap_cnt.cnt, 0) as gap_count,
-		ta.created_at, ta.updated_at
-	FROM tracked_artists ta
-	LEFT JOIN (
-		SELECT clean_name, COUNT(DISTINCT album_id) as cnt
-		FROM (
-			SELECT ar.clean_name, a.id AS album_id FROM albums a JOIN artists ar ON ar.id = a.artist_id
-			UNION ALL
-			SELECT ar.clean_name, t.album_id FROM tracks t JOIN artists ar ON ar.id = t.artist_id
-		)
-		GROUP BY clean_name
-	) al_cnt ON al_cnt.clean_name = ta.clean_name
-	LEFT JOIN (
-		SELECT ar.clean_name, COUNT(t.id) as cnt
-		FROM artists ar
-		JOIN tracks t ON t.artist_id = ar.id
-		GROUP BY ar.clean_name
-	) tr_cnt ON tr_cnt.clean_name = ta.clean_name
-	LEFT JOIN (
-		SELECT clean_artist_name, COUNT(*) as cnt
-		FROM radar_releases
-		WHERE status = 'missing'
-		GROUP BY clean_artist_name
-	) gap_cnt ON gap_cnt.clean_artist_name = ta.clean_name
-	%s
-	ORDER BY ta.name COLLATE NOCASE ASC;
-	`, whereClause)
-
-	rows, err := r.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var result []TrackedArtist
-	for rows.Next() {
-		var a TrackedArtist
-		var isFollowedInt, autoDownloadInt int
-		var lastChecked sql.NullTime
-
-		err := rows.Scan(
-			&a.ID, &a.Name, &a.CleanName, &isFollowedInt, &autoDownloadInt,
-			&a.CustomSearchAlias, &a.DeezerID, &a.MusicBrainzID, &a.YandexID,
-			&lastChecked, &a.AlbumCount, &a.TrackCount, &a.GapCount, &a.CreatedAt, &a.UpdatedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		a.IsFollowed = isFollowedInt == 1
-		a.AutoDownload = autoDownloadInt == 1
-		if lastChecked.Valid {
-			a.LastCheckedAt = &lastChecked.Time
-		}
-		result = append(result, a)
-	}
-	if result == nil {
-		result = []TrackedArtist{}
-	}
-	return result, rows.Err()
+	return db.QueryTrackedArtists(ctx, r.db, onlyFollowed)
 }
 
-// GetTrackedArtistByName находит запись артиста по его имени.
 func (r *SQLiteRepository) GetTrackedArtistByName(ctx context.Context, name string) (*TrackedArtist, error) {
-	cleanName := cleanKey(name)
-	query := `
-	SELECT 
-		ta.id, ta.name, ta.clean_name, ta.is_followed, ta.auto_download,
-		COALESCE(ta.custom_search_alias, ''),
-		COALESCE(ta.deezer_id, ''),
-		COALESCE(ta.musicbrainz_id, ''),
-		COALESCE(ta.yandex_id, ''),
-		ta.last_checked_at,
-		COALESCE(al_cnt.cnt, 0) as album_count,
-		COALESCE(tr_cnt.cnt, 0) as track_count,
-		COALESCE(gap_cnt.cnt, 0) as gap_count,
-		ta.created_at, ta.updated_at
-	FROM tracked_artists ta
-	LEFT JOIN (
-		SELECT clean_name, COUNT(DISTINCT album_id) as cnt
-		FROM (
-			SELECT ar.clean_name, a.id AS album_id FROM albums a JOIN artists ar ON ar.id = a.artist_id
-			UNION ALL
-			SELECT ar.clean_name, t.album_id FROM tracks t JOIN artists ar ON ar.id = t.artist_id
-		)
-		GROUP BY clean_name
-	) al_cnt ON al_cnt.clean_name = ta.clean_name
-	LEFT JOIN (
-		SELECT ar.clean_name, COUNT(t.id) as cnt
-		FROM artists ar
-		JOIN tracks t ON t.artist_id = ar.id
-		GROUP BY ar.clean_name
-	) tr_cnt ON tr_cnt.clean_name = ta.clean_name
-	LEFT JOIN (
-		SELECT clean_artist_name, COUNT(*) as cnt
-		FROM radar_releases
-		WHERE status = 'missing'
-		GROUP BY clean_artist_name
-	) gap_cnt ON gap_cnt.clean_artist_name = ta.clean_name
-	WHERE ta.clean_name = ?
-	ORDER BY ta.name = ? DESC, ta.id
-	LIMIT 1;
-	`
-	var a TrackedArtist
-	var isFollowedInt, autoDownloadInt int
-	var lastChecked sql.NullTime
-
-	err := r.db.QueryRowContext(ctx, query, cleanName, strings.TrimSpace(name)).Scan(
-		&a.ID, &a.Name, &a.CleanName, &isFollowedInt, &autoDownloadInt,
-		&a.CustomSearchAlias, &a.DeezerID, &a.MusicBrainzID, &a.YandexID,
-		&lastChecked, &a.AlbumCount, &a.TrackCount, &a.GapCount, &a.CreatedAt, &a.UpdatedAt,
-	)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
+	artist, err := db.QueryTrackedArtist(ctx, r.db, name)
+	if err == sql.ErrNoRows {
+		return nil, nil
 	}
-	a.IsFollowed = isFollowedInt == 1
-	a.AutoDownload = autoDownloadInt == 1
-	if lastChecked.Valid {
-		a.LastCheckedAt = &lastChecked.Time
-	}
-	return &a, nil
+	return artist, err
 }
 
 // GetRadarFeed возвращает ленту новинок (is_radar = 1) с фильтрацией и пагинацией.
@@ -281,47 +147,12 @@ func (r *SQLiteRepository) GetRadarFeed(ctx context.Context, releaseType, search
 	return result, total, rows.Err()
 }
 
-// GetArtistDiscography возвращает все релизы дискографии артиста.
 func (r *SQLiteRepository) GetArtistDiscography(ctx context.Context, artistName string) ([]RadarRelease, error) {
-	cleanName := cleanKey(artistName)
-	query := `
-	SELECT 
-		rr.id, rr.artist_name, rr.clean_artist_name, rr.title, rr.clean_title,
-		rr.release_type, COALESCE(rr.release_date, ''), rr.year, COALESCE(rr.cover_url, ''),
-		rr.track_count, COALESCE(rr.deezer_id, ''), COALESCE(rr.musicbrainz_id, ''),
-		COALESCE(rr.shazam_id, ''), rr.source_url, rr.status, rr.is_radar,
-		rr.created_at, rr.updated_at
-	FROM radar_releases rr
-	WHERE music_radar_artist_matches(rr.artist_name, ?)
-	ORDER BY rr.year DESC, rr.release_date DESC;
-	`
-	rows, err := r.db.QueryContext(ctx, query, cleanName)
-	if err != nil {
-		return nil, err
+	releases, err := db.QueryArtistDiscography(ctx, r.db, artistName)
+	if err == nil && releases == nil {
+		releases = []RadarRelease{}
 	}
-	defer rows.Close()
-
-	var result []RadarRelease
-	for rows.Next() {
-		var rel RadarRelease
-		var isRadarInt int
-		err := rows.Scan(
-			&rel.ID, &rel.ArtistName, &rel.CleanArtistName, &rel.Title, &rel.CleanTitle,
-			&rel.ReleaseType, &rel.ReleaseDate, &rel.Year, &rel.CoverURL,
-			&rel.TrackCount, &rel.DeezerID, &rel.MusicBrainzID,
-			&rel.ShazamID, &rel.SourceURL, &rel.Status, &isRadarInt,
-			&rel.CreatedAt, &rel.UpdatedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		rel.IsRadar = isRadarInt == 1
-		result = append(result, rel)
-	}
-	if result == nil {
-		result = []RadarRelease{}
-	}
-	return result, rows.Err()
+	return releases, err
 }
 
 // SetRadarReleaseStatus меняет статус релиза.

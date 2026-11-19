@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"fmt"
 	"path"
 	"regexp"
@@ -16,6 +17,18 @@ import (
 )
 
 func init() {
+	sqlite.MustRegisterDeterministicScalarFunction("music_artist_credit_parts", 1,
+		func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+			credit, _ := args[0].(string)
+			names := []string{credit}
+			for _, part := range artistSeparator.Split(credit, -1) {
+				if name := strings.TrimSpace(part); name != "" && name != credit {
+					names = append(names, name)
+				}
+			}
+			raw, err := json.Marshal(names)
+			return string(raw), err
+		})
 	sqlite.MustRegisterDeterministicScalarFunction("music_search_key", 1,
 		func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
 			value, _ := args[0].(string)

@@ -22,7 +22,7 @@ func (s *Service) GetCandidatesWithLimit(ctx context.Context, artist, title stri
 	}
 	items, err := s.matcher.SearchMultiCandidatesWithLimit(ctx, artist, title, duration, query, limit)
 	if s.repo != nil {
-		if pin, e := s.repo.GetPinnedSource(ctx, resolver.BuildCacheKey(code, artist, title)); e == nil && pin != nil && resolver.IsAllowedURL(pin.PinnedURL) {
+		if pin, e := s.repo.getPinnedSource(ctx, resolver.BuildCacheKey(code, artist, title), resolver.ExtractPrimaryArtist(artist), title); e == nil && pin != nil && resolver.IsAllowedURL(pin.PinnedURL) {
 			found := false
 			for i := range items {
 				if resolver.SameAudioSource(items[i].URL, pin.PinnedURL) {

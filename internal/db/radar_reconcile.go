@@ -10,7 +10,7 @@ import (
 	"music-manager/internal/core/textkey"
 )
 
-var artistSeparator = regexp.MustCompile(`\s+(?:feat\.?|ft\.?|vs\.?)\s+|[,;&/\\\x00]+`)
+var artistSeparator = regexp.MustCompile(`(?i)\s+(?:feat\.?|ft\.?|vs\.?)\s+|[,;&/\\\x00]+`)
 
 func radarArtistMatches(releaseArtist, localArtist string) bool {
 	release, local := textkey.Search(releaseArtist), textkey.Search(localArtist)
@@ -41,10 +41,11 @@ func (db *DB) radarAlbumCandidates(ctx context.Context, release RadarReleaseEnti
 	rows, err := db.conn.QueryContext(ctx, `
 		SELECT a.id, ar.name, COALESCE(a.album_artist, ''), COALESCE(a.year, 0),
 			COALESCE(a.deezer_id, ''), COALESCE(a.is_complete, 0),
-			COALESCE(a.expected_tracks_count, 0)
+			COALESCE(a.expected_tracks_count, 0), EXISTS (
+				SELECT 1 FROM radar_release_artists credit WHERE credit.release_id = ? AND credit.artist_id = a.artist_id)
 		FROM albums a JOIN artists ar ON a.artist_id = ar.id
 		WHERE a.search_title = ? OR a.deezer_id = NULLIF(?, '')`,
-		textkey.Search(release.Title), release.DeezerID)
+		release.ID, textkey.Search(release.Title), release.DeezerID)
 	if err != nil {
 		return nil, err
 	}
@@ -54,10 +55,11 @@ func (db *DB) radarAlbumCandidates(ctx context.Context, release RadarReleaseEnti
 		var a radarAlbum
 		var artist, albumArtist string
 		var year int
-		if err := rows.Scan(&a.id, &artist, &albumArtist, &year, &a.deezerID, &a.complete, &a.expected); err != nil {
+		var linked bool
+		if err := rows.Scan(&a.id, &artist, &albumArtist, &year, &a.deezerID, &a.complete, &a.expected, &linked); err != nil {
 			return nil, err
 		}
-		if !radarArtistMatches(release.ArtistName, artist) && !radarArtistMatches(release.ArtistName, albumArtist) {
+		if !linked && !radarArtistMatches(release.ArtistName, artist) && !radarArtistMatches(release.ArtistName, albumArtist) {
 			continue
 		}
 		if a.deezerID != "" && release.DeezerID != "" {
@@ -132,25 +134,33 @@ func (r RadarReleaseEntity) isSingleTrack() bool {
 func (db *DB) radarSingleInLibrary(ctx context.Context, release RadarReleaseEntity) (bool, error) {
 	title, artist := singleTrackCredit(release)
 	rows, err := db.conn.QueryContext(ctx, `
-		SELECT a.name FROM tracks t JOIN artists a ON a.id = t.artist_id
-		WHERE t.search_title = ?`, textkey.Search(title))
+		SELECT a.name, EXISTS (SELECT 1 FROM radar_release_artists credit
+			WHERE credit.release_id = ? AND credit.artist_id = t.artist_id)
+		FROM tracks t JOIN artists a ON a.id = t.artist_id
+		WHERE t.search_title = ?`, release.ID, textkey.Search(title))
 	if err != nil {
 		return false, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var localArtist string
-		if err := rows.Scan(&localArtist); err != nil {
+		var linked bool
+		if err := rows.Scan(&localArtist, &linked); err != nil {
 			return false, err
 		}
-		if radarArtistMatches(artist, localArtist) {
+		if linked || radarArtistMatches(artist, localArtist) {
 			return true, nil
 		}
 	}
 	return false, rows.Err()
 }
 
-func (db *DB) radarSingleTrackIndex(ctx context.Context, releases []RadarReleaseEntity) (map[string][]string, error) {
+type radarArtist struct {
+	id   int64
+	name string
+}
+
+func (db *DB) radarSingleTrackIndex(ctx context.Context, releases []RadarReleaseEntity) (map[string][]radarArtist, error) {
 	titles := make(map[string]bool)
 	for _, release := range releases {
 		if release.isSingleTrack() {
@@ -158,18 +168,19 @@ func (db *DB) radarSingleTrackIndex(ctx context.Context, releases []RadarRelease
 			titles[textkey.Search(title)] = true
 		}
 	}
-	tracks := make(map[string][]string)
+	tracks := make(map[string][]radarArtist)
 	if len(titles) == 0 {
 		return tracks, nil
 	}
-	rows, err := db.conn.QueryContext(ctx, `SELECT t.search_title, ar.name FROM tracks t JOIN artists ar ON ar.id=t.artist_id`)
+	rows, err := db.conn.QueryContext(ctx, `SELECT t.search_title, ar.id, ar.name FROM tracks t JOIN artists ar ON ar.id=t.artist_id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var title, artist string
-		if err := rows.Scan(&title, &artist); err != nil {
+		var title string
+		var artist radarArtist
+		if err := rows.Scan(&title, &artist.id, &artist.name); err != nil {
 			return nil, err
 		}
 		if titles[title] {
@@ -209,6 +220,30 @@ func (db *DB) radarHasCompletePositions(ctx context.Context, albumID int64, expe
 		return false, err
 	}
 	return count == expected, nil
+}
+
+// radarSingleArtistLinks reads identities in bulk for the same reconciliation pass.
+func (db *DB) radarSingleArtistLinks(ctx context.Context) (map[int64]map[int64]bool, error) {
+	rows, err := db.conn.QueryContext(ctx, `
+		SELECT credit.release_id, credit.artist_id
+		FROM radar_release_artists credit JOIN radar_releases rr ON rr.id = credit.release_id
+		WHERE credit.artist_id IS NOT NULL AND rr.release_type = 'single' AND rr.track_count <= 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	links := make(map[int64]map[int64]bool)
+	for rows.Next() {
+		var releaseID, artistID int64
+		if err := rows.Scan(&releaseID, &artistID); err != nil {
+			return nil, err
+		}
+		if links[releaseID] == nil {
+			links[releaseID] = make(map[int64]bool)
+		}
+		links[releaseID][artistID] = true
+	}
+	return links, rows.Err()
 }
 
 // RadarReleaseRecent is the inbox policy for releases absent from the library.
@@ -260,6 +295,13 @@ func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	var linkedArtists map[int64]map[int64]bool
+	if len(singles) != 0 {
+		linkedArtists, err = db.radarSingleArtistLinks(ctx)
+		if err != nil {
+			return 0, err
+		}
+	}
 	type update struct {
 		id            int64
 		before, after string
@@ -270,7 +312,7 @@ func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
 		if r.isSingleTrack() {
 			title, artist := singleTrackCredit(r)
 			for _, localArtist := range singles[textkey.Search(title)] {
-				if radarArtistMatches(artist, localArtist) {
+				if linkedArtists[r.ID][localArtist.id] || radarArtistMatches(artist, localArtist.name) {
 					found = true
 					break
 				}

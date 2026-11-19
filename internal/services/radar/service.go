@@ -181,7 +181,7 @@ func (s *Service) ScanAll(parentCtx context.Context, trigger string) error {
 			s.progress.CurrentArtist = artist.Name
 			s.mu.Unlock()
 
-			res, err := s.ScanArtist(scanCtx, artist.Name)
+			res, err := s.scanArtist(scanCtx, artist.Name, &artist)
 			if err != nil {
 				log.Printf("[Radar] Ошибка сканирования дискографии %q: %v", artist.Name, err)
 			} else if res != nil && res.NewReleases > 0 {
@@ -209,10 +209,16 @@ func (s *Service) ScanArtist(ctx context.Context, artistName string) (*ScanArtis
 		return nil, fmt.Errorf("artist name cannot be empty")
 	}
 
-	tracked, err := s.db.GetTrackedArtistByName(ctx, artistName)
+	tracked, _ := s.db.GetTrackedArtistByName(ctx, artistName)
+	return s.scanArtist(ctx, artistName, tracked)
+}
+
+func (s *Service) scanArtist(ctx context.Context, artistName string, tracked *db.TrackedArtistEntity) (*ScanArtistResult, error) {
 	var alias string
+	var artistID int64
 	knownIDs := make(map[string]string)
-	if err == nil && tracked != nil {
+	if tracked != nil {
+		artistID = tracked.ArtistID
 		alias = tracked.CustomSearchAlias
 		if tracked.DeezerID != "" {
 			knownIDs["deezer"] = tracked.DeezerID
@@ -230,6 +236,7 @@ func (s *Service) ScanArtist(ctx context.Context, artistName string) (*ScanArtis
 	newCount := 0
 	for _, rel := range releases {
 		entity := db.RadarReleaseEntity{
+			ScannedArtistID: artistID,
 			ArtistName:      rel.ArtistName,
 			CleanArtistName: rel.CleanArtist,
 			Title:           rel.Title,
