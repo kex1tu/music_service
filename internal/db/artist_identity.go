@@ -49,6 +49,7 @@ func GetOrCreateLibraryArtist(ctx context.Context, store artistStore, name strin
 // only artists without local media or a surviving reference in these tables.
 const unusedArtist = `
 	NOT EXISTS (SELECT 1 FROM albums WHERE artist_id = artists.id)
+	AND NOT EXISTS (SELECT 1 FROM album_artists WHERE artist_id = artists.id)
 	AND NOT EXISTS (SELECT 1 FROM tracks WHERE artist_id = artists.id)
 	AND NOT EXISTS (SELECT 1 FROM tracked_artists WHERE artist_id = artists.id)
 	AND NOT EXISTS (SELECT 1 FROM radar_release_artists WHERE artist_id = artists.id)

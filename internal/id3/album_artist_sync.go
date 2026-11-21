@@ -4,12 +4,22 @@ import (
 	"strings"
 )
 
+// IsCompilationArtist reports whether the album credit is a generic compilation label.
+func IsCompilationArtist(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "various artists", "va", "soundtrack", "ost":
+		return true
+	default:
+		return false
+	}
+}
+
 // SyncAlbumArtistAndTrackArtists synchronizes AlbumArtist across the album and ensures
 // that if AlbumArtist is known, it is included in each track's Artist metadata.
-// 1) If AlbumArtist is empty, but all tracks share an artist (or clear majority),
-//    AlbumArtist is populated with that common artist.
-// 2) If AlbumArtist is present and not a generic compilation ("Various Artists", etc.),
-//    it is ensured to be present in each track's Artist list (prepended if missing).
+//  1. If AlbumArtist is empty, but all tracks share an artist (or clear majority),
+//     AlbumArtist is populated with that common artist.
+//  2. If AlbumArtist is present and not a generic compilation ("Various Artists", etc.),
+//     it is ensured to be present in each track's Artist list (prepended if missing).
 func SyncAlbumArtistAndTrackArtists(fallbackAlbumArtist string, tracks []TrackTags) (string, []TrackTags) {
 	if len(tracks) == 0 {
 		return strings.TrimSpace(fallbackAlbumArtist), tracks
@@ -50,13 +60,7 @@ func SyncAlbumArtistAndTrackArtists(fallbackAlbumArtist string, tracks []TrackTa
 	}
 
 	// 2. Check if AlbumArtist is a generic compilation
-	isCompilation := false
-	if albumArtist != "" {
-		lowerAA := strings.ToLower(albumArtist)
-		if lowerAA == "various artists" || lowerAA == "va" || lowerAA == "soundtrack" || lowerAA == "ost" {
-			isCompilation = true
-		}
-	}
+	isCompilation := IsCompilationArtist(albumArtist)
 
 	// 3. Apply AlbumArtist and ensure it's in track.Artist
 	for i := range tracks {

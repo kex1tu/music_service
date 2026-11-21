@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,6 +31,15 @@ func radarArtistMatches(releaseArtist, localArtist string) bool {
 	return false
 }
 
+// sameAlbumCredit compares the whole legacy credit across catalog separators.
+func sameAlbumCredit(catalog, local string) bool {
+	catalogParts := artistSeparator.Split(textkey.Search(catalog), -1)
+	localParts := artistSeparator.Split(textkey.Search(local), -1)
+	return len(catalogParts) > 1 && slices.EqualFunc(catalogParts, localParts, func(a, b string) bool {
+		return strings.TrimSpace(a) != "" && strings.TrimSpace(a) == strings.TrimSpace(b)
+	})
+}
+
 type radarAlbum struct {
 	id       int64
 	deezerID string
@@ -39,13 +49,24 @@ type radarAlbum struct {
 
 func (db *DB) radarAlbumCandidates(ctx context.Context, release RadarReleaseEntity) ([]radarAlbum, error) {
 	rows, err := db.conn.QueryContext(ctx, `
+		WITH linked_credits(artist_id) AS (
+			SELECT artist_id FROM radar_release_artists WHERE release_id = ?1 AND artist_id IS NOT NULL
+		), credited(artist_id) AS (
+			SELECT artist_id FROM linked_credits
+			UNION
+			SELECT `+ArtistIDLookup("names.value")+`
+			FROM json_each(music_artist_credit_parts(?2)) AS names
+			WHERE NOT EXISTS (SELECT 1 FROM linked_credits)
+			  AND (names.value = ?2 OR `+ArtistIDLookup("?2")+` IS NULL)
+		)
 		SELECT a.id, ar.name, COALESCE(a.album_artist, ''), COALESCE(a.year, 0),
 			COALESCE(a.deezer_id, ''), COALESCE(a.is_complete, 0),
 			COALESCE(a.expected_tracks_count, 0), EXISTS (
-				SELECT 1 FROM radar_release_artists credit WHERE credit.release_id = ? AND credit.artist_id = a.artist_id)
+				SELECT 1 FROM album_artists aa JOIN credited c ON c.artist_id = aa.artist_id WHERE aa.album_id = a.id
+			), EXISTS (SELECT 1 FROM album_artists aa WHERE aa.album_id = a.id)
 		FROM albums a JOIN artists ar ON a.artist_id = ar.id
-		WHERE a.search_title = ? OR a.deezer_id = NULLIF(?, '')`,
-		release.ID, textkey.Search(release.Title), release.DeezerID)
+		WHERE a.search_title = ?3 OR a.deezer_id = NULLIF(?4, '')`,
+		release.ID, release.ArtistName, textkey.Search(release.Title), release.DeezerID)
 	if err != nil {
 		return nil, err
 	}
@@ -55,19 +76,23 @@ func (db *DB) radarAlbumCandidates(ctx context.Context, release RadarReleaseEnti
 		var a radarAlbum
 		var artist, albumArtist string
 		var year int
-		var linked bool
-		if err := rows.Scan(&a.id, &artist, &albumArtist, &year, &a.deezerID, &a.complete, &a.expected, &linked); err != nil {
+		var linked, hasCredits bool
+		if err := rows.Scan(&a.id, &artist, &albumArtist, &year, &a.deezerID, &a.complete, &a.expected, &linked, &hasCredits); err != nil {
 			return nil, err
-		}
-		if !linked && !radarArtistMatches(release.ArtistName, artist) && !radarArtistMatches(release.ArtistName, albumArtist) {
-			continue
 		}
 		if a.deezerID != "" && release.DeezerID != "" {
 			if a.deezerID != release.DeezerID {
 				continue
 			}
-		} else if year > 0 && release.Year > 0 && year != release.Year {
-			continue
+		} else {
+			if year > 0 && release.Year > 0 && year != release.Year {
+				continue
+			}
+			// Older or display-only credits can still select a candidate for tracklist verification.
+			legacyMatch := !hasCredits && (radarArtistMatches(release.ArtistName, artist) || radarArtistMatches(release.ArtistName, albumArtist))
+			if !linked && !legacyMatch && !sameAlbumCredit(release.ArtistName, albumArtist) {
+				continue
+			}
 		}
 		matches = append(matches, a)
 	}

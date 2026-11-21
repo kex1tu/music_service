@@ -330,9 +330,6 @@ func (r *Repository) UpdateTrackTags(ctx context.Context, relPath string, tags T
 	albumDir := filepath.ToSlash(filepath.Dir(cleanRel))
 	tags.DiscNumber = librarydb.LocalDiscNumber(albumDir, tags.DiscNumber)
 	displayAlbumArtist := strings.TrimSpace(tags.AlbumArtist)
-	if displayAlbumArtist == "" {
-		displayAlbumArtist = effAlbumArtist
-	}
 	albumID, err := r.GetOrCreateAlbum(ctx, albumTitle, albumArtistID, displayAlbumArtist, tags.Year, albumDir, tags.HasCover)
 	if err != nil {
 		return err

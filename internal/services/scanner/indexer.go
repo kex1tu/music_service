@@ -48,14 +48,6 @@ func (s *Scanner) indexFileLocked(ctx context.Context, relPath, oldPath, pending
 		return err
 	}
 
-	artistName := tags.Artist
-	if artistName == "" {
-		artistName = "Unknown Artist"
-	}
-	albumArtist := tags.AlbumArtist
-	if albumArtist == "" {
-		albumArtist = artistName
-	}
 	albumTitle := tags.Album
 	if albumTitle == "" || strings.EqualFold(albumTitle, "single") || strings.EqualFold(albumTitle, "singles") {
 		if strings.TrimSpace(tags.Title) != "" {
@@ -115,7 +107,7 @@ func (s *Scanner) indexFileLocked(ctx context.Context, relPath, oldPath, pending
 	}
 
 	// 1. Get or create primary artist for the track (avoiding composite 'Artist 1\\Artist 2' in artists table)
-	primaryTrackArtist := resolver.ExtractPrimaryArtist(artistName)
+	primaryTrackArtist := resolver.ExtractPrimaryArtist(tags.Artist)
 	if primaryTrackArtist == "" {
 		primaryTrackArtist = "Unknown Artist"
 	}
@@ -125,22 +117,16 @@ func (s *Scanner) indexFileLocked(ctx context.Context, relPath, oldPath, pending
 	}
 
 	// 2. Get or create primary artist for the album and resolve album ID
-	effectiveAlbumArtist := resolver.ExtractPrimaryArtist(albumArtist)
+	effectiveAlbumArtist := resolver.ExtractPrimaryArtist(tags.AlbumArtist)
 	if effectiveAlbumArtist == "" {
-		effectiveAlbumArtist = resolver.ExtractPrimaryArtist(artistName)
-	}
-	if effectiveAlbumArtist == "" {
-		effectiveAlbumArtist = "Unknown Artist"
+		effectiveAlbumArtist = primaryTrackArtist
 	}
 	albumArtistID, err := getOrCreateArtist(ctx, tx, effectiveAlbumArtist)
 	if err != nil {
 		return err
 	}
 
-	displayAlbumArtist := strings.TrimSpace(albumArtist)
-	if displayAlbumArtist == "" {
-		displayAlbumArtist = effectiveAlbumArtist
-	}
+	displayAlbumArtist := strings.TrimSpace(tags.AlbumArtist)
 	albumID, err := getOrCreateAlbum(ctx, tx, albumTitle, albumArtistID, displayAlbumArtist, tags.Year, albumDir, tags.HasCover)
 	if err != nil {
 		return err

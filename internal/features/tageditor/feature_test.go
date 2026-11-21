@@ -603,6 +603,21 @@ func TestTagEditor_Repository_Operations(t *testing.T) {
 	if err != nil || albID <= 0 {
 		t.Fatalf("failed to create album: %v", err)
 	}
+	const trackPath = "Test Album - Test Artist/Track.mp3"
+	if _, err := env.DB.Conn().ExecContext(ctx, `INSERT INTO tracks (album_id, artist_id, title, clean_title, file_path, file_size, mtime)
+		VALUES (?, ?, 'Track', 'track', ?, 1, 1)`, albID, artID, trackPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateTrackTags(ctx, trackPath, tageditor.TrackTags{
+		Title: "Track", Album: "Test Album", Artist: "Test Artist", AlbumArtist: `Test Artist\\Guest Artist`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var guest string
+	if err := env.DB.Conn().QueryRowContext(ctx, `SELECT ar.name FROM album_artists aa JOIN artists ar ON ar.id = aa.artist_id
+		WHERE aa.album_id = ? AND aa.position = 2`, albID).Scan(&guest); err != nil || guest != "Guest Artist" {
+		t.Fatalf("tag editor did not persist the second album credit: %q, %v", guest, err)
+	}
 
 	// 2. Setting values
 	if err := repo.SetSetting(ctx, "test_key", "test_val"); err != nil {

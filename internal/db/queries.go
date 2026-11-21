@@ -199,10 +199,11 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (*Sear
 	FROM tracks t
 	JOIN albums al ON t.album_id = al.id
 	JOIN artists ar ON t.artist_id = ar.id
-	WHERE instr(t.search_title, ?) > 0 OR instr(t.search_clean_title, ?) > 0
-	LIMIT ?;
+	WHERE instr(t.search_title, ?1) > 0 OR instr(t.search_clean_title, ?1) > 0 OR instr(ar.clean_name, ?1) > 0
+	ORDER BY (instr(t.search_title, ?1) > 0 OR instr(t.search_clean_title, ?1) > 0) DESC, t.id
+	LIMIT ?2;
 	`
-	tRows, err := db.conn.QueryContext(ctx, trackQuery, term, term, limit)
+	tRows, err := db.conn.QueryContext(ctx, trackQuery, term, limit)
 	if err == nil {
 		defer tRows.Close()
 		for tRows.Next() {
@@ -243,10 +244,12 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (*Sear
 	       (SELECT COUNT(1) FROM tracks WHERE album_id = al.id) AS track_count
 	FROM albums al
 	JOIN artists ar ON al.artist_id = ar.id
-	WHERE instr(al.search_title, ?) > 0 OR instr(al.search_clean_title, ?) > 0
-	LIMIT ?;
+	WHERE instr(al.search_title, ?1) > 0 OR instr(al.search_clean_title, ?1) > 0
+	   OR al.id IN (` + SearchAlbumIDsByArtist + `)
+	ORDER BY (instr(al.search_title, ?1) > 0 OR instr(al.search_clean_title, ?1) > 0) DESC, al.id
+	LIMIT ?2;
 	`
-	aRows, err := db.conn.QueryContext(ctx, albumQuery, term, term, limit)
+	aRows, err := db.conn.QueryContext(ctx, albumQuery, term, limit)
 	if err == nil {
 		defer aRows.Close()
 		for aRows.Next() {
@@ -279,11 +282,12 @@ func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (*Sear
 	artistQuery := `
 	SELECT ar.id, ar.name,
 	       COUNT(DISTINCT t.id) AS track_count,
-	       COALESCE(MIN(al.folder_path), MIN(t.file_path), '') AS first_path
+	       COALESCE((` + FirstCreditedAlbumPath + `), MIN(track_album.folder_path), MIN(t.file_path), '') AS first_path
 	FROM artists ar
 	LEFT JOIN tracks t ON t.artist_id = ar.id
-	LEFT JOIN albums al ON al.artist_id = ar.id
-	WHERE instr(ar.clean_name, ?) > 0 AND (t.id IS NOT NULL OR al.id IS NOT NULL)
+	LEFT JOIN albums track_album ON track_album.id = t.album_id
+	WHERE instr(ar.clean_name, ?) > 0
+	  AND (t.id IS NOT NULL OR EXISTS (SELECT 1 FROM album_artists aa WHERE aa.artist_id = ar.id))
 	GROUP BY ar.id, ar.name
 	LIMIT ?;
 	`

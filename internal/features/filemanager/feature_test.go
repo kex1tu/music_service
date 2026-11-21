@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"music-manager/internal/core/auth"
+	"music-manager/internal/db"
 	"music-manager/internal/features/filemanager"
 	"music-manager/internal/testkit"
 )
@@ -415,6 +416,22 @@ func TestFileManager_SearchLibrary(t *testing.T) {
 	}
 	if len(res.Artists) != 1 || res.Artists[0].Name != "SearchArtist" {
 		t.Errorf("expected 1 artist, got %+v", res.Artists)
+	}
+
+	if _, err := db.UpsertLocalAlbum(t.Context(), env.DB.Conn(), "SearchAlbum", 10, `SearchArtist\\Collaborator`, 2026, "SearchAlbum", false); err != nil {
+		t.Fatal(err)
+	}
+	resp = env.Get("/files/search?q=Collaborator")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	res = filemanager.SearchLibraryResult{}
+	if err := json.Unmarshal(env.ReadBody(resp), &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Albums) != 1 || res.Albums[0].ID != 10 || res.Albums[0].AlbumArtist != `SearchArtist\\Collaborator` ||
+		len(res.Artists) != 1 || res.Artists[0].FolderPath != "SearchAlbum" || len(res.Tracks) != 0 {
+		t.Fatalf("unexpected search results for an album-only collaborator: %+v", res)
 	}
 }
 

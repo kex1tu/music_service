@@ -72,13 +72,34 @@ func AlbumRoot(directory string) string {
 	return directory
 }
 
-type albumWriter interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
+// UpsertLocalAlbum indexes a local edition by its root. The tags of the last
+// indexed track provide the release metadata, including a cleared year and the ordered artist credits.
+func UpsertLocalAlbum(ctx context.Context, writer artistStore, title string, artistID int64, albumArtist string, year int, directory string, hasCover bool) (int64, error) {
+	if tx, ok := writer.(*sql.Tx); ok {
+		return upsertLocalAlbum(ctx, tx, title, artistID, albumArtist, year, directory, hasCover)
+	}
+	pool, ok := writer.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	})
+	if !ok {
+		return 0, fmt.Errorf("album indexing requires a SQLite transaction")
+	}
+	tx, err := pool.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	id, err := upsertLocalAlbum(ctx, tx, title, artistID, albumArtist, year, directory, hasCover)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
-// UpsertLocalAlbum indexes a local edition by its root. The tags of the last
-// indexed track provide the release metadata, including a cleared year.
-func UpsertLocalAlbum(ctx context.Context, writer albumWriter, title string, artistID int64, albumArtist string, year int, directory string, hasCover bool) (int64, error) {
+func upsertLocalAlbum(ctx context.Context, tx *sql.Tx, title string, artistID int64, albumArtist string, year int, directory string, hasCover bool) (int64, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		title = "Unknown Album"
@@ -88,7 +109,7 @@ func UpsertLocalAlbum(ctx context.Context, writer albumWriter, title string, art
 		cleanTitle = textkey.Search(title)
 	}
 	var id int64
-	err := writer.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		INSERT INTO albums (title, clean_title, artist_id, album_artist, year, folder_path, has_cover)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(folder_path) DO UPDATE SET
@@ -97,7 +118,13 @@ func UpsertLocalAlbum(ctx context.Context, writer albumWriter, title string, art
 			has_cover = MAX(COALESCE(albums.has_cover, 0), excluded.has_cover),
 			updated_at = CURRENT_TIMESTAMP
 		RETURNING id`, title, cleanTitle, artistID, albumArtist, year, AlbumRoot(directory), hasCover).Scan(&id)
-	return id, err
+	if err != nil {
+		return 0, err
+	}
+	if err := syncAlbumArtists(ctx, tx, id, albumArtist); err != nil {
+		return 0, fmt.Errorf("album %d artist credits: %w", id, err)
+	}
+	return id, nil
 }
 
 // TrackPosition identifies a track within a release, independently of its title.

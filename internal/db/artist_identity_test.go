@@ -58,7 +58,7 @@ func TestArtistIdentityMigration(t *testing.T) {
 			t.Fatalf("%s = %d, want %d", query, got, want)
 		}
 	}
-	assert("PRAGMA user_version", 5)
+	assert("PRAGMA user_version", 6)
 	assert("SELECT COUNT(*) FROM tracked_artists WHERE id=70 AND artist_id=11 AND auto_download=1", 1)
 	assert("SELECT COUNT(*) FROM pinned_track_sources WHERE cache_key='match' AND artist_id=11", 1)
 	assert("SELECT COUNT(*) FROM pinned_track_sources WHERE cache_key='ambiguous' AND artist_id IS NULL", 1)

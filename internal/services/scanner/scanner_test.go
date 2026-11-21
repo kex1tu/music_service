@@ -45,6 +45,7 @@ func TestScanner_ScanAll(t *testing.T) {
 		Title:       "TestSong",
 		Artist:      "TestArtist",
 		Album:       "TestAlbum",
+		AlbumArtist: "TestArtist\x00Co-Artist",
 		TrackNumber: 1,
 	}
 	_ = id3.WriteTags(mp3Path, tags, nil)
@@ -63,6 +64,10 @@ func TestScanner_ScanAll(t *testing.T) {
 	err = database.Conn().QueryRow("SELECT COUNT(*) FROM tracks WHERE title = 'TestSong'").Scan(&count)
 	if err != nil || count != 1 {
 		t.Errorf("expected track in SQLite, got count %d, err: %v", count, err)
+	}
+	if err := database.Conn().QueryRow(`SELECT COUNT(*) FROM album_artists aa JOIN artists ar ON ar.id = aa.artist_id
+		JOIN albums al ON al.id = aa.album_id WHERE al.title = 'TestAlbum' AND ar.name = 'Co-Artist' AND aa.position = 2`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("scanner missed the second TPE2 credit: %d, %v", count, err)
 	}
 }
 
@@ -306,6 +311,11 @@ func TestScanner_MultiArtistAlbum_Completeness(t *testing.T) {
 	}
 	if isComplete != 1 {
 		t.Errorf("expected is_complete = 1 for complete multi-artist album, got %d", isComplete)
+	}
+	var albumCredits int
+	if err := database.Conn().QueryRow(`SELECT COUNT(*) FROM album_artists aa JOIN albums al ON al.id = aa.album_id
+		WHERE al.title = 'Dragonborn'`).Scan(&albumCredits); err != nil || albumCredits != 1 {
+		t.Fatalf("track features became album credits: %d credits, err: %v", albumCredits, err)
 	}
 }
 

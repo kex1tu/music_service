@@ -128,7 +128,7 @@ func TestSQLiteMigrationVariants(t *testing.T) {
 
 			database := openMigrated(t, path)
 			conn := database.Conn()
-			requireScalar(t, conn, "PRAGMA user_version", 5)
+			requireScalar(t, conn, "PRAGMA user_version", 6)
 			requireScalar(t, conn, "SELECT count(*) FROM pragma_table_info('albums') WHERE name = 'youtube_id'", 1)
 			requireScalar(t, conn, "SELECT count(*) FROM pragma_foreign_key_check", 0)
 			if fixture.ddl == "" {
@@ -177,7 +177,7 @@ func TestSQLiteMigrationVariants(t *testing.T) {
 				t.Fatal(err)
 			}
 			reopened := openMigrated(t, path)
-			requireScalar(t, reopened.Conn(), "PRAGMA user_version", 5)
+			requireScalar(t, reopened.Conn(), "PRAGMA user_version", 6)
 			requireTrackedArtistSettings(t, reopened.Conn())
 			requireScalar(t, reopened.Conn(), "SELECT count(*) FROM tracked_artists WHERE name = 'Artist'", 1)
 			checkMigrationQueries(t, reopened, 5)
@@ -296,7 +296,7 @@ func TestSQLiteMigrationRollsBackOnForeignKeyFailure(t *testing.T) {
 
 	execMigrationSQL(t, raw, "UPDATE tracks SET album_id = 21 WHERE id = 32")
 	reopened := openMigrated(t, path)
-	requireScalar(t, reopened.Conn(), "PRAGMA user_version", 5)
+	requireScalar(t, reopened.Conn(), "PRAGMA user_version", 6)
 	requireScalar(t, reopened.Conn(), "SELECT status FROM missing_tracks WHERE id = 41", "queued")
 	requireScalar(t, reopened.Conn(), "SELECT count(*) FROM pragma_foreign_key_check", 0)
 }
@@ -353,7 +353,7 @@ func TestSQLiteMigrationRestoredWALBackup(t *testing.T) {
 	}
 
 	migrated := openMigrated(t, restoredPath)
-	requireScalar(t, migrated.Conn(), "PRAGMA user_version", 5)
+	requireScalar(t, migrated.Conn(), "PRAGMA user_version", 6)
 	requireScalar(t, migrated.Conn(), "PRAGMA integrity_check", "ok")
 	requireScalar(t, migrated.Conn(), "SELECT count(*) FROM pragma_foreign_key_check", 0)
 	requireScalar(t, migrated.Conn(), "SELECT status FROM missing_tracks WHERE id = 41", "queued")

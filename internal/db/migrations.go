@@ -15,6 +15,7 @@ var migrations = [...]func(context.Context, *sql.Conn) error{
 	migrateLibraryIndex,
 	migrateReleaseModel,
 	migrateArtistIdentity,
+	migrateAlbumArtists,
 }
 
 func (db *DB) migrate() error {

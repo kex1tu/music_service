@@ -314,10 +314,11 @@ func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limi
 	FROM tracks t
 	JOIN albums al ON t.album_id = al.id
 	JOIN artists ar ON t.artist_id = ar.id
-	WHERE instr(t.search_title, ?) > 0 OR instr(t.search_clean_title, ?) > 0
-	LIMIT ?;
+	WHERE instr(t.search_title, ?1) > 0 OR instr(t.search_clean_title, ?1) > 0 OR instr(ar.clean_name, ?1) > 0
+	ORDER BY (instr(t.search_title, ?1) > 0 OR instr(t.search_clean_title, ?1) > 0) DESC, t.id
+	LIMIT ?2;
 	`
-	tRows, err := r.db.QueryContext(ctx, trackQuery, term, term, limit)
+	tRows, err := r.db.QueryContext(ctx, trackQuery, term, limit)
 	if err == nil {
 		defer tRows.Close()
 		for tRows.Next() {
@@ -336,11 +337,13 @@ func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limi
 	FROM albums al
 	JOIN artists ar ON al.artist_id = ar.id
 	LEFT JOIN tracks t ON t.album_id = al.id
-	WHERE instr(al.search_title, ?) > 0 OR instr(al.search_clean_title, ?) > 0
+	WHERE instr(al.search_title, ?1) > 0 OR instr(al.search_clean_title, ?1) > 0
+	   OR al.id IN (` + db.SearchAlbumIDsByArtist + `)
 	GROUP BY al.id
-	LIMIT ?;
+	ORDER BY (instr(al.search_title, ?1) > 0 OR instr(al.search_clean_title, ?1) > 0) DESC, al.id
+	LIMIT ?2;
 	`
-	aRows, err := r.db.QueryContext(ctx, albumQuery, term, term, limit)
+	aRows, err := r.db.QueryContext(ctx, albumQuery, term, limit)
 	if err == nil {
 		defer aRows.Close()
 		for aRows.Next() {
@@ -354,12 +357,12 @@ func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limi
 	// 3. Поиск по артистам
 	artistQuery := `
 	SELECT ar.id, ar.name, COUNT(DISTINCT t.id) AS track_count,
-	       COALESCE((SELECT al.folder_path FROM albums al WHERE al.artist_id = ar.id LIMIT 1), ''),
+	       COALESCE((` + db.FirstCreditedAlbumPath + `), ''),
 	       COALESCE((SELECT t.file_path FROM tracks t WHERE t.artist_id = ar.id LIMIT 1), '')
 	FROM artists ar
 	LEFT JOIN tracks t ON t.artist_id = ar.id
 	WHERE instr(ar.clean_name, ?) > 0
-	  AND (t.id IS NOT NULL OR EXISTS (SELECT 1 FROM albums a WHERE a.artist_id = ar.id))
+	  AND (t.id IS NOT NULL OR EXISTS (SELECT 1 FROM album_artists aa WHERE aa.artist_id = ar.id))
 	GROUP BY ar.id
 	LIMIT ?;
 	`
