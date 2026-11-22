@@ -21,6 +21,10 @@ document.addEventListener('alpine:init', () => {
         isMuted: false,
         isVisible: false,
         audioElement: null,
+        _playbackVersion: 0,
+        _playAttempt: 0,
+        _spotTimer: null,
+        _spotSeek: null,
 
         // Режимы воспроизведения
         loopMode: 'none', // 'none' | 'all' | 'one'
@@ -172,21 +176,69 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        beginPlayback() {
+            this._playbackVersion++;
+            this._playAttempt++;
+            this.clearSpotPlayback();
+            this.isPlaying = false;
+            this.isLoading = false;
+            this.resetLyrics();
+            return this._playbackVersion;
+        },
+
+        clearSpotPlayback() {
+            if (this._spotTimer !== null) {
+                clearTimeout(this._spotTimer);
+                this._spotTimer = null;
+            }
+            if (this._spotSeek) {
+                this.audioElement?.removeEventListener('loadedmetadata', this._spotSeek);
+                this._spotSeek = null;
+            }
+        },
+
+        startPlayback(onStarted) {
+            if (!this.audioElement) return;
+            const attempt = ++this._playAttempt;
+            this.isLoading = true;
+            this.audioElement.play().then(() => {
+                if (attempt !== this._playAttempt) return;
+                this.isPlaying = true;
+                this.isLoading = false;
+                onStarted?.();
+                this.startVisualizer();
+            }).catch(err => {
+                if (attempt !== this._playAttempt) return;
+                console.warn('Ошибка воспроизведения аудио:', err);
+                this.isPlaying = false;
+                this.isLoading = false;
+                this.stopVisualizer();
+            });
+        },
+
+        pausePlayback() {
+            this._playAttempt++;
+            this.audioElement?.pause();
+            this.isPlaying = false;
+            this.isLoading = false;
+            this.stopVisualizer();
+        },
+
         playTrack(track, playlist = []) {
             if (!track) return;
-
-            // Если кликнули на уже играющий трек — переключаем паузу/воспроизведение
-            if (this.currentTrack && (this.currentTrack.path === track.path || (this.currentTrack.id && this.currentTrack.id === track.id))) {
+            const trackPath = track.path || track.file_path || '';
+            const currentPath = this.currentTrack?.path || this.currentTrack?.file_path || '';
+            if (this.currentTrack && ((trackPath && currentPath === trackPath) || (track.id && this.currentTrack.id === track.id))) {
                 this.togglePlay();
                 return;
             }
 
+            this.beginPlayback();
             this.currentTrack = track;
             this.isVisible = true;
             this.currentTime = 0;
             this.duration = track.duration || 0;
 
-            const trackPath = track.path || track.file_path || '';
             const trackId = track.id || trackPath;
 
             if (playlist && playlist.length > 0) {
@@ -199,20 +251,9 @@ document.addEventListener('alpine:init', () => {
             this.ensureAudioContext();
 
             if (this.audioElement) {
-                this.isLoading = true;
                 this.audioElement.src = streamUrl;
                 this.audioElement.load();
-                this.audioElement.play()
-                    .then(() => {
-                        this.isPlaying = true;
-                        this.isLoading = false;
-                        this.startVisualizer();
-                    })
-                    .catch((err) => {
-                        console.warn('Автовоспроизведение прервано:', err);
-                        this.isPlaying = false;
-                        this.isLoading = false;
-                    });
+                this.startPlayback();
             }
 
             // Загружаем тексты песен и метаданные трека
@@ -226,6 +267,7 @@ document.addEventListener('alpine:init', () => {
                 this.togglePlay();
                 return;
             }
+            this.beginPlayback();
             this.currentTrack = {
                 title: title || 'Предпрослушивание',
                 artist: artist || 'Фрагмент (15 сек)',
@@ -237,20 +279,9 @@ document.addEventListener('alpine:init', () => {
             this.duration = 15;
             this.ensureAudioContext();
             if (this.audioElement) {
-                this.isLoading = true;
                 this.audioElement.src = streamUrl;
                 this.audioElement.load();
-                this.audioElement.play()
-                    .then(() => {
-                        this.isPlaying = true;
-                        this.isLoading = false;
-                        this.startVisualizer();
-                    })
-                    .catch((err) => {
-                        console.warn('Ошибка превью воспроизведения:', err);
-                        this.isPlaying = false;
-                        this.isLoading = false;
-                    });
+                this.startPlayback();
             }
         },
 
@@ -261,6 +292,7 @@ document.addEventListener('alpine:init', () => {
             const startTime = Number.isFinite(spot.start_sec) ? Math.max(0, spot.start_sec) : Math.max(0, (spot.time_sec || 0) - 2.0);
             const stopDuration = Number.isFinite(spot.end_sec) ? Math.max(0.2, Math.min(60, spot.end_sec - startTime)) : 5.0;
 
+            const version = this.beginPlayback();
             this.currentTrack = {
                 title: trackTitle || 'Отслушивание точки',
                 artist: `${trackArtist || ''} • «${spot.word}» (${spot.time_str || ''})`,
@@ -269,17 +301,12 @@ document.addEventListener('alpine:init', () => {
             };
             this.isVisible = true;
 
-            if (this._spotTimer) {
-                clearTimeout(this._spotTimer);
-                this._spotTimer = null;
-            }
-
             this.ensureAudioContext();
 
             if (this.audioElement) {
-                this.isLoading = true;
                 const audio = this.audioElement;
                 const applySeek = () => {
+                    if (version !== this._playbackVersion) return;
                     try {
                         audio.currentTime = startTime;
                     } catch (e) {
@@ -294,30 +321,21 @@ document.addEventListener('alpine:init', () => {
                     if (audio.readyState >= 1) {
                         applySeek();
                     } else {
+                        this._spotSeek = applySeek;
                         audio.addEventListener('loadedmetadata', applySeek, { once: true });
                     }
                 } else {
                     applySeek();
                 }
 
-                audio.play()
-                    .then(() => {
-                        applySeek();
-                        this.isPlaying = true;
-                        this.isLoading = false;
-                        this.startVisualizer();
-                        this._spotTimer = setTimeout(() => {
-                            if (this.audioElement) {
-                                this.audioElement.pause();
-                            }
-                            this.isPlaying = false;
-                        }, stopDuration * 1000);
-                    })
-                    .catch((err) => {
-                        console.warn('Spot play error:', err);
-                        this.isPlaying = false;
-                        this.isLoading = false;
-                    });
+                this.startPlayback(() => {
+                    applySeek();
+                    this._spotTimer = setTimeout(() => {
+                        if (version !== this._playbackVersion) return;
+                        this._spotTimer = null;
+                        this.pausePlayback();
+                    }, stopDuration * 1000);
+                });
             }
 
             const toastMsg = `🎧 Точка: «${spot.word}» (${spot.time_str || ''})${spot.line_text ? '\n' + spot.line_text : ''}`;
@@ -334,18 +352,10 @@ document.addEventListener('alpine:init', () => {
             this.ensureAudioContext();
 
             if (this.isPlaying) {
-                this.audioElement.pause();
-                this.isPlaying = false;
-                this.stopVisualizer();
+                this.pausePlayback();
             } else {
-                this.audioElement.play()
-                    .then(() => {
-                        this.isPlaying = true;
-                        this.startVisualizer();
-                    })
-                    .catch((err) => {
-                        console.error('Ошибка воспроизведения:', err);
-                    });
+                if (this.audioElement.error) this.audioElement.load();
+                this.startPlayback();
             }
         },
 
@@ -424,6 +434,8 @@ document.addEventListener('alpine:init', () => {
                     this.currentIndex = this.playlist.findIndex(t => t.path === nextTrack.path);
                     this.playTrack(nextTrack, this.playlist);
                 } else {
+                    this.playlist = [];
+                    this.currentIndex = -1;
                     this.close();
                 }
             } else {
@@ -601,22 +613,27 @@ document.addEventListener('alpine:init', () => {
 
         // ==================== КАРАОКЕ LRC ====================
 
+        resetLyrics() {
+            this.lyricsLines = [];
+            this.rawLyrics = '';
+            this.lyricsKind = 'none';
+            this.currentLyricIndex = -1;
+            this.lyricsLoading = false;
+            this.lyricsError = null;
+        },
+
         async loadLyrics(track) {
             const trackPath = track ? (track.path || track.file_path) : null;
-            if (!track || !trackPath) {
-                this.lyricsLines = [];
-                this.lyricsKind = 'none';
-                return;
-            }
+            const version = this._playbackVersion;
+            this.resetLyrics();
+            if (!trackPath) return;
             this.lyricsLoading = true;
-            this.lyricsError = null;
-            this.lyricsLines = [];
-            this.currentLyricIndex = -1;
 
             try {
                 const res = await window.api.raw(`/lyrics?path=${encodeURIComponent(trackPath)}`);
                 if (!res.ok) throw new Error('Lyrics fetch failed');
                 const data = await res.json();
+                if (version !== this._playbackVersion) return;
                 this.lyricsKind = data.kind || 'none';
                 const text = data.content || data.lyrics || '';
                 this.rawLyrics = text;
@@ -631,10 +648,11 @@ document.addEventListener('alpine:init', () => {
                     })).filter(item => item.text.length > 0);
                 }
             } catch (e) {
+                if (version !== this._playbackVersion) return;
                 console.warn('Lyrics load error:', e);
                 this.lyricsError = 'Не удалось загрузить текст песни';
             } finally {
-                this.lyricsLoading = false;
+                if (version === this._playbackVersion) this.lyricsLoading = false;
             }
         },
 
@@ -693,11 +711,13 @@ document.addEventListener('alpine:init', () => {
 
         async fetchTrackSpecs(track) {
             if (!track) return;
+            const version = this._playbackVersion;
             try {
                 const id = track.id || track.path;
                 const res = await window.api.raw(`/api/tracks/${encodeURIComponent(id)}/metadata`);
                 if (res.ok) {
                     const data = await res.json();
+                    if (version !== this._playbackVersion) return;
                     this.techSpecs = {
                         bitrate: data.bitrate_kbps || 320,
                         sampleRate: data.sample_rate || 44100,
@@ -710,7 +730,7 @@ document.addEventListener('alpine:init', () => {
                     };
                 }
             } catch (e) {
-                console.warn('Metadata fetch error:', e);
+                if (version === this._playbackVersion) console.warn('Metadata fetch error:', e);
             }
         },
 
@@ -749,7 +769,7 @@ document.addEventListener('alpine:init', () => {
         onEnded() {
             if (this.loopMode === 'one') {
                 this.seek(0);
-                this.audioElement.play();
+                this.startPlayback();
                 return;
             }
             if (this.playlist && this.playlist.length > 0) {
@@ -768,6 +788,8 @@ document.addEventListener('alpine:init', () => {
         },
 
         onError(e) {
+            if (!this.currentTrack || !this.audioElement?.error) return;
+            this._playAttempt++;
             this.isLoading = false;
             this.isPlaying = false;
             this.stopVisualizer();
@@ -778,14 +800,15 @@ document.addEventListener('alpine:init', () => {
         },
 
         close() {
-            if (this.audioElement) {
-                this.audioElement.pause();
-                this.audioElement.src = '';
-            }
-            this.isPlaying = false;
-            this.stopVisualizer();
+            this.beginPlayback();
             this.currentTrack = null;
             this.isVisible = false;
+            if (this.audioElement) {
+                this.audioElement.pause();
+                this.audioElement.removeAttribute('src');
+                this.audioElement.load();
+            }
+            this.stopVisualizer();
         },
 
         // ==================== НАВИГАЦИЯ И ВКЛАДКИ ====================

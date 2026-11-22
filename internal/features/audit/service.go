@@ -72,7 +72,7 @@ type Service struct {
 
 	// Background batch lyrics worker state
 	lyricsMu     sync.RWMutex
-	lyricsState  BatchProgress
+	lyricsState  *BatchProgress
 	lyricsCancel context.CancelFunc
 
 	// Background batch covers worker state
@@ -110,6 +110,7 @@ func NewService(cfg ServiceConfig) *Service {
 		httpClient:      client,
 		ctx:             ctx,
 		cancel:          cancel,
+		lyricsState:     &BatchProgress{},
 	}
 }
 

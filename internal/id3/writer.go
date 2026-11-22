@@ -43,6 +43,13 @@ func writeTags(filePath string, tags TrackTags, cover *CoverInfo, existingFrames
 		if (header[5] & 0x10) != 0 {
 			audioOffset += 10 // ID3v2.4 footer
 		}
+		info, err := file.Stat()
+		if err != nil {
+			return fmt.Errorf("не удалось определить размер исходного файла: %w", err)
+		}
+		if audioOffset > info.Size() {
+			return fmt.Errorf("тег ID3 выходит за пределы исходного файла: %w", io.ErrUnexpectedEOF)
+		}
 	}
 
 	if _, err := file.Seek(audioOffset, io.SeekStart); err != nil {

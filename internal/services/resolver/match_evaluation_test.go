@@ -1,6 +1,9 @@
 package resolver
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestUnifiedMatchRegressions(t *testing.T) {
 	exact := EvaluateTrack("abcdef", "uvwxyz", 180, "abcdef", "uvwxyz - Topic", 180)
@@ -103,5 +106,32 @@ func TestVersionPreferenceCannotHideMissingIdentityEvidence(t *testing.T) {
 	got := RankCandidateItems([]CandidateTrackItem{{URL: "https://soundcloud.com/a/unknown", Source: "soundcloud", Title: "Song (Uncensored)", Uploader: "Anonymous Uploads", Duration: 180}, {URL: "https://music.youtube.com/watch?v=known", Source: "ytmusic", Title: "Song (Clean)", Uploader: "Artist", Duration: 180}}, "Song", "Artist", 180, PolicyUncensored)
 	if got[0].URL != "https://music.youtube.com/watch?v=known" {
 		t.Fatalf("version claim compensated for unknown artist: %+v", got)
+	}
+}
+
+func TestEvaluateTrackDurationBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		original   int
+		candidate  int
+		compatible bool
+		known      bool
+	}{
+		{"short track below threshold", 150, 161, true, true},
+		{"short track at threshold", 150, 162, true, true},
+		{"short track above threshold", 150, 163, false, true},
+		{"long track below threshold", 300, 323, true, true},
+		{"long track at threshold", 300, 324, true, true},
+		{"long track above threshold", 300, 325, false, true},
+		{"unknown duration", 150, 0, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := EvaluateTrack("Song", "Artist", tc.original, "Song", "Artist", tc.candidate)
+			if got.DurationKnown != tc.known || got.Compatible != tc.compatible ||
+				slices.Contains(got.Conflicts, "duration_mismatch") != !tc.compatible ||
+				slices.Contains(got.Unknown, "duration") != !tc.known {
+				t.Fatalf("duration %d vs %d: %+v", tc.original, tc.candidate, got)
+			}
+		})
 	}
 }
