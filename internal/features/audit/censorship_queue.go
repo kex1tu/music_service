@@ -87,6 +87,19 @@ func (a *CensorshipAudit) notify() {
 	}
 }
 
+// Paths assigned by the library are literal. If a client sends an encoded
+// path, preserve compatibility when the literal spelling does not exist.
+func (a *CensorshipAudit) resolveAuditInput(path string, allowRoot bool) (string, error) {
+	literal, err := a.sb.Resolve(path, allowRoot, sandbox.LiteralPath)
+	if err != nil {
+		return "", err
+	}
+	if _, err := safefs.Stat(literal); err == nil {
+		return literal, nil
+	}
+	return a.sb.Resolve(path, allowRoot)
+}
+
 func (a *CensorshipAudit) Start(ctx context.Context, o CensorshipOptions) (string, error) {
 	if o.Provider == "" {
 		o.Provider = "local"
@@ -99,7 +112,7 @@ func (a *CensorshipAudit) Start(ctx context.Context, o CensorshipOptions) (strin
 	}
 	paths := append([]string(nil), o.Paths...)
 	if len(paths) == 0 {
-		root, e := a.sb.Resolve(o.Path, true)
+		root, e := a.resolveAuditInput(o.Path, true)
 		if e != nil {
 			return "", e
 		}
@@ -129,7 +142,7 @@ func (a *CensorshipAudit) Start(ctx context.Context, o CensorshipOptions) (strin
 	unique := []string{}
 	seen := map[string]bool{}
 	for _, p := range paths {
-		full, e := a.sb.Resolve(p, false)
+		full, e := a.resolveAuditInput(p, false)
 		if e != nil {
 			return "", e
 		}
@@ -152,16 +165,37 @@ func (a *CensorshipAudit) Start(ctx context.Context, o CensorshipOptions) (strin
 	if len(unique) == 0 {
 		return "", fmt.Errorf("no MP3 tracks selected")
 	}
-	for _, ref := range o.References {
-		resolved, e := a.sb.Resolve(ref, false)
+	references := make(map[string]string, len(o.References))
+	for path, ref := range o.References {
+		full, e := a.resolveAuditInput(path, false)
+		if e != nil {
+			return "", e
+		}
+		rel, e := a.sb.ToRelative(full)
+		if e != nil {
+			return "", e
+		}
+		if !seen[rel] {
+			return "", fmt.Errorf("%w: эталон задан для невыбранного трека %q", errCensorshipInput, rel)
+		}
+		resolved, e := a.resolveAuditInput(ref, false)
 		if e != nil {
 			return "", e
 		}
 		info, e := safefs.Stat(resolved)
-		if e != nil || !info.Mode().IsRegular() || !strings.EqualFold(filepath.Ext(ref), ".mp3") {
+		if e != nil || !info.Mode().IsRegular() || !strings.EqualFold(filepath.Ext(resolved), ".mp3") {
 			return "", fmt.Errorf("reference must be an available MP3")
 		}
+		refPath, e := a.sb.ToRelative(resolved)
+		if e != nil {
+			return "", e
+		}
+		if previous, ok := references[rel]; ok && previous != refPath {
+			return "", fmt.Errorf("%w: заданы разные эталоны для трека %q", errCensorshipInput, rel)
+		}
+		references[rel] = refPath
 	}
+	o.References = references
 	o.Paths = nil
 	raw, e := json.Marshal(o)
 	if e != nil {
@@ -237,7 +271,7 @@ func (a *CensorshipAudit) Control(ctx context.Context, id, action string) error 
 		}
 	}
 	if action == "retry" {
-		if _, e = tx.ExecContext(ctx, "UPDATE censorship_items SET state='queued',error='',attempt_token='' WHERE run_id=? AND state='error'", id); e != nil {
+		if _, e = tx.ExecContext(ctx, "UPDATE censorship_items SET state='queued',error='',attempt_token='',verdict='not_checked',result_json='{}',audio_hash='' WHERE run_id=? AND state='error'", id); e != nil {
 			return e
 		}
 	}
@@ -259,6 +293,7 @@ func (a *CensorshipAudit) loop() {
 	defer a.wg.Done()
 	timer := time.NewTicker(time.Second)
 	defer timer.Stop()
+	var nextCleanup time.Time
 	for {
 		select {
 		case <-a.ctx.Done():
@@ -267,6 +302,13 @@ func (a *CensorshipAudit) loop() {
 		case <-a.wake:
 		}
 		for a.ctx.Err() == nil {
+			if now := time.Now(); !now.Before(nextCleanup) {
+				nextCleanup = now.Add(24 * time.Hour)
+				if err := a.pruneCensorshipCache(a.ctx, now); err != nil && a.ctx.Err() == nil {
+					log.Printf("[Censorship] cache cleanup: %v", err)
+					nextCleanup = now.Add(time.Minute)
+				}
+			}
 			worked, e := a.step()
 			if e != nil && a.ctx.Err() == nil {
 				log.Printf("[Censorship] queue/storage failure: %v", e)
@@ -294,7 +336,7 @@ func (a *CensorshipAudit) step() (bool, error) {
 		      (i.state='running' AND (i.attempt_token NOT GLOB 'v1:*' OR i.attempt_token < ?)))
 		    ORDER BY r.created_at,i.id LIMIT 1
 		)
-		RETURNING id,run_id,file_path,reference_path,
+		RETURNING id,run_id,coalesce(current_file_path,file_path),coalesce(current_reference_path,reference_path),
 		          (SELECT provider FROM censorship_runs WHERE id=censorship_items.run_id)`,
 		token, censorshipLeasePrefix(now)).Scan(&id, &run, &path, &ref, &provider)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -383,8 +425,8 @@ func (a *CensorshipAudit) finishAttempt(ctx context.Context, id int64, run, toke
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `
-		UPDATE censorship_items SET state=?,verdict=?,result_json=?,error=?,attempt_token=''
-		WHERE id=? AND attempt_token=? AND state='running'`, state, result.Verdict, string(raw), errText, id, token)
+		UPDATE censorship_items SET state=?,verdict=?,result_json=?,error=?,audio_hash=?,attempt_token=''
+		WHERE id=? AND attempt_token=? AND state='running'`, state, result.Verdict, string(raw), errText, result.AudioHash, id, token)
 	if err != nil {
 		return err
 	}
@@ -393,14 +435,14 @@ func (a *CensorshipAudit) finishAttempt(ctx context.Context, id int64, run, toke
 		return err
 	}
 	if n > 0 {
-		for _, ev := range result.Evidence {
-			encoded, err := json.Marshal(ev)
-			if err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO censorship_evidence(item_id,evidence_json) VALUES(?,?)", id, string(encoded)); err != nil {
-				return err
-			}
+		_, err = tx.ExecContext(ctx, `
+			UPDATE censorship_runs SET state='completed',updated_at=CURRENT_TIMESTAMP
+			WHERE id=? AND state='running' AND NOT EXISTS (
+				SELECT 1 FROM censorship_items WHERE run_id=? AND state IN ('queued','running')
+			)
+		`, run, run)
+		if err != nil {
+			return err
 		}
 	}
 	return tx.Commit()

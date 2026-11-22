@@ -140,7 +140,7 @@ func TestTrackIDFollowsAnIndexedMoveAfterOldPathIsReused(t *testing.T) {
 	}
 }
 
-func TestRedownloadRetainsPinForRenamedArtist(t *testing.T) {
+func TestRedownloadSourceBelongsToFile(t *testing.T) {
 	env := testkit.NewEnv(t)
 	conn := env.DB.Conn()
 	_, err := conn.ExecContext(t.Context(), `
@@ -148,8 +148,7 @@ func TestRedownloadRetainsPinForRenamedArtist(t *testing.T) {
 		INSERT INTO albums(id, title, clean_title, artist_id, folder_path) VALUES (1,'Album','album',1,'album');
 		INSERT INTO tracks(album_id,artist_id,title,clean_title,file_path,file_size,mtime)
 			VALUES (1,1,'Song','song','album/Song.mp3',10,0);
-		INSERT INTO pinned_track_sources(cache_key,artist_name,track_title,pinned_url,source_type)
-			VALUES ('track:original:song','Original','Song','https://youtu.be/pinned','manual');
+		UPDATE tracks SET source_url='https://youtu.be/pinned' WHERE file_path='album/Song.mp3';
 		UPDATE artists SET name='Renamed', clean_name='renamed' WHERE id=1;
 	`)
 	if err != nil {
@@ -167,7 +166,7 @@ func TestRedownloadRetainsPinForRenamedArtist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, _, pin, _, _, err = repo.GetTrackDetailsForRedownload(t.Context(), "album/Song.mp3")
+	_, _, _, _, pin, _, _, err = repo.GetTrackDetailsForRedownload(t.Context(), "album/Other Song.mp3")
 	if err != nil || pin != "" {
 		t.Fatalf("ambiguous track inherited a title-only pin: pin=%q err=%v", pin, err)
 	}

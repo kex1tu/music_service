@@ -28,7 +28,7 @@ window.createQueueManager = function() {
             return Math.round(this.summary?.overall_progress || 0);
         },
         get readyCount() {
-            return (this.jobs || []).filter((j) => j.status === 'READY' || j.status === 'PARTIAL_READY').length;
+            return (this.jobs || []).filter((j) => !j.is_redownload && (j.status === 'READY' || j.status === 'PARTIAL_READY')).length;
         },
         get errorCount() {
             return (this.jobs || []).filter((j) => j.status === 'ERROR').length;
@@ -278,7 +278,7 @@ window.createQueueManager = function() {
         },
 
         async acceptAllReadyJobs() {
-            const readyJobs = (this.jobs || []).filter(j => j.status === 'READY' || j.status === 'PARTIAL_READY');
+            const readyJobs = (this.jobs || []).filter(j => !j.is_redownload && (j.status === 'READY' || j.status === 'PARTIAL_READY'));
             if (readyJobs.length === 0) {
                 Alpine.store('app').toast('Нет готовых релизов для принятия', 'warning');
                 return;

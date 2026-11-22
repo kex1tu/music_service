@@ -10,11 +10,10 @@ import (
 // ScannerEngine определяет контракт фонового сканера и агрегатора релизов.
 type ScannerEngine interface {
 	ScanArtist(ctx context.Context, artistName string) (*serviceRadar.ScanArtistResult, error)
+	ScanArtistByID(ctx context.Context, artistID int64) (*serviceRadar.ScanArtistResult, error)
 	ScanAll(ctx context.Context, trigger string) error
 	GetProgress() serviceRadar.ScanProgress
 	CancelScan()
-	FollowArtist(ctx context.Context, artistName string, followed bool) error
-	SetAutoDownload(ctx context.Context, artistName string, auto bool) error
 	UpdateArtistCustomLinks(ctx context.Context, artistName, alias, deezerID, mbID, yandexID string) error
 }
 
@@ -24,7 +23,7 @@ type ServiceConfig struct {
 	Scanner ScannerEngine
 }
 
-// Service инкапсулирует бизнес-логику Release Radar, отслеживания артистов и поиска пробелов в дискографии.
+// Service инкапсулирует бизнес-логику Release Radar и поиска пробелов в дискографии.
 type Service struct {
 	repo    Repository
 	scanner ScannerEngine
@@ -54,48 +53,18 @@ func (s *Service) GetUnreadCount(ctx context.Context) (int, error) {
 	return s.repo.GetRadarUnreadCount(ctx)
 }
 
-// GetTrackedArtists возвращает список всех исполнителей в каталоге отслеживания.
-func (s *Service) GetTrackedArtists(ctx context.Context, onlyFollowed bool) ([]TrackedArtist, error) {
+// GetLibraryArtists возвращает список исполнителей медиатеки.
+func (s *Service) GetLibraryArtists(ctx context.Context) ([]TrackedArtist, error) {
 	if s.repo == nil {
 		return []TrackedArtist{}, nil
 	}
-	return s.repo.GetTrackedArtists(ctx, onlyFollowed)
-}
-
-// AddTrackedArtist добавляет артиста на отслеживание вручную.
-func (s *Service) AddTrackedArtist(ctx context.Context, name string) error {
-	if s.repo == nil {
-		return fmt.Errorf("repository unavailable")
-	}
-	return s.repo.UpsertTrackedArtist(ctx, name)
-}
-
-// FollowArtist включает или отключает отслеживание артиста.
-func (s *Service) FollowArtist(ctx context.Context, name string, followed bool, artistID int64) error {
-	if artistID > 0 && s.repo != nil {
-		return s.repo.SetArtistFollowed(ctx, artistID, followed)
-	}
-	if s.scanner == nil {
-		return fmt.Errorf("scanner engine unavailable")
-	}
-	return s.scanner.FollowArtist(ctx, name, followed)
-}
-
-// SetAutoDownload включает или отключает автозагрузку новых релизов артиста.
-func (s *Service) SetAutoDownload(ctx context.Context, name string, auto bool, artistID int64) error {
-	if artistID > 0 && s.repo != nil {
-		return s.repo.SetArtistAutoDownload(ctx, artistID, auto)
-	}
-	if s.scanner == nil {
-		return fmt.Errorf("scanner engine unavailable")
-	}
-	return s.scanner.SetAutoDownload(ctx, name, auto)
+	return s.repo.GetLibraryArtists(ctx)
 }
 
 // UpdateCustomLinks обновляет пользовательские идентификаторы артиста в каталогах.
 func (s *Service) UpdateCustomLinks(ctx context.Context, name, alias, deezerID, mbID, yandexID string, artistID int64) error {
 	if artistID > 0 && s.repo != nil {
-		return s.repo.SetArtistLinks(ctx, artistID, alias, deezerID, mbID, yandexID)
+		return s.repo.SetArtistLinks(ctx, artistID, name, alias, deezerID, mbID, yandexID)
 	}
 	if s.scanner == nil {
 		return fmt.Errorf("scanner engine unavailable")
@@ -104,22 +73,37 @@ func (s *Service) UpdateCustomLinks(ctx context.Context, name, alias, deezerID, 
 }
 
 // GetArtistDiscography возвращает дискографию артиста с маркировкой статусов релизов.
-func (s *Service) GetArtistDiscography(ctx context.Context, name string) ([]RadarRelease, *TrackedArtist, error) {
+func (s *Service) GetArtistDiscography(ctx context.Context, name string, artistID ...int64) ([]RadarRelease, *TrackedArtist, error) {
 	if s.repo == nil {
 		return []RadarRelease{}, nil, nil
 	}
-	releases, err := s.repo.GetArtistDiscography(ctx, name)
+	releases, err := s.repo.GetArtistDiscography(ctx, name, artistID...)
 	if err != nil {
 		return nil, nil, err
+	}
+	if len(artistID) > 0 && artistID[0] > 0 {
+		artists, err := s.repo.GetLibraryArtists(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, tracked := range artists {
+			if tracked.ArtistID == artistID[0] {
+				return releases, &tracked, nil
+			}
+		}
+		return releases, nil, nil
 	}
 	tracked, _ := s.repo.GetTrackedArtistByName(ctx, name)
 	return releases, tracked, nil
 }
 
 // ScanArtist запускает обнаружение новинок для одного конкретного артиста.
-func (s *Service) ScanArtist(ctx context.Context, artistName string) (*serviceRadar.ScanArtistResult, error) {
+func (s *Service) ScanArtist(ctx context.Context, artistName string, artistID int64) (*serviceRadar.ScanArtistResult, error) {
 	if s.scanner == nil {
 		return nil, fmt.Errorf("scanner engine unavailable")
+	}
+	if artistID > 0 {
+		return s.scanner.ScanArtistByID(ctx, artistID)
 	}
 	return s.scanner.ScanArtist(ctx, artistName)
 }

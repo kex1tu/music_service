@@ -35,21 +35,9 @@ func (s *Service) GetIncompleteAlbums(ctx context.Context) (*IncompleteAlbumsRes
 		for _, track := range missing {
 			nums = append(nums, track.TrackNumber)
 		}
-		if len(nums) == 0 && a.TotalDiscs <= 1 && a.ExpectedCount > a.PresentCount {
-			present, _ := s.repo.GetPresentTrackNumbers(ctx, a.ID)
-			presentMap := make(map[int]bool)
-			for _, p := range present {
-				presentMap[p] = true
-			}
-			for n := 1; n <= a.ExpectedCount; n++ {
-				if !presentMap[n] {
-					nums = append(nums, n)
-				}
-			}
-		}
 
 		totalMissing += len(nums)
-		isCatMatched := a.DeezerAlbumID != nil && *a.DeezerAlbumID != ""
+		isCatMatched := a.Completeness != "unknown"
 		albums = append(albums, IncompleteAlbum{
 			Path:                a.FolderPath,
 			Album:               a.Title,
@@ -62,6 +50,7 @@ func (s *Service) GetIncompleteAlbums(ctx context.Context) (*IncompleteAlbumsRes
 			MissingTrackNumbers: nums,
 			MissingTracks:       missing,
 			IsCatalogMatched:    isCatMatched,
+			Completeness:        a.Completeness,
 			DeezerAlbumID:       a.DeezerAlbumID,
 		})
 	}
@@ -91,8 +80,11 @@ func (s *Service) CatalogMatchAlbum(ctx context.Context, albumPath, deezerID str
 	if matchedAlbum == nil && s.deezer != nil && meta.Artist != "" && meta.Title != "" {
 		q := fmt.Sprintf(`artist:"%s" album:"%s"`, meta.Artist, meta.Title)
 		albums, _ := s.deezer.SearchAlbums(ctx, q)
-		if len(albums) > 0 {
-			matchedAlbum, _ = s.deezer.GetAlbum(ctx, strconv.FormatInt(albums[0].ID, 10))
+		for _, album := range albums {
+			if album.MatchesArtistID(meta.DeezerArtistID) {
+				matchedAlbum, _ = s.deezer.GetAlbum(ctx, strconv.FormatInt(album.ID, 10))
+				break
+			}
 		}
 	}
 
@@ -106,9 +98,13 @@ func (s *Service) CatalogMatchAlbum(ctx context.Context, albumPath, deezerID str
 			"missing_tracks":        []any{},
 			"all_tracks":            []any{},
 			"is_catalog_matched":    false,
+			"completeness":          "unknown",
 		}, nil
 	}
 
+	if !matchedAlbum.MatchesArtistID(meta.DeezerArtistID) {
+		return nil, fmt.Errorf("релиз Deezer %d не связан с исполнителем Deezer %s", matchedAlbum.ID, meta.DeezerArtistID)
+	}
 	cover := matchedAlbum.BestCoverURL()
 	year := matchedAlbum.ReleaseYear()
 	catalog, err := resolver.DeezerCatalogTracks(matchedAlbum)
@@ -119,7 +115,7 @@ func (s *Service) CatalogMatchAlbum(ctx context.Context, albumPath, deezerID str
 
 	matched := make(map[db.TrackPosition]bool)
 	if meta.ID > 0 {
-		matched, err = s.repo.VerifyCatalog(ctx, meta.ID, strconv.FormatInt(matchedAlbum.ID, 10), catalog)
+		matched, err = s.repo.VerifyCatalog(ctx, meta.ID, strconv.FormatInt(matchedAlbum.ID, 10), catalog, meta.catalogRevision)
 		if err != nil {
 			return nil, err
 		}
@@ -142,6 +138,10 @@ func (s *Service) CatalogMatchAlbum(ctx context.Context, albumPath, deezerID str
 		}
 	}
 	presentCount, expectedCount := len(matched), len(catalog)
+	completeness := "incomplete"
+	if presentCount == expectedCount {
+		completeness = "complete"
+	}
 
 	return map[string]any{
 		"path":                  albumPath,
@@ -156,6 +156,7 @@ func (s *Service) CatalogMatchAlbum(ctx context.Context, albumPath, deezerID str
 		"missing_tracks":        missingTracks,
 		"all_tracks":            allTracks,
 		"is_catalog_matched":    true,
+		"completeness":          completeness,
 		"deezer_album_id":       strconv.FormatInt(matchedAlbum.ID, 10),
 	}, nil
 }
@@ -189,6 +190,12 @@ func (s *Service) enrichCatalogArtists(ctx context.Context, catalog []db.Catalog
 			}
 			if len(names) > 0 {
 				catalog[i].Artist = id3.FormatMultiValue(names)
+			}
+			if track.Artist.Name != "" {
+				catalog[i].PrimaryArtist = track.Artist.Name
+			}
+			if track.Artist.ID > 0 {
+				catalog[i].DeezerArtistID = strconv.FormatInt(track.Artist.ID, 10)
 			}
 			if track.ISRC != "" {
 				catalog[i].ISRC = track.ISRC
@@ -399,6 +406,9 @@ func (s *Service) DownloadMissing(ctx context.Context, req DownloadMissingReques
 		if meta.DeezerAlbumID != nil {
 			deezerID = *meta.DeezerAlbumID
 		}
+	}
+	if meta != nil && meta.Completeness == "complete" {
+		return []*BackfillJobInfo{}, nil
 	}
 	if req.DeezerAlbumID != nil && *req.DeezerAlbumID != "" {
 		deezerID = *req.DeezerAlbumID

@@ -12,7 +12,7 @@ import (
 	"music-manager/internal/services/radar"
 )
 
-// RadarHandler обрабатывает HTTP-запросы ленты новинок, отслеживания артистов и обнаружения пробелов.
+// RadarHandler обрабатывает HTTP-запросы ленты новинок, артистов медиатеки и обнаружения пробелов.
 type RadarHandler struct {
 	radar *radar.Service
 	db    *db.DB
@@ -58,10 +58,9 @@ func (h *RadarHandler) GetFeed(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetTrackedArtists возвращает список всех исполнителей в каталоге отслеживания.
-func (h *RadarHandler) GetTrackedArtists(w http.ResponseWriter, r *http.Request) {
-	onlyFollowed := r.URL.Query().Get("followed") == "true"
-	artists, err := h.db.GetTrackedArtists(r.Context(), onlyFollowed)
+// GetLibraryArtists возвращает список исполнителей медиатеки.
+func (h *RadarHandler) GetLibraryArtists(w http.ResponseWriter, r *http.Request) {
+	artists, err := h.db.GetRadarLibraryArtists(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -72,71 +71,6 @@ func (h *RadarHandler) GetTrackedArtists(w http.ResponseWriter, r *http.Request)
 		"items": artists,
 		"total": len(artists),
 	})
-}
-
-type addTrackedArtistReq struct {
-	Name string `json:"name"`
-}
-
-// AddTrackedArtist добавляет артиста на отслеживание вручную.
-func (h *RadarHandler) AddTrackedArtist(w http.ResponseWriter, r *http.Request) {
-	var req addTrackedArtistReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Name) == "" {
-		http.Error(w, `{"error":"invalid artist name"}`, http.StatusBadRequest)
-		return
-	}
-
-	if err := h.db.UpsertTrackedArtist(r.Context(), req.Name); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-}
-
-type followArtistReq struct {
-	Followed bool `json:"followed"`
-}
-
-// FollowArtist включает/отключает отслеживание артиста.
-func (h *RadarHandler) FollowArtist(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
-	var req followArtistReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
-		return
-	}
-
-	if err := h.radar.FollowArtist(r.Context(), name, req.Followed); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-}
-
-type autoDownloadReq struct {
-	AutoDownload bool `json:"auto_download"`
-}
-
-// SetAutoDownload включает/отключает автозагрузку новых релизов артиста.
-func (h *RadarHandler) SetAutoDownload(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
-	var req autoDownloadReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
-		return
-	}
-
-	if err := h.radar.SetAutoDownload(r.Context(), name, req.AutoDownload); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 type customLinksReq struct {

@@ -4,22 +4,24 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"music-manager/internal/db"
 	"strconv"
 	"strings"
 
+	"music-manager/internal/db"
 	"music-manager/internal/services/resolver"
 )
 
 type incompleteAlbum struct {
-	ID          int64
-	Artist      string
-	Title       string
-	TotalTracks int
-	DeezerID    string
+	CatalogRevision int64
+	ID              int64
+	Artist          string
+	Title           string
+	TotalTracks     int
+	DeezerID        string
+	DeezerArtistID  string
 }
 
-func selectBestDeezerAlbumScanner(candidates []resolver.DeezerAlbum, dbArtist, dbAlbum string, localTrackCount int) *resolver.DeezerAlbum {
+func selectBestDeezerAlbumScanner(candidates []resolver.DeezerAlbum, dbArtist, dbAlbum string, localTrackCount int, artistID string) *resolver.DeezerAlbum {
 	if len(candidates) == 0 {
 		return nil
 	}
@@ -33,6 +35,9 @@ func selectBestDeezerAlbumScanner(candidates []resolver.DeezerAlbum, dbArtist, d
 
 	for i := range candidates {
 		cand := &candidates[i]
+		if !cand.MatchesArtistID(artistID) {
+			continue
+		}
 		candAlbum := strings.ToLower(resolver.CleanQueryText(cand.Title))
 		candArtist := strings.ToLower(resolver.CleanQueryText(cand.Artist.Name))
 
@@ -93,16 +98,13 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 	}
 
 	rows, err := s.database.Conn().QueryContext(ctx, `
-		SELECT al.id, ar.name, al.title, COALESCE(al.total_tracks, 0), COALESCE(al.deezer_id, '')
+		SELECT al.id, al.catalog_revision, ar.name, al.title, COALESCE(al.total_tracks, 0), COALESCE(al.deezer_id, ''), COALESCE(ar.deezer_id, '')
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
-		WHERE (al.is_complete = 0 AND al.total_tracks > 1)
-		   OR EXISTS (SELECT 1 FROM missing_tracks WHERE album_id = al.id)
-		   OR al.total_tracks = 0
-		   OR EXISTS (
-			   SELECT 1 FROM tracks t WHERE t.album_id = al.id
-			   GROUP BY t.album_id HAVING MAX(t.disc_total) > COUNT(DISTINCT t.disc_number)
-		   )
+		WHERE al.catalog_checked_at IS NULL AND (NULLIF(al.deezer_id, '') IS NOT NULL
+			OR al.total_tracks = 0 OR al.total_tracks > al.present_tracks_count
+			OR EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id
+				GROUP BY t.album_id HAVING MAX(t.disc_total) > COUNT(DISTINCT t.disc_number)))
 	`)
 	if err != nil {
 		return
@@ -112,7 +114,7 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 	var albums []incompleteAlbum
 	for rows.Next() {
 		var a incompleteAlbum
-		if err := rows.Scan(&a.ID, &a.Artist, &a.Title, &a.TotalTracks, &a.DeezerID); err == nil {
+		if err := rows.Scan(&a.ID, &a.CatalogRevision, &a.Artist, &a.Title, &a.TotalTracks, &a.DeezerID, &a.DeezerArtistID); err == nil {
 			albums = append(albums, a)
 		}
 	}
@@ -148,7 +150,7 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 			query := fmt.Sprintf(`artist:"%s" album:"%s"`, cleanArtist, album.Title)
 			searchResults, searchErr := s.deezerClient.SearchAlbums(ctx, query)
 			if searchErr == nil && len(searchResults) > 0 {
-				best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, localCount)
+				best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, localCount, album.DeezerArtistID)
 				if best != nil {
 					remoteAlbum, fetchErr = s.deezerClient.GetAlbum(ctx, strconv.FormatInt(best.ID, 10))
 				}
@@ -157,7 +159,7 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 				simpleQuery := fmt.Sprintf("%s %s", cleanArtist, album.Title)
 				searchResults, searchErr = s.deezerClient.SearchAlbums(ctx, simpleQuery)
 				if searchErr == nil && len(searchResults) > 0 {
-					best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, localCount)
+					best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, localCount, album.DeezerArtistID)
 					if best != nil {
 						remoteAlbum, fetchErr = s.deezerClient.GetAlbum(ctx, strconv.FormatInt(best.ID, 10))
 					}
@@ -166,7 +168,7 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 			if remoteAlbum == nil {
 				searchResults, searchErr = s.deezerClient.SearchAlbums(ctx, album.Title)
 				if searchErr == nil && len(searchResults) > 0 {
-					best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, localCount)
+					best := selectBestDeezerAlbumScanner(searchResults, cleanArtist, album.Title, localCount, album.DeezerArtistID)
 					if best != nil {
 						remoteAlbum, fetchErr = s.deezerClient.GetAlbum(ctx, strconv.FormatInt(best.ID, 10))
 					}
@@ -174,13 +176,13 @@ func (s *Scanner) CheckIncompleteAlbums(ctx context.Context) {
 			}
 		}
 
-		if fetchErr != nil || remoteAlbum == nil || remoteAlbum.Tracks == nil {
+		if fetchErr != nil || remoteAlbum == nil || remoteAlbum.Tracks == nil || !remoteAlbum.MatchesArtistID(album.DeezerArtistID) {
 			continue
 		}
 
 		catalog, err := resolver.DeezerCatalogTracks(remoteAlbum)
 		if err == nil {
-			_, err = db.VerifyCatalog(ctx, s.database.Conn(), album.ID, strconv.FormatInt(remoteAlbum.ID, 10), catalog)
+			_, err = db.VerifyCatalog(ctx, s.database.Conn(), album.ID, strconv.FormatInt(remoteAlbum.ID, 10), catalog, album.CatalogRevision)
 		}
 		if err != nil {
 			log.Printf("[Scanner] failed to verify catalog for album %d: %v", album.ID, err)

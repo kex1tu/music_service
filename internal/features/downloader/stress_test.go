@@ -470,20 +470,7 @@ func TestStress_RepositoryConcurrency(t *testing.T) {
 					_, _ = repo.GetActiveJobCount(ctx)
 
 				case 6:
-					// Pinned source and soundcloud cache
-					pinKey := fmt.Sprintf("artist:title:%d", workerID)
-					_ = repo.SavePinnedSource(ctx, downloader.PinnedTrackSourceDTO{
-						CacheKey:   pinKey,
-						ArtistName: "Test Artist",
-						TrackTitle: "Test Title",
-						PinnedURL:  "https://soundcloud.com/test",
-						SourceType: "soundcloud",
-					})
-					_, _ = repo.GetPinnedSource(ctx, pinKey)
-
-					scKey := fmt.Sprintf("sc:%d:%d", workerID, op)
-					_ = repo.PinSoundCloudVersion(ctx, scKey, "Artist", "Title", "https://soundcloud.com/pin", 180)
-					_, _ = repo.GetSoundCloudCache(ctx, scKey, 24)
+					_, _ = repo.GetJob(ctx, jobID)
 
 				case 7:
 					// DeleteJob

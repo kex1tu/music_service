@@ -33,8 +33,8 @@ const EarlyExitMatchThreshold = 85.0
 
 // AudioMatcher matches Deezer track metadata to SoundCloud or YouTube audio streams.
 type AudioMatcher struct {
-	cookiesPath   string
-	db            *db.DB
+	cookiesPath string
+
 	cfg           *config.Config
 	deezerClient  *DeezerClient
 	itunesClient  *ITunesClient
@@ -57,11 +57,6 @@ func NewAudioMatcher(cookiesPath string) *AudioMatcher {
 	return &AudioMatcher{
 		cookiesPath: cookiesPath,
 	}
-}
-
-// SetDB привязывает SQLite базу данных для кэширования кандидатов SoundCloud.
-func (m *AudioMatcher) SetDB(database *db.DB) {
-	m.db = database
 }
 
 // SetConfig устанавливает конфигурационные параметры для резолвера.
@@ -97,8 +92,7 @@ func (m *AudioMatcher) FindBestMatch(ctx context.Context, title, artist string, 
 	return res.URL, nil
 }
 
-// FindBestMatchWithDetails returns a combined suggestion list. Cached/pinned
-// URLs do not authorize application; URL stays empty pending a user choice.
+// FindBestMatchWithDetails returns suggestions pending a user choice.
 func (m *AudioMatcher) FindBestMatchWithDetails(ctx context.Context, title, artist, isrc string, duration int) (*MatchResult, error) {
 	items, err := m.SearchMultiCandidates(ctx, artist, title, duration)
 	if err != nil {
@@ -107,7 +101,7 @@ func (m *AudioMatcher) FindBestMatchWithDetails(ctx context.Context, title, arti
 	return &MatchResult{Status: "waiting_source", Suggestions: items}, nil
 }
 
-// FindUncensoredSoundCloudMatch executes candidate ranking on SoundCloud and caches the result.
+// FindUncensoredSoundCloudMatch executes candidate ranking on SoundCloud.
 func (m *AudioMatcher) FindUncensoredSoundCloudMatch(ctx context.Context, title, artist, isrc string, duration int) (*MatchResult, error) {
 	cleanArt := CleanQueryText(artist)
 	cleanTit := CleanQueryText(title)
@@ -182,22 +176,6 @@ func (m *AudioMatcher) FindUncensoredSoundCloudMatch(ctx context.Context, title,
 	}
 
 	best := ranked[0]
-	cacheKey := BuildCacheKey(isrc, artist, title)
-
-	// Сохранение в SQLite кэш
-	if m.db != nil {
-		entry := db.SoundCloudCacheEntry{
-			CacheKey:    cacheKey,
-			TrackTitle:  title,
-			ArtistName:  artist,
-			SelectedURL: best.URL,
-			Status:      best.Status,
-			Duration:    best.Duration,
-			IsManual:    false,
-			Candidates:  ranked,
-		}
-		_ = m.db.SaveSoundCloudCache(ctx, entry)
-	}
 
 	return &MatchResult{
 		URL:        best.URL,

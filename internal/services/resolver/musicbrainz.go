@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"music-manager/internal/db"
 )
 
 const (
@@ -828,7 +830,7 @@ func (c *MusicBrainzClient) GetArtistReleaseGroups(ctx context.Context, mbid str
 		return nil, fmt.Errorf("mbid cannot be empty")
 	}
 
-	reqURL := fmt.Sprintf("%s/release-group?artist=%s&type=album|ep|single|compilation&limit=100&fmt=json", c.baseURL, url.PathEscape(mbid))
+	reqURL := fmt.Sprintf("%s/release-group?artist=%s&type=album|ep|single|compilation&inc=artist-credits+url-rels&limit=100&fmt=json", c.baseURL, url.PathEscape(mbid))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, err
@@ -854,6 +856,11 @@ func (c *MusicBrainzClient) GetArtistReleaseGroups(ctx context.Context, mbid str
 			SecondaryTypes   []string         `json:"secondary-types"`
 			FirstReleaseDate string           `json:"first-release-date"`
 			ArtistCredit     []mbArtistCredit `json:"artist-credit"`
+			Relations        []struct {
+				URL struct {
+					Resource string `json:"resource"`
+				} `json:"url"`
+			} `json:"relations"`
 		} `json:"release-groups"`
 	}
 
@@ -872,7 +879,7 @@ func (c *MusicBrainzClient) GetArtistReleaseGroups(ctx context.Context, mbid str
 				break
 			}
 		}
-		results = append(results, CatalogReleaseSummary{
+		summary := CatalogReleaseSummary{
 			ID:          rg.ID,
 			ReleaseType: releaseType,
 			Source:      "musicbrainz",
@@ -880,7 +887,21 @@ func (c *MusicBrainzClient) GetArtistReleaseGroups(ctx context.Context, mbid str
 			Artist:      artist,
 			Year:        year,
 			Date:        rg.FirstReleaseDate,
-		})
+		}
+		summary.ProviderCredits = make([]db.RadarCredit, 0, len(rg.ArtistCredit))
+		for _, credit := range rg.ArtistCredit {
+			name := strings.TrimSpace(credit.Name)
+			if name == "" {
+				name = strings.TrimSpace(credit.Artist.Name)
+			}
+			if name != "" {
+				summary.ProviderCredits = append(summary.ProviderCredits, db.RadarCredit{Name: name, ExternalID: credit.Artist.ID})
+			}
+		}
+		for _, relation := range rg.Relations {
+			summary.DeezerAlbumLinks = append(summary.DeezerAlbumLinks, relation.URL.Resource)
+		}
+		results = append(results, summary)
 	}
 	return results, nil
 }

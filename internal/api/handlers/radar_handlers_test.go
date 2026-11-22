@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -9,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/go-chi/chi/v5"
 
 	"music-manager/internal/config"
 	"music-manager/internal/db"
@@ -34,11 +31,10 @@ func setupTestRadarHandler(t *testing.T) (*RadarHandler, *db.DB, func()) {
 
 	cfg := &config.Config{
 		RadarScanIntervalHours: 24,
-		RadarAutoDownload:      false,
 	}
 
 	aggregator := resolver.NewDiscographyAggregator(nil, nil, nil, database)
-	radarService := radar.NewService(database, aggregator, nil, cfg)
+	radarService := radar.NewService(database, aggregator, cfg)
 	handler := NewRadarHandler(radarService, database)
 
 	cleanup := func() {
@@ -55,43 +51,25 @@ func TestRadarHandler_Endpoints(t *testing.T) {
 
 	ctx := context.Background()
 
-	// 1. POST /artists (Добавление артиста)
-	body, _ := json.Marshal(map[string]string{"name": "Daft Punk"})
-	req := httptest.NewRequest("POST", "/api/radar/artists", bytes.NewReader(body))
+	artistID, err := db.GetOrCreateLibraryArtist(ctx, database.Conn(), "Daft Punk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Conn().ExecContext(ctx, `INSERT INTO albums(artist_id, title, clean_title, folder_path)
+        VALUES (?, 'Discovery', 'discovery', 'Discovery')`, artistID); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/api/radar/artists", nil)
 	w := httptest.NewRecorder()
-	handler.AddTrackedArtist(w, req)
-
+	handler.GetLibraryArtists(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("AddTrackedArtist failed with status %d", w.Code)
+		t.Fatalf("GetLibraryArtists failed with status %d", w.Code)
 	}
-
-	// 2. GET /artists
-	req = httptest.NewRequest("GET", "/api/radar/artists", nil)
-	w = httptest.NewRecorder()
-	handler.GetTrackedArtists(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GetTrackedArtists failed with status %d", w.Code)
+	var artistsResp struct {
+		Total int `json:"total"`
 	}
-	var artistsResp map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &artistsResp)
-	if artistsResp["total"].(float64) != 1 {
-		t.Errorf("expected 1 tracked artist, got %v", artistsResp["total"])
-	}
-
-	// 3. POST /artists/{name}/follow
-	r := chi.NewRouter()
-	r.Post("/api/radar/artists/{name}/follow", handler.FollowArtist)
-	followBody, _ := json.Marshal(map[string]bool{"followed": false})
-	req = httptest.NewRequest("POST", "/api/radar/artists/Daft%20Punk/follow", bytes.NewReader(followBody))
-	w = httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("FollowArtist failed with status %d", w.Code)
-	}
-
-	tracked, err := database.GetTrackedArtistByName(ctx, "Daft Punk")
-	if err != nil || tracked.IsFollowed {
-		t.Errorf("expected artist not to be followed")
+	if err := json.Unmarshal(w.Body.Bytes(), &artistsResp); err != nil || artistsResp.Total != 1 {
+		t.Fatalf("expected one library artist, got %+v, %v", artistsResp, err)
 	}
 
 	// 4. Добавляем релиз и проверяем GetFeed и SetReleaseStatus

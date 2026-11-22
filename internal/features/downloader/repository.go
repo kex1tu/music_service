@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"music-manager/internal/core/textkey"
 	"music-manager/internal/db"
 	"music-manager/internal/id3"
 )
@@ -43,15 +44,7 @@ type JobRepository interface {
 	ClearCompletedJobs(ctx context.Context, age time.Duration) (int64, error)
 	GetMissingTracksForAlbum(ctx context.Context, folderPath string) ([]MissingTrackInfo, error)
 	GetAlbumTrackPositions(ctx context.Context, folderPath string) (map[db.TrackPosition]bool, error)
-	CheckTrackInLibrary(ctx context.Context, title, artist string) (*ExistingTrackInfo, error)
-
-	GetPinnedSource(ctx context.Context, cacheKey string) (*PinnedTrackSourceDTO, error)
-	SavePinnedSource(ctx context.Context, pin PinnedTrackSourceDTO) error
-	DeletePinnedSource(ctx context.Context, cacheKey string) error
-	UpdateTrackPinnedURL(ctx context.Context, trackID int64, pinnedURL string) error
-	GetSoundCloudCache(ctx context.Context, key string, ttlHours int) (*SoundCloudCacheDTO, error)
-	PinSoundCloudVersion(ctx context.Context, key, artist, title, url string, duration int) error
-	InvalidateSoundCloudURL(ctx context.Context, key string, failedURL string) (*SoundCloudCacheDTO, error)
+	CheckTrackInLibrary(ctx context.Context, title, artist string, isrc ...*string) (*ExistingTrackInfo, error)
 }
 
 // Repository реализует персистентный слой задач загрузки в SQLite WAL.
@@ -102,7 +95,7 @@ func scanJob(scanner interface{ Scan(dest ...any) error }) (*Job, error) {
 	err := scanner.Scan(
 		&j.ID, &statusStr, &j.Source, &j.URL, &j.Progress, &j.CurrentStep,
 		&j.TotalTracks, &j.CompletedTracks, &j.Error, &j.TargetAlbumPath,
-		&j.IsBackfill, &j.AlbumTitle, &j.ArtistName, &createdAtRaw, &updatedAtRaw, &selection, &backfill,
+		&j.IsBackfill, &j.AlbumTitle, &j.ArtistName, &createdAtRaw, &updatedAtRaw, &selection, &backfill, &j.ArtistID,
 	)
 	if err != nil {
 		return nil, err
@@ -118,6 +111,7 @@ func scanJob(scanner interface{ Scan(dest ...any) error }) (*Job, error) {
 	_, updatedAt := parseTimeField(updatedAtRaw)
 	j.CreatedAt = createdAtStr
 	j.UpdatedAt = updatedAt
+	j.legacySelection = !selection.Valid
 	if selection.Valid && !j.selectionCorrupt {
 		loadSourceSelection(&j, selection.String)
 	}
@@ -130,31 +124,29 @@ func scanJob(scanner interface{ Scan(dest ...any) error }) (*Job, error) {
 	return &j, nil
 }
 
-var insertJobSQL = `
+const insertJobSQL = `
 	INSERT INTO download_jobs (
 		id, status, source, url, progress, current_step,
 		total_tracks, completed_tracks, error, target_album_path,
-		is_backfill, album_title, artist_name, backfill_selection, artist_id, updated_at
-	) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ` + db.ArtistIDLookup("?13") + `, CURRENT_TIMESTAMP)`
+		is_backfill, album_title, artist_name, backfill_selection, artist_id, selection_json, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
 
-var updateJobSQL = `
+const updateJobSQL = `
 	UPDATE download_jobs SET
-		status=?1, source=?2, url=?3, progress=?4, current_step=?5, total_tracks=?6,
-		completed_tracks=?7, error=?8, target_album_path=?9, is_backfill=?10, album_title=?11,
-		artist_id=CASE WHEN artist_name IS ?12 AND artist_id IS NOT NULL
-			THEN artist_id ELSE ` + db.ArtistIDLookup("?12") + ` END,
-		artist_name=?12, backfill_selection=?13, updated_at=CURRENT_TIMESTAMP
-	WHERE id=?14`
+		status=?, source=?, url=?, progress=?, current_step=?, total_tracks=?,
+		completed_tracks=?, error=?, target_album_path=?, is_backfill=?, album_title=?,
+		artist_name=?, backfill_selection=?, artist_id=?, selection_json=?, updated_at=CURRENT_TIMESTAMP
+	WHERE id=?`
 
 const selectJobSQL = `
 	SELECT j.id, j.status, j.source, j.url, j.progress, j.current_step,
 	       j.total_tracks, j.completed_tracks, j.error, j.target_album_path,
-	       j.is_backfill, j.album_title, j.artist_name, j.created_at, j.updated_at, s.payload_json, j.backfill_selection
-	FROM download_jobs j
-	LEFT JOIN download_source_selections s ON s.job_id=j.id`
+	       j.is_backfill, j.album_title, j.artist_name, j.created_at, j.updated_at,
+	       j.selection_json, j.backfill_selection, j.artist_id
+	FROM download_jobs j`
 
 func (r *Repository) CreateJob(ctx context.Context, job *Job) error {
-	return r.createJobWithPins(ctx, job, nil)
+	return r.writeJob(ctx, job, insertJobSQL, true)
 }
 
 func (r *Repository) createJobs(ctx context.Context, jobs []*Job) error {
@@ -178,25 +170,20 @@ func (r *Repository) SaveJob(ctx context.Context, job *Job) error {
 		total_tracks=excluded.total_tracks, completed_tracks=excluded.completed_tracks,
 		error=excluded.error, target_album_path=excluded.target_album_path,
 		is_backfill=excluded.is_backfill, album_title=excluded.album_title,
-		artist_id=CASE WHEN download_jobs.artist_name IS excluded.artist_name
-			THEN COALESCE(download_jobs.artist_id, excluded.artist_id) ELSE excluded.artist_id END,
-		artist_name=excluded.artist_name, backfill_selection=excluded.backfill_selection, updated_at=CURRENT_TIMESTAMP`, true, nil)
-}
-
-func (r *Repository) createJobWithPins(ctx context.Context, job *Job, pins []PinnedTrackSourceDTO) error {
-	return r.writeJob(ctx, job, insertJobSQL, true, pins)
+		artist_id=excluded.artist_id, artist_name=excluded.artist_name,
+		backfill_selection=excluded.backfill_selection, selection_json=excluded.selection_json, updated_at=CURRENT_TIMESTAMP`, true)
 }
 
 // updateProgressSnapshot only updates an existing job that is no longer queued.
 func (r *Repository) updateProgressSnapshot(ctx context.Context, job *Job) error {
-	return r.writeJob(ctx, job, updateJobSQL+" AND status <> 'QUEUED'", false, nil)
+	return r.writeJob(ctx, job, updateJobSQL+" AND status <> 'QUEUED'", false)
 }
 
-func (r *Repository) updateJobWithSelection(ctx context.Context, job *Job, expected JobStatus, pins []PinnedTrackSourceDTO) error {
-	return r.writeJob(ctx, job, updateJobSQL+" AND status=?", false, pins, expected)
+func (r *Repository) updateJobWithSelection(ctx context.Context, job *Job, expected JobStatus) error {
+	return r.writeJob(ctx, job, updateJobSQL+" AND status=?", false, expected)
 }
 
-func (r *Repository) writeJob(ctx context.Context, job *Job, query string, insert bool, pins []PinnedTrackSourceDTO, conditions ...any) error {
+func (r *Repository) writeJob(ctx context.Context, job *Job, query string, insert bool, conditions ...any) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -204,11 +191,6 @@ func (r *Repository) writeJob(ctx context.Context, job *Job, query string, inser
 	defer tx.Rollback()
 	if err := writeJobSnapshot(ctx, tx, job.Snapshot(), query, insert, conditions...); err != nil {
 		return err
-	}
-	for _, pin := range pins {
-		if err := savePinnedSource(ctx, tx, pin); err != nil {
-			return fmt.Errorf("save pinned source: %w", err)
-		}
 	}
 	return tx.Commit()
 }
@@ -228,9 +210,13 @@ func writeJobSnapshot(ctx context.Context, tx *sql.Tx, snap *Job, query string, 
 		}
 		backfill = string(payload)
 	}
+	selection, err := marshalSourceSelection(snap)
+	if err != nil {
+		return fmt.Errorf("encode job selection: %w", err)
+	}
 	args := []any{snap.Status, snap.Source, snap.URL, snap.Progress, snap.CurrentStep,
 		snap.TotalTracks, snap.CompletedTracks, snap.Error, snap.TargetAlbumPath,
-		snap.IsBackfill, snap.AlbumTitle, snap.ArtistName, backfill}
+		snap.IsBackfill, snap.AlbumTitle, snap.ArtistName, backfill, snap.ArtistID, string(selection)}
 	if insert {
 		args = append([]any{snap.ID}, args...)
 	} else {
@@ -247,9 +233,6 @@ func writeJobSnapshot(ctx context.Context, tx *sql.Tx, snap *Job, query string, 
 	}
 	if n == 0 {
 		return ErrJobNotFound
-	}
-	if err := saveSourceSelection(ctx, tx, snap); err != nil {
-		return fmt.Errorf("save job selection: %w", err)
 	}
 	return nil
 }
@@ -445,32 +428,35 @@ func (r *Repository) ClearCompletedJobs(ctx context.Context, age time.Duration) 
 	return r.ClearFinishedJobs(ctx, age)
 }
 
-// GetMissingTracksForAlbum возвращает список недостающих треков для альбома из missing_tracks.
+func (r *Repository) albumCatalogChecked(ctx context.Context, folderPath string) (bool, error) {
+	var checked bool
+	err := r.db.QueryRowContext(ctx, "SELECT catalog_checked_at IS NOT NULL FROM albums WHERE folder_path = ?",
+		db.AlbumRoot(filepath.ToSlash(folderPath))).Scan(&checked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return checked, err
+}
+
+// GetMissingTracksForAlbum возвращает позиции, помеченные как отсутствующие при сверке.
 func (r *Repository) GetMissingTracksForAlbum(ctx context.Context, folderPath string) ([]MissingTrackInfo, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT mt.title, COALESCE(ar.name, mt.artist), mt.track_number, COALESCE(mt.disc_number, 1),
-			COALESCE(mt.expected_duration, 0), COALESCE(mt.deezer_id, ''), COALESCE(mt.deezer_url, ''),
-			COALESCE(mt.isrc, ''), COALESCE(mt.pinned_source_url, '')
-		FROM missing_tracks mt JOIN albums al ON mt.album_id = al.id
-		LEFT JOIN artists ar ON ar.id = mt.artist_id
-		WHERE al.folder_path = ? ORDER BY mt.disc_number, mt.track_number
-	`, db.AlbumRoot(filepath.ToSlash(folderPath)))
+	var id int64
+	err := r.db.QueryRowContext(ctx, "SELECT id FROM albums WHERE folder_path = ?", db.AlbumRoot(filepath.ToSlash(folderPath))).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var result []MissingTrackInfo
-	for rows.Next() {
-		var item MissingTrackInfo
-		if err := rows.Scan(&item.Title, &item.Artist, &item.TrackNumber, &item.DiscNumber,
-			&item.Duration, &item.DeezerID, &item.DeezerURL, &item.ISRC, &item.PinnedURL); err != nil {
-			return nil, err
-		}
-		item.TrackPosition = db.ReleasePosition(item.DiscNumber, item.TrackNumber)
-		result = append(result, item)
+	tracks, err := db.ReleaseTracklist(ctx, r.db, id, true)
+	if err != nil {
+		return nil, err
 	}
-	return result, rows.Err()
+	result := make([]MissingTrackInfo, len(tracks))
+	for i, track := range tracks {
+		result[i] = MissingTrackInfo{CatalogTrack: track}
+	}
+	return result, nil
 }
 
 func (r *Repository) GetAlbumTrackPositions(ctx context.Context, folderPath string) (map[db.TrackPosition]bool, error) {
@@ -493,217 +479,6 @@ func (r *Repository) GetAlbumTrackPositions(ctx context.Context, folderPath stri
 	return positions, rows.Err()
 }
 
-// GetPinnedSource возвращает зафиксированный источник трека по cache_key.
-func (r *Repository) GetPinnedSource(ctx context.Context, cacheKey string) (*PinnedTrackSourceDTO, error) {
-	return r.getPinnedSource(ctx, cacheKey, "", "")
-}
-
-func (r *Repository) getPinnedSource(ctx context.Context, cacheKey, artist, title string) (*PinnedTrackSourceDTO, error) {
-	cacheKey = strings.TrimSpace(cacheKey)
-	if cacheKey == "" {
-		return nil, nil
-	}
-
-	query := `
-	WITH requested(id) AS (SELECT ` + db.ArtistIDLookup("?2") + `)
-	SELECT p.cache_key, p.artist_name, p.track_title, p.isrc, p.pinned_url, p.source_type, p.duration, p.created_at, p.updated_at
-	FROM pinned_track_sources p CROSS JOIN requested
-	WHERE (p.cache_key = ?1 AND (p.artist_id IS NULL OR requested.id IS NULL OR p.artist_id = requested.id OR ?1 LIKE 'isrc:%'))
-	   OR (p.artist_id = requested.id AND ?1 NOT LIKE 'isrc:%' AND NULLIF(p.isrc, '') IS NULL
-	       AND music_search_key(p.track_title) = music_search_key(?3))
-	ORDER BY p.cache_key = ?1 DESC, p.updated_at DESC, p.cache_key
-	LIMIT 1;`
-	row := r.db.QueryRowContext(ctx, query, cacheKey, artist, title)
-	var p PinnedTrackSourceDTO
-	var isrc sql.NullString
-	var createdAtRaw, updatedAtRaw any
-
-	err := row.Scan(
-		&p.CacheKey, &p.ArtistName, &p.TrackTitle, &isrc,
-		&p.PinnedURL, &p.SourceType, &p.Duration,
-		&createdAtRaw, &updatedAtRaw,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if isrc.Valid && isrc.String != "" {
-		p.ISRC = &isrc.String
-	}
-	_, p.CreatedAt = parseTimeField(createdAtRaw)
-	_, p.UpdatedAt = parseTimeField(updatedAtRaw)
-	return &p, nil
-}
-
-// SavePinnedSource сохраняет или обновляет ручную привязку источника трека.
-func (r *Repository) SavePinnedSource(ctx context.Context, pin PinnedTrackSourceDTO) error {
-	return savePinnedSource(ctx, r.db, pin)
-}
-
-func savePinnedSource(ctx context.Context, writer DBTX, pin PinnedTrackSourceDTO) error {
-	return db.WritePinnedSource(ctx, writer, pin)
-}
-
-// DeletePinnedSource удаляет ручную привязку аудио-источника по cache_key.
-func (r *Repository) DeletePinnedSource(ctx context.Context, cacheKey string) error {
-	query := `DELETE FROM pinned_track_sources WHERE cache_key = ?;`
-	_, err := r.db.ExecContext(ctx, query, cacheKey)
-	return err
-}
-
-// UpdateTrackPinnedURL обновляет URL ручной привязки в таблице tracks.
-func (r *Repository) UpdateTrackPinnedURL(ctx context.Context, trackID int64, pinnedURL string) error {
-	query := `UPDATE tracks SET pinned_source_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;`
-	_, err := r.db.ExecContext(ctx, query, pinnedURL, trackID)
-	return err
-}
-
-// GetSoundCloudCache возвращает валидный кэш альтернативных версий SoundCloud.
-func (r *Repository) GetSoundCloudCache(ctx context.Context, key string, ttlHours int) (*SoundCloudCacheDTO, error) {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return nil, nil
-	}
-	if ttlHours <= 0 {
-		ttlHours = 720
-	}
-
-	query := `
-	SELECT cache_key, track_title, artist_name, selected_url, status, duration, is_manual, candidates_json, checked_at, updated_at
-	FROM soundcloud_uncensored_cache
-	WHERE cache_key = ? AND (is_manual = 1 OR checked_at > datetime('now', printf('-%d hours', ?)));
-	`
-	row := r.db.QueryRowContext(ctx, query, key, ttlHours)
-	var e SoundCloudCacheDTO
-	var checkedAtRaw, updatedAtRaw any
-
-	err := row.Scan(
-		&e.CacheKey, &e.TrackTitle, &e.ArtistName, &e.SelectedURL,
-		&e.Status, &e.Duration, &e.IsManual, &e.CandidatesJSON,
-		&checkedAtRaw, &updatedAtRaw,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	_, e.CheckedAt = parseTimeField(checkedAtRaw)
-	_, e.UpdatedAt = parseTimeField(updatedAtRaw)
-
-	if e.CandidatesJSON != "" && e.CandidatesJSON != "[]" {
-		_ = json.Unmarshal([]byte(e.CandidatesJSON), &e.Candidates)
-	}
-
-	if !e.IsManual && (e.Status == "link_dead" || e.SelectedURL == "") {
-		return nil, nil
-	}
-	return &e, nil
-}
-
-// PinSoundCloudVersion фиксирует вручную выбранную версию SoundCloud.
-func (r *Repository) PinSoundCloudVersion(ctx context.Context, key, artist, title, url string, duration int) error {
-	query := `
-	INSERT INTO soundcloud_uncensored_cache (
-		cache_key, artist_name, track_title, selected_url, duration, status, is_manual, candidates_json, checked_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, 'manual', 1, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	ON CONFLICT(cache_key) DO UPDATE SET
-		selected_url = excluded.selected_url,
-		duration = excluded.duration,
-		is_manual = 1,
-		status = 'manual',
-		checked_at = CURRENT_TIMESTAMP,
-		updated_at = CURRENT_TIMESTAMP;
-	`
-	_, err := r.db.ExecContext(ctx, query, key, artist, title, url, duration)
-	return err
-}
-
-// InvalidateSoundCloudURL обрабатывает недоступность URL трека с ротацией на следующего кандидата.
-func (r *Repository) InvalidateSoundCloudURL(ctx context.Context, key string, failedURL string) (*SoundCloudCacheDTO, error) {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return nil, nil
-	}
-
-	query := `
-	SELECT cache_key, track_title, artist_name, selected_url, status, duration, is_manual, candidates_json, checked_at, updated_at
-	FROM soundcloud_uncensored_cache
-	WHERE cache_key = ?;
-	`
-	row := r.db.QueryRowContext(ctx, query, key)
-	var entry SoundCloudCacheDTO
-	var checkedAtRaw, updatedAtRaw any
-
-	err := row.Scan(
-		&entry.CacheKey, &entry.TrackTitle, &entry.ArtistName, &entry.SelectedURL,
-		&entry.Status, &entry.Duration, &entry.IsManual, &entry.CandidatesJSON,
-		&checkedAtRaw, &updatedAtRaw,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	_, entry.CheckedAt = parseTimeField(checkedAtRaw)
-	_, entry.UpdatedAt = parseTimeField(updatedAtRaw)
-
-	if entry.CandidatesJSON != "" && entry.CandidatesJSON != "[]" {
-		_ = json.Unmarshal([]byte(entry.CandidatesJSON), &entry.Candidates)
-	}
-
-	if entry.IsManual {
-		entry.Status = "link_dead"
-		_, err = r.db.ExecContext(ctx,
-			"UPDATE soundcloud_uncensored_cache SET status = 'link_dead', updated_at = CURRENT_TIMESTAMP WHERE cache_key = ?;",
-			key,
-		)
-		return &entry, err
-	}
-
-	var remaining []db.SoundCloudCandidateItem
-	for _, c := range entry.Candidates {
-		if c.URL != failedURL && c.URL != "" {
-			remaining = append(remaining, c)
-		}
-	}
-	entry.Candidates = remaining
-
-	if len(remaining) > 0 {
-		next := remaining[0]
-		candJSON, _ := json.Marshal(remaining)
-		entry.SelectedURL = next.URL
-		entry.Status = next.Status
-		entry.Duration = next.Duration
-		entry.CandidatesJSON = string(candJSON)
-
-		_, err = r.db.ExecContext(ctx, `
-			UPDATE soundcloud_uncensored_cache
-			SET selected_url = ?, status = ?, duration = ?, candidates_json = ?, updated_at = CURRENT_TIMESTAMP
-			WHERE cache_key = ?;
-		`, entry.SelectedURL, entry.Status, entry.Duration, entry.CandidatesJSON, key)
-	} else {
-		entry.SelectedURL = ""
-		entry.Status = "link_dead"
-		entry.CandidatesJSON = "[]"
-
-		_, err = r.db.ExecContext(ctx, `
-			UPDATE soundcloud_uncensored_cache
-			SET selected_url = '', status = 'link_dead', candidates_json = '[]', updated_at = CURRENT_TIMESTAMP
-			WHERE cache_key = ?;
-		`, key)
-	}
-
-	return &entry, err
-}
-
-// isHighQualityBitrate проверяет, является ли битрейт высоким (>= 310k),
-// учитывая варианты хранения в kbps (320) и bps (320000).
 func isHighQualityBitrate(bitrate int) bool {
 	if bitrate >= 310000 {
 		return true
@@ -715,71 +490,72 @@ func isHighQualityBitrate(bitrate int) bool {
 }
 
 // CheckTrackInLibrary ищет трек в медиатеке по названию и исполнителю.
-func (r *Repository) CheckTrackInLibrary(ctx context.Context, title, artist string) (*ExistingTrackInfo, error) {
+func (r *Repository) CheckTrackInLibrary(ctx context.Context, title, artist string, isrc ...*string) (*ExistingTrackInfo, error) {
 	if r.db == nil {
 		return nil, nil
 	}
 
-	cleanTitle := strings.ToLower(strings.TrimSpace(id3.CleanTitle(title, "")))
-	if cleanTitle == "" {
+	if strings.TrimSpace(title) == "" {
 		return nil, nil
 	}
-
-	cleanArtist := strings.ToLower(strings.TrimSpace(artist))
+	titleKey := textkey.Search(id3.CleanTitle(title, ""))
+	artistKey := textkey.Search(artist)
+	var recording string
+	if len(isrc) != 0 && isrc[0] != nil {
+		recording = textkey.Search(*isrc[0])
+	}
 
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT t.id, t.title, a.name, COALESCE(al.title, ''), t.file_path, COALESCE(t.bitrate, 0)
-		FROM tracks t
-		JOIN artists a ON a.id = t.artist_id
-		LEFT JOIN albums al ON al.id = t.album_id
-		WHERE t.clean_title = ?
-		LIMIT 10
-	`, cleanTitle)
+		WITH known_artist AS (
+			SELECT MIN(id) AS id FROM artists WHERE clean_name = ?2 AND ?2 <> '' HAVING COUNT(*) = 1
+		), candidates(id, exact_recording) AS (
+			SELECT id, 1 FROM tracks WHERE ?3 <> '' AND music_search_key(COALESCE(isrc, '')) = ?3
+			UNION ALL
+			SELECT id, 0 FROM tracks WHERE search_title = ?1 AND artist_id = (SELECT id FROM known_artist)
+				AND (?3 = '' OR NULLIF(trim(isrc), '') IS NULL)
+		)
+		SELECT t.id, t.title, a.name, al.title, t.file_path, COALESCE(t.bitrate, 0), c.exact_recording
+		FROM candidates c JOIN tracks t ON t.id = c.id
+		JOIN artists a ON a.id = t.artist_id JOIN albums al ON al.id = t.album_id
+		ORDER BY exact_recording DESC,
+			CASE WHEN t.bitrate >= 10000 THEN t.bitrate / 1000.0 ELSE t.bitrate END DESC, t.id
+		LIMIT 2
+	`, titleKey, artistKey, recording)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	type candidate struct {
-		id       int64
-		title    string
-		artist   string
-		album    string
-		filePath string
-		bitrate  int
-	}
-
-	var candidates []candidate
+	var match *ExistingTrackInfo
 	for rows.Next() {
-		var c candidate
-		if err := rows.Scan(&c.id, &c.title, &c.artist, &c.album, &c.filePath, &c.bitrate); err == nil {
-			candidates = append(candidates, c)
+		var found ExistingTrackInfo
+		var exactRecording bool
+		if err := rows.Scan(&found.TrackID, &found.Title, &found.Artist, &found.Album, &found.FilePath, &found.Bitrate, &exactRecording); err != nil {
+			return nil, err
 		}
+		if match != nil {
+			return nil, nil
+		}
+		found.QualityTier = "upscaled_128k"
+		if isHighQualityBitrate(found.Bitrate) {
+			found.QualityTier = "true_320k"
+		}
+		if exactRecording {
+			return &found, nil
+		}
+		match = &found
 	}
+	return match, rows.Err()
+}
 
-	if len(candidates) == 0 {
+func (r *Repository) albumArtistForFolder(ctx context.Context, folder string) (*int64, error) {
+	var id int64
+	err := r.db.QueryRowContext(ctx, "SELECT artist_id FROM albums WHERE folder_path = ?", folder).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-
-	for _, c := range candidates {
-		dbArtistClean := strings.ToLower(strings.TrimSpace(c.artist))
-		if cleanArtist == "" || dbArtistClean == cleanArtist ||
-			strings.Contains(cleanArtist, dbArtistClean) || strings.Contains(dbArtistClean, cleanArtist) {
-			tier := "upscaled_128k"
-			if isHighQualityBitrate(c.bitrate) {
-				tier = "true_320k"
-			}
-			return &ExistingTrackInfo{
-				TrackID:     c.id,
-				Title:       c.title,
-				Artist:      c.artist,
-				Album:       c.album,
-				FilePath:    c.filePath,
-				Bitrate:     c.bitrate,
-				QualityTier: tier,
-			}, nil
-		}
+	if err != nil {
+		return nil, err
 	}
-
-	return nil, nil
+	return &id, nil
 }

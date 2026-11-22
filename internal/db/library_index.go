@@ -52,6 +52,9 @@ func DeleteLibraryPathTx(ctx context.Context, tx *sql.Tx, path string, directory
 		where += " OR (file_path >= ? AND file_path < ?)"
 		args = append(args, path+"/", path+"0")
 	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM library_artist_conflicts WHERE "+where, args...); err != nil {
+		return 0, err
+	}
 	return deleteLibraryTracks(ctx, tx, where, args...)
 }
 
@@ -135,7 +138,7 @@ func PruneLibraryArtist(ctx context.Context, tx *sql.Tx, id int64) error {
 func RefreshLibraryAlbum(ctx context.Context, tx *sql.Tx, id int64) error {
 	var artistID int64
 	err := tx.QueryRowContext(ctx, `
-		DELETE FROM albums WHERE id = ?
+		DELETE FROM albums WHERE id = ? AND catalog_checked_at IS NULL
 		AND NOT EXISTS (SELECT 1 FROM tracks WHERE album_id = albums.id)
 		RETURNING artist_id
 	`, id).Scan(&artistID)
@@ -148,19 +151,13 @@ func RefreshLibraryAlbum(ctx context.Context, tx *sql.Tx, id int64) error {
 	if err != sql.ErrNoRows {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `
-		WITH summary AS (
-			SELECT COUNT(*) AS present, COALESCE(MAX(track_total), 0) AS tagged_total
-			FROM tracks WHERE album_id = ?
-		)
-		UPDATE albums SET
-			present_tracks_count = (SELECT present FROM summary),
-			total_tracks = MAX(COALESCE(total_tracks, 0), (SELECT tagged_total FROM summary)),
-			is_complete = NOT EXISTS (SELECT 1 FROM missing_tracks WHERE album_id = albums.id)
-				AND MAX(COALESCE(total_tracks, 0), (SELECT tagged_total FROM summary)) <= MAX(1, (SELECT present FROM summary)),
-			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`, id, id)
+	if _, err := tx.ExecContext(ctx, `UPDATE albums SET has_cover =
+		(NULLIF(cover_path, '') IS NOT NULL OR EXISTS
+			(SELECT 1 FROM tracks WHERE album_id = ?1 AND has_embedded_cover = 1))
+		WHERE id = ?1`, id); err != nil {
+		return err
+	}
+	_, err = RefreshReleaseCompleteness(ctx, tx, id)
 	return err
 }
 
@@ -186,6 +183,20 @@ func PrepareLibraryTrackUpdate(ctx context.Context, tx *sql.Tx, oldPath, newPath
 		}
 		if err != nil {
 			return 0, 0, err
+		}
+		if !merged {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE censorship_items SET current_file_path=?
+				WHERE coalesce(current_file_path,file_path)=?
+			`, newPath, oldPath); err != nil {
+				return 0, 0, err
+			}
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE censorship_items SET current_reference_path=?
+				WHERE coalesce(current_reference_path,reference_path)=?
+			`, newPath, oldPath); err != nil {
+				return 0, 0, err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE tracks SET file_path = ? WHERE file_path = ?", newPath, oldPath); err != nil {
 			return 0, 0, err

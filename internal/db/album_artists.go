@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"music-manager/internal/id3"
@@ -64,12 +65,22 @@ func syncAlbumArtists(ctx context.Context, store artistStore, albumID int64, cre
 			return err
 		}
 		if !id.Valid {
+			err := store.QueryRowContext(ctx, `SELECT a.artist_id FROM albums a JOIN artists ar ON ar.id = a.artist_id
+				WHERE a.id = ? AND ar.clean_name = music_search_key(?)`, albumID, name).Scan(&id)
+			if err != nil && err != sql.ErrNoRows {
+				return err
+			}
+		}
+		if !id.Valid {
 			// A lone unresolved credit may be a free-form string such as "A feat. B".
 			// Only explicit lists justify creating additional artist identities.
 			if len(names) == 1 {
 				continue
 			}
 			newID, err := GetOrCreateLibraryArtist(ctx, store, name)
+			if errors.Is(err, ErrAmbiguousArtist) {
+				continue
+			}
 			if err != nil {
 				return err
 			}

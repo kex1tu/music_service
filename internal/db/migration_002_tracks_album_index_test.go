@@ -169,7 +169,7 @@ func checkAlbumIndexCounters(t testing.TB, conn *sql.DB, albums int) {
 	t.Helper()
 	var matching, total int
 	if err := conn.QueryRow(`
-		SELECT COUNT(*) FILTER (WHERE present_tracks_count = 10 AND total_tracks = 1 AND is_complete), COUNT(*)
+		SELECT COUNT(*) FILTER (WHERE present_tracks_count = 10 AND total_tracks = 1), COUNT(*)
 		FROM albums
 	`).Scan(&matching, &total); err != nil {
 		t.Fatal(err)

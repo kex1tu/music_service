@@ -2,6 +2,8 @@ package scanner
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"path/filepath"
@@ -34,11 +36,33 @@ func (s *Scanner) indexPath(ctx context.Context, relPath string) error {
 
 // indexFileLocked reads the file before opening the SQLite write transaction.
 func (s *Scanner) indexFileLocked(ctx context.Context, relPath, oldPath, pendingPath string, merged bool) error {
+	err := s.storeIndexFile(ctx, relPath, oldPath, pendingPath, merged)
+	var conflict *artistConflictError
+	if errors.As(err, &conflict) {
+		_, saveErr := s.database.Conn().ExecContext(ctx, `INSERT INTO library_artist_conflicts
+			(file_path, artist_name, album_artist) VALUES (?, ?, ?)
+			ON CONFLICT(file_path, album_artist) DO UPDATE SET artist_name = excluded.artist_name,
+				resolved_artist_id = CASE WHEN artist_name = excluded.artist_name THEN resolved_artist_id END`,
+			relPath, conflict.name, conflict.album)
+		if saveErr != nil {
+			return saveErr
+		}
+		if pendingPath != "" {
+			_, saveErr = s.database.Conn().ExecContext(ctx, "DELETE FROM library_index_pending WHERE target_path = ?", pendingPath)
+			if saveErr != nil {
+				return saveErr
+			}
+		}
+	}
+	return err
+}
+
+func (s *Scanner) storeIndexFile(ctx context.Context, relPath, oldPath, pendingPath string, merged bool) error {
 	fullPath, err := s.resolveIndexedPath(relPath)
 	if err != nil {
 		return err
 	}
-	tags, err := id3.ReadTags(fullPath, relPath)
+	tags, err := id3.ReadTagsContext(ctx, fullPath, relPath)
 	if err != nil {
 		return err
 	}
@@ -62,6 +86,10 @@ func (s *Scanner) indexFileLocked(ctx context.Context, relPath, oldPath, pending
 
 	albumDir := filepath.Dir(relPath)
 	tags.DiscNumber = db.LocalDiscNumber(filepath.ToSlash(albumDir), tags.DiscNumber)
+	trackNumber := tags.TrackNumber
+	if !tags.HasTrackNumber {
+		trackNumber = 0
+	}
 
 	// 3. Compute canonical path and validate path conformity
 	effAlbum := strings.TrimSpace(tags.Album)
@@ -111,19 +139,29 @@ func (s *Scanner) indexFileLocked(ctx context.Context, relPath, oldPath, pending
 	if primaryTrackArtist == "" {
 		primaryTrackArtist = "Unknown Artist"
 	}
-	artistID, err := getOrCreateArtist(ctx, tx, primaryTrackArtist)
+	artistID, err := resolveIndexedArtist(ctx, tx, relPath, albumDir, primaryTrackArtist, previousArtist, tags, false)
 	if err != nil {
+		return err
+	}
+	if err := db.RegisterTrackedArtistID(ctx, tx, artistID); err != nil {
 		return err
 	}
 
 	// 2. Get or create primary artist for the album and resolve album ID
-	effectiveAlbumArtist := resolver.ExtractPrimaryArtist(tags.AlbumArtist)
-	if effectiveAlbumArtist == "" {
-		effectiveAlbumArtist = primaryTrackArtist
-	}
-	albumArtistID, err := getOrCreateArtist(ctx, tx, effectiveAlbumArtist)
-	if err != nil {
-		return err
+	albumArtistID := artistID
+	if effectiveAlbumArtist := resolver.ExtractPrimaryArtist(tags.AlbumArtist); effectiveAlbumArtist != "" {
+		var previousAlbumArtist int64
+		err := tx.QueryRowContext(ctx, `SELECT artist_id FROM albums WHERE folder_path = ?1 OR id = ?2
+			ORDER BY folder_path = ?1 DESC LIMIT 1`, db.AlbumRoot(albumDir), previousAlbum).Scan(&previousAlbumArtist)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if previousAlbumArtist != 0 || effectiveAlbumArtist != primaryTrackArtist {
+			albumArtistID, err = resolveIndexedArtist(ctx, tx, relPath, albumDir, effectiveAlbumArtist, previousAlbumArtist, tags, true)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	displayAlbumArtist := strings.TrimSpace(tags.AlbumArtist)
@@ -132,12 +170,16 @@ func (s *Scanner) indexFileLocked(ctx context.Context, relPath, oldPath, pending
 		return err
 	}
 
+	if err := s.refreshAlbumFolderCover(ctx, tx, albumID, db.AlbumRoot(albumDir)); err != nil {
+		return err
+	}
+
 	query := `
 	INSERT INTO tracks (
 		album_id, artist_id, title, clean_title, track_number, track_total,
 		disc_number, disc_total, duration, bitrate, file_path, file_size,
-		mtime, file_hash, has_embedded_cover, lyrics_status, is_path_valid, path_violation_reason, suggested_path
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		mtime, file_hash, has_embedded_cover, lyrics_status, is_path_valid, path_violation_reason, suggested_path, source_url, isrc
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))
 	ON CONFLICT(file_path) DO UPDATE SET
 		album_id = excluded.album_id,
 		artist_id = excluded.artist_id,
@@ -157,6 +199,8 @@ func (s *Scanner) indexFileLocked(ctx context.Context, relPath, oldPath, pending
 		is_path_valid = excluded.is_path_valid,
 		path_violation_reason = excluded.path_violation_reason,
 		suggested_path = excluded.suggested_path,
+		source_url = excluded.source_url,
+		isrc = excluded.isrc,
         updated_at = CURRENT_TIMESTAMP
 	RETURNING id;
 	`
@@ -168,7 +212,7 @@ func (s *Scanner) indexFileLocked(ctx context.Context, relPath, oldPath, pending
 		artistID,
 		tags.Title,
 		cleanTitle,
-		tags.TrackNumber,
+		trackNumber,
 		tags.TrackTotal,
 		tags.DiscNumber,
 		tags.DiscTotal,
@@ -183,6 +227,8 @@ func (s *Scanner) indexFileLocked(ctx context.Context, relPath, oldPath, pending
 		isPathValid,
 		pathViolationReason,
 		suggestedPath,
+		resolver.PublicTrackSource(tags.SourceURL),
+		tags.ISRC,
 	).Scan(&trackID)
 	if err != nil {
 		return err
@@ -303,6 +349,9 @@ func (s *Scanner) indexFileLocked(ctx context.Context, relPath, oldPath, pending
 		if _, err := tx.ExecContext(ctx, "DELETE FROM library_index_pending WHERE target_path = ?", pendingPath); err != nil {
 			return err
 		}
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM library_artist_conflicts WHERE file_path = ?", relPath); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err

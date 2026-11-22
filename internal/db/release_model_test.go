@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 )
@@ -40,7 +41,7 @@ func TestReleaseIdentityMigration(t *testing.T) {
 	}
 
 	for attempt := 0; attempt < 2; attempt++ {
-		db, err := Open(file)
+		db, err := openReleaseMigrationV6(ctx, file)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,17 +69,52 @@ func TestReleaseIdentityMigration(t *testing.T) {
 		if err := db.conn.QueryRow("SELECT seq FROM sqlite_sequence WHERE name='radar_releases'").Scan(&radarSequence); err != nil || radarSequence < 1000 {
 			t.Fatalf("radar sequence = %d, err = %v", radarSequence, err)
 		}
-		album, err := UpsertLocalAlbum(ctx, db.conn, "Live retagged", 1, "Ёлка", 2026, "CD edition/CD1", false)
-		if err != nil || album != first {
-			t.Fatalf("retag changed the edition identity: id=%d err=%v", album, err)
-		}
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
-func TestVerifyCatalogKeepsGapStateAndRollsBack(t *testing.T) {
+// This fixture exercises migration 4 legacy gap preservation before migration 7 drops the old table.
+func openReleaseMigrationV6(ctx context.Context, path string) (*DB, error) {
+	return openTestSchemaVersion(ctx, path, 6)
+}
+
+func openTestSchemaVersion(ctx context.Context, path string, target int) (*DB, error) {
+	conn, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		return nil, err
+	}
+	c, err := conn.Conn(ctx)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	defer c.Close()
+	ok := false
+	defer func() {
+		if !ok {
+			c.Close()
+			conn.Close()
+		}
+	}()
+	var version int
+	if err := c.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return nil, err
+	}
+	for _, migrate := range migrations[version:target] {
+		if err := migrate(ctx, c); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := c.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", target)); err != nil {
+		return nil, err
+	}
+	ok = true
+	return &DB{conn: conn}, nil
+}
+
+func TestVerifyCatalogKeepsSnapshotAndRollsBack(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "gaps.db"))
 	if err != nil {
@@ -90,8 +126,9 @@ func TestVerifyCatalogKeepsGapStateAndRollsBack(t *testing.T) {
 		INSERT INTO albums (id, title, clean_title, artist_id, folder_path) VALUES (1, 'Album', 'album', 1, 'Band/Album');
 		INSERT INTO tracks (album_id, artist_id, title, clean_title, track_number, disc_number, duration, file_path, file_size, mtime)
 		VALUES (1, 1, 'Intro', 'intro', 1, 2, 101, 'Band/Album/CD2/01.mp3', 1, 1);
-		INSERT INTO missing_tracks (id, album_id, title, artist, disc_number, track_number, status, pinned_source_url)
-		VALUES (81, 1, 'Old title', 'Band', 1, 1, 'reviewed', 'manual'), (82, 1, 'Intro', 'Band', 2, 1, 'missing', NULL);
+		INSERT INTO release_tracklist (album_id, title, artist_id, artist_credit, disc_number, track_number)
+		VALUES (1, 'Old title', 1, 'Band', 1, 1), (1, 'Intro', 1, 'Band', 2, 1);
+		UPDATE albums SET catalog_checked_at = CURRENT_TIMESTAMP;
 	`)
 	first, second := ReleasePosition(1, 1), ReleasePosition(2, 1)
 	catalog := []CatalogTrack{
@@ -105,7 +142,7 @@ func TestVerifyCatalogKeepsGapStateAndRollsBack(t *testing.T) {
 	}
 	var count int
 	var title string
-	if err := db.conn.QueryRow("SELECT count(*), min(CASE WHEN id = 81 THEN title END) FROM missing_tracks").Scan(&count, &title); err != nil || count != 2 || title != "Old title" {
+	if err := db.conn.QueryRow("SELECT count(*), min(CASE WHEN disc_number = 1 THEN title END) FROM release_tracklist").Scan(&count, &title); err != nil || count != 2 || title != "Old title" {
 		t.Fatalf("failed verification changed gaps: count=%d title=%q err=%v", count, title, err)
 	}
 	mustReleaseSQL(t, db.conn, "DROP TRIGGER refuse_verification")
@@ -113,14 +150,15 @@ func TestVerifyCatalogKeepsGapStateAndRollsBack(t *testing.T) {
 	if err != nil || len(matches) != 1 || matches[first] || !matches[second] {
 		t.Fatalf("incorrect multidisc matches: %v, %v", matches, err)
 	}
-	var id int64
-	var status, pin, externalID string
-	var expected, present int
-	err = db.conn.QueryRow(`SELECT m.id, m.status, m.pinned_source_url, m.deezer_id,
-		a.expected_tracks_count, a.present_tracks_count FROM missing_tracks m JOIN albums a ON a.id=m.album_id`).
-		Scan(&id, &status, &pin, &externalID, &expected, &present)
-	if err != nil || id != 81 || status != "reviewed" || pin != "manual" || externalID != "2001" || expected != 2 || present != 1 {
-		t.Fatalf("gap state or aggregates changed incorrectly: %d %q %q %q %d/%d %v", id, status, pin, externalID, present, expected, err)
+	var artistID int64
+	var externalID string
+	var expected, present, countPresent int
+	err = db.conn.QueryRow(`SELECT r.artist_id, r.deezer_id, a.expected_tracks_count, a.present_tracks_count,
+		(SELECT COUNT(*) FROM release_tracklist WHERE is_present = 1)
+		FROM release_tracklist r JOIN albums a ON a.id=r.album_id WHERE r.is_present = 0`).
+		Scan(&artistID, &externalID, &expected, &present, &countPresent)
+	if err != nil || artistID != 1 || externalID != "2001" || expected != 2 || present != 1 || countPresent != 1 {
+		t.Fatalf("tracklist or aggregates changed incorrectly: %d %q %d/%d %d %v", artistID, externalID, present, expected, countPresent, err)
 	}
 }
 

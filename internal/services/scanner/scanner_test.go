@@ -309,8 +309,8 @@ func TestScanner_MultiArtistAlbum_Completeness(t *testing.T) {
 	if totalTracks != 3 {
 		t.Errorf("expected total_tracks = 3, got %d", totalTracks)
 	}
-	if isComplete != 1 {
-		t.Errorf("expected is_complete = 1 for complete multi-artist album, got %d", isComplete)
+	if isComplete != 0 {
+		t.Errorf("catalog has not been verified, got is_complete = %d", isComplete)
 	}
 	var albumCredits int
 	if err := database.Conn().QueryRow(`SELECT COUNT(*) FROM album_artists aa JOIN albums al ON al.id = aa.album_id
@@ -670,7 +670,7 @@ func TestScanner_CheckIncompleteAlbums_MockDeezer(t *testing.T) {
 
 	// Verify missing_tracks has Song Two and Song Three
 	var missingCount int
-	err = database.Conn().QueryRow("SELECT COUNT(*) FROM missing_tracks").Scan(&missingCount)
+	err = database.Conn().QueryRow("SELECT COUNT(*) FROM release_tracklist WHERE is_present = 0").Scan(&missingCount)
 	if err != nil {
 		t.Fatalf("failed to query missing_tracks: %v", err)
 	}
@@ -686,7 +686,7 @@ func TestScanner_CheckIncompleteAlbums_MockDeezer(t *testing.T) {
 
 func TestSelectBestDeezerAlbumScanner(t *testing.T) {
 	// 1. Empty candidates
-	if got := selectBestDeezerAlbumScanner(nil, "Artist", "Album", 1); got != nil {
+	if got := selectBestDeezerAlbumScanner(nil, "Artist", "Album", 1, ""); got != nil {
 		t.Errorf("expected nil for empty candidates, got %+v", got)
 	}
 
@@ -705,9 +705,16 @@ func TestSelectBestDeezerAlbumScanner(t *testing.T) {
 			Artist:   resolver.DeezerArtist{Name: "Artist"},
 		},
 	}
-	best := selectBestDeezerAlbumScanner(cands, "Artist", "My Best Album", 3)
+	best := selectBestDeezerAlbumScanner(cands, "Artist", "My Best Album", 3, "")
 	if best == nil || best.ID != 20 {
 		t.Errorf("expected best album ID 20, got %+v", best)
+	}
+	homonyms := []resolver.DeezerAlbum{
+		{ID: 10, Title: "My Best Album", NbTracks: 5, Artist: resolver.DeezerArtist{ID: 101, Name: "Artist"}},
+		{ID: 20, Title: "My Best Album", NbTracks: 5, Artist: resolver.DeezerArtist{ID: 202, Name: "Artist"}},
+	}
+	if best := selectBestDeezerAlbumScanner(homonyms, "Artist", "My Best Album", 3, "202"); best == nil || best.ID != 20 {
+		t.Fatalf("selected a release by the wrong Deezer artist: %+v", best)
 	}
 
 	// 3. Single track penalty for multi-track local album
@@ -719,7 +726,7 @@ func TestSelectBestDeezerAlbumScanner(t *testing.T) {
 			Artist:   resolver.DeezerArtist{Name: "Band"},
 		},
 	}
-	bestSingle := selectBestDeezerAlbumScanner(candsSingle, "Band", "Single Track Version", 10)
+	bestSingle := selectBestDeezerAlbumScanner(candsSingle, "Band", "Single Track Version", 10, "")
 	if bestSingle != nil {
 		t.Errorf("expected nil due to single-track penalty on 10-track album, got %+v", bestSingle)
 	}

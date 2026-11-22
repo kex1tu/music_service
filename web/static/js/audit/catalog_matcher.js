@@ -70,6 +70,9 @@ window.AuditCatalogMatcher = {
                     this.incompleteAlbums[idx] = matched;
                 }
                 return matched;
+            } else if (res.status === 409) {
+                const conflict = await res.json();
+                Alpine.store('app').toast(conflict.error, 'warning');
             } else {
                 Alpine.store('app').toast('Не удалось найти треклист альбома в Deezer', 'warning');
             }

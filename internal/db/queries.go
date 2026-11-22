@@ -5,47 +5,40 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-
-	"music-manager/internal/core/textkey"
 )
 
 // DownloadJobEntity представляет запись задачи загрузки в SQLite.
 type DownloadJobEntity struct {
-	ID               string    `json:"id"`
-	Status           string    `json:"status"`
-	Source           string    `json:"source"`
-	URL              string    `json:"url"`
-	Progress         float64   `json:"progress"`
-	CurrentStep      string    `json:"current_step"`
-	TotalTracks      int       `json:"total_tracks"`
-	CompletedTracks  int       `json:"completed_tracks"`
-	Error            *string   `json:"error"`
-	TargetAlbumPath  *string   `json:"target_album_path"`
-	IsBackfill       bool      `json:"is_backfill"`
-	AlbumTitle       *string   `json:"album_title"`
-	ArtistName       *string   `json:"artist_name"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	Status          string    `json:"status"`
+	Source          string    `json:"source"`
+	URL             string    `json:"url"`
+	Progress        float64   `json:"progress"`
+	CurrentStep     string    `json:"current_step"`
+	TotalTracks     int       `json:"total_tracks"`
+	CompletedTracks int       `json:"completed_tracks"`
+	Error           *string   `json:"error"`
+	TargetAlbumPath *string   `json:"target_album_path"`
+	IsBackfill      bool      `json:"is_backfill"`
+	AlbumTitle      *string   `json:"album_title"`
+	ArtistName      *string   `json:"artist_name"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // SaveJob вставляет или обновляет состояние задачи в базе данных.
 func (db *DB) SaveJob(ctx context.Context, job DownloadJobEntity) error {
-	artistID := "NULL"
-	if job.ArtistName != nil && strings.TrimSpace(*job.ArtistName) != "" {
-		artistID = ArtistIDLookup("?13")
-	}
 	query := `
 	INSERT INTO download_jobs (
 		id, status, source, url, progress, current_step,
 		total_tracks, completed_tracks, error, target_album_path,
-		is_backfill, album_title, artist_name, artist_id, updated_at
-	) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ` + artistID + `, CURRENT_TIMESTAMP)
+		is_backfill, album_title, artist_name, updated_at
+	) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, CURRENT_TIMESTAMP)
 	ON CONFLICT(id) DO UPDATE SET
 		status = excluded.status,
 		progress = excluded.progress,
@@ -56,16 +49,22 @@ func (db *DB) SaveJob(ctx context.Context, job DownloadJobEntity) error {
 		target_album_path = excluded.target_album_path,
 		is_backfill = excluded.is_backfill,
 		album_title = excluded.album_title,
-		artist_id = CASE WHEN download_jobs.artist_name IS excluded.artist_name
-			THEN COALESCE(download_jobs.artist_id, excluded.artist_id) ELSE excluded.artist_id END,
 		artist_name = excluded.artist_name,
-		updated_at = CURRENT_TIMESTAMP;
+		updated_at = CURRENT_TIMESTAMP
+	WHERE download_jobs.selection_json IS NULL AND download_jobs.backfill_selection IS NULL;
 	`
-	_, err := db.conn.ExecContext(ctx, query,
+	result, err := db.conn.ExecContext(ctx, query,
 		job.ID, job.Status, job.Source, job.URL, job.Progress, job.CurrentStep,
 		job.TotalTracks, job.CompletedTracks, job.Error, job.TargetAlbumPath,
 		job.IsBackfill, job.AlbumTitle, job.ArtistName,
 	)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err == nil && n == 0 {
+		return fmt.Errorf("job %q has a selection snapshot and requires the downloader repository", job.ID)
+	}
 	return err
 }
 
@@ -124,6 +123,7 @@ func (db *DB) GetAllJobs(ctx context.Context) ([]DownloadJobEntity, error) {
 
 // SearchTrackItem представляет трек в результатах глобального поиска.
 type SearchTrackItem struct {
+	Bitrate      int     `json:"-"`
 	ID           int64   `json:"id"`
 	Title        string  `json:"title"`
 	Artist       string  `json:"artist"`
@@ -138,26 +138,30 @@ type SearchTrackItem struct {
 
 // SearchAlbumItem представляет альбом в результатах глобального поиска.
 type SearchAlbumItem struct {
-	ID          int64  `json:"id"`
-	Title       string `json:"title"`
-	Album       string `json:"album"`
-	Artist      string `json:"artist"`
-	AlbumArtist string `json:"album_artist"`
-	Year        int    `json:"year,omitempty"`
-	Path        string `json:"path"`
-	HasCover    bool   `json:"has_cover"`
-	CoverPath   string `json:"cover_path,omitempty"`
-	TrackCount  int    `json:"track_count"`
+	PrimaryArtist  string `json:"-"`
+	RawAlbumArtist string `json:"-"`
+	ID             int64  `json:"id"`
+	Title          string `json:"title"`
+	Album          string `json:"album"`
+	Artist         string `json:"artist"`
+	AlbumArtist    string `json:"album_artist"`
+	Year           int    `json:"year,omitempty"`
+	Path           string `json:"path"`
+	HasCover       bool   `json:"has_cover"`
+	CoverPath      string `json:"cover_path,omitempty"`
+	TrackCount     int    `json:"track_count"`
 }
 
 // SearchArtistItem представляет исполнителя в результатах глобального поиска.
 type SearchArtistItem struct {
-	ID         int64  `json:"id"`
-	Name       string `json:"name"`
-	Title      string `json:"title"`
-	TrackCount int    `json:"track_count"`
-	FolderPath string `json:"folder_path,omitempty"`
-	FirstPath  string `json:"first_path,omitempty"`
+	CreditFolder string `json:"-"`
+	TrackPath    string `json:"-"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Title        string `json:"title"`
+	TrackCount   int    `json:"track_count"`
+	FolderPath   string `json:"folder_path,omitempty"`
+	FirstPath    string `json:"first_path,omitempty"`
 }
 
 // SearchLibraryResult объединяет результаты поиска по трекам, альбомам и артистам.
@@ -184,143 +188,7 @@ type SearchResultItem struct {
 
 // SearchLibrary выполняет быстрый поиск по трекам, альбомам и артистам.
 func (db *DB) SearchLibrary(ctx context.Context, query string, limit int) (*SearchLibraryResult, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	term := textkey.Search(query)
-
-	tracks := make([]SearchTrackItem, 0)
-	albums := make([]SearchAlbumItem, 0)
-	artists := make([]SearchArtistItem, 0)
-
-	// 1. Поиск по трекам
-	trackQuery := `
-	SELECT t.id, t.title, ar.name AS artist, al.title AS album, al.year, t.duration, t.file_path, t.lyrics_status, al.has_cover, al.cover_path
-	FROM tracks t
-	JOIN albums al ON t.album_id = al.id
-	JOIN artists ar ON t.artist_id = ar.id
-	WHERE instr(t.search_title, ?1) > 0 OR instr(t.search_clean_title, ?1) > 0 OR instr(ar.clean_name, ?1) > 0
-	ORDER BY (instr(t.search_title, ?1) > 0 OR instr(t.search_clean_title, ?1) > 0) DESC, t.id
-	LIMIT ?2;
-	`
-	tRows, err := db.conn.QueryContext(ctx, trackQuery, term, limit)
-	if err == nil {
-		defer tRows.Close()
-		for tRows.Next() {
-			var it SearchTrackItem
-			var artName sql.NullString
-			var albTitle sql.NullString
-			var yr sql.NullInt64
-			var fPath sql.NullString
-			var lyrStatus sql.NullString
-			var covPath sql.NullString
-			if err := tRows.Scan(&it.ID, &it.Title, &artName, &albTitle, &yr, &it.Duration, &fPath, &lyrStatus, &it.HasCover, &covPath); err == nil {
-				if artName.Valid {
-					it.Artist = artName.String
-				}
-				if albTitle.Valid {
-					it.Album = albTitle.String
-				}
-				if yr.Valid {
-					it.Year = int(yr.Int64)
-				}
-				if fPath.Valid {
-					it.Path = filepath.ToSlash(fPath.String)
-				}
-				if lyrStatus.Valid {
-					it.LyricsStatus = lyrStatus.String
-				}
-				if covPath.Valid {
-					it.CoverPath = covPath.String
-				}
-				tracks = append(tracks, it)
-			}
-		}
-	}
-
-	// 2. Поиск по альбомам
-	albumQuery := `
-	SELECT al.id, al.title, COALESCE(NULLIF(al.album_artist, ''), ar.name) AS album_artist, al.year, al.folder_path, al.has_cover, al.cover_path,
-	       (SELECT COUNT(1) FROM tracks WHERE album_id = al.id) AS track_count
-	FROM albums al
-	JOIN artists ar ON al.artist_id = ar.id
-	WHERE instr(al.search_title, ?1) > 0 OR instr(al.search_clean_title, ?1) > 0
-	   OR al.id IN (` + SearchAlbumIDsByArtist + `)
-	ORDER BY (instr(al.search_title, ?1) > 0 OR instr(al.search_clean_title, ?1) > 0) DESC, al.id
-	LIMIT ?2;
-	`
-	aRows, err := db.conn.QueryContext(ctx, albumQuery, term, limit)
-	if err == nil {
-		defer aRows.Close()
-		for aRows.Next() {
-			var it SearchAlbumItem
-			var albArtist sql.NullString
-			var yr sql.NullInt64
-			var fPath sql.NullString
-			var covPath sql.NullString
-			if err := aRows.Scan(&it.ID, &it.Title, &albArtist, &yr, &fPath, &it.HasCover, &covPath, &it.TrackCount); err == nil {
-				it.Album = it.Title
-				if albArtist.Valid {
-					it.AlbumArtist = albArtist.String
-					it.Artist = albArtist.String
-				}
-				if yr.Valid {
-					it.Year = int(yr.Int64)
-				}
-				if fPath.Valid {
-					it.Path = filepath.ToSlash(fPath.String)
-				}
-				if covPath.Valid {
-					it.CoverPath = covPath.String
-				}
-				albums = append(albums, it)
-			}
-		}
-	}
-
-	// 3. Поиск по артистам с подсчетом треков и вычислением пути к каталогу
-	artistQuery := `
-	SELECT ar.id, ar.name,
-	       COUNT(DISTINCT t.id) AS track_count,
-	       COALESCE((` + FirstCreditedAlbumPath + `), MIN(track_album.folder_path), MIN(t.file_path), '') AS first_path
-	FROM artists ar
-	LEFT JOIN tracks t ON t.artist_id = ar.id
-	LEFT JOIN albums track_album ON track_album.id = t.album_id
-	WHERE instr(ar.clean_name, ?) > 0
-	  AND (t.id IS NOT NULL OR EXISTS (SELECT 1 FROM album_artists aa WHERE aa.artist_id = ar.id))
-	GROUP BY ar.id, ar.name
-	LIMIT ?;
-	`
-	arRows, err := db.conn.QueryContext(ctx, artistQuery, term, limit)
-	if err == nil {
-		defer arRows.Close()
-		for arRows.Next() {
-			var it SearchArtistItem
-			var firstPath sql.NullString
-			if err := arRows.Scan(&it.ID, &it.Name, &it.TrackCount, &firstPath); err == nil {
-				it.Title = it.Name
-				if firstPath.Valid && firstPath.String != "" {
-					fp := filepath.ToSlash(firstPath.String)
-					it.FirstPath = fp
-					parts := strings.Split(fp, "/")
-					if len(parts) > 1 {
-						it.FolderPath = parts[0]
-					} else {
-						it.FolderPath = fp
-					}
-				}
-				artists = append(artists, it)
-			}
-		}
-	}
-
-	return &SearchLibraryResult{
-		Query:        query,
-		Artists:      artists,
-		Albums:       albums,
-		Tracks:       tracks,
-		TotalMatches: len(artists) + len(albums) + len(tracks),
-	}, nil
+	return QueryLibrarySearch(ctx, db.conn, query, limit, false)
 }
 
 // InvalidPathRecord представляет трек с нарушением канонического пути.
@@ -414,8 +282,9 @@ func (db *DB) ResetLibraryTables(ctx context.Context) error {
 
 	queries := []string{
 		"DELETE FROM track_genres;",
+		"DELETE FROM library_artist_conflicts;",
 		"DELETE FROM audit_issues;",
-		"DELETE FROM missing_tracks;",
+		"DELETE FROM release_tracklist;",
 		"DELETE FROM tracks;",
 		"DELETE FROM albums;",
 		"DELETE FROM artists WHERE " + unusedArtist,
@@ -511,195 +380,6 @@ type SoundCloudCandidateItem struct {
 	Score      int    `json:"score"`
 	Status     string `json:"status"` // marked, likely, unverified, manual, link_dead
 	UploadDate string `json:"upload_date,omitempty"`
-}
-
-// SoundCloudCacheEntry представляет запись кэша SoundCloud в SQLite.
-type SoundCloudCacheEntry struct {
-	CacheKey       string                   `json:"cache_key"`
-	TrackTitle     string                   `json:"track_title"`
-	ArtistName     string                   `json:"artist_name"`
-	SelectedURL    string                   `json:"selected_url"`
-	Status         string                   `json:"status"`
-	Duration       int                      `json:"duration"`
-	IsManual       bool                     `json:"is_manual"`
-	CandidatesJSON string                   `json:"candidates_json"`
-	Candidates     []SoundCloudCandidateItem `json:"candidates,omitempty"`
-	CheckedAt      time.Time                `json:"checked_at"`
-	UpdatedAt      time.Time                `json:"updated_at"`
-}
-
-// GetSoundCloudCache возвращает кэшированную запись SoundCloud по ключу с учетом TTL.
-func (db *DB) GetSoundCloudCache(ctx context.Context, key string, ttlHours int) (*SoundCloudCacheEntry, error) {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return nil, nil
-	}
-	if ttlHours <= 0 {
-		ttlHours = 720
-	}
-
-	query := `
-	SELECT cache_key, track_title, artist_name, selected_url, status, duration, is_manual, candidates_json, checked_at, updated_at
-	FROM soundcloud_uncensored_cache
-	WHERE cache_key = ? AND (is_manual = 1 OR checked_at > datetime('now', printf('-%d hours', ?)));
-	`
-	row := db.conn.QueryRowContext(ctx, query, key, ttlHours)
-	var e SoundCloudCacheEntry
-	err := row.Scan(
-		&e.CacheKey, &e.TrackTitle, &e.ArtistName, &e.SelectedURL,
-		&e.Status, &e.Duration, &e.IsManual, &e.CandidatesJSON,
-		&e.CheckedAt, &e.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	if e.CandidatesJSON != "" && e.CandidatesJSON != "[]" {
-		_ = json.Unmarshal([]byte(e.CandidatesJSON), &e.Candidates)
-	}
-
-	// Если is_manual = 0 и (status = 'link_dead' ИЛИ selected_url = '') -> трактуется как MISS (nil, nil)
-	if !e.IsManual && (e.Status == "link_dead" || e.SelectedURL == "") {
-		return nil, nil
-	}
-
-	return &e, nil
-}
-
-// SaveSoundCloudCache сохраняет или обновляет запись автоматического кэша в SQLite.
-// Если запись была закреплена вручную (is_manual = 1), автоматическое обновление игнорируется.
-func (db *DB) SaveSoundCloudCache(ctx context.Context, entry SoundCloudCacheEntry) error {
-	if entry.CandidatesJSON == "" {
-		if len(entry.Candidates) > 0 {
-			if data, err := json.Marshal(entry.Candidates); err == nil {
-				entry.CandidatesJSON = string(data)
-			} else {
-				entry.CandidatesJSON = "[]"
-			}
-		} else {
-			entry.CandidatesJSON = "[]"
-		}
-	}
-
-	query := `
-	INSERT INTO soundcloud_uncensored_cache (
-		cache_key, track_title, artist_name, selected_url, status, duration, is_manual, candidates_json, checked_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	ON CONFLICT(cache_key) DO UPDATE SET
-		track_title = excluded.track_title,
-		artist_name = excluded.artist_name,
-		selected_url = excluded.selected_url,
-		status = excluded.status,
-		duration = excluded.duration,
-		candidates_json = excluded.candidates_json,
-		checked_at = CURRENT_TIMESTAMP,
-		updated_at = CURRENT_TIMESTAMP
-	WHERE soundcloud_uncensored_cache.is_manual = 0;
-	`
-	_, err := db.conn.ExecContext(ctx, query,
-		entry.CacheKey, entry.TrackTitle, entry.ArtistName,
-		entry.SelectedURL, entry.Status, entry.Duration,
-		entry.IsManual, entry.CandidatesJSON,
-	)
-	return err
-}
-
-// PinSoundCloudVersion фиксирует выбранную вручную версию трека с защитой от перезаписи автоматическим резолвером.
-func (db *DB) PinSoundCloudVersion(ctx context.Context, key, artist, title, url string, duration int) error {
-	query := `
-	INSERT INTO soundcloud_uncensored_cache (
-		cache_key, artist_name, track_title, selected_url, duration, status, is_manual, candidates_json, checked_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, 'manual', 1, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	ON CONFLICT(cache_key) DO UPDATE SET
-		selected_url = excluded.selected_url,
-		duration = excluded.duration,
-		is_manual = 1,
-		status = 'manual',
-		checked_at = CURRENT_TIMESTAMP,
-		updated_at = CURRENT_TIMESTAMP;
-	`
-	_, err := db.conn.ExecContext(ctx, query, key, artist, title, url, duration)
-	return err
-}
-
-// InvalidateSoundCloudURL обрабатывает недоступность URL (404/410).
-// Для ручных версий выставляет status = 'link_dead'.
-// Для автоматических версий исключает ссылку из списка кандидатов и ротирует на следующую.
-func (db *DB) InvalidateSoundCloudURL(ctx context.Context, key string, failedURL string) (*SoundCloudCacheEntry, error) {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return nil, nil
-	}
-
-	query := `
-	SELECT cache_key, track_title, artist_name, selected_url, status, duration, is_manual, candidates_json, checked_at, updated_at
-	FROM soundcloud_uncensored_cache
-	WHERE cache_key = ?;
-	`
-	row := db.conn.QueryRowContext(ctx, query, key)
-	var entry SoundCloudCacheEntry
-	err := row.Scan(
-		&entry.CacheKey, &entry.TrackTitle, &entry.ArtistName, &entry.SelectedURL,
-		&entry.Status, &entry.Duration, &entry.IsManual, &entry.CandidatesJSON,
-		&entry.CheckedAt, &entry.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	if entry.CandidatesJSON != "" && entry.CandidatesJSON != "[]" {
-		_ = json.Unmarshal([]byte(entry.CandidatesJSON), &entry.Candidates)
-	}
-
-	if entry.IsManual {
-		entry.Status = "link_dead"
-		_, err = db.conn.ExecContext(ctx,
-			"UPDATE soundcloud_uncensored_cache SET status = 'link_dead', updated_at = CURRENT_TIMESTAMP WHERE cache_key = ?;",
-			key,
-		)
-		return &entry, err
-	}
-
-	var remaining []SoundCloudCandidateItem
-	for _, c := range entry.Candidates {
-		if c.URL != failedURL && c.URL != "" {
-			remaining = append(remaining, c)
-		}
-	}
-	entry.Candidates = remaining
-
-	if len(remaining) > 0 {
-		next := remaining[0]
-		candJSON, _ := json.Marshal(remaining)
-		entry.SelectedURL = next.URL
-		entry.Status = next.Status
-		entry.Duration = next.Duration
-		entry.CandidatesJSON = string(candJSON)
-
-		_, err = db.conn.ExecContext(ctx, `
-			UPDATE soundcloud_uncensored_cache
-			SET selected_url = ?, status = ?, duration = ?, candidates_json = ?, updated_at = CURRENT_TIMESTAMP
-			WHERE cache_key = ?;
-		`, entry.SelectedURL, entry.Status, entry.Duration, entry.CandidatesJSON, key)
-	} else {
-		entry.SelectedURL = ""
-		entry.Status = "link_dead"
-		entry.CandidatesJSON = "[]"
-
-		_, err = db.conn.ExecContext(ctx, `
-			UPDATE soundcloud_uncensored_cache
-			SET selected_url = '', status = 'link_dead', candidates_json = '[]', updated_at = CURRENT_TIMESTAMP
-			WHERE cache_key = ?;
-		`, key)
-	}
-
-	return &entry, err
 }
 
 // TrackMetadataCache holds cached metadata for quick lookups during directory walks.
@@ -810,105 +490,3 @@ func (db *DB) DeleteSetting(ctx context.Context, key string) error {
 	_, err := db.conn.ExecContext(ctx, "DELETE FROM app_settings WHERE key = ?", key)
 	return err
 }
-
-// PinnedTrackSource представляет запись постоянной ручной привязки аудио-источника.
-type PinnedTrackSource struct {
-	CacheKey   string    `json:"cache_key"`
-	ArtistName string    `json:"artist_name"`
-	TrackTitle string    `json:"track_title"`
-	ISRC       *string   `json:"isrc,omitempty"`
-	PinnedURL  string    `json:"pinned_url"`
-	SourceType string    `json:"source_type"`
-	Duration   int       `json:"duration"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-}
-
-// GetPinnedSource возвращает зафиксированный источник трека по ключу.
-func (db *DB) GetPinnedSource(ctx context.Context, cacheKey string) (*PinnedTrackSource, error) {
-	cacheKey = strings.TrimSpace(cacheKey)
-	if cacheKey == "" {
-		return nil, nil
-	}
-
-	query := `
-	SELECT cache_key, artist_name, track_title, isrc, pinned_url, source_type, duration, created_at, updated_at
-	FROM pinned_track_sources
-	WHERE cache_key = ?;
-	`
-	row := db.conn.QueryRowContext(ctx, query, cacheKey)
-	var p PinnedTrackSource
-	var isrc sql.NullString
-	err := row.Scan(
-		&p.CacheKey, &p.ArtistName, &p.TrackTitle, &isrc,
-		&p.PinnedURL, &p.SourceType, &p.Duration,
-		&p.CreatedAt, &p.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if isrc.Valid && isrc.String != "" {
-		p.ISRC = &isrc.String
-	}
-	return &p, nil
-}
-
-// SavePinnedSource сохраняет постоянную ручную привязку аудио-источника.
-func (db *DB) SavePinnedSource(ctx context.Context, pin PinnedTrackSource) error {
-	return WritePinnedSource(ctx, db.conn, pin)
-}
-
-// WritePinnedSource records the local identity when a source's artist is known.
-func WritePinnedSource(ctx context.Context, writer interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}, pin PinnedTrackSource) error {
-	query := `
-	INSERT INTO pinned_track_sources (
-		cache_key, artist_name, track_title, isrc, pinned_url, source_type, duration, artist_id, updated_at
-	) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ` + ArtistIDLookup("?2") + `, CURRENT_TIMESTAMP)
-	ON CONFLICT(cache_key) DO UPDATE SET
-		artist_id = COALESCE(pinned_track_sources.artist_id, excluded.artist_id),
-		artist_name = COALESCE(NULLIF(pinned_track_sources.artist_name, ''), excluded.artist_name),
-		track_title = COALESCE(NULLIF(pinned_track_sources.track_title, ''), excluded.track_title),
-		isrc = COALESCE(NULLIF(pinned_track_sources.isrc, ''), excluded.isrc),
-		pinned_url = excluded.pinned_url,
-		source_type = excluded.source_type,
-		duration = excluded.duration,
-		updated_at = CURRENT_TIMESTAMP;
-	`
-	var isrcVal any
-	if pin.ISRC != nil && *pin.ISRC != "" {
-		isrcVal = *pin.ISRC
-	}
-	_, err := writer.ExecContext(ctx, query,
-		pin.CacheKey, pin.ArtistName, pin.TrackTitle, isrcVal,
-		pin.PinnedURL, pin.SourceType, pin.Duration,
-	)
-	return err
-}
-
-// UpdateTrackPinnedURL сохраняет URL ручной привязки для трека в таблице tracks.
-func (db *DB) UpdateTrackPinnedURL(ctx context.Context, trackID int64, pinnedURL string) error {
-	query := `UPDATE tracks SET pinned_source_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;`
-	_, err := db.conn.ExecContext(ctx, query, pinnedURL, trackID)
-	return err
-}
-
-// UpdateMissingTrackPinnedURL сохраняет URL ручной привязки для недостающего трека.
-func (db *DB) UpdateMissingTrackPinnedURL(ctx context.Context, missingTrackID int64, pinnedURL string) error {
-	query := `UPDATE missing_tracks SET pinned_source_url = ? WHERE id = ?;`
-	_, err := db.conn.ExecContext(ctx, query, pinnedURL, missingTrackID)
-	return err
-}
-
-// DeletePinnedSource удаляет ручную привязку аудио-источника по ключу.
-func (db *DB) DeletePinnedSource(ctx context.Context, cacheKey string) error {
-	query := `DELETE FROM pinned_track_sources WHERE cache_key = ?;`
-	_, err := db.conn.ExecContext(ctx, query, cacheKey)
-	return err
-}
-
-

@@ -141,7 +141,6 @@ document.addEventListener('alpine:init', () => {
                 delta_seconds: delta,
                 is_topic: false,
                 score: 100,
-                saved_selection: false,
                 search_incomplete: false,
             };
             const existingIdx = this.candidates.findIndex(c => c.url === cand.url);

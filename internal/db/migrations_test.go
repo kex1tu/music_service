@@ -76,6 +76,15 @@ func openMigrated(t *testing.T, path string) *db.DB {
 	return database
 }
 
+func preMigrationCopy(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	copies, err := filepath.Glob(path + ".pre-v7-*.sqlite")
+	if err != nil || len(copies) != 1 {
+		t.Fatalf("expected one pre-migration copy, got %v: %v", copies, err)
+	}
+	return rawMigrationDB(t, copies[0])
+}
+
 func TestSQLiteMigrationVariants(t *testing.T) {
 	for _, fixture := range []struct {
 		name      string
@@ -128,7 +137,7 @@ func TestSQLiteMigrationVariants(t *testing.T) {
 
 			database := openMigrated(t, path)
 			conn := database.Conn()
-			requireScalar(t, conn, "PRAGMA user_version", 6)
+			requireScalar(t, conn, "PRAGMA user_version", 13)
 			requireScalar(t, conn, "SELECT count(*) FROM pragma_table_info('albums') WHERE name = 'youtube_id'", 1)
 			requireScalar(t, conn, "SELECT count(*) FROM pragma_foreign_key_check", 0)
 			if fixture.ddl == "" {
@@ -137,15 +146,15 @@ func TestSQLiteMigrationVariants(t *testing.T) {
 			} else {
 				requireScalar(t, conn, `SELECT count(*) FROM audit_issues WHERE id = 51 AND entity_type = 'track'
 					AND entity_id = 31 AND issue_type = 'invalid_path' AND is_resolved = 1 AND is_auto_fixed = 1`, 1)
-				requireScalar(t, conn, `SELECT count(*) FROM missing_tracks WHERE
+				backup := preMigrationCopy(t, path)
+				requireScalar(t, backup, `SELECT count(*) FROM missing_tracks WHERE
 					(id = 41 AND album_id = 21 AND track_number = 2 AND disc_number = 1 AND status = 'queued')
 					OR (id = 42 AND album_id = 21 AND track_number = 2 AND disc_number = 2 AND status = 'ignored')`, 2)
-				requireScalar(t, conn, "SELECT COALESCE(pinned_source_url, '') FROM missing_tracks WHERE id = 41", fixture.pin)
-			}
-			switch fixture.name {
-			case "historical", "partially-upgraded":
-				requireScalar(t, conn, "SELECT CAST(updated_at AS TEXT) FROM missing_tracks WHERE id = 41", "2025-01-02 03:04:05")
-				requireScalar(t, conn, "SELECT count(*) FROM missing_tracks WHERE id = 42 AND updated_at IS NOT NULL", 1)
+				requireScalar(t, backup, "SELECT CAST(created_at AS TEXT) FROM missing_tracks WHERE id = 41", "2025-01-02 03:04:05")
+				if fixture.pin != "" {
+					requireScalar(t, backup, "SELECT pinned_source_url FROM missing_tracks WHERE id = 41", fixture.pin)
+				}
+				requireScalar(t, conn, "SELECT COUNT(*) FROM release_tracklist", 0)
 			}
 			if fixture.legacyLog {
 				requireScalar(t, conn, `SELECT count(*) FROM audit_issues WHERE id = 51 AND file_path IS NULL
@@ -158,7 +167,7 @@ func TestSQLiteMigrationVariants(t *testing.T) {
 				requireScalar(t, conn, `SELECT count(*) FROM tracked_artists
 					WHERE name = 'New Artist' AND clean_name = 'new artist' AND is_followed = 1`, 1)
 				requireScalar(t, conn, `SELECT count(*) FROM sqlite_schema
-					WHERE name IN ('idx_audit_issues_unresolved', 'idx_missing_tracks_status')`, 2)
+					WHERE name = 'idx_audit_issues_unresolved'`, 0)
 				requireTrackedArtistSettings(t, conn)
 				requireScalar(t, conn, "SELECT id FROM tracked_artists WHERE name = 'Artist'", 71)
 			} else {
@@ -177,7 +186,7 @@ func TestSQLiteMigrationVariants(t *testing.T) {
 				t.Fatal(err)
 			}
 			reopened := openMigrated(t, path)
-			requireScalar(t, reopened.Conn(), "PRAGMA user_version", 6)
+			requireScalar(t, reopened.Conn(), "PRAGMA user_version", 13)
 			requireTrackedArtistSettings(t, reopened.Conn())
 			requireScalar(t, reopened.Conn(), "SELECT count(*) FROM tracked_artists WHERE name = 'Artist'", 1)
 			checkMigrationQueries(t, reopened, 5)
@@ -237,11 +246,9 @@ func checkMigrationQueries(t *testing.T, database *db.DB, position int) {
 	if len(missing) != 2 {
 		t.Fatalf("expected two discs after upsert, got %+v", missing)
 	}
-	requireScalar(t, conn, "SELECT title FROM missing_tracks WHERE album_id = 21 AND track_number = ? AND disc_number = 1", "Updated", position)
-	requireScalar(t, conn, "SELECT count(*) FROM missing_tracks WHERE updated_at IS NOT NULL", 2)
-	requireScalar(t, conn, "SELECT dflt_value FROM pragma_table_info('missing_tracks') WHERE name = 'updated_at'", "CURRENT_TIMESTAMP")
-	execMigrationSQL(t, conn, "INSERT INTO missing_tracks(album_id, title, artist, track_number) VALUES (21, 'Defaults', 'Artist', ?)", position+1)
-	requireScalar(t, conn, "SELECT count(*) FROM missing_tracks WHERE track_number = ? AND updated_at IS NOT NULL", 1, position+1)
+	requireScalar(t, conn, "SELECT title FROM release_tracklist WHERE album_id = 21 AND track_number = ? AND disc_number = 1", "Updated", position)
+	requireScalar(t, conn, "SELECT count(*) FROM release_tracklist WHERE album_id = 21 AND is_present = 0 AND artist_id = 11", 2)
+	requireScalar(t, conn, "SELECT count(*) FROM albums WHERE id = 21 AND catalog_checked_at IS NOT NULL AND expected_tracks_count = 2", 1)
 }
 
 func TestSQLiteMigrationUnknownLayout(t *testing.T) {
@@ -249,7 +256,7 @@ func TestSQLiteMigrationUnknownLayout(t *testing.T) {
 		{"unexpected table", historicalDDL + "CREATE TABLE surprise (id INTEGER);", "surprise"},
 		{"missing key", strings.Replace(historicalDDL, ",\n    UNIQUE(album_id, track_number, disc_number)", "", 1), "missing_tracks"},
 		{"unknown constraint", strings.Replace(localDDL, "description TEXT NOT NULL", "description TEXT CHECK(length(description) > 1) NOT NULL", 1), "audit_issues"},
-		{"future version", canonicalDDL + "PRAGMA user_version = 11;", "user_version=11"},
+		{"future version", canonicalDDL + "PRAGMA user_version = 14;", "user_version=14"},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "library.db")
@@ -296,8 +303,8 @@ func TestSQLiteMigrationRollsBackOnForeignKeyFailure(t *testing.T) {
 
 	execMigrationSQL(t, raw, "UPDATE tracks SET album_id = 21 WHERE id = 32")
 	reopened := openMigrated(t, path)
-	requireScalar(t, reopened.Conn(), "PRAGMA user_version", 6)
-	requireScalar(t, reopened.Conn(), "SELECT status FROM missing_tracks WHERE id = 41", "queued")
+	requireScalar(t, reopened.Conn(), "PRAGMA user_version", 13)
+	requireScalar(t, reopened.Conn(), "SELECT COUNT(*) FROM release_tracklist", 0)
 	requireScalar(t, reopened.Conn(), "SELECT count(*) FROM pragma_foreign_key_check", 0)
 }
 
@@ -353,10 +360,10 @@ func TestSQLiteMigrationRestoredWALBackup(t *testing.T) {
 	}
 
 	migrated := openMigrated(t, restoredPath)
-	requireScalar(t, migrated.Conn(), "PRAGMA user_version", 6)
+	requireScalar(t, migrated.Conn(), "PRAGMA user_version", 13)
 	requireScalar(t, migrated.Conn(), "PRAGMA integrity_check", "ok")
 	requireScalar(t, migrated.Conn(), "SELECT count(*) FROM pragma_foreign_key_check", 0)
-	requireScalar(t, migrated.Conn(), "SELECT status FROM missing_tracks WHERE id = 41", "queued")
+	requireScalar(t, preMigrationCopy(t, restoredPath), "SELECT status FROM missing_tracks WHERE id = 41", "queued")
 	checkMigrationQueries(t, migrated, 3)
 	requireScalar(t, raw, "PRAGMA user_version", 0)
 	requireScalar(t, raw, "SELECT status FROM missing_tracks WHERE id = 41", "queued")

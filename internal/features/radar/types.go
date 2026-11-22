@@ -4,7 +4,7 @@ import (
 	"music-manager/internal/db"
 )
 
-// TrackedArtist описывает артиста в каталоге отслеживания Радара.
+// TrackedArtist описывает настройки артиста для Радара.
 type TrackedArtist = db.TrackedArtistEntity
 
 // RadarRelease описывает отдельный релиз Радара новинок или дискографии.
@@ -19,27 +19,10 @@ type FeedResponse struct {
 	Unread int            `json:"unread"`
 }
 
-// TrackedArtistsResponse представляет список отслеживаемых артистов.
+// TrackedArtistsResponse представляет список артистов медиатеки.
 type TrackedArtistsResponse struct {
 	Items []TrackedArtist `json:"items"`
 	Total int             `json:"total"`
-}
-
-// AddTrackedArtistRequest содержит имя артиста для добавления в отслеживание.
-type AddTrackedArtistRequest struct {
-	Name string `json:"name"`
-}
-
-// FollowArtistRequest управляет статусом отслеживания артиста.
-type FollowArtistRequest struct {
-	ArtistID int64 `json:"artist_id"`
-	Followed bool  `json:"followed"`
-}
-
-// AutoDownloadRequest управляет автозагрузкой новых релизов артиста.
-type AutoDownloadRequest struct {
-	ArtistID     int64 `json:"artist_id"`
-	AutoDownload bool  `json:"auto_download"`
 }
 
 // CustomLinksRequest обновляет пользовательские идентификаторы артиста в каталогах.
@@ -51,7 +34,7 @@ type CustomLinksRequest struct {
 	YandexID      string `json:"yandex_id"`
 }
 
-// ArtistDiscographyResponse содержит дискографию артиста и его статус отслеживания.
+// ArtistDiscographyResponse содержит дискографию артиста и его настройки поиска.
 type ArtistDiscographyResponse struct {
 	Artist   string         `json:"artist"`
 	Tracked  *TrackedArtist `json:"tracked,omitempty"`
@@ -60,7 +43,8 @@ type ArtistDiscographyResponse struct {
 
 // ScanRequest содержит параметры запуска сканирования.
 type ScanRequest struct {
-	Artist string `json:"artist"`
+	ArtistID int64  `json:"artist_id,omitempty"`
+	Artist   string `json:"artist"`
 }
 
 // SetReleaseStatusRequest содержит новый статус релиза.

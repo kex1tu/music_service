@@ -11,9 +11,7 @@ import (
 	"time"
 
 	"music-manager/internal/config"
-	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
-	"music-manager/internal/services/downloader"
 	"music-manager/internal/services/resolver"
 )
 
@@ -66,6 +64,7 @@ func TestRadarService(t *testing.T) {
 						"record_type":  "album",
 						"cover_xl":     "https://example.com/ok_computer.jpg",
 						"nb_tracks":    12,
+						"artist":       map[string]any{"id": 42, "name": "Radiohead"},
 					},
 					{
 						"id":           1002,
@@ -74,6 +73,7 @@ func TestRadarService(t *testing.T) {
 						"record_type":  "album",
 						"cover_xl":     "https://example.com/amsp.jpg",
 						"nb_tracks":    11,
+						"artist":       map[string]any{"id": 42, "name": "Radiohead"},
 					},
 				},
 			})
@@ -89,10 +89,9 @@ func TestRadarService(t *testing.T) {
 	aggregator := resolver.NewDiscographyAggregator(deezerClient, nil, nil, database)
 	cfg := &config.Config{
 		RadarScanIntervalHours: 24,
-		RadarAutoDownload:      false,
 	}
 
-	service := NewService(database, aggregator, nil, cfg)
+	service := NewService(database, aggregator, cfg)
 
 	// Добавляем артиста
 	err := database.UpsertTrackedArtist(ctx, "Radiohead")
@@ -131,17 +130,6 @@ func TestRadarService(t *testing.T) {
 		t.Fatalf("expected at least 1 radar release, got %d", total)
 	}
 
-	// 3. Тестируем Follow/AutoDownload/CustomLinks
-	err = service.FollowArtist(ctx, "Radiohead", true)
-	if err != nil {
-		t.Fatalf("FollowArtist failed: %v", err)
-	}
-
-	err = service.SetAutoDownload(ctx, "Radiohead", true)
-	if err != nil {
-		t.Fatalf("SetAutoDownload failed: %v", err)
-	}
-
 	err = service.UpdateArtistCustomLinks(ctx, "Radiohead", "RH", "42", "mb-123", "")
 	if err != nil {
 		t.Fatalf("UpdateArtistCustomLinks failed: %v", err)
@@ -150,12 +138,6 @@ func TestRadarService(t *testing.T) {
 	tracked, err := database.GetTrackedArtistByName(ctx, "Radiohead")
 	if err != nil {
 		t.Fatalf("GetTrackedArtistByName failed: %v", err)
-	}
-	if !tracked.IsFollowed {
-		t.Error("expected artist to be followed")
-	}
-	if !tracked.AutoDownload {
-		t.Error("expected auto_download to be true")
 	}
 	if tracked.CustomSearchAlias != "RH" {
 		t.Errorf("expected alias 'RH', got %q", tracked.CustomSearchAlias)
@@ -362,7 +344,7 @@ func TestRadar_ValidationAndConcurrency(t *testing.T) {
 
 	ctx := context.Background()
 	aggregator := resolver.NewDiscographyAggregator(nil, nil, nil, database)
-	service := NewService(database, aggregator, nil, nil)
+	service := NewService(database, aggregator, nil)
 
 	// 1. Empty artist name error
 	if _, err := service.ScanArtist(ctx, ""); err == nil {
@@ -375,7 +357,7 @@ func TestRadar_ValidationAndConcurrency(t *testing.T) {
 	cancel() // Cancel background cron loop
 }
 
-func TestRadar_ScanArtist_AutoDownload(t *testing.T) {
+func TestRadar_ScanArtistDoesNotEnqueueWithLegacyFlag(t *testing.T) {
 	database, cleanup := setupTestDB(t)
 	defer cleanup()
 
@@ -414,30 +396,10 @@ func TestRadar_ScanArtist_AutoDownload(t *testing.T) {
 	deezerClient.SetBaseURL(deezerServer.URL)
 
 	aggregator := resolver.NewDiscographyAggregator(deezerClient, nil, nil, database)
-	cfg := &config.Config{
-		RadarScanIntervalHours: 24,
-		RadarAutoDownload:      true,
-	}
-
-	tmpDir := t.TempDir()
-	tmpSb, err := sandbox.NewPathSandbox(tmpDir)
-	if err != nil {
+	service := NewService(database, aggregator, nil)
+	if _, err := database.Conn().ExecContext(ctx, `INSERT INTO tracked_artists (name, clean_name, auto_download)
+        VALUES ('AutoArtist', 'autoartist', 1)`); err != nil {
 		t.Fatal(err)
-	}
-	musicSb, err := sandbox.NewPathSandbox(tmpDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	jobMgr := downloader.NewJobManager(database)
-	dlService := downloader.NewService(ctx, jobMgr, nil, tmpSb, musicSb, "", 2)
-
-	service := NewService(database, aggregator, dlService, cfg)
-
-	if err := database.UpsertTrackedArtist(ctx, "AutoArtist"); err != nil {
-		t.Fatalf("UpsertTrackedArtist failed: %v", err)
-	}
-	if err := service.SetAutoDownload(ctx, "AutoArtist", true); err != nil {
-		t.Fatalf("SetAutoDownload failed: %v", err)
 	}
 
 	res, err := service.ScanArtist(ctx, "AutoArtist")
@@ -448,10 +410,9 @@ func TestRadar_ScanArtist_AutoDownload(t *testing.T) {
 		t.Errorf("expected 1 new release, got %d", res.NewReleases)
 	}
 
-	// Verify download job was automatically scheduled
-	jobs := jobMgr.GetAll()
-	if len(jobs) != 1 {
-		t.Errorf("expected 1 auto-download job to be created, got %d", len(jobs))
+	var jobs int
+	if err := database.Conn().QueryRowContext(ctx, "SELECT count(*) FROM download_jobs").Scan(&jobs); err != nil || jobs != 0 {
+		t.Fatalf("radar scan created %d download jobs, %v", jobs, err)
 	}
 }
 
@@ -461,10 +422,9 @@ func TestRadar_ScanAll_AlreadyRunning(t *testing.T) {
 
 	ctx := context.Background()
 	aggregator := resolver.NewDiscographyAggregator(nil, nil, nil, database)
-	service := NewService(database, aggregator, nil, nil)
+	service := NewService(database, aggregator, nil)
 
-	// Add 1 artist so ScanAll has work
-	_ = database.UpsertTrackedArtist(ctx, "ArtistSlow")
+	addRadarLibraryAlbum(t, database, "ArtistSlow")
 
 	err := service.ScanAll(ctx, "first_run")
 	if err != nil {
@@ -486,7 +446,7 @@ func TestRadar_ScanAll_NoArtists(t *testing.T) {
 
 	ctx := context.Background()
 	aggregator := resolver.NewDiscographyAggregator(nil, nil, nil, database)
-	service := NewService(database, aggregator, nil, nil)
+	service := NewService(database, aggregator, nil)
 
 	// No tracked artists
 	if err := service.ScanAll(ctx, "empty_run"); err != nil {
@@ -545,10 +505,12 @@ func TestRadar_ScanAll_ProgressUpdate(t *testing.T) {
 	deezerClient.SetBaseURL(deezerServer.URL)
 
 	aggregator := resolver.NewDiscographyAggregator(deezerClient, nil, nil, database)
-	service := NewService(database, aggregator, nil, nil)
+	service := NewService(database, aggregator, nil)
 
-	if err := database.UpsertTrackedArtist(ctx, "ActiveArtist"); err != nil {
-		t.Fatalf("UpsertTrackedArtist failed: %v", err)
+	addRadarLibraryAlbum(t, database, "ActiveArtist")
+	if _, err := database.Conn().ExecContext(ctx, `UPDATE tracked_artists SET is_followed = 0 WHERE name = 'ActiveArtist';
+        INSERT INTO tracked_artists(name, clean_name, is_followed) VALUES ('Outside', 'outside', 1)`); err != nil {
+		t.Fatal(err)
 	}
 
 	if err := service.ScanAll(ctx, "progress_test"); err != nil {
@@ -573,4 +535,66 @@ func TestRadar_ScanAll_ProgressUpdate(t *testing.T) {
 	}
 
 	service.CancelScan()
+}
+
+func addRadarLibraryAlbum(t *testing.T, database *db.DB, name string) {
+	t.Helper()
+	id, err := db.GetOrCreateLibraryArtist(t.Context(), database.Conn(), name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Conn().ExecContext(t.Context(), `INSERT INTO albums(artist_id, title, clean_title, folder_path)
+        VALUES (?, 'Album', 'album', ?)`, id, name); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRadarScanSavesBothCatalogsWithExplicitLink(t *testing.T) {
+	database, cleanup := setupTestDB(t)
+	defer cleanup()
+	addRadarLibraryAlbum(t, database, "Artist")
+	if err := database.UpdateArtistCustomLinks(t.Context(), "Artist", "", "51", "artist-mbid", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	catalogs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/artist/51/albums":
+			_, _ = w.Write([]byte(`{"data":[{"id":55,"title":"Edition","nb_tracks":3,"record_type":"album",
+				"artist":{"name":"Artist"},"contributors":[{"name":"Artist"}]}]}`))
+		case "/release-group":
+			if r.URL.Query().Get("inc") != "artist-credits url-rels" {
+				t.Errorf("expected MusicBrainz credits and relationships, got %q", r.URL.Query().Get("inc"))
+			}
+			_, _ = w.Write([]byte(`{"release-groups":[
+				{"id":"linked","title":"Release group title","primary-type":"Album","artist-credit":[{"name":"Artist"}],
+					"relations":[{"url":{"resource":"https://www.deezer.com/en/album/55"}}]},
+				{"id":"unlinked","title":"Edition","primary-type":"Album","artist-credit":[{"name":"Artist"}]}
+			]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer catalogs.Close()
+	deezer := resolver.NewDeezerClient()
+	deezer.SetBaseURL(catalogs.URL)
+	mb := resolver.NewMusicBrainzClient("")
+	mb.SetBaseURL(catalogs.URL)
+	service := NewService(database, resolver.NewDiscographyAggregator(deezer, mb, nil, database), nil)
+
+	for range 2 {
+		result, err := service.ScanArtist(t.Context(), "Artist")
+		if err != nil || result.TotalDiscovered != 2 {
+			t.Fatalf("unexpected scan: %+v, %v", result, err)
+		}
+	}
+	var linked, cards int
+	if err := database.Conn().QueryRow(`SELECT
+		(SELECT count(*) FROM radar_release_sources s JOIN radar_releases r ON r.id = s.release_id
+		 WHERE r.deezer_id = '55' AND (s.provider = 'deezer' OR
+		     (s.provider = 'musicbrainz' AND s.external_id = 'linked' AND s.title = 'Release group title'))),
+		(SELECT count(*) FROM radar_releases)`).Scan(&linked, &cards); err != nil || linked != 2 || cards != 2 {
+		t.Fatalf("linked catalog sources = %d, cards = %d, err %v", linked, cards, err)
+	}
 }

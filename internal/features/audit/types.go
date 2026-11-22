@@ -131,6 +131,7 @@ type IncompleteAlbum struct {
 	ExpectedCount       int               `json:"expected_count"`
 	MissingTracks       []db.CatalogTrack `json:"missing_tracks"`
 	MissingTrackNumbers []int             `json:"missing_track_numbers"`
+	Completeness        string            `json:"completeness"`
 	IsCatalogMatched    bool              `json:"is_catalog_matched"`
 	DeezerAlbumID       *string           `json:"deezer_album_id"`
 }

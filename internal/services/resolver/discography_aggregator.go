@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,22 +27,26 @@ func IsDeluxeOrRemaster(title string) bool {
 
 // AggregatedRelease представляет объединенную информацию о релизе из нескольких каталогов.
 type AggregatedRelease struct {
-	Tracklist     []db.CatalogTrack `json:"-"`
-	ArtistName    string            `json:"artist_name"`
-	CleanArtist   string            `json:"clean_artist"`
-	Title         string            `json:"title"`
-	CleanTitle    string            `json:"clean_title"`
-	ReleaseType   string            `json:"release_type"` // album, ep, single, compilation
-	ReleaseDate   string            `json:"release_date"` // YYYY-MM-DD
-	Year          int               `json:"year"`
-	CoverURL      string            `json:"cover_url"`
-	TrackCount    int               `json:"track_count"`
-	DeezerID      string            `json:"deezer_id,omitempty"`
-	MusicBrainzID string            `json:"musicbrainz_id,omitempty"`
-	ShazamID      string            `json:"shazam_id,omitempty"`
-	SourceURL     string            `json:"source_url"`
-	Status        string            `json:"status"` // new, in_library, version_exists, missing, downloaded, ignored
-	IsRadar       bool              `json:"is_radar"`
+	deezerAlbumLinks    []string
+	MusicBrainzMetadata *db.RadarSourceMetadata `json:"-"`
+	Tracklist           []db.CatalogTrack       `json:"-"`
+	ProviderCredits     []db.RadarCredit        `json:"-"`
+	CatalogCredits      []string                `json:"-"`
+	ArtistName          string                  `json:"artist_name"`
+	CleanArtist         string                  `json:"clean_artist"`
+	Title               string                  `json:"title"`
+	CleanTitle          string                  `json:"clean_title"`
+	ReleaseType         string                  `json:"release_type"` // album, ep, single, compilation
+	ReleaseDate         string                  `json:"release_date"` // YYYY-MM-DD
+	Year                int                     `json:"year"`
+	CoverURL            string                  `json:"cover_url"`
+	TrackCount          int                     `json:"track_count"`
+	DeezerID            string                  `json:"deezer_id,omitempty"`
+	MusicBrainzID       string                  `json:"musicbrainz_id,omitempty"`
+	ShazamID            string                  `json:"shazam_id,omitempty"`
+	SourceURL           string                  `json:"source_url"`
+	Status              string                  `json:"status"` // new, in_library, version_exists, missing, downloaded, ignored
+	IsRadar             bool                    `json:"is_radar"`
 }
 
 // ExtractAllReleaseArtists объединяет имя основного исполнителя, contributors из каталога и фиты из названия.
@@ -185,24 +191,26 @@ func (a *DiscographyAggregator) Aggregate(ctx context.Context, artistName, alias
 						if primaryArt == "" {
 							primaryArt = artistName
 						}
-						allArtists := ExtractAllReleaseArtists(primaryArt, alb.Contributors, alb.Title)
-						formattedArtist := strings.Join(allArtists, ", ")
+						credits := deezerRadarCredits(alb)
+						formattedArtist := strings.Join(credits, ", ")
 						if formattedArtist == "" {
-							formattedArtist = artistName
+							formattedArtist = primaryArt
 						}
 
 						collected = append(collected, AggregatedRelease{
-							ArtistName:  formattedArtist,
-							CleanArtist: CleanArtistKey(primaryArt),
-							Title:       alb.Title,
-							CleanTitle:  CleanReleaseTitle(alb.Title),
-							ReleaseType: relType,
-							ReleaseDate: relDate,
-							Year:        year,
-							CoverURL:    cover,
-							TrackCount:  alb.NbTracks,
-							DeezerID:    strconv.FormatInt(alb.ID, 10),
-							SourceURL:   fmt.Sprintf("https://www.deezer.com/album/%d", alb.ID),
+							CatalogCredits:  credits,
+							ProviderCredits: deezerProviderCredits(alb),
+							ArtistName:      formattedArtist,
+							CleanArtist:     CleanArtistKey(primaryArt),
+							Title:           alb.Title,
+							CleanTitle:      CleanReleaseTitle(alb.Title),
+							ReleaseType:     relType,
+							ReleaseDate:     relDate,
+							Year:            year,
+							CoverURL:        cover,
+							TrackCount:      alb.NbTracks,
+							DeezerID:        strconv.FormatInt(alb.ID, 10),
+							SourceURL:       fmt.Sprintf("https://www.deezer.com/album/%d", alb.ID),
 						})
 					}
 					mu.Unlock()
@@ -226,8 +234,8 @@ func (a *DiscographyAggregator) Aggregate(ctx context.Context, artistName, alias
 				if err == nil {
 					mu.Lock()
 					for _, rg := range rgs {
-						allArtists := ExtractAllReleaseArtists(artistName, nil, rg.Title)
-						formattedArtist := strings.Join(allArtists, ", ")
+						credits := append([]string{}, id3.ParseMultiValue(rg.Artist)...)
+						formattedArtist := strings.Join(credits, ", ")
 						if formattedArtist == "" {
 							formattedArtist = artistName
 						}
@@ -240,15 +248,18 @@ func (a *DiscographyAggregator) Aggregate(ctx context.Context, artistName, alias
 						}
 
 						collected = append(collected, AggregatedRelease{
-							ArtistName:    formattedArtist,
-							CleanArtist:   CleanArtistKey(artistName),
-							Title:         rg.Title,
-							CleanTitle:    CleanReleaseTitle(rg.Title),
-							ReleaseType:   rg.ReleaseType,
-							ReleaseDate:   rgDate,
-							Year:          rg.Year,
-							MusicBrainzID: rg.ID,
-							SourceURL:     fmt.Sprintf("https://musicbrainz.org/release-group/%s", rg.ID),
+							CatalogCredits:   credits,
+							ProviderCredits:  rg.ProviderCredits,
+							deezerAlbumLinks: rg.DeezerAlbumLinks,
+							ArtistName:       formattedArtist,
+							CleanArtist:      CleanArtistKey(artistName),
+							Title:            rg.Title,
+							CleanTitle:       CleanReleaseTitle(rg.Title),
+							ReleaseType:      rg.ReleaseType,
+							ReleaseDate:      rgDate,
+							Year:             rg.Year,
+							MusicBrainzID:    rg.ID,
+							SourceURL:        fmt.Sprintf("https://musicbrainz.org/release-group/%s", rg.ID),
 						})
 					}
 					mu.Unlock()
@@ -260,12 +271,84 @@ func (a *DiscographyAggregator) Aggregate(ctx context.Context, artistName, alias
 	wg.Wait()
 
 	// 3. Дедупликация и слияние
-	deduped := a.deduplicateReleases(collected)
+	deduped := attachRadarMusicBrainzGroups(a.deduplicateReleases(collected))
 
 	// 4. Сверка с локальной библиотекой SQLite
 	a.reconcileWithLibrary(ctx, artistName, deduped)
 
 	return deduped, nil
+}
+
+// Relationship URLs confirm a link to a specific Deezer album. An album title
+// shared by the catalogs is insufficient to establish that relationship.
+func attachRadarMusicBrainzGroups(releases []AggregatedRelease) []AggregatedRelease {
+	groupByAlbum := make(map[string]int)
+	editionCounts := make(map[int]int)
+	for i, release := range releases {
+		if release.MusicBrainzID == "" {
+			continue
+		}
+		editions := make(map[string]struct{})
+		for _, link := range release.deezerAlbumLinks {
+			id := radarDeezerAlbumID(link)
+			if id == "" {
+				continue
+			}
+			editions[id] = struct{}{}
+			if other, ok := groupByAlbum[id]; ok && other != i+1 {
+				groupByAlbum[id] = -1
+			} else {
+				groupByAlbum[id] = i + 1
+			}
+		}
+		editionCounts[i] = len(editions)
+	}
+	attached := make(map[int]bool)
+	for i := range releases {
+		release := &releases[i]
+		index := groupByAlbum[release.DeezerID] - 1
+		if index < 0 {
+			continue
+		}
+		group := releases[index]
+		release.MusicBrainzID = group.MusicBrainzID
+		release.MusicBrainzMetadata = &db.RadarSourceMetadata{
+			Title: group.Title, ArtistName: group.ArtistName, Credits: group.ProviderCredits, MultipleEditions: editionCounts[index] > 1,
+		}
+		if len(release.CatalogCredits) == 0 {
+			release.CatalogCredits = group.CatalogCredits
+		}
+		attached[index] = true
+	}
+	result := make([]AggregatedRelease, 0, len(releases)-len(attached))
+	for i, release := range releases {
+		if !attached[i] {
+			result = append(result, release)
+		}
+	}
+	return result
+}
+
+func radarDeezerAlbumID(link string) string {
+	u, err := url.Parse(link)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
+		return ""
+	}
+	if host := strings.ToLower(u.Hostname()); host != "deezer.com" && host != "www.deezer.com" {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) == 3 && len(parts[0]) == 2 {
+		parts = parts[1:]
+	}
+	if len(parts) != 2 || parts[0] != "album" {
+		return ""
+	}
+	id, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil || id == 0 {
+		return ""
+	}
+	return strconv.FormatUint(id, 10)
 }
 
 // deduplicateReleases groups releases by catalog identity. Name-based matching
@@ -285,6 +368,16 @@ func (a *DiscographyAggregator) deduplicateReleases(raw []AggregatedRelease) []A
 			continue
 		}
 		existing := &deduped[i]
+		for _, name := range item.CatalogCredits {
+			if !slices.Contains(existing.CatalogCredits, name) {
+				existing.CatalogCredits = append(existing.CatalogCredits, name)
+			}
+		}
+		for _, credit := range item.ProviderCredits {
+			if !slices.Contains(existing.ProviderCredits, credit) {
+				existing.ProviderCredits = append(existing.ProviderCredits, credit)
+			}
+		}
 		if len(existing.ArtistName) < len(item.ArtistName) {
 			existing.ArtistName = item.ArtistName
 		}
@@ -305,6 +398,35 @@ func (a *DiscographyAggregator) deduplicateReleases(raw []AggregatedRelease) []A
 		}
 	}
 	return deduped
+}
+
+func deezerProviderCredits(album DeezerAlbum) []db.RadarCredit {
+	credits := make([]db.RadarCredit, 0, 1+len(album.Artists)+len(album.Contributors))
+	for _, artist := range slices.Concat([]DeezerArtist{album.Artist}, album.Artists, album.Contributors) {
+		name := strings.TrimSpace(artist.Name)
+		if name == "" {
+			continue
+		}
+		credit := db.RadarCredit{Name: name}
+		if artist.ID > 0 {
+			credit.ExternalID = strconv.FormatInt(artist.ID, 10)
+		}
+		if !slices.Contains(credits, credit) {
+			credits = append(credits, credit)
+		}
+	}
+	return credits
+}
+
+func deezerRadarCredits(album DeezerAlbum) []string {
+	credits := make([]string, 0, 1+len(album.Artists)+len(album.Contributors))
+	for _, artist := range slices.Concat([]DeezerArtist{album.Artist}, album.Artists, album.Contributors) {
+		name := strings.TrimSpace(artist.Name)
+		if name != "" && !slices.Contains(credits, name) {
+			credits = append(credits, name)
+		}
+	}
+	return credits
 }
 
 func (a *DiscographyAggregator) reconcileWithLibrary(ctx context.Context, _ string, releases []AggregatedRelease) {

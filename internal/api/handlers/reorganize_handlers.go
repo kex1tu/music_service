@@ -102,8 +102,8 @@ func (h *FileHandler) DownloadMissing(w http.ResponseWriter, r *http.Request) {
 	if len(trackNumbers) == 0 && albumID > 0 {
 		mRows, mErr := h.database.Conn().QueryContext(r.Context(), `
 			SELECT track_number, COALESCE(deezer_url, '')
-			FROM missing_tracks
-			WHERE album_id = ?
+			FROM release_tracklist
+			WHERE album_id = ? AND is_present = 0
 			ORDER BY track_number
 		`, albumID)
 		if mErr == nil {

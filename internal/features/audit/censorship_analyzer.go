@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"music-manager/internal/core/safefs"
+	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/censorcheck"
 	"music-manager/internal/services/resolver"
@@ -32,7 +33,7 @@ func digest(parts ...string) string {
 }
 
 func (a *CensorshipAudit) readLyrics(path string) (string, error) {
-	p, e := a.sb.Resolve(strings.TrimSuffix(path, filepath.Ext(path))+".lrc", false)
+	p, e := a.sb.Resolve(strings.TrimSuffix(path, filepath.Ext(path))+".lrc", false, sandbox.LiteralPath)
 	if e != nil {
 		return "", e
 	}
@@ -67,29 +68,41 @@ func (a *CensorshipAudit) analyze(ctx context.Context, path, reference, provider
 	if lyricsErr != nil {
 		r.Limitations = append(r.Limitations, "Синхронизированный текст недоступен")
 	}
-	tags, _ := id3.ReadTagsFromFile(target, "")
-	duration := 0.0
-	if tags != nil {
-		duration = tags.Duration
-	}
 	spots := censorcheck.ExtractAuditSpots(lyrics)
+	var duration float64
+	if len(spots) > 0 {
+		duration, e = censorcheck.AudioDuration(ctx, target)
+		if e != nil {
+			return r, e
+		}
+	}
 	windows := censorcheck.AuditWindows(spots, duration)
 
 	var refFile *os.File
 	referenceHash := ""
+	referenceState := "absent"
+	if reference != "" {
+		referenceState = "unused"
+	}
 	if reference != "" && len(windows) > 0 {
 		refFile, e = censorcheck.OpenAudio(a.sb, reference)
 		if e != nil {
 			return r, e
 		}
 		defer refFile.Close()
+		tags, _ := id3.ReadTagsFromFile(target, "")
 		rt, _ := id3.ReadTagsFromFile(refFile, "")
 		referenceOK := false
 		if tags != nil && rt != nil && tags.Artist != "" && rt.Artist != "" && tags.Title != "" && rt.Title != "" {
-			ev := resolver.EvaluateTrack(tags.Title, tags.Artist, int(tags.Duration), rt.Title, rt.Artist, int(rt.Duration))
+			refDuration, err := censorcheck.AudioDuration(ctx, refFile)
+			if err != nil {
+				return r, err
+			}
+			ev := resolver.EvaluateTrack(tags.Title, tags.Artist, int(duration), rt.Title, rt.Artist, int(refDuration))
 			referenceOK = ev.Compatible && ev.TitleSimilarity >= 0.9 && ev.ArtistSimilarity >= 0.9
 		}
 		if referenceOK {
+			referenceState = "used"
 			referenceHash, e = censorcheck.AudioDigest(ctx, refFile)
 			if e != nil {
 				return r, e
@@ -107,13 +120,19 @@ func (a *CensorshipAudit) analyze(ctx context.Context, path, reference, provider
 		}
 		identity = a.clouds[provider].Identity()
 	}
-	key := digest(audioHash, lyrics, referenceHash, reference, identity, censorcheck.AlgorithmVersion)
+	intervals, err := json.Marshal(windows)
+	if err != nil {
+		return r, err
+	}
+	key := digest("audit-result-v2", audioHash, lyrics, string(intervals), fmt.Sprint(lyricsErr == nil),
+		referenceState, referenceHash, identity, censorcheck.AlgorithmVersion)
 	var cached string
 	e = a.db.QueryRowContext(ctx, "SELECT result_json FROM censorship_cache WHERE cache_key=?", key).Scan(&cached)
 	if e == nil {
 		var result CensorshipResult
 		if json.Unmarshal([]byte(cached), &result) == nil && result.AudioHash == audioHash && result.ReferenceAudioHash == referenceHash {
-			return result, nil
+			_, err := a.db.ExecContext(ctx, "UPDATE censorship_cache SET last_used_at=unixepoch() WHERE cache_key=?", key)
+			return result, err
 		}
 	} else if !errors.Is(e, sql.ErrNoRows) {
 		return r, e
@@ -145,7 +164,7 @@ func (a *CensorshipAudit) analyze(ctx context.Context, path, reference, provider
 					return r, err
 				}
 				if alignedDifference(pcm, refPCM) {
-					r.Evidence = append(r.Evidence, CensorshipEvidence{Start: w.Start, End: w.End, Kind: "possible_audio_edit", Origin: "reference_comparison", Reference: reference})
+					r.Evidence = append(r.Evidence, CensorshipEvidence{Start: w.Start, End: w.End, Kind: "possible_audio_edit", Origin: "reference_comparison"})
 				}
 			}
 			if provider != "local" {
@@ -206,7 +225,7 @@ func (a *CensorshipAudit) analyze(ctx context.Context, path, reference, provider
 		return r, e
 	}
 	e = retryCensorshipWrite(ctx, func() error {
-		_, err := a.db.ExecContext(ctx, "INSERT INTO censorship_cache(cache_key,result_json) VALUES(?,?) ON CONFLICT(cache_key) DO UPDATE SET result_json=excluded.result_json", key, string(raw))
+		_, err := a.db.ExecContext(ctx, "INSERT INTO censorship_cache(cache_key,result_json,last_used_at) VALUES(?,?,unixepoch()) ON CONFLICT(cache_key) DO UPDATE SET result_json=excluded.result_json,last_used_at=excluded.last_used_at", key, string(raw))
 		return err
 	})
 	return r, e
@@ -244,16 +263,27 @@ func (a *CensorshipAudit) transcribe(ctx context.Context, provider string, pcm [
 		return censorcheck.Transcript{}, censorcheck.ErrCloudWaiting
 	}
 	h := sha256.Sum256(pcm)
-	key := digest(hex.EncodeToString(h[:]), cloud.Identity(), censorcheck.AlgorithmVersion)
-	var raw string
-	var t censorcheck.Transcript
+	audio := hex.EncodeToString(h[:])
+	identity := cloud.Identity()
+	key := digest("transcript-v1", audio, identity)
+	legacyKey := digest(audio, identity, "censorship-v1")
+	var raw sql.NullString
 	e := a.db.QueryRowContext(ctx, "SELECT transcript_json FROM censorship_transcripts WHERE cache_key=?", key).Scan(&raw)
-	if e == nil && json.Unmarshal([]byte(raw), &t) == nil {
+	if e != nil && !errors.Is(e, sql.ErrNoRows) {
+		return censorcheck.Transcript{}, e
+	}
+	if t, ok := usableTranscript(raw.String, identity); ok {
 		return t, nil
 	}
+	var legacy string
+	e = a.db.QueryRowContext(ctx, "SELECT transcript_json FROM censorship_transcripts WHERE cache_key=?", legacyKey).Scan(&legacy)
 	if e != nil && !errors.Is(e, sql.ErrNoRows) {
-		return t, e
+		return censorcheck.Transcript{}, e
 	}
+	if t, ok := usableTranscript(legacy, identity); ok {
+		return t, a.saveTranscript(ctx, key, legacy, raw)
+	}
+	var t censorcheck.Transcript
 	seconds := int(math.Ceil(float64(len(pcm)) / (censorcheck.SampleRate * 2)))
 	// Reserve usage BEFORE sending. Failed requests retain their reservation;
 	// restarting cannot repeat potentially billed work without consuming a limit.
@@ -261,7 +291,10 @@ func (a *CensorshipAudit) transcribe(ctx context.Context, provider string, pcm [
 	if e != nil {
 		return t, e
 	}
-	n, _ := res.RowsAffected()
+	n, e := res.RowsAffected()
+	if e != nil {
+		return t, e
+	}
 	if n == 0 {
 		return t, fmt.Errorf("%w: local daily audio limit reached", censorcheck.ErrCloudWaiting)
 	}
@@ -277,11 +310,36 @@ func (a *CensorshipAudit) transcribe(ctx context.Context, provider string, pcm [
 	// even if this item was paused immediately after the provider returned.
 	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 8*time.Second)
 	defer cancel()
-	e = retryCensorshipWrite(storeCtx, func() error {
-		_, err := a.db.ExecContext(storeCtx, "INSERT INTO censorship_transcripts(cache_key,transcript_json) VALUES(?,?) ON CONFLICT(cache_key) DO UPDATE SET transcript_json=excluded.transcript_json WHERE NOT json_valid(censorship_transcripts.transcript_json)", key, string(b))
+	return t, a.saveTranscript(storeCtx, key, string(b), raw)
+}
+
+func usableTranscript(raw, identity string) (censorcheck.Transcript, bool) {
+	var t censorcheck.Transcript
+	var fields struct {
+		Text *string `json:"text"`
+	}
+	if json.Unmarshal([]byte(raw), &t) != nil || json.Unmarshal([]byte(raw), &fields) != nil ||
+		fields.Text == nil || t.Provider == "" || t.Model == "" || t.Settings != identity {
+		return t, false
+	}
+	// Production identities encode provider and model ahead of the settings.
+	if provider, model, ok := strings.Cut(identity, ":"); ok {
+		if model, _, ok := strings.Cut(model, ":"); ok && (t.Provider != provider || t.Model != model) {
+			return t, false
+		}
+	}
+	return t, true
+}
+
+func (a *CensorshipAudit) saveTranscript(ctx context.Context, key, raw string, previous sql.NullString) error {
+	return retryCensorshipWrite(ctx, func() error {
+		_, err := a.db.ExecContext(ctx, `
+			INSERT INTO censorship_transcripts(cache_key,transcript_json) VALUES(?,?)
+			ON CONFLICT(cache_key) DO UPDATE SET transcript_json=excluded.transcript_json
+			WHERE censorship_transcripts.transcript_json=?
+		`, key, raw, previous)
 		return err
 	})
-	return t, e
 }
 
 // Compare gain-normalized 100ms envelopes with up to one second alignment.

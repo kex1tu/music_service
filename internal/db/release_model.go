@@ -108,6 +108,20 @@ func upsertLocalAlbum(ctx context.Context, tx *sql.Tx, title string, artistID in
 	if cleanTitle == "" {
 		cleanTitle = textkey.Search(title)
 	}
+	root := AlbumRoot(directory)
+	// A confirmed tracklist describes an edition, while the folder row survives
+	// when its tags change. Release a stale binding before updating its identity.
+	const changedEdition = `folder_path = ?1
+		AND (music_search_key(title) <> music_search_key(?2) OR artist_id <> ?3
+			OR (year > 0 AND ?4 > 0 AND year <> ?4))`
+	if _, err := tx.ExecContext(ctx, `DELETE FROM release_tracklist WHERE album_id IN
+		(SELECT id FROM albums WHERE `+changedEdition+`)`, root, title, artistID, year); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE albums SET catalog_checked_at = NULL, deezer_id = NULL,
+		is_complete = 0, expected_tracks_count = 0, catalog_revision = catalog_revision + 1 WHERE `+changedEdition, root, title, artistID, year); err != nil {
+		return 0, err
+	}
 	var id int64
 	err := tx.QueryRowContext(ctx, `
 		INSERT INTO albums (title, clean_title, artist_id, album_artist, year, folder_path, has_cover)
@@ -117,7 +131,7 @@ func upsertLocalAlbum(ctx context.Context, tx *sql.Tx, title string, artistID in
 			album_artist = excluded.album_artist, year = excluded.year,
 			has_cover = MAX(COALESCE(albums.has_cover, 0), excluded.has_cover),
 			updated_at = CURRENT_TIMESTAMP
-		RETURNING id`, title, cleanTitle, artistID, albumArtist, year, AlbumRoot(directory), hasCover).Scan(&id)
+		RETURNING id`, title, cleanTitle, artistID, albumArtist, year, root, hasCover).Scan(&id)
 	if err != nil {
 		return 0, err
 	}

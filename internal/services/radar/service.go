@@ -11,7 +11,6 @@ import (
 
 	"music-manager/internal/config"
 	"music-manager/internal/db"
-	"music-manager/internal/services/downloader"
 	"music-manager/internal/services/resolver"
 )
 
@@ -38,7 +37,6 @@ type ScanArtistResult struct {
 type Service struct {
 	db         *db.DB
 	aggregator *resolver.DiscographyAggregator
-	downloader *downloader.Service
 	cfg        *config.Config
 
 	mu         sync.RWMutex
@@ -50,13 +48,11 @@ type Service struct {
 func NewService(
 	database *db.DB,
 	aggregator *resolver.DiscographyAggregator,
-	dl *downloader.Service,
 	cfg *config.Config,
 ) *Service {
 	return &Service{
 		db:         database,
 		aggregator: aggregator,
-		downloader: dl,
 		cfg:        cfg,
 	}
 }
@@ -111,7 +107,7 @@ func (s *Service) CancelScan() {
 	s.progress.IsRunning = false
 }
 
-// ScanAll запускает процесс обхода всех отслеживаемых артистов с задержкой 1.5 сек между запросами.
+// ScanAll запускает процесс обхода всех артистов медиатеки с задержкой 1.5 сек между запросами.
 func (s *Service) ScanAll(parentCtx context.Context, trigger string) error {
 	s.mu.Lock()
 	if s.progress.IsRunning {
@@ -144,24 +140,13 @@ func (s *Service) ScanAll(parentCtx context.Context, trigger string) error {
 			log.Printf("[Radar] Сканирование завершено (триггер: %s, найдено новинок: %d)", trigger, s.GetProgress().NewReleasesFound)
 		}()
 
-		artists, err := s.db.GetTrackedArtists(scanCtx, true)
+		artists, err := s.db.GetRadarLibraryArtists(scanCtx)
 		if err != nil {
 			s.mu.Lock()
 			s.progress.LastError = err.Error()
 			s.mu.Unlock()
 			log.Printf("[Radar] Ошибка получения списка артистов: %v", err)
 			return
-		}
-
-		if len(artists) == 0 {
-			// Если нет явно подписанных, сканируем всех отслеживаемых артистов библиотеки
-			artists, err = s.db.GetTrackedArtists(scanCtx, false)
-			if err != nil {
-				s.mu.Lock()
-				s.progress.LastError = err.Error()
-				s.mu.Unlock()
-				return
-			}
 		}
 
 		s.mu.Lock()
@@ -213,12 +198,18 @@ func (s *Service) ScanArtist(ctx context.Context, artistName string) (*ScanArtis
 	return s.scanArtist(ctx, artistName, tracked)
 }
 
+func (s *Service) ScanArtistByID(ctx context.Context, artistID int64) (*ScanArtistResult, error) {
+	tracked, err := s.db.GetTrackedArtistByID(ctx, artistID)
+	if err != nil {
+		return nil, err
+	}
+	return s.scanArtist(ctx, tracked.Name, &tracked)
+}
+
 func (s *Service) scanArtist(ctx context.Context, artistName string, tracked *db.TrackedArtistEntity) (*ScanArtistResult, error) {
 	var alias string
-	var artistID int64
 	knownIDs := make(map[string]string)
 	if tracked != nil {
-		artistID = tracked.ArtistID
 		alias = tracked.CustomSearchAlias
 		if tracked.DeezerID != "" {
 			knownIDs["deezer"] = tracked.DeezerID
@@ -236,23 +227,25 @@ func (s *Service) scanArtist(ctx context.Context, artistName string, tracked *db
 	newCount := 0
 	for _, rel := range releases {
 		entity := db.RadarReleaseEntity{
-			ScannedArtistID: artistID,
-			ArtistName:      rel.ArtistName,
-			CleanArtistName: rel.CleanArtist,
-			Title:           rel.Title,
-			CleanTitle:      rel.CleanTitle,
-			ReleaseType:     rel.ReleaseType,
-			ReleaseDate:     rel.ReleaseDate,
-			Year:            rel.Year,
-			CoverURL:        rel.CoverURL,
-			TrackCount:      rel.TrackCount,
-			DeezerID:        rel.DeezerID,
-			MusicBrainzID:   rel.MusicBrainzID,
-			ShazamID:        rel.ShazamID,
-			SourceURL:       rel.SourceURL,
-			Status:          rel.Status,
-			IsRadar:         rel.IsRadar,
-			Tracklist:       rel.Tracklist,
+			CatalogCredits:      rel.CatalogCredits,
+			ProviderCredits:     rel.ProviderCredits,
+			MusicBrainzMetadata: rel.MusicBrainzMetadata,
+			ArtistName:          rel.ArtistName,
+			CleanArtistName:     rel.CleanArtist,
+			Title:               rel.Title,
+			CleanTitle:          rel.CleanTitle,
+			ReleaseType:         rel.ReleaseType,
+			ReleaseDate:         rel.ReleaseDate,
+			Year:                rel.Year,
+			CoverURL:            rel.CoverURL,
+			TrackCount:          rel.TrackCount,
+			DeezerID:            rel.DeezerID,
+			MusicBrainzID:       rel.MusicBrainzID,
+			ShazamID:            rel.ShazamID,
+			SourceURL:           rel.SourceURL,
+			Status:              rel.Status,
+			IsRadar:             rel.IsRadar,
+			Tracklist:           rel.Tracklist,
 		}
 
 		if err := s.db.UpsertRadarRelease(ctx, &entity); err != nil {
@@ -262,20 +255,6 @@ func (s *Service) scanArtist(ctx context.Context, artistName string, tracked *db
 
 		if entity.Status == "new" {
 			newCount++
-			// Проверяем возможность автозагрузки
-			autoDownload := false
-			if tracked != nil && tracked.AutoDownload {
-				autoDownload = true
-			} else if s.cfg != nil && s.cfg.RadarAutoDownload {
-				autoDownload = true
-			}
-
-			if autoDownload && s.downloader != nil && rel.SourceURL != "" {
-				log.Printf("[Radar] Автозагрузка нового релиза: %s — %s (%s)", rel.ArtistName, rel.Title, rel.SourceURL)
-				if _, dlErr := s.downloader.CreateJob(rel.SourceURL, "auto"); dlErr != nil {
-					log.Printf("[Radar] Не удалось создать задание автозагрузки: %v", dlErr)
-				}
-			}
 		}
 	}
 
@@ -291,16 +270,6 @@ func (s *Service) scanArtist(ctx context.Context, artistName string, tracked *db
 		NewReleases:     newCount,
 		Releases:        releases,
 	}, nil
-}
-
-// FollowArtist включает/выключает отслеживание артиста.
-func (s *Service) FollowArtist(ctx context.Context, artistName string, followed bool) error {
-	return s.db.SetArtistFollowed(ctx, artistName, followed)
-}
-
-// SetAutoDownload включает/выключает автозагрузку релизов артиста.
-func (s *Service) SetAutoDownload(ctx context.Context, artistName string, auto bool) error {
-	return s.db.SetArtistAutoDownload(ctx, artistName, auto)
 }
 
 // UpdateArtistCustomLinks сохраняет кастомные ID и поисковый псевдоним.

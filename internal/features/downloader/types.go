@@ -61,7 +61,10 @@ type Job struct {
 	TargetAlbumPath      *string                  `json:"target_album_path,omitempty"`
 	Backfill             *BackfillRequest         `json:"backfill,omitempty"`
 	IsBackfill           bool                     `json:"is_backfill"`
+	IsRedownload         bool                     `json:"is_redownload,omitempty"`
+	RedownloadTargets    []RedownloadTarget       `json:"-"`
 	AlbumTitle           *string                  `json:"album_title,omitempty"`
+	ArtistID             *int64                   `json:"-"`
 	ArtistName           *string                  `json:"artist_name,omitempty"`
 	CreatedAt            string                   `json:"created_at"` // RFC3339 / RFC3339Nano формат для совместимости с фронтендом
 	UpdatedAt            time.Time                `json:"updated_at,omitempty"`
@@ -70,6 +73,7 @@ type Job struct {
 	SelectedTrackIndices []int                    `json:"selected_track_indices,omitempty"`
 	Tracks               []resolver.ResolvedTrack `json:"tracks,omitempty"`
 	SkipExisting         bool                     `json:"skip_existing,omitempty"`
+	legacySelection      bool
 	selectionCorrupt     bool
 	manualTrackIndex     *int
 	backfillTrackNumbers []int
@@ -88,10 +92,18 @@ func (j *Job) MarshalJSON() ([]byte, error) {
 	defer j.mu.RUnlock()
 
 	type Alias Job
+	var confirmed []string
+	for _, target := range j.RedownloadTargets {
+		if target.Confirmed {
+			confirmed = append(confirmed, target.TrackID)
+		}
+	}
 	return json.Marshal(&struct {
 		*Alias
+		ConfirmedRedownloadTracks []string `json:"confirmed_redownload_tracks,omitempty"`
 	}{
-		Alias: (*Alias)(j),
+		Alias:                     (*Alias)(j),
+		ConfirmedRedownloadTracks: confirmed,
 	})
 }
 
@@ -120,12 +132,16 @@ func (j *Job) Snapshot() *Job {
 		TotalTracks:          j.TotalTracks,
 		CompletedTracks:      j.CompletedTracks,
 		IsBackfill:           j.IsBackfill,
+		IsRedownload:         j.IsRedownload,
+		RedownloadTargets:    slices.Clone(j.RedownloadTargets),
 		CreatedAt:            j.CreatedAt,
 		UpdatedAt:            j.UpdatedAt,
 		CoverRelativePath:    j.CoverRelativePath,
 		AlbumMetadata:        j.AlbumMetadata,
 		SkipExisting:         j.SkipExisting,
 		selectionCorrupt:     j.selectionCorrupt,
+		legacySelection:      j.legacySelection,
+		ArtistID:             j.ArtistID,
 		manualTrackIndex:     j.manualTrackIndex,
 		backfillTrackNumbers: j.backfillTrackNumbers,
 		backfillTrackURLs:    j.backfillTrackURLs,
@@ -187,11 +203,13 @@ func (j *Job) applyQueueSnapshot(snap *Job) {
 	j.UpdatedAt = snap.UpdatedAt
 	j.Tracks = snap.Tracks
 	j.AlbumMetadata = snap.AlbumMetadata
+	j.CoverRelativePath = snap.CoverRelativePath
 	j.SelectedTrackIndices = snap.SelectedTrackIndices
 	j.SkipExisting = snap.SkipExisting
 	j.selectionCorrupt = snap.selectionCorrupt
 	j.manualTrackIndex = snap.manualTrackIndex
 	j.Backfill = snap.Backfill
+	j.RedownloadTargets = snap.RedownloadTargets
 	j.backfillTrackNumbers = snap.backfillTrackNumbers
 	j.backfillTrackURLs = snap.backfillTrackURLs
 }
@@ -357,7 +375,7 @@ func (j *Job) SetMetadata(meta resolver.ReleaseMetadata, tracks []resolver.Resol
 		aTitle := meta.AlbumTitle
 		j.AlbumTitle = &aTitle
 	}
-	if meta.AlbumArtist != "" {
+	if meta.AlbumArtist != "" && j.ArtistName == nil {
 		aArtist := meta.AlbumArtist
 		j.ArtistName = &aArtist
 	}
@@ -424,6 +442,7 @@ func (j *Job) GetSelectedTrackIndices() []int {
 
 // CreateJobRequest — тело запроса для постановки одиночной ссылки в очередь.
 type CreateJobRequest struct {
+	PreflightID          string `json:"preflight_id,omitempty"`
 	URL                  string `json:"url"`
 	Source               string `json:"source"`
 	SelectedTrackIndices []int  `json:"selected_track_indices,omitempty"`
@@ -494,9 +513,10 @@ type PreflightSummary struct {
 
 // PreflightResponse — ответ эндпоинта POST /api/downloads/preflight.
 type PreflightResponse struct {
-	Release PreflightReleaseInfo `json:"release"`
-	Tracks  []PreflightTrackItem `json:"tracks"`
-	Summary PreflightSummary     `json:"summary"`
+	PreflightID string               `json:"preflight_id"`
+	Release     PreflightReleaseInfo `json:"release"`
+	Tracks      []PreflightTrackItem `json:"tracks"`
+	Summary     PreflightSummary     `json:"summary"`
 }
 
 // CreateBatchJobRequest — тело запроса для пакетного добавления ссылок.
@@ -658,28 +678,9 @@ type BackfillRequest struct {
 	TrackNumbers []int                  `json:"track_numbers,omitempty"`
 }
 
-// MissingTrackInfo is a catalog gap and its optional manually pinned audio source.
+// MissingTrackInfo is a catalog gap.
 type MissingTrackInfo struct {
 	db.CatalogTrack
-	PinnedURL string
-}
-
-// PinnedTrackSourceDTO — DTO для сохранения и чтения ручной привязки трека.
-type PinnedTrackSourceDTO = db.PinnedTrackSource
-
-// SoundCloudCacheDTO — запись кэша альтернативных версий SoundCloud.
-type SoundCloudCacheDTO struct {
-	CacheKey       string                       `json:"cache_key"`
-	TrackTitle     string                       `json:"track_title"`
-	ArtistName     string                       `json:"artist_name"`
-	SelectedURL    string                       `json:"selected_url"`
-	Status         string                       `json:"status"`
-	Duration       int                          `json:"duration"`
-	IsManual       bool                         `json:"is_manual"`
-	CandidatesJSON string                       `json:"candidates_json"`
-	Candidates     []db.SoundCloudCandidateItem `json:"candidates,omitempty"`
-	CheckedAt      time.Time                    `json:"checked_at"`
-	UpdatedAt      time.Time                    `json:"updated_at"`
 }
 
 // ReleaseCandidatesResponse — ответ поиска цельных источников релиза.

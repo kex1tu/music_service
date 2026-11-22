@@ -17,8 +17,6 @@ document.addEventListener('alpine:init', () => {
         artists: [],
         artistsTotal: 0,
         artistsSearch: '',
-        artistsOnlyFollowed: false,
-        newArtistName: '',
 
         // Прогресс сканирования
         progress: {
@@ -130,16 +128,12 @@ document.addEventListener('alpine:init', () => {
             this.isLoading = true;
             try {
                 const params = new URLSearchParams();
-                if (this.artistsOnlyFollowed) {
-                    params.set('followed', 'true');
-                }
                 const search = this.artistsSearch.trim();
-                const onlyFollowed = this.artistsOnlyFollowed;
                 if (search) params.set('search', search);
                 const res = await window.api.raw(`/api/radar/artists?${params.toString()}`);
                 if (res.ok) {
                     const data = await res.json();
-                    if (this.artistsSearch.trim() !== search || this.artistsOnlyFollowed !== onlyFollowed) return;
+                    if (this.artistsSearch.trim() !== search) return;
                     this.artists = data.items || [];
                     this.artistsTotal = data.total || 0;
                 }
@@ -150,63 +144,9 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async addArtist() {
-            const name = this.newArtistName.trim();
-            if (!name) return;
+        async triggerScan(artistName = '', artistId = 0) {
             try {
-                const res = await window.api.raw('/api/radar/artists', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name })
-                });
-                if (res.ok) {
-                    this.newArtistName = '';
-                    Alpine.store('app').showToast(`Артист "${name}" добавлен в отслеживание`, 'success');
-                    this.fetchArtists();
-                    this.triggerScan(name);
-                }
-            } catch (err) {
-                console.error('[Radar] Error adding artist:', err);
-            }
-        },
-
-        async toggleFollow(artist) {
-            const targetState = !artist.is_followed;
-            try {
-                const res = await window.api.raw(`/api/radar/artists/${encodeURIComponent(artist.name)}/follow`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ artist_id: artist.id, followed: targetState })
-                });
-                if (res.ok) {
-                    artist.is_followed = targetState;
-                    Alpine.store('app').showToast(targetState ? `Отслеживание ${artist.name} включено` : `Отслеживание ${artist.name} приостановлено`, 'info');
-                }
-            } catch (err) {
-                console.error('[Radar] Error toggling follow:', err);
-            }
-        },
-
-        async toggleAutoDownload(artist) {
-            const targetState = !artist.auto_download;
-            try {
-                const res = await window.api.raw(`/api/radar/artists/${encodeURIComponent(artist.name)}/auto-download`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ artist_id: artist.id, auto_download: targetState })
-                });
-                if (res.ok) {
-                    artist.auto_download = targetState;
-                    Alpine.store('app').showToast(targetState ? `Автозагрузка для ${artist.name} включена` : `Автозагрузка для ${artist.name} выключена`, 'info');
-                }
-            } catch (err) {
-                console.error('[Radar] Error toggling auto-download:', err);
-            }
-        },
-
-        async triggerScan(artistName = '') {
-            try {
-                const body = artistName ? { artist: artistName } : {};
+                const body = artistName ? { artist: artistName, artist_id: artistId || undefined } : {};
                 const res = await window.api.raw('/api/radar/scan', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -336,7 +276,8 @@ document.addEventListener('alpine:init', () => {
             this.discographyReleases = [];
 
             try {
-                const res = await window.api.raw(`/api/radar/artists/${encodeURIComponent(targetArtist)}/discography`);
+                const artistQuery = artist?.artist_id ? `?artist_id=${encodeURIComponent(artist.artist_id)}` : '';
+                const res = await window.api.raw(`/api/radar/artists/${encodeURIComponent(targetArtist)}/discography${artistQuery}`);
                 if (res.ok) {
                     const data = await res.json();
                     this.discographyReleases = data.releases || [];
@@ -362,7 +303,7 @@ document.addEventListener('alpine:init', () => {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        artist_id: this.artistTrackedInfo.id,
+                        artist_id: this.artistTrackedInfo.artist_id || undefined,
                         alias: this.customAlias.trim(),
                         deezer_id: this.customDeezerId.trim(),
                         musicbrainz_id: this.customMbId.trim(),
@@ -371,7 +312,7 @@ document.addEventListener('alpine:init', () => {
                 });
                 if (res.ok) {
                     Alpine.store('app').showToast('Идентификаторы артиста сохранены', 'success');
-                    this.triggerScan(this.selectedArtist);
+                    this.triggerScan(this.selectedArtist, this.artistTrackedInfo.artist_id);
                 }
             } catch (err) {
                 console.error('[Radar] Error saving custom links:', err);

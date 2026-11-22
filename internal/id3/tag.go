@@ -21,23 +21,28 @@ var (
 
 // TrackTags представляет полные метаданные аудиодорожки.
 type TrackTags struct {
-	Path         string  `json:"path"`
-	Title        string  `json:"title"`
-	Artist       string  `json:"artist"`
-	Album        string  `json:"album"`
-	AlbumArtist  string  `json:"album_artist"`
-	Year         int     `json:"year"`
-	Genre        string  `json:"genre"`
-	TrackNumber  int     `json:"track_number"`
-	TrackTotal   int     `json:"track_total"`
-	DiscNumber   int     `json:"disc_number"`
-	DiscTotal    int     `json:"disc_total"`
-	Duration     float64 `json:"duration"`
-	Bitrate      int     `json:"bitrate"`
-	HasCover     bool    `json:"has_cover"`
-	LyricsStatus string  `json:"lyrics_status"` // "lrc", "txt", "none"
-	LyricsPath   string  `json:"lyrics_path,omitempty"`
+	Path           string  `json:"path"`
+	Title          string  `json:"title"`
+	Artist         string  `json:"artist"`
+	Album          string  `json:"album"`
+	AlbumArtist    string  `json:"album_artist"`
+	Year           int     `json:"year"`
+	Genre          string  `json:"genre"`
+	TrackNumber    int     `json:"track_number"`
+	TrackTotal     int     `json:"track_total"`
+	DiscNumber     int     `json:"disc_number"`
+	DiscTotal      int     `json:"disc_total"`
+	Duration       float64 `json:"duration"`
+	Bitrate        int     `json:"bitrate"`
+	HasCover       bool    `json:"has_cover"`
+	LyricsStatus   string  `json:"lyrics_status"` // "lrc", "txt", "none"
+	LyricsPath     string  `json:"lyrics_path,omitempty"`
+	SourceURL      string  `json:"-"`
+	ISRC           string  `json:"-"`
+	HasTrackNumber bool    `json:"-"`
 }
+
+const sourceURLDescription = "MUSIC_MANAGER_SOURCE_URL"
 
 // RawFrame represents an unparsed or pass-through ID3v2 frame.
 type RawFrame struct {

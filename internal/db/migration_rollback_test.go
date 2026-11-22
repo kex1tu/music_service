@@ -69,10 +69,8 @@ func TestSQLiteMigrationRetriesAfterDiskFull(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	var status, updatedAt string
-	if err := reopened.Conn().QueryRowContext(ctx, "SELECT status, CAST(updated_at AS TEXT) FROM missing_tracks WHERE id = 3").
-		Scan(&status, &updatedAt); err != nil || status != "queued" || updatedAt != "2025-01-02 03:04:05" {
-		t.Fatalf("status=%q updated_at=%q err=%v", status, updatedAt, err)
+	if got := libraryRowCount(t, reopened.Conn(), "SELECT COUNT(*) FROM release_tracklist"); got != 0 {
+		t.Fatalf("legacy gap unexpectedly became a catalog snapshot: %d", got)
 	}
 	if err := reopened.Conn().QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != len(migrations) {
 		t.Fatalf("user_version=%d err=%v", version, err)

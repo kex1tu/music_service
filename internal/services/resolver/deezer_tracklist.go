@@ -8,6 +8,28 @@ import (
 	"music-manager/internal/id3"
 )
 
+// MatchesArtistID checks the primary artist and the credits for a known Deezer ID.
+func (album DeezerAlbum) MatchesArtistID(expected string) bool {
+	if expected == "" {
+		return true
+	}
+	id, err := strconv.ParseInt(expected, 10, 64)
+	if err != nil || id <= 0 {
+		return false
+	}
+	if album.Artist.ID == id {
+		return true
+	}
+	for _, artists := range [][]DeezerArtist{album.Artists, album.Contributors} {
+		for _, artist := range artists {
+			if artist.ID == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // DeezerCatalogTracks builds an ordered, complete tracklist with disc-local positions.
 func DeezerCatalogTracks(album *DeezerAlbum) ([]db.CatalogTrack, error) {
 	if album.Tracks == nil || len(album.Tracks.Data) == 0 ||
@@ -30,9 +52,6 @@ func DeezerCatalogTracks(album *DeezerAlbum) ([]db.CatalogTrack, error) {
 		}
 		positions[position] = true
 		artist := t.Artist.Name
-		if artist == "" {
-			artist = album.Artist.Name
-		}
 		if len(t.Contributors) > 0 {
 			var names []string
 			for _, contributor := range t.Contributors {
@@ -47,6 +66,10 @@ func DeezerCatalogTracks(album *DeezerAlbum) ([]db.CatalogTrack, error) {
 		track := db.CatalogTrack{
 			BackfillSelection: db.BackfillSelection{TrackPosition: position},
 			Title:             id3.CleanTitle(t.Title, ""), Artist: artist, Duration: t.Duration, ISRC: t.ISRC,
+		}
+		track.PrimaryArtist = t.Artist.Name
+		if t.Artist.ID > 0 {
+			track.DeezerArtistID = strconv.FormatInt(t.Artist.ID, 10)
 		}
 		if t.ID > 0 {
 			track.DeezerID = strconv.FormatInt(t.ID, 10)

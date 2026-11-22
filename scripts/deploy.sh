@@ -43,17 +43,18 @@ service=music-manager.service
 bin="$app_dir/bin/music-manager"
 staged="$bin.new.$deploy_id"
 backup="$bin.bak.$deploy_id"
+db_backup="$bin.db.bak.$deploy_id"
 cd "$app_dir"
 [[ "$(systemctl show "$service" -p WorkingDirectory --value)" == "$app_dir" ]]
 [[ -f "$bin" ]]
 runtime_config() {
-    local pid key value config_host='' config_port=''
+    local pid key value config_host='' config_port='' config_db=''
     pid="$(systemctl show "$service" -p MainPID --value)"
     [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
     [[ "$(readlink "/proc/$pid/exe")" == "$bin" ]] || return 1
-    # Read only HOST and PORT; never print the environment or secrets.
+    # Read only the settings needed by health checks and SQLite backup.
     while IFS='=' read -r -d '' key value; do
-        case "$key" in HOST) config_host="$value" ;; PORT) config_port="$value" ;; esac
+        case "$key" in HOST) config_host="$value" ;; PORT) config_port="$value" ;; DATABASE_PATH) config_db="$value" ;; esac
     done < "/proc/$pid/environ"
     if [[ -f .env ]]; then
         while IFS='=' read -r key value; do
@@ -62,6 +63,7 @@ runtime_config() {
             case "$key" in
                 HOST) [[ -n "$config_host" ]] || config_host="$value" ;;
                 PORT) [[ -n "$config_port" ]] || config_port="$value" ;;
+                DATABASE_PATH) [[ -n "$config_db" ]] || config_db="$value" ;;
             esac
         done < .env
     fi
@@ -69,6 +71,7 @@ runtime_config() {
     [[ "$config_port" =~ ^[0-9]+$ ]] && (( config_port > 0 && config_port < 65536 )) || return 1
     case "$config_host" in 0.0.0.0) config_host=127.0.0.1 ;; ::) config_host='[::1]' ;; *:*) config_host="[$config_host]" ;; esac
     local_url="http://$config_host:$config_port"
+    database_path="$(realpath -m -- "${config_db:-data/library.db}")"
     echo "Service=$service app=$app_dir local=$local_url"
 }
 wait_for_health() {
@@ -94,6 +97,15 @@ case "$mode" in
         [[ -f "$staged" ]]
         [[ "$(sha256sum "$staged" | cut -d ' ' -f1)" == "$expected_sha" ]]
         cp -p "$bin" "$backup"
+        runtime_config
+        systemctl stop "$service"
+        [[ -f "$database_path" ]]
+        install -d -m 700 "$db_backup"
+        cp -p -- "$database_path" "$db_backup/database"
+        if [[ -f "$database_path-wal" ]]; then
+            cp -p -- "$database_path-wal" "$db_backup/database-wal"
+        fi
+        printf '%s\n' "$database_path" > "$db_backup/path"
         chmod 755 "$staged"
         chown --reference="$bin" "$staged"
         mv -f "$staged" "$bin"
@@ -111,6 +123,20 @@ case "$mode" in
         if [[ ! -f "$backup" ]]; then
             echo 'No backup created; binary replacement was not reached.' >&2
             exit 1
+        fi
+        systemctl stop "$service"
+        if [[ -f "$db_backup/path" && -f "$db_backup/database" ]]; then
+            IFS= read -r database_path < "$db_backup/path"
+            [[ -n "$database_path" ]]
+            cp -p -- "$db_backup/database" "$database_path.rollback.$deploy_id"
+            if [[ -f "$db_backup/database-wal" ]]; then
+                cp -p -- "$db_backup/database-wal" "$database_path-wal.rollback.$deploy_id"
+            fi
+            rm -f -- "$database_path-wal" "$database_path-shm"
+            mv -f -- "$database_path.rollback.$deploy_id" "$database_path"
+            if [[ -f "$db_backup/database-wal" ]]; then
+                mv -f -- "$database_path-wal.rollback.$deploy_id" "$database_path-wal"
+            fi
         fi
         cp -p "$backup" "$bin.rollback.$deploy_id"
         mv -f "$bin.rollback.$deploy_id" "$bin"

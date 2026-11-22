@@ -1,5 +1,5 @@
 {{ define "audit_censorship" }}
-<div x-show="activeSubTab === 'censorship'" x-data="$store.app.censorship" x-init="startPolling()" class="space-y-4" x-cloak>
+<div x-show="activeSubTab === 'censorship'" x-data="$store.app.censorship" x-effect="setVisible(activeSubTab === 'censorship' && $store.app.activeTab === 'audit')" @visibilitychange.document="if (visible && document.visibilityState === 'visible') refresh()" class="space-y-4" x-cloak>
     <div class="bg-surface-panel border border-surface-border rounded-lg p-4 space-y-4">
         <div><h3 class="text-base font-semibold text-content-primary">Проверка цензуры</h3><p class="text-sm text-content-secondary mt-1">Заглушки, запикивания и замены слов. Приоритет — темы наркотиков и суицида. Результаты требуют прослушивания; файлы не изменяются.</p></div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -8,11 +8,15 @@
         </div>
         <details class="text-sm text-content-secondary"><summary class="cursor-pointer min-h-[44px] flex items-center">Выбрать отдельные треки и эталоны</summary><div class="grid grid-cols-1 md:grid-cols-2 gap-3"><label>Треки: относительные пути, по одному на строке<textarea x-model="pathsText" rows="3" class="block w-full mt-1 bg-surface-input border border-surface-border rounded p-2"></textarea></label><label>Эталоны: путь трека =&gt; путь эталона<textarea x-model="referenceText" rows="3" class="block w-full mt-1 bg-surface-input border border-surface-border rounded p-2"></textarea></label></div></details>
         <p x-show="provider !== 'local'" class="text-sm text-amber-300">Аудиофрагменты будут переданы выбранному провайдеру. Используйте бесплатную квоту или доступный кредит. При ограничениях обработка остановится без смены провайдера.</p>
+        <template x-for="entry in quota" :key="entry.provider">
+            <p x-show="entry.provider === provider" class="text-sm tabular-nums text-content-secondary" x-text="`${entry.day} UTC · зарезервировано ${entry.reserved_seconds} из ${entry.limit_seconds} с · осталось ${entry.remaining_seconds} с`"></p>
+        </template>
         <button @click="start()" :disabled="busy" class="min-h-[44px] px-4 rounded bg-brand text-surface-base disabled:opacity-50">Запустить проверку</button>
         <p x-show="error" role="alert" class="text-sm text-red-400 break-words" x-text="error"></p>
     </div>
     <div class="flex flex-wrap gap-2 items-center">
         <label class="sr-only" for="censor-run">Запуск аудита</label><select id="censor-run" x-model="runId" @change="selectRun()" class="min-h-[44px] max-w-full bg-surface-input border border-surface-border rounded px-2"><option value="">Выберите запуск</option><template x-for="run in runs" :key="run.id"><option :value="run.id" x-text="`${run.created_at} · ${states[run.state] || run.state} · ${run.done}/${run.total} · ошибок ${run.errors}`"></option></template></select>
+        <button x-show="nextCursor" @click="loadOlder()" :disabled="busy" class="min-h-[44px] px-3 border border-surface-border rounded text-sm text-content-secondary">Более ранние запуски</button>
         <template x-for="act in [{id:'pause',name:'Пауза'},{id:'resume',name:'Продолжить'},{id:'retry',name:'Повторить ошибки'},{id:'cancel',name:'Отменить'}]" :key="act.id"><button @click="action(act.id)" :disabled="busy || !runId" class="min-h-[44px] px-3 border border-surface-border rounded text-sm text-content-secondary disabled:opacity-50" x-text="act.name"></button></template>
     </div>
     <label class="block text-sm text-content-secondary">Результаты<select x-model="filter" @change="selectRun()" class="ml-2 min-h-[44px] max-w-full bg-surface-input border border-surface-border rounded px-2"><option value="">Все</option><template x-for="(name,id) in labels" :key="id"><option :value="id" x-text="name"></option></template></select></label>
@@ -22,15 +26,58 @@
         <p x-show="item.error" class="text-sm text-amber-300" x-text="item.error"></p>
         <div x-show="item.state === 'done' && (!item.result.audio_hash || audioIssues[item.id]?.target)" class="space-y-1">
             <p role="status" class="text-sm text-amber-300 break-words" x-text="audioIssues[item.id]?.target || 'Этот результат сохранён без привязки к аудио. Вердикт и заметка доступны.'"></p>
-            <button @click="analyzeCurrent(item)" :disabled="busy" class="min-h-[44px] px-3 border border-surface-border rounded-md text-sm text-brand disabled:opacity-50" x-text="`Проверить текущий файл · ${provider === 'local' ? 'локально' : provider}`"></button>
         </div>
         <p x-show="audioIssues[item.id]?.reference" role="status" class="text-sm text-amber-300 break-words" x-text="audioIssues[item.id]?.reference"></p>
+        <p x-show="item.current_path !== item.path" class="text-xs text-content-muted break-all" x-text="`Текущий путь: ${item.current_path}`"></p>
+        <details class="text-sm text-content-secondary" x-show="item.state === 'done'">
+            <summary class="cursor-pointer min-h-[44px] flex items-center">Действия с аудио</summary>
+            <div class="flex flex-wrap gap-2">
+                <button @click="chooseAudio(item, 'rerun')" class="min-h-[44px] px-3 border border-surface-border rounded">Проверить снова</button>
+                <button x-show="item.result.audio_hash" @click="chooseAudio(item, 'target')" class="min-h-[44px] px-3 border border-surface-border rounded">Указать файл</button>
+                <button x-show="item.result.reference_audio_hash" @click="chooseAudio(item, 'reference')" class="min-h-[44px] px-3 border border-surface-border rounded">Указать эталон</button>
+            </div>
+            <template x-if="editAudio?.id === item.id">
+                <form @submit.prevent="saveAudio(item)" class="mt-2 space-y-2">
+                    <label class="block">
+                        <span x-text="editAudio.mode === 'reference' ? 'Путь к эталону' : 'Путь к треку'"></span>
+                        <input x-model="editAudio.path" required class="block w-full min-h-[44px] mt-1 bg-surface-input border border-surface-border rounded px-3">
+                    </label>
+                    <label x-show="editAudio.mode === 'rerun'" class="block">
+                        Эталон (можно оставить пустым)
+                        <input x-model="editAudio.reference" class="block w-full min-h-[44px] mt-1 bg-surface-input border border-surface-border rounded px-3">
+                    </label>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="submit" :disabled="busy" class="min-h-[44px] px-3 border border-surface-border rounded" x-text="editAudio.mode === 'rerun' ? `Запустить · ${provider === 'local' ? 'локально' : provider}` : 'Сохранить путь'"></button>
+                        <button type="button" @click="editAudio = null" class="min-h-[44px] px-3 rounded">Отмена</button>
+                    </div>
+                </form>
+            </template>
+        </details>
         <template x-for="(ev,index) in (item.result.evidence || [])" :key="index"><div class="border-t border-surface-border pt-2 text-sm space-y-1">
             <div class="flex flex-wrap items-center gap-2"><span class="font-mono tabular-nums text-content-secondary" x-text="`${ev.start.toFixed(1)}–${ev.end.toFixed(1)} с`"></span><span x-text="kinds[ev.kind] || ev.kind"></span><button x-show="item.state === 'done' && item.result.audio_hash" @click="listen(item,ev)" class="min-h-[44px] px-3 text-brand">Прослушать</button><button x-show="item.state === 'done' && ev.reference && item.result.reference_audio_hash" @click="listen(item,ev,true)" class="min-h-[44px] px-3 text-brand">Эталон</button></div>
             <p x-show="ev.expected" class="text-content-secondary break-words" x-text="`Текст: ${ev.expected}`"></p><p x-show="ev.transcript" class="text-content-secondary break-words" x-text="`Распознано: ${ev.heard || 'нет разборчивых слов'}`"></p><p x-show="ev.transcript" class="text-xs text-content-muted" x-text="ev.transcript ? `${ev.transcript.provider} · ${ev.transcript.model}` : ''"></p>
         </div></template>
         <template x-for="(note,i) in (item.result.limitations || [])" :key="i"><p class="text-xs text-content-muted" x-text="note"></p></template>
-        <div class="flex flex-wrap gap-2 items-center"><label class="text-sm text-content-secondary">Ручное решение<select :value="item.manual_decision" @change="decide(item,$event.target.value)" class="ml-2 min-h-[44px] max-w-full bg-surface-input border border-surface-border rounded px-2"><option value="">Не принято</option><option value="confirmed_censored">Цензура подтверждена</option><option value="cleared">Подозрение отклонено</option><option value="uncertain">Не уверен</option></select></label><input x-model="drafts[item.id]" maxlength="4000" aria-label="Комментарий к решению" placeholder="Комментарий" class="min-h-[44px] max-w-full bg-surface-input border border-surface-border rounded px-2"><button @click="decide(item,item.manual_decision)" class="min-h-[44px] px-3 text-brand">Сохранить</button></div>
+        <template x-if="item.previous_decision">
+            <p class="text-sm text-content-secondary">
+                Предыдущее решение
+                <span x-text="decisions[item.previous_decision.decision]"></span>
+                <span x-show="item.previous_decision.decided_at" x-text="new Date(item.previous_decision.decided_at).toLocaleString()"></span>
+                <button @click="openRun(item.previous_decision.run_id)" class="min-h-[44px] px-2 text-brand">Открыть запуск</button>
+            </p>
+        </template>
+        <p x-show="item.manual_decision && !item.decision_verified" class="text-sm text-amber-300">Версия аудио для сохранённого решения не подтверждена.</p>
+        <div class="flex flex-wrap gap-2 items-center">
+            <label class="text-sm text-content-secondary">
+                Ручное решение
+                <select :value="item.manual_decision" @change="decide(item, $event.target.value)" :disabled="busy || item.state !== 'done' || !item.result.audio_hash" class="ml-2 min-h-[44px] max-w-full bg-surface-input border border-surface-border rounded px-2">
+                    <option value="">Не принято</option>
+                    <template x-for="(label, value) in decisions" :key="value"><option :value="value" x-text="label"></option></template>
+                </select>
+            </label>
+            <input x-model="drafts[item.id]" maxlength="4000" aria-label="Комментарий к решению" placeholder="Комментарий" class="min-h-[44px] max-w-full bg-surface-input border border-surface-border rounded px-2">
+            <button @click="decide(item)" :disabled="busy" class="min-h-[44px] px-3 border border-surface-border rounded text-sm text-content-secondary">Сохранить заметку</button>
+        </div>
     </article></template>
     <div x-show="runId" class="flex gap-3 items-center"><button @click="page(-1)" :disabled="offset === 0" class="min-h-[44px] px-3 border border-surface-border rounded disabled:opacity-50">Назад</button><span class="text-sm tabular-nums" x-text="`${offset + 1}–${offset + items.length}`"></span><button @click="page(1)" :disabled="items.length < 100" class="min-h-[44px] px-3 border border-surface-border rounded disabled:opacity-50">Далее</button></div>
 </div>

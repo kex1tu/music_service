@@ -19,8 +19,8 @@ func TestBackfillKeepsSelectedDiscAndCatalogIDAfterReload(t *testing.T) {
 	_, err = database.Conn().ExecContext(ctx, `
 		INSERT INTO artists (id, name, clean_name) VALUES (1, 'Band', 'band');
 		INSERT INTO albums (id, artist_id, title, clean_title, folder_path) VALUES (1, 1, 'Live', 'live', 'Live');
-		INSERT INTO missing_tracks (album_id, title, artist, track_number, disc_number, deezer_id)
-		VALUES (1, 'Intro', 'Band', 1, 1, '441'), (1, 'Intro', 'Band', 1, 2, '442');
+		INSERT INTO release_tracklist (album_id, title, artist_id, artist_credit, track_number, disc_number, deezer_id)
+		VALUES (1, 'Intro', 1, 'Band', 1, 1, '441'), (1, 'Intro', 1, 'Band', 1, 2, '442');
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -97,5 +97,29 @@ func TestManualReleaseBackfillPersistsOnlyItsCatalogPositions(t *testing.T) {
 	if err != nil || len(tracks) != 1 || tracks[0].TrackID != "dz_442" ||
 		tracks[0].DiscNumber != 2 || tracks[0].AudioSourceURL != source {
 		t.Fatalf("wrong resolved manual backfill: %+v, %v", tracks, err)
+	}
+
+	// The position can be filled by another import while the job waits.
+	_, err = database.Conn().ExecContext(ctx, `
+		INSERT INTO artists (id, name, clean_name) VALUES (1, 'Band', 'band');
+		INSERT INTO albums (id, artist_id, title, clean_title, folder_path, catalog_checked_at)
+		VALUES (1, 1, 'Live', 'live', 'CD edition', CURRENT_TIMESTAMP);
+		INSERT INTO release_tracklist (album_id, title, artist_id, artist_credit, track_number, disc_number, deezer_id, is_present)
+		VALUES (1, 'Intro', 1, 'Band', 1, 2, '442', 1), (1, 'Intro', 1, 'Band', 1, 1, '441', 0);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, tracks, err = svc.resolveBackfill(ctx, job)
+	if err != nil || len(tracks) != 0 {
+		t.Fatalf("selected position is now present: %+v, %v", tracks, err)
+	}
+	_, err = database.Conn().ExecContext(ctx, `UPDATE release_tracklist SET is_present = 0 WHERE disc_number = 2`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, tracks, err = svc.resolveBackfill(ctx, job)
+	if err != nil || len(tracks) != 1 || tracks[0].TrackID != "dz_442" || tracks[0].AudioSourceURL != source {
+		t.Fatalf("confirmed gap lost its selected source: %+v, %v", tracks, err)
 	}
 }

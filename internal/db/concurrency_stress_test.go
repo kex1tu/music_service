@@ -90,12 +90,7 @@ func TestSQLite_HighConcurrencyWAL(t *testing.T) {
 					}
 
 				case 1:
-					// Группа 2: Обновление статистики треков и радар-релизов
-					trackID := int64(101 + (op % 20))
-					if err := database.RecordRadioPlay(ctx, trackID, "wave", ""); err != nil {
-						errCh <- fmt.Errorf("gid %d: RecordRadioPlay error: %w", gid, err)
-						return
-					}
+					// Группа 2: Чтение треков и обновление радар-релизов
 					hash := fmt.Sprintf("hash%04d", 1+(op%20))
 					tr, err := database.GetTrackByIDOrHash(ctx, hash)
 					if err != nil || tr == nil {
@@ -125,14 +120,9 @@ func TestSQLite_HighConcurrencyWAL(t *testing.T) {
 						errCh <- fmt.Errorf("gid %d: SearchLibrary error: %w", gid, err)
 						return
 					}
-					artists, err := database.GetTrackedArtists(ctx, false)
+					artists, err := database.GetTrackedArtists(ctx)
 					if err != nil || len(artists) == 0 {
 						errCh <- fmt.Errorf("gid %d: GetTrackedArtists error: %w", gid, err)
-						return
-					}
-					genres, err := database.GetAvailableGenres(ctx, 10)
-					if err != nil || len(genres) == 0 {
-						errCh <- fmt.Errorf("gid %d: GetAvailableGenres error: %w", gid, err)
 						return
 					}
 

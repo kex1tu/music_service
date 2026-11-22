@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"regexp"
 	"slices"
 	"strings"
@@ -57,13 +58,18 @@ func (db *DB) radarAlbumCandidates(ctx context.Context, release RadarReleaseEnti
 			SELECT `+ArtistIDLookup("names.value")+`
 			FROM json_each(music_artist_credit_parts(?2)) AS names
 			WHERE NOT EXISTS (SELECT 1 FROM linked_credits)
+			  AND NOT EXISTS (SELECT 1 FROM radar_release_sources WHERE release_id = ?1 AND credits_json IS NOT NULL)
 			  AND (names.value = ?2 OR `+ArtistIDLookup("?2")+` IS NULL)
 		)
 		SELECT a.id, ar.name, COALESCE(a.album_artist, ''), COALESCE(a.year, 0),
 			COALESCE(a.deezer_id, ''), COALESCE(a.is_complete, 0),
-			COALESCE(a.expected_tracks_count, 0), EXISTS (
+			COALESCE(a.expected_tracks_count, 0), EXISTS (SELECT 1 FROM credited WHERE artist_id = a.artist_id) OR EXISTS (
 				SELECT 1 FROM album_artists aa JOIN credited c ON c.artist_id = aa.artist_id WHERE aa.album_id = a.id
-			), EXISTS (SELECT 1 FROM album_artists aa WHERE aa.album_id = a.id)
+			), EXISTS (SELECT 1 FROM album_artists aa WHERE aa.album_id = a.id),
+			EXISTS (SELECT 1 FROM linked_credits) OR EXISTS (
+				SELECT 1 FROM radar_release_sources WHERE release_id = ?1 AND credits_json IS NOT NULL
+			) AS has_linked_credit,
+			(SELECT COUNT(*) FROM artists AS named WHERE named.name = ?2 OR named.clean_name = music_search_key(?2)) > 1
 		FROM albums a JOIN artists ar ON a.artist_id = ar.id
 		WHERE a.search_title = ?3 OR a.deezer_id = NULLIF(?4, '')`,
 		release.ID, release.ArtistName, textkey.Search(release.Title), release.DeezerID)
@@ -76,8 +82,8 @@ func (db *DB) radarAlbumCandidates(ctx context.Context, release RadarReleaseEnti
 		var a radarAlbum
 		var artist, albumArtist string
 		var year int
-		var linked, hasCredits bool
-		if err := rows.Scan(&a.id, &artist, &albumArtist, &year, &a.deezerID, &a.complete, &a.expected, &linked, &hasCredits); err != nil {
+		var linked, hasCredits, linkKnown, ambiguousName bool
+		if err := rows.Scan(&a.id, &artist, &albumArtist, &year, &a.deezerID, &a.complete, &a.expected, &linked, &hasCredits, &linkKnown, &ambiguousName); err != nil {
 			return nil, err
 		}
 		if a.deezerID != "" && release.DeezerID != "" {
@@ -90,7 +96,7 @@ func (db *DB) radarAlbumCandidates(ctx context.Context, release RadarReleaseEnti
 			}
 			// Older or display-only credits can still select a candidate for tracklist verification.
 			legacyMatch := !hasCredits && (radarArtistMatches(release.ArtistName, artist) || radarArtistMatches(release.ArtistName, albumArtist))
-			if !linked && !legacyMatch && !sameAlbumCredit(release.ArtistName, albumArtist) {
+			if !linked && (linkKnown || ambiguousName || (!legacyMatch && !sameAlbumCredit(release.ArtistName, albumArtist))) {
 				continue
 			}
 		}
@@ -160,20 +166,23 @@ func (db *DB) radarSingleInLibrary(ctx context.Context, release RadarReleaseEnti
 	title, artist := singleTrackCredit(release)
 	rows, err := db.conn.QueryContext(ctx, `
 		SELECT a.name, EXISTS (SELECT 1 FROM radar_release_artists credit
-			WHERE credit.release_id = ? AND credit.artist_id = t.artist_id)
+			WHERE credit.release_id = ?1 AND credit.artist_id = t.artist_id),
+			EXISTS(SELECT 1 FROM radar_release_artists WHERE release_id = ?1 AND artist_id IS NOT NULL)
+			OR EXISTS(SELECT 1 FROM radar_release_sources WHERE release_id = ?1 AND credits_json IS NOT NULL)
+			OR (SELECT COUNT(*) FROM artists WHERE clean_name = music_search_key(?3)) > 1
 		FROM tracks t JOIN artists a ON a.id = t.artist_id
-		WHERE t.search_title = ?`, release.ID, textkey.Search(title))
+		WHERE t.search_title = ?2`, release.ID, textkey.Search(title), artist)
 	if err != nil {
 		return false, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var localArtist string
-		var linked bool
-		if err := rows.Scan(&localArtist, &linked); err != nil {
+		var linked, requireLink bool
+		if err := rows.Scan(&localArtist, &linked, &requireLink); err != nil {
 			return false, err
 		}
-		if linked || radarArtistMatches(artist, localArtist) {
+		if linked || (!requireLink && radarArtistMatches(artist, localArtist)) {
 			return true, nil
 		}
 	}
@@ -216,35 +225,11 @@ func (db *DB) radarSingleTrackIndex(ctx context.Context, releases []RadarRelease
 }
 
 func (db *DB) radarHasCompletePositions(ctx context.Context, albumID int64, expected int) (bool, error) {
-	rows, err := db.conn.QueryContext(ctx, `
-		SELECT DISTINCT MAX(1, COALESCE(disc_number, 1)), COALESCE(track_number, 0)
-		FROM tracks WHERE album_id = ?1 AND NOT EXISTS(
-			SELECT 1 FROM missing_tracks WHERE album_id = ?1
-		) ORDER BY 1, 2`, albumID)
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	count, previous := 0, ReleasePosition(1, 0)
-	for rows.Next() {
-		var p TrackPosition
-		if err := rows.Scan(&p.DiscNumber, &p.TrackNumber); err != nil {
-			return false, err
-		}
-		if count == 0 && p != ReleasePosition(1, 1) {
-			return false, nil
-		}
-		if (p.DiscNumber != previous.DiscNumber || p.TrackNumber != previous.TrackNumber+1) &&
-			(p.DiscNumber != previous.DiscNumber+1 || p.TrackNumber != 1) {
-			return false, nil
-		}
-		previous = p
-		count++
-	}
-	if err := rows.Err(); err != nil {
-		return false, err
-	}
-	return count == expected, nil
+	var complete bool
+	err := db.conn.QueryRowContext(ctx, `SELECT catalog_checked_at IS NOT NULL
+		AND is_complete = 1 AND expected_tracks_count = ? AND present_tracks_count = ?
+		FROM albums WHERE id = ?`, expected, expected, albumID).Scan(&complete)
+	return complete, err
 }
 
 // radarSingleArtistLinks reads identities in bulk for the same reconciliation pass.
@@ -305,8 +290,8 @@ func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
 		}
 		if tracklist != "" {
 			if err := json.Unmarshal([]byte(tracklist), &r.Tracklist); err != nil {
-				rows.Close()
-				return 0, err
+				log.Printf("[Radar] Invalid tracklist for release %d: %v", r.ID, err)
+				continue
 			}
 		}
 		releases = append(releases, r)
@@ -335,11 +320,18 @@ func (db *DB) ReconcileAllRadarReleases(ctx context.Context) (int, error) {
 	for _, r := range releases {
 		var found bool
 		if r.isSingleTrack() {
-			title, artist := singleTrackCredit(r)
+			title, _ := singleTrackCredit(r)
+			links := linkedArtists[r.ID]
 			for _, localArtist := range singles[textkey.Search(title)] {
-				if linkedArtists[r.ID][localArtist.id] || radarArtistMatches(artist, localArtist.name) {
+				if links[localArtist.id] {
 					found = true
 					break
+				}
+			}
+			if !found && len(links) == 0 && len(singles[textkey.Search(title)]) != 0 {
+				found, err = db.radarSingleInLibrary(ctx, r)
+				if err != nil {
+					return 0, err
 				}
 			}
 		} else {

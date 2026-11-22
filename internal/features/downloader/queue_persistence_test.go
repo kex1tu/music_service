@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -10,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
 	"music-manager/internal/services/resolver"
+	"music-manager/internal/testkit"
 )
 
 func TestJobSelectionRollbackAndCorruptionIsolation(t *testing.T) {
@@ -34,8 +37,8 @@ func TestJobSelectionRollbackAndCorruptionIsolation(t *testing.T) {
 		}
 	}
 	if _, err := conn.ExecContext(ctx, `
-		CREATE TRIGGER reject_job_selection BEFORE UPDATE ON download_source_selections
-		WHEN NEW.job_id='selected'
+		CREATE TRIGGER reject_job_selection BEFORE UPDATE OF selection_json ON download_jobs
+		WHEN NEW.id='selected'
 		BEGIN SELECT RAISE(FAIL, 'test selection write rejected'); END`); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +57,7 @@ func TestJobSelectionRollbackAndCorruptionIsolation(t *testing.T) {
 
 	if _, err := conn.ExecContext(ctx, `
 		DROP TRIGGER reject_job_selection;
-		UPDATE download_source_selections SET payload_json='{' WHERE job_id='selected';
+		UPDATE download_jobs SET selection_json='{' WHERE id='selected';
 		UPDATE download_jobs SET status='QUEUED' WHERE id='selected';`); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +81,7 @@ func TestJobSelectionRollbackAndCorruptionIsolation(t *testing.T) {
 	}
 	var status, payload string
 	if err := conn.QueryRowContext(ctx, `
-		SELECT j.status,s.payload_json FROM download_jobs j JOIN download_source_selections s ON s.job_id=j.id
+		SELECT j.status,j.selection_json FROM download_jobs j
 		WHERE j.id='selected'`).Scan(&status, &payload); err != nil || status != string(StatusError) || payload != "{" {
 		t.Fatalf("corrupt job DB state = %q, %q, %v", status, payload, err)
 	}
@@ -94,9 +97,11 @@ func TestQueueDrainsAfterRestartWithFullWakeChannel(t *testing.T) {
 
 	const source = "https://www.deezer.com/album/123"
 	old := NewService(ServiceConfig{Repo: NewRepository(database.Conn()), MaxConcurrent: 2})
+	id := old.rememberPreflight(source, "deezer", &resolver.ReleaseMetadata{},
+		[]resolver.ResolvedTrack{{Title: "first"}, {Title: "selected"}, {Title: "last"}})
 	const jobCount = 8
 	for range jobCount {
-		_, err := old.CreateJobWithOptions(t.Context(), source, "deezer", JobOptions{SelectedTrackIndices: []int{1}})
+		_, err := old.CreateJobWithOptions(t.Context(), source, "deezer", JobOptions{PreflightID: id, SelectedTrackIndices: []int{1}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -126,7 +131,7 @@ func TestQueueDrainsAfterRestartWithFullWakeChannel(t *testing.T) {
 	// track must reach WAITING_SOURCE without invoking any media tool.
 	svc.resolveCache["deezer:"+source] = &cachedResolveResult{
 		meta: &resolver.ReleaseMetadata{}, expiresAt: time.Now().Add(time.Minute),
-		tracks: []resolver.ResolvedTrack{{Title: "first"}, {Title: "selected"}, {Title: "last"}},
+		tracks: []resolver.ResolvedTrack{{Title: "selected"}, {Title: "first"}, {Title: "last"}},
 	}
 	if err := svc.Start(t.Context()); err != nil {
 		t.Fatal(err)
@@ -239,5 +244,161 @@ func TestConcurrentRepositoriesClaimOnlyOnce(t *testing.T) {
 	}
 	if claimed != 1 {
 		t.Fatalf("%d workers claimed one job", claimed)
+	}
+}
+
+func TestQueueWorkerLimitAfterFailedEnqueue(t *testing.T) {
+	ctx := t.Context()
+	database, err := db.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	conn := database.Conn()
+	svc := NewService(ServiceConfig{Repo: NewRepository(conn), MaxConcurrent: 1})
+	svc.PauseQueue()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	if _, err := conn.ExecContext(ctx, `CREATE TRIGGER reject_queue_job BEFORE INSERT ON download_jobs
+		BEGIN SELECT RAISE(FAIL, 'test write failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateJob(ctx, "https://www.deezer.com/album/123", "deezer"); err == nil {
+		t.Fatal("expected failed insertion")
+	}
+	if _, err := conn.ExecContext(ctx, "DROP TRIGGER reject_queue_job"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.CreateJob(ctx, "https://www.deezer.com/album/123", "deezer"); err != nil {
+		t.Fatal(err)
+	}
+	saved := svc.GetSortedJobSnapshots()
+	if len(saved) != 1 || saved[0].Status != StatusQueued {
+		t.Fatalf("unexpected queue: %+v", saved)
+	}
+	if _, _, _, err := svc.claimNextJob(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := svc.repo.GetJob(ctx, saved[0].ID); err != nil || got.Status != StatusQueued {
+		t.Fatalf("paused queue claimed a job: %+v %v", got, err)
+	}
+	if _, err := svc.CreateJob(ctx, "https://www.deezer.com/album/456", "deezer"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+		CREATE TRIGGER check_shared_worker_limit AFTER UPDATE OF status ON download_jobs
+		WHEN NEW.status='RESOLVING' AND (SELECT COUNT(*) FROM download_jobs WHERE status='RESOLVING') > 1
+		BEGIN SELECT RAISE(FAIL, 'worker limit exceeded'); END`); err != nil {
+		t.Fatal(err)
+	}
+	svc.ResumeQueue()
+	deadline, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		var ready int
+		if err := conn.QueryRowContext(deadline, "SELECT COUNT(*) FROM download_jobs WHERE status='READY'").Scan(&ready); err != nil {
+			t.Fatal(err)
+		}
+		if ready == 2 {
+			break
+		}
+		select {
+		case <-deadline.Done():
+			t.Fatal("worker did not finish both jobs")
+		case <-tick.C:
+		}
+	}
+}
+
+func TestQueueRecoversLegacyStagedAudio(t *testing.T) {
+	ctx := t.Context()
+	database, err := db.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	sb, err := sandbox.NewPathSandbox(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel := "legacy/converted/song.mp3"
+	if _, err := testkit.CreateDummyMP3(sb, rel, "Song", "Artist", "Album"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Conn().ExecContext(ctx, `INSERT INTO download_jobs(id,status,source,url,total_tracks)
+		VALUES('legacy','READY','deezer','https://www.deezer.com/album/1',1)`); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(database.Conn())
+	svc := NewService(ServiceConfig{Repo: repo, TmpSandbox: sb})
+	if err := svc.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	job, err := repo.GetJob(ctx, "legacy")
+	if err != nil || job == nil || job.Status != StatusReady || len(job.Tracks) != 1 ||
+		job.Tracks[0].Title != "Song" || job.Tracks[0].ConvertedPath == nil || *job.Tracks[0].ConvertedPath != rel {
+		t.Fatalf("recovered job = %+v, %v", job, err)
+	}
+	if _, err := svc.RetryJob(ctx, "legacy"); err == nil {
+		t.Fatal("retry was allowed to remove recovered media")
+	}
+}
+
+func TestQueueRejectsExpiredPreflight(t *testing.T) {
+	const url = "https://www.deezer.com/album/123"
+	svc := NewService(ServiceConfig{})
+	id := svc.rememberPreflight(url, "deezer", &resolver.ReleaseMetadata{}, []resolver.ResolvedTrack{{Title: "Song"}})
+	old := svc.preflightCache[id]
+	old.expiresAt = time.Now().Add(-time.Second)
+	svc.preflightCache[id] = old
+	job, err := svc.CreateJobWithOptions(t.Context(), url, "deezer", JobOptions{PreflightID: id, SelectedTrackIndices: []int{0}})
+	if !errors.Is(err, errPreflightExpired) || job != nil || len(svc.GetAllJobs()) != 0 {
+		t.Fatalf("expired preflight created a job: %+v, %v", job, err)
+	}
+}
+
+func TestQueueRestoresSavedStatuses(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := t.Context()
+	repo := NewRepository(database.Conn())
+	for _, status := range []JobStatus{StatusQueued, StatusResolving, StatusDownloading, StatusConverting, StatusTagging,
+		StatusWaitingSource, StatusReady, StatusPartialReady, StatusError, StatusCancelled} {
+		job := &Job{ID: string(status), Status: status,
+			Tracks: []resolver.ResolvedTrack{{Title: "Song", VersionStatus: "manual", AudioSourceURL: "https://soundcloud.com/a/b"}}}
+		if err := repo.CreateJob(ctx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	svc := NewService(ServiceConfig{Repo: repo})
+	svc.PauseQueue()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	for _, status := range []JobStatus{StatusQueued, StatusResolving, StatusDownloading, StatusConverting, StatusTagging,
+		StatusWaitingSource, StatusReady, StatusPartialReady, StatusError, StatusCancelled} {
+		want := status
+		switch status {
+		case StatusResolving, StatusDownloading, StatusConverting, StatusTagging:
+			want = StatusError
+		}
+		job, err := repo.GetJob(ctx, string(status))
+		if err != nil || job == nil || job.Status != want || len(job.Tracks) != 1 ||
+			job.Tracks[0].AudioSourceURL != "https://soundcloud.com/a/b" {
+			t.Fatalf("%s restored as %+v, %v; want %s and saved source", status, job, err, want)
+		}
 	}
 }

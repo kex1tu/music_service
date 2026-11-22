@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"music-manager/internal/core/safefs"
@@ -76,7 +77,7 @@ func AuditWindows(spots []QuickListenSpot, duration float64) []Window {
 
 // OpenAudio pins a regular media file inside the library sandbox.
 func OpenAudio(sb *sandbox.PathSandbox, rel string) (*os.File, error) {
-	p, err := sb.Resolve(rel, false)
+	p, err := sb.Resolve(rel, false, sandbox.LiteralPath)
 	if err != nil {
 		return nil, err
 	}
@@ -113,6 +114,24 @@ func AudioDigest(ctx context.Context, f *os.File) (string, error) {
 		return "", fmt.Errorf("audio digest failed: %w", e)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// AudioDuration reads stream duration from the already opened MP3.
+func AudioDuration(ctx context.Context, f *os.File) (float64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-select_streams", "a:0",
+		"-show_entries", "stream=duration", "-of", "default=noprint_wrappers=1:nokey=1", audioDescriptor)
+	cmd.ExtraFiles = []*os.File{f}
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("probe audit duration: %w", err)
+	}
+	duration, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if err != nil || duration <= 0 || math.IsNaN(duration) || math.IsInf(duration, 0) {
+		return 0, fmt.Errorf("invalid audit audio duration")
+	}
+	return duration, nil
 }
 
 // DecodeWindow passes a sandbox-pinned media descriptor to ffmpeg. PCM is

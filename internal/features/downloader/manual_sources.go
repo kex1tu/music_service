@@ -21,22 +21,6 @@ func selectManualSource(track *resolver.ResolvedTrack, sourceURL string, policy 
 	track.Error = nil
 }
 
-func pinForTrack(track resolver.ResolvedTrack) PinnedTrackSourceDTO {
-	var isrc string
-	if track.ISRC != nil {
-		isrc = *track.ISRC
-	}
-	return PinnedTrackSourceDTO{
-		CacheKey:   resolver.BuildCacheKey(isrc, track.Artist, track.Title),
-		ArtistName: track.Artist,
-		TrackTitle: track.Title,
-		ISRC:       track.ISRC,
-		PinnedURL:  track.AudioSourceURL,
-		SourceType: "manual",
-		Duration:   track.Duration,
-	}
-}
-
 // Recompute under one lock: concurrent manual track downloads cannot overwrite
 // a completed job with a stale partial count.
 func (j *Job) reconcileManualSources() {

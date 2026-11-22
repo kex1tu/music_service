@@ -161,7 +161,7 @@ window.QueueEditorBridge = {
     },
 
     async openAllReadyJobsInTagEditor(queueMgr) {
-        const readyJobs = (queueMgr.jobs || []).filter((j) => j.status === 'READY' || j.status === 'PARTIAL_READY');
+        const readyJobs = (queueMgr.jobs || []).filter((j) => !j.is_redownload && (j.status === 'READY' || j.status === 'PARTIAL_READY'));
         if (readyJobs.length === 0) {
             Alpine.store('app').toast('В очереди нет завершенных релизов для редактирования', 'warning');
             return;
