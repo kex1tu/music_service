@@ -48,13 +48,13 @@ cd "$app_dir"
 [[ "$(systemctl show "$service" -p WorkingDirectory --value)" == "$app_dir" ]]
 [[ -f "$bin" ]]
 runtime_config() {
-    local pid key value config_host='' config_port='' config_db=''
+    local key value config_host='' config_port=''
     pid="$(systemctl show "$service" -p MainPID --value)"
     [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
     [[ "$(readlink "/proc/$pid/exe")" == "$bin" ]] || return 1
-    # Read only the settings needed by health checks and SQLite backup.
+    # Read only the settings needed by health checks.
     while IFS='=' read -r -d '' key value; do
-        case "$key" in HOST) config_host="$value" ;; PORT) config_port="$value" ;; DATABASE_PATH) config_db="$value" ;; esac
+        case "$key" in HOST) config_host="$value" ;; PORT) config_port="$value" ;; esac
     done < "/proc/$pid/environ"
     if [[ -f .env ]]; then
         while IFS='=' read -r key value; do
@@ -63,7 +63,6 @@ runtime_config() {
             case "$key" in
                 HOST) [[ -n "$config_host" ]] || config_host="$value" ;;
                 PORT) [[ -n "$config_port" ]] || config_port="$value" ;;
-                DATABASE_PATH) [[ -n "$config_db" ]] || config_db="$value" ;;
             esac
         done < .env
     fi
@@ -71,8 +70,36 @@ runtime_config() {
     [[ "$config_port" =~ ^[0-9]+$ ]] && (( config_port > 0 && config_port < 65536 )) || return 1
     case "$config_host" in 0.0.0.0) config_host=127.0.0.1 ;; ::) config_host='[::1]' ;; *:*) config_host="[$config_host]" ;; esac
     local_url="http://$config_host:$config_port"
-    database_path="$(realpath -m -- "${config_db:-data/library.db}")"
     echo "Service=$service app=$app_dir local=$local_url"
+}
+find_running_database() {
+    local fd path
+    database_path=''
+    for fd in "/proc/$pid/fd/"*; do
+        [[ -f "$fd" ]] || continue
+        IFS= read -r -d '' path < <(readlink -z -- "$fd") || continue
+        [[ "$path" = /* && "$path" -ef "$fd" ]] || continue
+        head -c 16 -- "$fd" | cmp -s - <(printf 'SQLite format 3\0') || continue
+        if [[ -n "$database_path" && ! "$database_path" -ef "$fd" ]]; then
+            echo 'The running service has more than one SQLite database open.' >&2
+            return 1
+        fi
+        database_path="$path"
+    done
+    if [[ -z "$database_path" ]]; then
+        echo 'Could not identify the SQLite database opened by the running service.' >&2
+        return 1
+    fi
+}
+prepare_database() {
+    local journal
+    "$1" --prepare-sqlite-snapshot "$2" || return
+    for journal in "$2-wal" "$2-shm" "$2-journal"; do
+        if [[ -e "$journal" || -L "$journal" ]]; then
+            echo "SQLite journal still exists: $journal" >&2
+            return 1
+        fi
+    done
 }
 wait_for_health() {
     # SQLite and filesystem initialization on nl_music can take over a minute.
@@ -90,23 +117,23 @@ case "$mode" in
     preflight)
         systemctl is-active --quiet "$service"
         runtime_config
+        find_running_database
         curl --noproxy '*' --fail --silent --show-error --max-time 5 "$local_url/api/health"
         echo
         ;;
     install)
         [[ -f "$staged" ]]
         [[ "$(sha256sum "$staged" | cut -d ' ' -f1)" == "$expected_sha" ]]
-        cp -p "$bin" "$backup"
         runtime_config
+        find_running_database
+        chmod 755 "$staged"
         systemctl stop "$service"
-        [[ -f "$database_path" ]]
+        prepare_database "$staged" "$database_path"
         install -d -m 700 "$db_backup"
         cp -p -- "$database_path" "$db_backup/database"
-        if [[ -f "$database_path-wal" ]]; then
-            cp -p -- "$database_path-wal" "$db_backup/database-wal"
-        fi
-        printf '%s\n' "$database_path" > "$db_backup/path"
-        chmod 755 "$staged"
+        printf '%s\0' "$database_path" > "$db_backup/path"
+        cp -p "$bin" "$backup"
+        sync -- "$db_backup/database" "$db_backup/path" "$db_backup" "$backup" "$(dirname "$backup")"
         chown --reference="$bin" "$staged"
         mv -f "$staged" "$bin"
         systemctl restart "$service"
@@ -120,26 +147,46 @@ case "$mode" in
         echo "Installed SHA256=$expected_sha backup=$backup"
         ;;
     rollback)
-        if [[ ! -f "$backup" ]]; then
-            echo 'No backup created; binary replacement was not reached.' >&2
-            exit 1
+        if [[ -f "$staged" ]] || { [[ -f "$backup" ]] && cmp -s -- "$bin" "$backup"; }; then
+            # Installation stopped before replacing the running binary.
+            systemctl start "$service"
+            wait_for_health
+            exit 0
         fi
+        [[ -f "$backup" && -f "$db_backup/path" && -f "$db_backup/database" ]]
+        IFS= read -r -d '' database_path < "$db_backup/path"
+        [[ "$database_path" = /* ]]
+        restored_db="$database_path.rollback.$deploy_id"
+        retained_db="$database_path.before-rollback.$deploy_id"
+        restored_bin="$bin.rollback.$deploy_id"
+        cp -p -- "$db_backup/database" "$restored_db"
+        cp -p -- "$backup" "$restored_bin"
+        sync -- "$restored_db" "$restored_bin"
+
+        was_active=0
+        if systemctl is-active --quiet "$service"; then was_active=1; fi
+        database_replaced=0
+        rollback_failed() {
+            local status="$1"
+            trap - ERR
+            if (( database_replaced )) && ! mv -fT -- "$retained_db" "$database_path"; then
+                echo "Could not put back the running database. It is preserved at $retained_db." >&2
+                exit "$status"
+            fi
+            if (( was_active )); then systemctl start "$service" || true; fi
+            exit "$status"
+        }
+        trap 'rollback_failed $?' ERR
         systemctl stop "$service"
-        if [[ -f "$db_backup/path" && -f "$db_backup/database" ]]; then
-            IFS= read -r database_path < "$db_backup/path"
-            [[ -n "$database_path" ]]
-            cp -p -- "$db_backup/database" "$database_path.rollback.$deploy_id"
-            if [[ -f "$db_backup/database-wal" ]]; then
-                cp -p -- "$db_backup/database-wal" "$database_path-wal.rollback.$deploy_id"
-            fi
-            rm -f -- "$database_path-wal" "$database_path-shm"
-            mv -f -- "$database_path.rollback.$deploy_id" "$database_path"
-            if [[ -f "$db_backup/database-wal" ]]; then
-                mv -f -- "$database_path-wal.rollback.$deploy_id" "$database_path-wal"
-            fi
+        prepare_database "$bin" "$database_path"
+        if [[ ! "$database_path" -ef "$retained_db" ]]; then
+            ln -- "$database_path" "$retained_db"
         fi
-        cp -p "$backup" "$bin.rollback.$deploy_id"
-        mv -f "$bin.rollback.$deploy_id" "$bin"
+        sync -- "$(dirname "$database_path")"
+        mv -fT -- "$restored_db" "$database_path"
+        database_replaced=1
+        mv -fT -- "$restored_bin" "$bin"
+        trap - ERR
         systemctl restart "$service"
         wait_for_health
         echo "Rollback completed: $backup"

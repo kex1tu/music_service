@@ -26,22 +26,30 @@ func (s *Service) ApplyRedownload(ctx context.Context, in RedownloadImport, veri
 	s.moveMu.Lock()
 	defer s.moveMu.Unlock()
 
+	staged, err := s.tmpSandbox.Resolve(in.StagedPath, false, sandbox.LiteralPath)
+	if err != nil {
+		return "", err
+	}
 	if in.ResultPath != "" && in.ResultHash != "" {
 		full, err := s.musicSandbox.Resolve(in.ResultPath, false, sandbox.LiteralPath)
 		if err != nil {
 			return "", err
 		}
 		if hash, err := FileSHA256(full); err == nil && hash == in.ResultHash {
-			if err := ApplyTrackChange(ctx, s.trackIndex, full, full, false, func() error { return nil }); err != nil {
+			if err := ApplyTrackChange(ctx, s.trackIndex, full, full, false, func() error {
+				if hash, err := FileSHA256(full); err != nil || hash != in.ResultHash {
+					return errors.New("файл изменился после публикации")
+				}
+				if in.OriginalPath == "" {
+					return moveCompanionFiles(staged, full, true)
+				}
+				return nil
+			}); err != nil {
 				return "", err
 			}
-			s.discardRedownloadStage(in.StagedPath)
+			s.discardRedownloadStage(in.StagedPath, in.OriginalPath != "")
 			return in.ResultPath, nil
 		}
-	}
-	staged, err := s.tmpSandbox.Resolve(in.StagedPath, false, sandbox.LiteralPath)
-	if err != nil {
-		return "", err
 	}
 	tags, err := id3.ReadTags(staged, in.StagedPath)
 	if err != nil {
@@ -111,7 +119,7 @@ func (s *Service) ApplyRedownload(ctx context.Context, in RedownloadImport, veri
 			}
 			return err
 		}
-		if err := moveCompanionFiles(staged, full); err != nil {
+		if err := moveCompanionFiles(staged, full, false); err != nil {
 			return errors.Join(err, safefs.Remove(full))
 		}
 		return nil
@@ -119,13 +127,17 @@ func (s *Service) ApplyRedownload(ctx context.Context, in RedownloadImport, veri
 	if err != nil {
 		return "", err
 	}
-	s.discardRedownloadStage(in.StagedPath)
+	s.discardRedownloadStage(in.StagedPath, in.OriginalPath != "")
 	return destination, nil
 }
 
-func (s *Service) discardRedownloadStage(path string) {
+func (s *Service) discardRedownloadStage(path string, discardCompanions bool) {
 	base := strings.TrimSuffix(path, filepath.Ext(path))
-	for _, ext := range append([]string{filepath.Ext(path)}, companionExtensions...) {
+	extensions := []string{filepath.Ext(path)}
+	if discardCompanions {
+		extensions = append(extensions, companionExtensions...)
+	}
+	for _, ext := range extensions {
 		full, err := s.tmpSandbox.Resolve(base+ext, false, sandbox.LiteralPath)
 		if err == nil {
 			err = safefs.Remove(full)

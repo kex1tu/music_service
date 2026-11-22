@@ -79,6 +79,17 @@ func (s *Service) confirmRedownloadTrack(ctx context.Context, job *downloader.Jo
 	}
 	verify := func() error {
 		repo, ok := s.repo.(redownloadLibrary)
+		if target.LibraryPath == "" {
+			if !ok || target.AlbumID == 0 {
+				return errors.New("создайте новую задачу для недостающей дорожки")
+			}
+			if err := repo.verifyRedownloadAlbum(ctx, folder, target.AlbumID, target.CatalogRevision); err != nil {
+				if errors.Is(err, db.ErrCatalogAlbumChanged) {
+					return errors.New("каталог релиза изменился, создайте новую задачу для недостающей дорожки")
+				}
+				return err
+			}
+		}
 		if !ok || track.TrackNumber <= 0 {
 			return nil
 		}

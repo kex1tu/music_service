@@ -346,6 +346,24 @@ func TestSQLiteMigrationRestoredWALBackup(t *testing.T) {
 	copyFile(sourcePath, barePath)
 	requireScalar(t, rawMigrationDB(t, barePath), "SELECT count(*) FROM missing_tracks WHERE id = 41", 0)
 
+	deployPath := resolve("deploy.db")
+	copyFile(sourcePath, deployPath)
+	copyFile(sourcePath+"-wal", deployPath+"-wal")
+	if err := db.PrepareOfflineSnapshot(t.Context(), deployPath); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		if _, err := os.Stat(deployPath + suffix); !os.IsNotExist(err) {
+			t.Fatalf("unexpected SQLite journal %s: %v", suffix, err)
+		}
+	}
+	deploySnapshot := resolve("deploy-snapshot.db")
+	copyFile(deployPath, deploySnapshot)
+	deployCopy := rawMigrationDB(t, deploySnapshot)
+	requireScalar(t, deployCopy, "SELECT title FROM missing_tracks WHERE id = 41", "WAL-only row")
+	requireScalar(t, deployCopy, "PRAGMA user_version", 0)
+	requireScalar(t, deployCopy, "PRAGMA integrity_check", "ok")
+
 	backupPath := resolve("backup.db")
 	execMigrationSQL(t, raw, "VACUUM INTO ?", backupPath)
 	restoredPath := resolve("restored.db")

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -146,6 +147,12 @@ func TestVerifyCatalogKeepsSnapshotAndRollsBack(t *testing.T) {
 		t.Fatalf("failed verification changed gaps: count=%d title=%q err=%v", count, title, err)
 	}
 	mustReleaseSQL(t, db.conn, "DROP TRIGGER refuse_verification")
+	mustReleaseSQL(t, db.conn, `INSERT INTO library_index_pending (target_path, source_path, source_is_staging, merge_into_target)
+		VALUES ('Band/Album/CD1/01.mp3', 'job/converted/01.mp3', 1, 0)`)
+	if _, err := VerifyCatalog(ctx, db.conn, 1, "200", catalog); !errors.Is(err, ErrCatalogAlbumChanged) {
+		t.Fatalf("expected a conflict during pending import, got %v", err)
+	}
+	mustReleaseSQL(t, db.conn, "DELETE FROM library_index_pending")
 	matches, err := VerifyCatalog(ctx, db.conn, 1, "200", catalog)
 	if err != nil || len(matches) != 1 || matches[first] || !matches[second] {
 		t.Fatalf("incorrect multidisc matches: %v, %v", matches, err)

@@ -2,6 +2,7 @@ package filemanager
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -28,6 +29,7 @@ type RedownloadOrganizer interface {
 type redownloadLibrary interface {
 	albumRedownloadTracks(context.Context, string) ([]resolver.ResolvedTrack, []downloader.RedownloadTarget, error)
 	redownloadPositionFiles(context.Context, string, db.TrackPosition) ([]string, error)
+	verifyRedownloadAlbum(context.Context, string, int64, int64) error
 }
 
 func (s *Service) prepareRedownload(ctx context.Context, req RedownloadRequest) (*RedownloadResponse, error) {
@@ -124,10 +126,10 @@ func releaseDownloadTrack(position db.TrackPosition, title, artist, album, album
 }
 
 func (r *SQLiteRepository) albumRedownloadTracks(ctx context.Context, folder string) ([]resolver.ResolvedTrack, []downloader.RedownloadTarget, error) {
-	var albumID int64
+	var albumID, catalogRevision int64
 	var album, albumArtist string
-	if err := r.db.QueryRowContext(ctx, `SELECT al.id, al.title, COALESCE(NULLIF(al.album_artist, ''), a.name)
-		FROM albums al JOIN artists a ON a.id = al.artist_id WHERE al.folder_path = ?`, folder).Scan(&albumID, &album, &albumArtist); err != nil {
+	if err := r.db.QueryRowContext(ctx, `SELECT al.id, al.catalog_revision, al.title, COALESCE(NULLIF(al.album_artist, ''), a.name)
+		FROM albums al JOIN artists a ON a.id = al.artist_id WHERE al.folder_path = ?`, folder).Scan(&albumID, &catalogRevision, &album, &albumArtist); err != nil {
 		return nil, nil, err
 	}
 	catalog, err := db.ReleaseTracklist(ctx, r.db, albumID, false)
@@ -184,6 +186,9 @@ func (r *SQLiteRepository) albumRedownloadTracks(ctx context.Context, folder str
 			if !t.Present && len(paths) > 0 {
 				trackTarget.LibraryPath, trackTarget.Conflict = "", true
 			}
+			if len(paths) == 0 {
+				trackTarget.AlbumID, trackTarget.CatalogRevision = albumID, catalogRevision
+			}
 			tracks, targets = append(tracks, track), append(targets, trackTarget)
 		}
 		return tracks, targets, nil
@@ -196,6 +201,16 @@ func (r *SQLiteRepository) albumRedownloadTracks(ctx context.Context, folder str
 		tracks, targets = append(tracks, value.track), append(targets, downloadTarget(value.track.TrackID, value.paths))
 	}
 	return tracks, targets, nil
+}
+
+func (r *SQLiteRepository) verifyRedownloadAlbum(ctx context.Context, root string, albumID, revision int64) error {
+	var present int
+	err := r.db.QueryRowContext(ctx, `SELECT 1 FROM albums WHERE folder_path = ? AND id = ? AND catalog_revision = ?`,
+		root, albumID, revision).Scan(&present)
+	if errors.Is(err, sql.ErrNoRows) {
+		return db.ErrCatalogAlbumChanged
+	}
+	return err
 }
 
 func downloadTarget(trackID string, paths []string) downloader.RedownloadTarget {

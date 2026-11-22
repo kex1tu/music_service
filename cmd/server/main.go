@@ -32,6 +32,15 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--prepare-sqlite-snapshot" {
+		if len(os.Args) != 3 {
+			log.Fatal("usage: music-manager --prepare-sqlite-snapshot DATABASE")
+		}
+		if err := db.PrepareOfflineSnapshot(context.Background(), os.Args[2]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	log.Println("[Main] Starting Music Manager (Go Backend)...")
 
 	// 1. Load configuration

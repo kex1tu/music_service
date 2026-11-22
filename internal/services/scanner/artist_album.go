@@ -14,8 +14,11 @@ func getOrCreateArtist(ctx context.Context, tx *sql.Tx, name string) (int64, err
 func getOrCreateAlbum(ctx context.Context, tx *sql.Tx, title string, artistID int64, albumArtistName string, year int, albumDir string, hasCover bool) (int64, error) {
 	if albumArtistName == "" {
 		// A track without TPE2 supplies no evidence about the album's artists.
-		err := tx.QueryRowContext(ctx, `SELECT artist_id, album_artist FROM albums
-			WHERE folder_path = ? AND NULLIF(TRIM(album_artist), '') IS NOT NULL`, db.AlbumRoot(albumDir)).Scan(&artistID, &albumArtistName)
+		// Reuse the existing artist even when the original import only had TPE1.
+		err := tx.QueryRowContext(ctx, `SELECT artist_id, COALESCE(album_artist, '') FROM albums
+			WHERE folder_path = ? AND (NULLIF(TRIM(album_artist), '') IS NOT NULL
+				OR (search_title = music_search_key(?2) AND (COALESCE(year, 0) = 0 OR ?3 = 0 OR year = ?3)))`,
+			db.AlbumRoot(albumDir), title, year).Scan(&artistID, &albumArtistName)
 		if err != nil && err != sql.ErrNoRows {
 			return 0, err
 		}

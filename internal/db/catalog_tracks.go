@@ -108,8 +108,16 @@ func VerifyCatalog(ctx context.Context, conn interface {
 	defer tx.Rollback()
 	// Reserve the writer before reading the local tracks to verify one snapshot.
 	var lockedID, revision int64
+	// The scanner records a pending change before publishing a file. An edition
+	// verified during that window could invalidate an import after its last check.
 	if err := tx.QueryRowContext(ctx, `UPDATE albums SET catalog_revision = catalog_revision + 1
-		WHERE id = ? RETURNING artist_id, catalog_revision - 1`, albumID).Scan(&lockedID, &revision); err != nil {
+		WHERE id = ? AND NOT EXISTS (SELECT 1 FROM library_index_pending p WHERE
+			(p.target_path = albums.folder_path OR substr(p.target_path, 1, length(albums.folder_path) + 1) = albums.folder_path || '/')
+			OR (albums.folder_path = '.' AND instr(p.target_path, '/') = 0))
+		RETURNING artist_id, catalog_revision - 1`, albumID).Scan(&lockedID, &revision); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrCatalogAlbumChanged
+		}
 		return nil, err
 	}
 	if len(expectedRevision) != 0 && revision != expectedRevision[0] {

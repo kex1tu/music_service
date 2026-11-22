@@ -10,13 +10,15 @@ import (
 )
 
 type RedownloadTarget struct {
-	TrackID      string `json:"track_id"`
-	LibraryPath  string `json:"library_path,omitempty"`
-	OriginalHash string `json:"original_hash,omitempty"`
-	ResultPath   string `json:"result_path,omitempty"`
-	ResultHash   string `json:"result_hash,omitempty"`
-	Confirmed    bool   `json:"confirmed,omitempty"`
-	Conflict     bool   `json:"conflict,omitempty"`
+	TrackID         string `json:"track_id"`
+	LibraryPath     string `json:"library_path,omitempty"`
+	OriginalHash    string `json:"original_hash,omitempty"`
+	AlbumID         int64  `json:"album_id,omitempty"`
+	CatalogRevision int64  `json:"catalog_revision,omitempty"`
+	ResultPath      string `json:"result_path,omitempty"`
+	ResultHash      string `json:"result_hash,omitempty"`
+	Confirmed       bool   `json:"confirmed,omitempty"`
+	Conflict        bool   `json:"conflict,omitempty"`
 }
 
 func (s *Service) PrepareRedownload(ctx context.Context, folder string, tracks []resolver.ResolvedTrack, targets []RedownloadTarget, run bool) (*Job, error) {

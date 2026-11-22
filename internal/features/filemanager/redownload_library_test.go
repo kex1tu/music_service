@@ -1,6 +1,7 @@
 package filemanager
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,6 +15,81 @@ import (
 	"music-manager/internal/services/scanner"
 	"music-manager/internal/testkit"
 )
+
+func TestRedownloadRejectsStaleMissingTrackAfterReload(t *testing.T) {
+	env := testkit.NewEnv(t)
+	ctx := t.Context()
+	scan := scanner.NewScanner(env.MusicSandbox, env.DB, nil, env.TmpSandbox)
+	org := organizer.NewService(env.MusicSandbox, env.TmpSandbox)
+	org.SetTrackChanger(scan)
+	queueConfig := downloader.ServiceConfig{Repo: downloader.NewRepository(env.DB.Conn()),
+		MusicSandbox: env.MusicSandbox, TmpSandbox: env.TmpSandbox}
+	queue := downloader.NewService(queueConfig)
+	t.Cleanup(func() { _ = queue.Close() })
+	cfg := ServiceConfig{MusicSandbox: env.MusicSandbox, Repo: NewRepository(env.DB.Conn()),
+		RedownloadQueue: queue, RedownloadOrganizer: org}
+	svc := NewService(cfg)
+
+	const existing = "Album/01. Existing.mp3"
+	tags := id3.TrackTags{Title: "Existing", Artist: "Band", AlbumArtist: "Band", Album: "Old edition", Year: 2000, TrackNumber: 1}
+	path := env.CreateDummyMP3WithTags(existing, tags, nil)
+	if err := scan.IndexFile(path, existing); err != nil {
+		t.Fatal(err)
+	}
+	var albumID int64
+	if err := env.DB.Conn().QueryRow(`SELECT id FROM albums WHERE folder_path = 'Album'`).Scan(&albumID); err != nil {
+		t.Fatal(err)
+	}
+	catalog := []db.CatalogTrack{
+		{BackfillSelection: db.BackfillSelection{TrackPosition: db.ReleasePosition(1, 1)}, Title: "Existing", Artist: "Band"},
+		{BackfillSelection: db.BackfillSelection{TrackPosition: db.ReleasePosition(1, 2)}, Title: "Missing", Artist: "Band"},
+	}
+	if _, err := db.VerifyCatalog(ctx, env.DB.Conn(), albumID, "42", catalog); err != nil {
+		t.Fatal(err)
+	}
+	response, err := svc.Redownload(ctx, RedownloadRequest{Path: "Album", Type: "album"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok := queue.GetJob(response.JobID)
+	if !ok {
+		t.Fatal("redownload job missing")
+	}
+	staged := filepath.Join(job.ID, "converted", "02. Missing.mp3")
+	stagedTags := tags
+	stagedTags.Title, stagedTags.TrackNumber = "Missing", 2
+	if _, err := testkit.CreateDummyMP3WithTags(env.TmpSandbox, staged, stagedTags, nil); err != nil {
+		t.Fatal(err)
+	}
+	job.UpdateTrack(1, func(t *resolver.ResolvedTrack) { t.Status, t.ConvertedPath = "ready", &staged })
+	job.SetPartialReady(1, 2)
+
+	tags.Album, tags.Year = "New edition", 2020
+	if err := id3.WriteTags(path, tags, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := scan.IndexFile(path, existing); err != nil {
+		t.Fatal(err)
+	}
+	catalog[1].Title = "Different missing track"
+	if _, err := db.VerifyCatalog(ctx, env.DB.Conn(), albumID, "43", catalog); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := downloader.NewService(queueConfig)
+	t.Cleanup(func() { _ = reloaded.Close() })
+	cfg.RedownloadQueue = reloaded
+	result, err := NewService(cfg).confirmRedownload(ctx, job.ID, []string{job.Snapshot().Tracks[1].TrackID})
+	if err != nil || len(result) != 1 || result[0].Error != "каталог релиза изменился, создайте новую задачу для недостающей дорожки" {
+		t.Fatalf("confirmation did not reject the stale edition: %+v, %v", result, err)
+	}
+	dest, err := env.MusicSandbox.Resolve("Album/02. Missing.mp3", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := safefs.Stat(dest); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale task changed the library: %v", err)
+	}
+}
 
 func TestRedownloadPartialConfirmAndRebuild(t *testing.T) {
 	env := testkit.NewEnv(t)
