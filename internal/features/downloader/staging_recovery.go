@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"music-manager/internal/core/safefs"
+	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
@@ -36,7 +37,7 @@ func (s *Service) recoverLegacyStaging(job *Job) (bool, error) {
 			continue
 		}
 		rel := filepath.ToSlash(filepath.Join(dir, file.Name()))
-		path, err := s.tmpSandbox.Resolve(rel, false)
+		path, err := s.tmpSandbox.Resolve(rel, false, sandbox.LiteralPath)
 		if err != nil {
 			return false, err
 		}

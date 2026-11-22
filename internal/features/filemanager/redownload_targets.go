@@ -127,9 +127,10 @@ func releaseDownloadTrack(position db.TrackPosition, title, artist, album, album
 
 func (r *SQLiteRepository) albumRedownloadTracks(ctx context.Context, folder string) ([]resolver.ResolvedTrack, []downloader.RedownloadTarget, error) {
 	var albumID, catalogRevision int64
+	var year int
 	var album, albumArtist string
-	if err := r.db.QueryRowContext(ctx, `SELECT al.id, al.catalog_revision, al.title, COALESCE(NULLIF(al.album_artist, ''), a.name)
-		FROM albums al JOIN artists a ON a.id = al.artist_id WHERE al.folder_path = ?`, folder).Scan(&albumID, &catalogRevision, &album, &albumArtist); err != nil {
+	if err := r.db.QueryRowContext(ctx, `SELECT al.id, al.catalog_revision, al.title, COALESCE(al.year, 0), COALESCE(NULLIF(al.album_artist, ''), a.name)
+		FROM albums al JOIN artists a ON a.id = al.artist_id WHERE al.folder_path = ?`, folder).Scan(&albumID, &catalogRevision, &album, &year, &albumArtist); err != nil {
 		return nil, nil, err
 	}
 	catalog, err := db.ReleaseTracklist(ctx, r.db, albumID, false)
@@ -187,6 +188,9 @@ func (r *SQLiteRepository) albumRedownloadTracks(ctx context.Context, folder str
 				trackTarget.LibraryPath, trackTarget.Conflict = "", true
 			}
 			if len(paths) == 0 {
+				if year > 0 {
+					track.Year = &year
+				}
 				trackTarget.AlbumID, trackTarget.CatalogRevision = albumID, catalogRevision
 			}
 			tracks, targets = append(tracks, track), append(targets, trackTarget)

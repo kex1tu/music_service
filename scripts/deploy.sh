@@ -44,6 +44,8 @@ bin="$app_dir/bin/music-manager"
 staged="$bin.new.$deploy_id"
 backup="$bin.bak.$deploy_id"
 db_backup="$bin.db.bak.$deploy_id"
+db_guard="$bin.deploy-db"
+db_guard_owner="$db_guard.$deploy_id"
 cd "$app_dir"
 [[ "$(systemctl show "$service" -p WorkingDirectory --value)" == "$app_dir" ]]
 [[ -f "$bin" ]]
@@ -101,6 +103,12 @@ prepare_database() {
         fi
     done
 }
+release_database_guard() {
+    if [[ "$db_guard" -ef "$db_guard_owner" ]]; then
+        rm -f -- "$db_guard"
+    fi
+    rm -f -- "$db_guard_owner"
+}
 wait_for_health() {
     # SQLite and filesystem initialization on nl_music can take over a minute.
     local deadline=$((SECONDS + 180))
@@ -127,6 +135,9 @@ case "$mode" in
         runtime_config
         find_running_database
         chmod 755 "$staged"
+        printf '%s\0' "$database_path" > "$db_guard_owner"
+        chmod 644 "$db_guard_owner"
+        ln -- "$db_guard_owner" "$db_guard"
         systemctl stop "$service"
         prepare_database "$staged" "$database_path"
         install -d -m 700 "$db_backup"
@@ -149,6 +160,11 @@ case "$mode" in
     rollback)
         if [[ -f "$staged" ]] || { [[ -f "$backup" ]] && cmp -s -- "$bin" "$backup"; }; then
             # Installation stopped before replacing the running binary.
+            if [[ -e "$db_guard" && ! "$db_guard" -ef "$db_guard_owner" ]]; then
+                echo 'Another deployment owns the database guard.' >&2
+                exit 1
+            fi
+            release_database_guard
             systemctl start "$service"
             wait_for_health
             exit 0
@@ -157,7 +173,6 @@ case "$mode" in
         IFS= read -r -d '' database_path < "$db_backup/path"
         [[ "$database_path" = /* ]]
         restored_db="$database_path.rollback.$deploy_id"
-        retained_db="$database_path.before-rollback.$deploy_id"
         restored_bin="$bin.rollback.$deploy_id"
         cp -p -- "$db_backup/database" "$restored_db"
         cp -p -- "$backup" "$restored_bin"
@@ -166,30 +181,60 @@ case "$mode" in
         was_active=0
         if systemctl is-active --quiet "$service"; then was_active=1; fi
         database_replaced=0
+        recovery_dir=''
+        journals=(-wal -shm -journal)
         rollback_failed() {
             local status="$1"
             trap - ERR
-            if (( database_replaced )) && ! mv -fT -- "$retained_db" "$database_path"; then
-                echo "Could not put back the running database. It is preserved at $retained_db." >&2
-                exit "$status"
+            local suffix
+            if [[ -n "$recovery_dir" ]]; then
+                if (( database_replaced )); then
+                    if [[ -e "$recovery_dir/database" ]]; then
+                        mv -fT -- "$recovery_dir/database" "$database_path" || {
+                            echo "Could not restore pre-rollback files from $recovery_dir." >&2
+                            exit "$status"
+                        }
+                    else
+                        rm -f -- "$database_path" || exit "$status"
+                    fi
+                fi
+                for suffix in "${journals[@]}"; do
+                    if [[ -e "$recovery_dir/database$suffix" ]]; then
+                        mv -fT -- "$recovery_dir/database$suffix" "$database_path$suffix" || {
+                            echo "Could not restore the SQLite journal from $recovery_dir." >&2
+                            exit "$status"
+                        }
+                    fi
+                done
             fi
             if (( was_active )); then systemctl start "$service" || true; fi
             exit "$status"
         }
         trap 'rollback_failed $?' ERR
         systemctl stop "$service"
-        prepare_database "$bin" "$database_path"
-        if [[ ! "$database_path" -ef "$retained_db" ]]; then
-            ln -- "$database_path" "$retained_db"
+        # Preserve the failed database and its journals without opening it.
+        # A broken database or binary must not block restoring a known-good pair.
+        recovery_dir="$(mktemp -d -- "$database_path.before-rollback.$deploy_id.XXXXXX")"
+        if [[ -e "$database_path" ]]; then
+            ln -- "$database_path" "$recovery_dir/database"
         fi
-        sync -- "$(dirname "$database_path")"
+        for suffix in "${journals[@]}"; do
+            if [[ -e "$database_path$suffix" ]]; then
+                mv -T -- "$database_path$suffix" "$recovery_dir/database$suffix"
+            fi
+        done
+        sync -- "$recovery_dir" "$(dirname "$database_path")"
         mv -fT -- "$restored_db" "$database_path"
         database_replaced=1
         mv -fT -- "$restored_bin" "$bin"
         trap - ERR
+        release_database_guard
         systemctl restart "$service"
         wait_for_health
-        echo "Rollback completed: $backup"
+        echo "Rollback completed: $backup. Pre-rollback database preserved at $recovery_dir"
+        ;;
+    finalize)
+        release_database_guard
         ;;
     *) exit 2 ;;
 esac
@@ -243,6 +288,7 @@ for server in "${servers[@]}"; do
         remote_run rollback || { echo "ROLLBACK FAILED on $SERVER_ID; manual attention required." >&2; exit 1; }
         exit 1
     fi
+    remote_run finalize
     echo "SUCCESS: $SERVER_ID $PUBLIC_URL SHA256=$BIN_SHA"
 done
 echo 'Deployment completed on all requested servers.'

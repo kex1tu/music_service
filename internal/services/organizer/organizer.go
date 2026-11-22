@@ -418,23 +418,32 @@ func (s *Service) resolveTrackSource(sourceDir, path string) (string, *sandbox.P
 
 	if isStaging(sourceDir) || isStaging(path) || (len(sourceDir) == 36 && strings.Contains(sourceDir, "-")) {
 		cleanPath := strings.TrimPrefix(strings.TrimPrefix(path, "tmp_downloads/"), "tmp/")
-		return regularTrackPath(s.tmpSandbox, cleanPath)
+		return stagedTrackPath(s.tmpSandbox, cleanPath)
 	}
 
 	// Older import clients send a bare job directory and relative staging paths.
 	if s.tmpSandbox != nil {
-		if full, source, err := regularTrackPath(s.tmpSandbox, path); err == nil {
+		if full, source, err := stagedTrackPath(s.tmpSandbox, path); err == nil {
 			return full, source, nil
 		}
 	}
 	return regularTrackPath(s.musicSandbox, path)
 }
 
-func regularTrackPath(source *sandbox.PathSandbox, path string) (string, *sandbox.PathSandbox, error) {
+// Queue paths are literal; older import clients may still send URL-encoded names.
+func stagedTrackPath(source *sandbox.PathSandbox, path string) (string, *sandbox.PathSandbox, error) {
+	full, sb, err := regularTrackPath(source, path, sandbox.LiteralPath)
+	if !errors.Is(err, os.ErrNotExist) {
+		return full, sb, err
+	}
+	return regularTrackPath(source, path)
+}
+
+func regularTrackPath(source *sandbox.PathSandbox, path string, syntax ...sandbox.PathSyntax) (string, *sandbox.PathSandbox, error) {
 	if source == nil {
 		return "", nil, fmt.Errorf("source sandbox not configured")
 	}
-	full, err := source.Resolve(path, false)
+	full, err := source.Resolve(path, false, syntax...)
 	if err != nil {
 		return "", nil, err
 	}

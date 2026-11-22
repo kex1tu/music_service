@@ -49,6 +49,10 @@ func main() {
 		log.Fatalf("[Main] Configuration error: %v", err)
 	}
 
+	if err := config.CheckDeployDatabase(cfg.DatabasePath); err != nil {
+		log.Fatalf("[Main] Deployment database check: %v", err)
+	}
+
 	if err := mediaexec.ValidateRuntime(); err != nil {
 		log.Printf("[Main] Downloads requiring yt-dlp are unavailable: %v", err)
 	}

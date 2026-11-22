@@ -109,10 +109,10 @@ func TestRedownloadPartialConfirmAndRebuild(t *testing.T) {
 	const newURL = "https://soundcloud.com/artist/first"
 	mp3 := env.CreateDummyMP3WithTags(first, id3.TrackTags{
 		Title: "First", Artist: "Artist", AlbumArtist: "Artist", Album: "Album",
-		TrackNumber: 1, DiscNumber: 1, DiscTotal: 2, SourceURL: oldURL,
+		Year: 1999, TrackNumber: 1, DiscNumber: 1, DiscTotal: 2, SourceURL: oldURL,
 	}, nil)
 	env.CreateDummyMP3WithTags(second, id3.TrackTags{Title: "Second", Artist: "Artist", Album: "Album",
-		AlbumArtist: "Artist", TrackNumber: 1, DiscNumber: 2, DiscTotal: 2, SourceURL: oldURL}, nil)
+		AlbumArtist: "Artist", Year: 1999, TrackNumber: 1, DiscNumber: 2, DiscTotal: 2, SourceURL: oldURL}, nil)
 	lyricsPath := filepath.Join(filepath.Dir(mp3), "01. First.lrc")
 	if err := safefs.WriteFile(lyricsPath, []byte("[00:01.00]original"), 0600); err != nil {
 		t.Fatal(err)
@@ -139,6 +139,10 @@ func TestRedownloadPartialConfirmAndRebuild(t *testing.T) {
 	job, ok := queue.GetJob(response.JobID)
 	if !ok || len(job.Snapshot().Tracks) != 3 || job.Snapshot().Status != downloader.StatusWaitingSource {
 		t.Fatalf("unexpected release queue: %+v", job)
+	}
+	missingYear := job.Snapshot().Tracks[2].Year
+	if missingYear == nil || *missingYear != 1999 {
+		t.Fatalf("missing track has wrong edition year: %v", missingYear)
 	}
 	staged := filepath.Join(job.ID, "converted", "First.mp3")
 	if _, err := testkit.CreateDummyMP3WithTags(env.TmpSandbox, staged,
@@ -185,7 +189,7 @@ func TestRedownloadPartialConfirmAndRebuild(t *testing.T) {
 		staged := filepath.Join(job.ID, "converted", title+".mp3")
 		if _, err := testkit.CreateDummyMP3WithTags(env.TmpSandbox, staged, id3.TrackTags{
 			Title: title, Artist: "Artist", AlbumArtist: "Artist", Album: "Album",
-			TrackNumber: i + 1, DiscNumber: 2, DiscTotal: 2, SourceURL: newURL,
+			TrackNumber: i + 1, DiscNumber: 2, DiscTotal: 2, SourceURL: newURL, Year: *missingYear,
 		}, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -198,6 +202,10 @@ func TestRedownloadPartialConfirmAndRebuild(t *testing.T) {
 	const missing = "Album/CD2/02. Missing.mp3"
 	if err != nil || len(results) != 2 || results[0].Error == "" || results[1].Path != missing || results[1].Error != "" {
 		t.Fatalf("expected a conflict for edited original and successful missing track: %+v, %v", results, err)
+	}
+	var year int
+	if err := env.DB.Conn().QueryRow("SELECT year FROM albums WHERE id = ?", albumID).Scan(&year); err != nil || year != 1999 {
+		t.Fatalf("import changed release year: %d, %v", year, err)
 	}
 	var presentCount int
 	if err := env.DB.Conn().QueryRow("SELECT present_tracks_count FROM albums WHERE id = ?", albumID).Scan(&presentCount); err != nil || presentCount != 3 {

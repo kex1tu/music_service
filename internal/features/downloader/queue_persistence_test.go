@@ -11,8 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
+	"music-manager/internal/id3"
+	"music-manager/internal/services/organizer"
 	"music-manager/internal/services/resolver"
 	"music-manager/internal/testkit"
 )
@@ -327,8 +330,16 @@ func TestQueueRecoversLegacyStagedAudio(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rel := "legacy/converted/song.mp3"
-	if _, err := testkit.CreateDummyMP3(sb, rel, "Song", "Artist", "Album"); err != nil {
+	const rel = "legacy/converted/Song%20Mix.mp3"
+	plain, err := testkit.CreateDummyMP3(sb, "legacy/converted/Song Mix.mp3", "Song", "Artist", "Album")
+	if err != nil {
+		t.Fatal(err)
+	}
+	literal, err := sb.Resolve(rel, false, sandbox.LiteralPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := safefs.Rename(plain, literal); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Conn().ExecContext(ctx, `INSERT INTO download_jobs(id,status,source,url,total_tracks)
@@ -349,6 +360,15 @@ func TestQueueRecoversLegacyStagedAudio(t *testing.T) {
 	}
 	if _, err := svc.RetryJob(ctx, "legacy"); err == nil {
 		t.Fatal("retry was allowed to remove recovered media")
+	}
+	music, err := sandbox.NewPathSandbox(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := organizer.NewService(music, sb).MoveAlbum("legacy", "Album", "Artist",
+		[]id3.TrackTags{{Path: *job.Tracks[0].ConvertedPath, Title: "Song", Artist: "Artist", TrackNumber: 1}}, "")
+	if err != nil || !result.Complete() || len(result.Tracks) != 1 {
+		t.Fatalf("could not import literal staged path: %+v, %v", result, err)
 	}
 }
 

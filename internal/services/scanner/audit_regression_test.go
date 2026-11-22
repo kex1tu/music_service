@@ -94,7 +94,7 @@ func TestFullScanPreservesCatalogWithoutAlbumArtistTags(t *testing.T) {
 		{"Album/02.mp3", "Second", "Bob"},
 	} {
 		env.CreateDummyMP3WithTags(track.path, id3.TrackTags{
-			Title: track.title, Artist: track.artist, Album: "Album", TrackNumber: i + 1,
+			Title: track.title, Artist: track.artist, Album: "Album", TrackNumber: i + 1, Year: 2000 + i,
 		}, nil)
 		catalog = append(catalog, db.CatalogTrack{
 			BackfillSelection: db.BackfillSelection{TrackPosition: db.ReleasePosition(1, i+1)},
@@ -111,14 +111,18 @@ func TestFullScanPreservesCatalogWithoutAlbumArtistTags(t *testing.T) {
 	if matched, err := db.VerifyCatalog(ctx, env.DB.Conn(), id, "42", catalog); err != nil || len(matched) != 2 {
 		t.Fatalf("verify catalog: %v, %v", matched, err)
 	}
+	var catalogRevision int
+	if err := env.DB.Conn().QueryRow("SELECT catalog_revision FROM albums WHERE id = ?", id).Scan(&catalogRevision); err != nil {
+		t.Fatal(err)
+	}
 	if n, err := scan.ScanAll(ctx); err != nil || n != 2 {
 		t.Fatalf("rescan: indexed %d tracks: %v", n, err)
 	}
 	var deezerID string
-	var revision, count int
-	if err := env.DB.Conn().QueryRow(`SELECT COALESCE(deezer_id, ''), catalog_revision,
+	var revision, count, year int
+	if err := env.DB.Conn().QueryRow(`SELECT COALESCE(deezer_id, ''), catalog_revision, year,
 		(SELECT COUNT(*) FROM release_tracklist WHERE album_id = albums.id) FROM albums WHERE id = ?`, id).
-		Scan(&deezerID, &revision, &count); err != nil || deezerID != "42" || revision != 1 || count != 2 {
-		t.Fatalf("unchanged files lost catalog: Deezer %q, revision %d, positions %d: %v", deezerID, revision, count, err)
+		Scan(&deezerID, &revision, &year, &count); err != nil || deezerID != "42" || revision != catalogRevision || count != 2 || year != 2001 {
+		t.Fatalf("unchanged files changed catalog: Deezer %q, revision %d, year %d, positions %d: %v", deezerID, revision, year, count, err)
 	}
 }
