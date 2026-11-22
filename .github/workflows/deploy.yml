@@ -35,6 +35,12 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
+      - name: Install FFmpeg and FFprobe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffprobe -version
+
       - name: Run unit tests
         env:
           GOTOOLCHAIN: auto
