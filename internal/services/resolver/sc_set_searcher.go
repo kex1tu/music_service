@@ -313,7 +313,8 @@ func (s *SoundCloudSetSearcher) ParseOutputBytes(data []byte, sourceURL string) 
 		return nil, fmt.Errorf("не найдено треков в выводе yt-dlp для %s", sourceURL)
 	}
 
-	isSoundCloud := strings.Contains(sourceURL, "soundcloud.com")
+	source, _ := (&SourceResolver{}).DetectSource(sourceURL)
+	isSoundCloud := source == "soundcloud"
 	playlistTitle := entries[0].PlaylistTitle
 	if playlistTitle == "" {
 		playlistTitle = entries[0].Playlist
@@ -345,12 +346,16 @@ func (s *SoundCloudSetSearcher) ParseOutputBytes(data []byte, sourceURL string) 
 		if directURL == "" {
 			directURL = e.URL
 		}
-		if directURL == "" && e.ID != "" && strings.Contains(sourceURL, "youtube") {
-			directURL = fmt.Sprintf("https://music.youtube.com/watch?v=%s", e.ID)
+		videoID := ""
+		if source == "youtube" {
+			videoID = e.ID
+			if directURL == videoID {
+				directURL = ""
+			}
 		}
 
 		tracks = append(tracks, AlbumTrackCandidate{
-			VideoID:   e.ID,
+			VideoID:   videoID,
 			DirectURL: directURL,
 			Title:     tit,
 			Artist:    art,
@@ -669,9 +674,20 @@ func (s *SoundCloudSetSearcher) convertAlbumToCandidate(album scAPIAlbumItem, hy
 
 	for idx, tr := range album.Tracks {
 		fullTrack := tr
-		if fullTrack.Title == "" && hydrated != nil {
+		if (fullTrack.Title == "" || fullTrack.PermalinkURL == "" || fullTrack.User.Username == "") && hydrated != nil {
 			if h, ok := hydrated[fullTrack.ID]; ok {
-				fullTrack = h
+				if h.Title != "" {
+					fullTrack.Title = h.Title
+				}
+				if h.PermalinkURL != "" {
+					fullTrack.PermalinkURL = h.PermalinkURL
+				}
+				if h.User.Username != "" {
+					fullTrack.User = h.User
+				}
+				if h.Duration > 0 {
+					fullTrack.Duration = h.Duration
+				}
 			}
 		}
 
@@ -679,7 +695,7 @@ func (s *SoundCloudSetSearcher) convertAlbumToCandidate(album scAPIAlbumItem, hy
 			continue
 		}
 
-		art, tit := ParseSoundCloudTitle(fullTrack.Title, uploader)
+		art, tit := ParseSoundCloudTitle(fullTrack.Title, fullTrack.User.Username)
 		if firstArtist == "" && art != "" && art != "Unknown Artist" {
 			firstArtist = art
 		}
@@ -688,7 +704,6 @@ func (s *SoundCloudSetSearcher) convertAlbumToCandidate(album scAPIAlbumItem, hy
 		directURL := fullTrack.PermalinkURL
 
 		tracks = append(tracks, AlbumTrackCandidate{
-			VideoID:   strconv.FormatInt(fullTrack.ID, 10),
 			DirectURL: directURL,
 			Title:     tit,
 			Artist:    art,
@@ -848,7 +863,7 @@ func (s *SoundCloudSetSearcher) SearchSetsAPIPaged(ctx context.Context, query st
 	seenIDs := make(map[int64]bool)
 	for _, it := range allItems {
 		for _, tr := range it.Tracks {
-			if tr.Title == "" && tr.ID > 0 && !seenIDs[tr.ID] {
+			if (tr.Title == "" || tr.PermalinkURL == "" || tr.User.Username == "") && tr.ID > 0 && !seenIDs[tr.ID] {
 				seenIDs[tr.ID] = true
 				stubIDs = append(stubIDs, tr.ID)
 			}

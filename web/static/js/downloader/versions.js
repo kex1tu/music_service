@@ -116,6 +116,13 @@ window.DownloaderVersions = {
                     badgeClass: 'bg-surface-elevated text-content-muted border border-surface-border',
                     dotClass: 'bg-gray-400',
                 };
+            case 'auto_release':
+                return {
+                    label: 'Автовыбор релиза',
+                    tooltip: 'Источник назначен по метаданным дорожки в найденном релизе',
+                    badgeClass: 'bg-surface-elevated text-content-secondary border border-surface-border',
+                    dotClass: 'bg-brand',
+                };
             case 'manual':
                 return {
                     label: 'Ручной выбор',

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -523,6 +524,9 @@ func TestStress_CreateDummyMP3WithTags_ExtendedAndOverwriting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// The ID3 reads locate the sandbox through a weak registry reference.
+	defer runtime.KeepAlive(sb)
 
 	relPath := "Electronic/Daft Punk/01. Around the World.mp3"
 

@@ -24,14 +24,14 @@ func TestFullReleaseMatcher_MatchTracklists_Perfect(t *testing.T) {
 	}
 
 	candTracks := []AlbumTrackCandidate{
-		{VideoID: "v1", Title: "Банкомат", Duration: 200, Index: 1},
-		{VideoID: "v2", Title: "Красный свет", Duration: 198, Index: 2},
-		{VideoID: "v3", Title: "Самолёт", Duration: 182, Index: 3},
-		{VideoID: "v4", Title: "Без шансов", Duration: 214, Index: 4},
-		{VideoID: "v5", Title: "Beauty Queen", Duration: 206, Index: 5},
-		{VideoID: "v6", Title: "VIP CLUB", Duration: 151, Index: 6},
-		{VideoID: "v7", Title: "Всего лишь друг", Duration: 209, Index: 7},
-		{VideoID: "v8", Title: "Мираж", Duration: 199, Index: 8},
+		{VideoID: "v1", Title: "Банкомат", Artist: "DEAD BLONDE", Duration: 200, Index: 1},
+		{VideoID: "v2", Title: "Красный свет", Artist: "DEAD BLONDE", Duration: 198, Index: 2},
+		{VideoID: "v3", Title: "Самолёт", Artist: "DEAD BLONDE", Duration: 182, Index: 3},
+		{VideoID: "v4", Title: "Без шансов", Artist: "DEAD BLONDE", Duration: 214, Index: 4},
+		{VideoID: "v5", Title: "Beauty Queen", Artist: "DEAD BLONDE", Duration: 206, Index: 5},
+		{VideoID: "v6", Title: "VIP CLUB", Artist: "DEAD BLONDE", Duration: 151, Index: 6},
+		{VideoID: "v7", Title: "Всего лишь друг", Artist: "DEAD BLONDE", Duration: 209, Index: 7},
+		{VideoID: "v8", Title: "Мираж", Artist: "DEAD BLONDE", Duration: 199, Index: 8},
 	}
 
 	urls, matched := matcher.MatchTracklists(targetTracks, candTracks)
@@ -66,13 +66,13 @@ func TestFullReleaseMatcher_IntroOrBonusMissing_Threshold85(t *testing.T) {
 
 	// Candidate missing Intro, but has 7 remaining tracks (7/8 = 87.5% >= 85%)
 	candTracks := []AlbumTrackCandidate{
-		{VideoID: "v2", Title: "Банкомат", Duration: 201, Index: 1}, // 1 sec delta
-		{VideoID: "v3", Title: "Красный свет", Duration: 198, Index: 2},
-		{VideoID: "v4", Title: "Самолёт", Duration: 183, Index: 3}, // 1 sec delta
-		{VideoID: "v5", Title: "Без шансов", Duration: 214, Index: 4},
-		{VideoID: "v6", Title: "Beauty Queen (Explicit)", Duration: 206, Index: 5},
-		{VideoID: "v7", Title: "VIP CLUB", Duration: 151, Index: 6},
-		{VideoID: "v8", Title: "Всего лишь друг", Duration: 208, Index: 7},
+		{VideoID: "v2", Title: "Банкомат", Artist: "DEAD BLONDE", Duration: 201, Index: 1}, // 1 sec delta
+		{VideoID: "v3", Title: "Красный свет", Artist: "DEAD BLONDE", Duration: 198, Index: 2},
+		{VideoID: "v4", Title: "Самолёт", Artist: "DEAD BLONDE", Duration: 183, Index: 3}, // 1 sec delta
+		{VideoID: "v5", Title: "Без шансов", Artist: "DEAD BLONDE", Duration: 214, Index: 4},
+		{VideoID: "v6", Title: "Beauty Queen (Explicit)", Artist: "DEAD BLONDE", Duration: 206, Index: 5},
+		{VideoID: "v7", Title: "VIP CLUB", Artist: "DEAD BLONDE", Duration: 151, Index: 6},
+		{VideoID: "v8", Title: "Всего лишь друг", Artist: "DEAD BLONDE", Duration: 208, Index: 7},
 	}
 
 	urls, matched := matcher.MatchTracklists(targetTracks, candTracks)
@@ -108,11 +108,11 @@ func TestFullReleaseMatcher_RejectWrongAlbum(t *testing.T) {
 
 	// Candidate compilation with completely different songs except 1
 	candTracks := []AlbumTrackCandidate{
-		{VideoID: "v_other_1", Title: "Другая песня 1", Duration: 200, Index: 1},
-		{VideoID: "v_other_2", Title: "Другая песня 2", Duration: 198, Index: 2},
-		{VideoID: "v_other_3", Title: "Другая песня 3", Duration: 182, Index: 3},
-		{VideoID: "v1", Title: "Банкомат", Duration: 200, Index: 4},
-		{VideoID: "v_other_5", Title: "Другая песня 5", Duration: 206, Index: 5},
+		{VideoID: "v_other_1", Title: "Другая песня 1", Artist: "DEAD BLONDE", Duration: 200, Index: 1},
+		{VideoID: "v_other_2", Title: "Другая песня 2", Artist: "DEAD BLONDE", Duration: 198, Index: 2},
+		{VideoID: "v_other_3", Title: "Другая песня 3", Artist: "DEAD BLONDE", Duration: 182, Index: 3},
+		{VideoID: "v1", Title: "Банкомат", Artist: "DEAD BLONDE", Duration: 200, Index: 4},
+		{VideoID: "v_other_5", Title: "Другая песня 5", Artist: "DEAD BLONDE", Duration: 206, Index: 5},
 	}
 
 	_, matched := matcher.MatchTracklists(targetTracks, candTracks)
@@ -135,7 +135,7 @@ func TestFullReleaseMatcher_DurationMismatchReject(t *testing.T) {
 
 	// Candidate has same title but slowed version (250s, delta 50s > 12s)
 	candTracks := []AlbumTrackCandidate{
-		{VideoID: "v1_slow", Title: "Банкомат", Duration: 250, Index: 1},
+		{VideoID: "v1_slow", Title: "Банкомат", Artist: "DEAD BLONDE", Duration: 250, Index: 1},
 	}
 
 	_, matched := matcher.MatchTracklists(targetTracks, candTracks)
@@ -225,6 +225,7 @@ func TestFullReleaseMatcher_MatchFullRelease_Success(t *testing.T) {
 											{
 												"musicResponsiveListItemRenderer": {
 													"playlistItemData": {"videoId": "v1"},
+												"badges": [{"musicInlineBadgeRenderer": {"icon": {"iconType": "MUSIC_EXPLICIT_BADGE"}}}],
 													"flexColumns": [
 														{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Банкомат"}]}}},
 														{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "DEAD BLONDE"}]}}}
@@ -261,7 +262,7 @@ func TestFullReleaseMatcher_MatchFullRelease_Success(t *testing.T) {
 	matcher := NewFullReleaseMatcher(ytClient)
 
 	targetTracks := []ResolvedTrack{
-		{TrackID: "dz_1", TrackNumber: 1, Title: "Банкомат", Artist: "DEAD BLONDE", Duration: 200},
+		{TrackID: "dz_1", TrackNumber: 1, Title: "Банкомат", Artist: "DEAD BLONDE", Duration: 200, VersionClaim: "uncensored"},
 		{TrackID: "dz_2", TrackNumber: 2, Title: "Красный свет", Artist: "DEAD BLONDE", Duration: 198},
 	}
 
@@ -366,14 +367,14 @@ func TestFullReleaseMatcher_SearchReleaseCandidates(t *testing.T) {
 											{
 												"musicResponsiveListItemRenderer": {
 													"playlistItemData": {"videoId": "v1"},
-													"flexColumns": [{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Банкомат"}]}}}],
+													"flexColumns": [{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Банкомат"}]}}},{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"DEAD BLONDE"}]}}}],
 													"fixedColumns": [{"musicResponsiveListItemFixedColumnRenderer": {"text": {"runs": [{"text": "3:20"}]}}}]
 												}
 											},
 											{
 												"musicResponsiveListItemRenderer": {
 													"playlistItemData": {"videoId": "v2"},
-													"flexColumns": [{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Красный свет"}]}}}],
+													"flexColumns": [{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Красный свет"}]}}},{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"DEAD BLONDE"}]}}}],
 													"fixedColumns": [{"musicResponsiveListItemFixedColumnRenderer": {"text": {"runs": [{"text": "3:18"}]}}}]
 												}
 											}
@@ -417,7 +418,7 @@ func TestFullReleaseMatcher_SearchReleaseCandidates(t *testing.T) {
 		t.Errorf("candidate matched count = %d, want 2", first.MatchedCount)
 	}
 	if first.CensorStatus != "unknown" {
-		t.Errorf("candidate censor status = %q, want 'red_flag' for Cyrillic official release", first.CensorStatus)
+		t.Errorf("candidate censor status = %q, want 'unknown'", first.CensorStatus)
 	}
 	if first.TrackMapping[0] != "https://music.youtube.com/watch?v=v1" {
 		t.Errorf("track mapping 0 = %q, want v1", first.TrackMapping[0])
@@ -425,7 +426,7 @@ func TestFullReleaseMatcher_SearchReleaseCandidates(t *testing.T) {
 }
 
 func TestFullReleaseMatcher_CensorshipRanking_SoundCloudVsYTM(t *testing.T) {
-	// 1. Тест для русского артиста: SoundCloud должен быть #1, YTM #2 с бейджем цензуры
+	// При одинаковом треклисте площадка и язык не подтверждают версию.
 	mockYTM := &YouTubeMusicClient{} // пустой, заменим mock-сервером
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -434,7 +435,7 @@ func TestFullReleaseMatcher_CensorshipRanking_SoundCloudVsYTM(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/youtubei/v1/browse" {
-			w.Write([]byte(`{"contents":{"twoColumnBrowseResultsRenderer":{"secondaryContents":{"sectionListRenderer":{"contents":[{"musicShelfRenderer":{"contents":[{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"ytm_1"},"flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Банкомат"}]}}}],"fixedColumns":[{"musicResponsiveListItemFixedColumnRenderer":{"text":{"runs":[{"text":"3:20"}]}}}]}}]}}]}}}}}`))
+			w.Write([]byte(`{"contents":{"twoColumnBrowseResultsRenderer":{"secondaryContents":{"sectionListRenderer":{"contents":[{"musicShelfRenderer":{"contents":[{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"ytm_1"},"flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Банкомат"}]}}},{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"DEAD BLONDE"}]}}}],"fixedColumns":[{"musicResponsiveListItemFixedColumnRenderer":{"text":{"runs":[{"text":"3:20"}]}}}]}}]}}]}}}}}`))
 			return
 		}
 	}))
@@ -477,22 +478,22 @@ func TestFullReleaseMatcher_CensorshipRanking_SoundCloudVsYTM(t *testing.T) {
 	if len(candsRU) < 2 {
 		t.Fatalf("expected at least 2 candidates, got %d", len(candsRU))
 	}
-	// Первым должен быть SoundCloud с бейджем рекомендовано
+	// При равном скоринге порядок определяется URL.
 	if candsRU[0].Source != "ytmusic_album" {
-		t.Errorf("candidate 0 source = %q, want 'soundcloud_set'", candsRU[0].Source)
+		t.Errorf("candidate 0 source = %q, want 'ytmusic_album'", candsRU[0].Source)
 	}
 	if candsRU[0].CensorStatus != "unknown" {
-		t.Errorf("candidate 0 status = %q, want 'recommended'", candsRU[0].CensorStatus)
-	}
-	// Вторым должен быть YouTube Music с красным флагом возможной цензуры
-	if candsRU[1].Source != "soundcloud_set" {
-		t.Errorf("candidate 1 source = %q, want 'ytmusic_album'", candsRU[1].Source)
-	}
-	if candsRU[1].CensorStatus != "unknown" {
-		t.Errorf("candidate 1 status = %q, want 'red_flag'", candsRU[1].CensorStatus)
+		t.Errorf("candidate 0 status = %q, want 'unknown'", candsRU[0].CensorStatus)
 	}
 
-	// 2. Тест для зарубежного артиста (21 Savage): YouTube Music должен быть #1
+	if candsRU[1].Source != "soundcloud_set" {
+		t.Errorf("candidate 1 source = %q, want 'soundcloud_set'", candsRU[1].Source)
+	}
+	if candsRU[1].CensorStatus != "unknown" {
+		t.Errorf("candidate 1 status = %q, want 'unknown'", candsRU[1].CensorStatus)
+	}
+
+	// То же правило для зарубежного артиста.
 	scSearcherForeign := NewSoundCloudSetSearcher("")
 	scSearcherForeign.SetCustomSearchFunc(func(ctx context.Context, artist, album string, limit int) ([]AlbumReleaseCandidate, error) {
 		return []AlbumReleaseCandidate{
@@ -515,7 +516,7 @@ func TestFullReleaseMatcher_CensorshipRanking_SoundCloudVsYTM(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/youtubei/v1/browse" {
-			w.Write([]byte(`{"contents":{"twoColumnBrowseResultsRenderer":{"secondaryContents":{"sectionListRenderer":{"contents":[{"musicShelfRenderer":{"contents":[{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"yt_runnin"},"flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Runnin"}]}}}],"fixedColumns":[{"musicResponsiveListItemFixedColumnRenderer":{"text":{"runs":[{"text":"3:15"}]}}}]}}]}}]}}}}}`))
+			w.Write([]byte(`{"contents":{"twoColumnBrowseResultsRenderer":{"secondaryContents":{"sectionListRenderer":{"contents":[{"musicShelfRenderer":{"contents":[{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"yt_runnin"},"flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Runnin"}]}}},{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"21 Savage"}]}}}],"fixedColumns":[{"musicResponsiveListItemFixedColumnRenderer":{"text":{"runs":[{"text":"3:15"}]}}}]}}]}}]}}}}}`))
 			return
 		}
 	}))
@@ -541,7 +542,7 @@ func TestFullReleaseMatcher_CensorshipRanking_SoundCloudVsYTM(t *testing.T) {
 		t.Errorf("EN candidate 0 source = %q, want 'ytmusic_album'", candsEN[0].Source)
 	}
 	if candsEN[0].CensorStatus != "unknown" {
-		t.Errorf("EN candidate 0 status = %q, want 'recommended'", candsEN[0].CensorStatus)
+		t.Errorf("EN candidate 0 status = %q, want 'unknown'", candsEN[0].CensorStatus)
 	}
 	// Вторым должен быть SoundCloud
 	if candsEN[1].Source != "soundcloud_set" {
@@ -669,7 +670,7 @@ func TestKishlak_SbornikHuyniIKartinki_FullAlbumCandidateMatching(t *testing.T) 
 		t.Errorf("top candidate score = %d, want 95", topCand.Score)
 	}
 	if topCand.CensorStatus != "unknown" {
-		t.Errorf("top candidate censor status = %q, want 'recommended'", topCand.CensorStatus)
+		t.Errorf("top candidate censor status = %q, want 'unknown'", topCand.CensorStatus)
 	}
 	if topCand.CensorBadge != "Цензура не проверена" {
 		t.Errorf("top candidate badge = %q, want '⭐ SoundCloud (оригинал без цензуры)'", topCand.CensorBadge)
@@ -690,7 +691,7 @@ func TestKishlak_SbornikHuyniIKartinki_FullAlbumCandidateMatching(t *testing.T) 
 		t.Errorf("last candidate score = %d, want 30", lastCand.Score)
 	}
 	if lastCand.CensorStatus != "unknown" {
-		t.Errorf("last candidate censor status = %q, want 'red_flag'", lastCand.CensorStatus)
+		t.Errorf("last candidate censor status = %q, want 'unknown'", lastCand.CensorStatus)
 	}
 	if lastCand.CensorBadge != "Цензура не проверена" {
 		t.Errorf("last candidate badge = %q, want '🚩 Офиц. релиз (возможна цензура)'", lastCand.CensorBadge)

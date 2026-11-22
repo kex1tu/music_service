@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"music-manager/internal/db"
 	"music-manager/internal/services/censorcheck"
@@ -53,6 +54,7 @@ type AudioQualityTelemetry struct {
 
 // ResolvedTrack defines the standardized track model across all sources.
 type ResolvedTrack struct {
+	VersionClaim     string                        `json:"version_claim,omitempty"`
 	VersionPolicy    VersionPolicy                 `json:"version_policy,omitempty"`
 	TrackID          string                        `json:"track_id"`
 	CatalogTrackID   string                        `json:"catalog_track_id,omitempty"`
@@ -306,4 +308,41 @@ func (r *SourceResolver) FullReleaseMatcher() *FullReleaseMatcher {
 // MatchFullRelease ищет цельный официальный релиз на YouTube Music и сопоставляет треклист.
 func (r *SourceResolver) MatchFullRelease(ctx context.Context, targetArtist, targetAlbum string, targetTracks []ResolvedTrack) (*FullReleaseMatchResult, error) {
 	return r.FullReleaseMatcher().MatchFullRelease(ctx, targetArtist, targetAlbum, targetTracks)
+}
+
+// AutoSelectRelease searches for a sufficiently evidenced source for a catalog release.
+func (r *SourceResolver) AutoSelectRelease(ctx context.Context, artist, album string, tracks []ResolvedTrack) (*ReleaseCandidateItem, error) {
+	return r.FullReleaseMatcher().AutoSelectRelease(ctx, artist, album, tracks)
+}
+
+// AutoReleaseVersionStatus identifies a source chosen for a catalog release.
+const AutoReleaseVersionStatus = "auto_release"
+
+// BindAutomaticRelease assigns links from a single release to unbound catalog tracks.
+func (r *SourceResolver) BindAutomaticRelease(ctx context.Context, rawURL string, meta *ReleaseMetadata, tracks []ResolvedTrack) (*ReleaseCandidateItem, error) {
+	if r == nil || meta == nil || meta.IsPlaylist || len(tracks) == 0 {
+		return nil, nil
+	}
+	source, err := r.DetectSource(rawURL)
+	if err != nil || (source != "deezer" && source != "yandex") {
+		return nil, nil
+	}
+	for _, track := range tracks {
+		if track.AudioSourceURL != "" || track.VersionStatus == "manual" || track.VersionStatus == AutoReleaseVersionStatus {
+			return nil, nil
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	match, err := r.AutoSelectRelease(ctx, meta.AlbumArtist, meta.AlbumTitle, tracks)
+	if match == nil || err != nil {
+		return nil, err
+	}
+	for idx, audioURL := range match.TrackMapping {
+		track := &tracks[idx]
+		track.AudioSourceURL = audioURL
+		track.VersionStatus = AutoReleaseVersionStatus
+		track.MatchScore = float64(match.TrackEvaluations[idx].Score)
+	}
+	return match, nil
 }

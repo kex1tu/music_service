@@ -399,12 +399,13 @@ func parseYtResponsiveListItem(r ytResponsiveListItem, addTrack func(YtMusicTrac
 
 // AlbumTrackCandidate представляет трек официального альбома YouTube Music или SoundCloud сета.
 type AlbumTrackCandidate struct {
-	VideoID   string `json:"video_id"`
-	DirectURL string `json:"direct_url,omitempty"`
-	Title     string `json:"title"`
-	Artist    string `json:"artist"`
-	Duration  int    `json:"duration"` // в секундах
-	Index     int    `json:"index"`
+	VideoID      string `json:"video_id"`
+	DirectURL    string `json:"direct_url,omitempty"`
+	Title        string `json:"title"`
+	Artist       string `json:"artist"`
+	Duration     int    `json:"duration"` // в секундах
+	Index        int    `json:"index"`
+	VersionClaim string `json:"version_claim,omitempty"`
 }
 
 // AlbumReleaseCandidate представляет метаданные найденного альбома и его треклист.
@@ -833,6 +834,13 @@ func (c *YouTubeMusicClient) GetAlbumReleaseTracks(ctx context.Context, browseID
 	for _, item := range rawItems {
 		var trItem struct {
 			MusicResponsiveListItemRenderer struct {
+				Badges []struct {
+					MusicInlineBadgeRenderer struct {
+						Icon struct {
+							IconType string `json:"iconType"`
+						} `json:"icon"`
+					} `json:"musicInlineBadgeRenderer"`
+				} `json:"badges"`
 				PlaylistItemData *struct {
 					VideoId string `json:"videoId"`
 				} `json:"playlistItemData"`
@@ -901,15 +909,20 @@ func (c *YouTubeMusicClient) GetAlbumReleaseTracks(ctx context.Context, browseID
 			continue
 		}
 
-		cleanTit, _ := ExtractFeatFromText(tit)
-		cleanTit = CleanYouTubeVideoTitle(cleanTit)
-
+		versionClaim := ""
+		for _, badge := range rend.Badges {
+			if badge.MusicInlineBadgeRenderer.Icon.IconType == "MUSIC_EXPLICIT_BADGE" {
+				versionClaim = string(PolicyUncensored)
+				break
+			}
+		}
 		tracks = append(tracks, AlbumTrackCandidate{
-			VideoID:  vid,
-			Title:    cleanTit,
-			Artist:   art,
-			Duration: durSec,
-			Index:    len(tracks) + 1,
+			VideoID:      vid,
+			Title:        tit,
+			VersionClaim: versionClaim,
+			Artist:       art,
+			Duration:     durSec,
+			Index:        len(tracks) + 1,
 		})
 	}
 

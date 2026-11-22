@@ -3,38 +3,52 @@ package resolver
 import (
 	"fmt"
 	"math"
+	"net/url"
 	"strings"
 )
 
 func releaseTrackURL(c AlbumTrackCandidate) string {
-	if c.DirectURL != "" {
-		if IsAllowedURL(c.DirectURL) {
-			return c.DirectURL
+	raw := c.DirectURL
+	if raw == "" && c.VideoID != "" {
+		if strings.HasPrefix(c.VideoID, "https://") || strings.HasPrefix(c.VideoID, "http://") {
+			raw = c.VideoID
+		} else {
+			raw = fmt.Sprintf("https://music.youtube.com/watch?v=%s", url.QueryEscape(c.VideoID))
 		}
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return ""
 	}
-	if strings.HasPrefix(c.VideoID, "https://") || strings.HasPrefix(c.VideoID, "http://") {
-		if IsAllowedURL(c.VideoID) {
-			return c.VideoID
-		}
+	source, err := (&SourceResolver{}).DetectSource(raw)
+	if err != nil {
 		return ""
 	}
-	if c.VideoID != "" {
-		return fmt.Sprintf("https://music.youtube.com/watch?v=%s", c.VideoID)
+	switch source {
+	case "youtube":
+		if u.Query().Get("v") != "" || (strings.EqualFold(u.Hostname(), "youtu.be") && strings.Trim(u.Path, "/") != "") {
+			return raw
+		}
+	case "soundcloud", "bandcamp":
+		return raw
 	}
 	return ""
 }
 
-// assignTracklists uses maximum-weight bipartite assignment with a private dummy
-// column for every target. No track is forced to match, or used twice by URL.
+const maxReleaseTargets, maxReleaseCandidates = 500, 1000
+
 func assignTracklists(targets []ResolvedTrack, candidates []AlbumTrackCandidate) (map[int]string, int) {
+	mapping, _, _, _ := evaluateTracklists(targets, candidates, PolicyRelease)
+	return mapping, len(mapping)
+}
+
+// evaluateTracklists retains the evidence used to assign each URL. Missing
+// credits or duration are suitable for browsing, but not for batch assignment.
+func evaluateTracklists(targets []ResolvedTrack, candidates []AlbumTrackCandidate, policy VersionPolicy) (map[int]string, map[int]MatchEvaluation, int, int) {
 	out := map[int]string{}
-	// The cubic assignment is intended for releases, not unbounded libraries.
-	if len(targets) > 500 || len(candidates) > 1000 {
-		return out, 0
-	}
-	if len(targets) == 0 {
-		return out, 0
+	evaluations := map[int]MatchEvaluation{}
+	if len(targets) == 0 || len(candidates) == 0 || len(targets) > maxReleaseTargets || len(candidates) > maxReleaseCandidates {
+		return out, evaluations, 0, 0
 	}
 	unique := []AlbumTrackCandidate{}
 	seen := map[string]bool{}
@@ -46,15 +60,47 @@ func assignTracklists(targets []ResolvedTrack, candidates []AlbumTrackCandidate)
 		seen[candidateKey(u)] = true
 		unique = append(unique, c)
 	}
+	if len(unique) == 0 {
+		return out, evaluations, 0, 0
+	}
 	n, m := len(targets), len(unique)+len(targets)
 	weights := make([][]float64, n)
+	eligible := make([]map[int]MatchEvaluation, n)
+	// In the global optimum, maximize eligible coverage first, then the number
+	// of requested versions, then metadata score. Even all lower-priority
+	// weights combined cannot outweigh one higher-priority unit.
+	versionWeight := n*100 + 1
+	matchWeight := (n + 1) * versionWeight
+	desired := make([]string, n)
 	for i, t := range targets {
+		desired[i] = desiredReleaseTrackClaim(t, policy)
 		weights[i] = make([]float64, m)
+		eligible[i] = make(map[int]MatchEvaluation)
+		targetArtist := artistSep.Split(t.Artist, -1)[0]
 		for j, c := range unique {
-			e := EvaluateTrack(t.Title, t.Artist, t.Duration, c.Title, c.Artist, c.Duration)
-			if e.Compatible && e.TitleSimilarity >= 0.65 {
-				weights[i][j] = float64(e.Score)
+			candidateArtist := artistSep.Split(CleanChannelName(c.Artist), -1)[0]
+			if !AreArtistsEquivalent(targetArtist, candidateArtist) {
+				continue
 			}
+			e := EvaluateTrack(t.Title, t.Artist, t.Duration, c.Title, c.Artist, c.Duration)
+			if !e.strongIdentity() {
+				continue
+			}
+			if (c.VersionClaim == "clean" || c.VersionClaim == "uncensored") && e.VersionClaim != c.VersionClaim {
+				if e.VersionClaim != "unknown" {
+					continue
+				}
+				e.VersionClaim = c.VersionClaim
+			}
+			weight := matchWeight + e.Score
+			if desired[i] != "unknown" && e.VersionClaim != "unknown" {
+				if e.VersionClaim != desired[i] {
+					continue
+				}
+				weight += versionWeight
+			}
+			eligible[i][j] = e
+			weights[i][j] = float64(weight)
 		}
 	}
 	// Rectangular Hungarian minimization, costs are negative match ratings.
@@ -108,10 +154,30 @@ func assignTracklists(targets []ResolvedTrack, candidates []AlbumTrackCandidate)
 			}
 		}
 	}
+	preferred, ambiguous := 0, 0
 	for j := 1; j <= len(unique); j++ {
 		if p[j] > 0 && weights[p[j]-1][j-1] > 0 {
-			out[p[j]-1] = releaseTrackURL(unique[j-1])
+			idx := p[j] - 1
+			e := eligible[idx][j-1]
+			evaluations[idx] = e
+			out[idx] = releaseTrackURL(unique[j-1])
+			if desired[idx] != "unknown" && e.VersionClaim == desired[idx] {
+				preferred++
+			}
+			for other, weight := range weights[idx][:len(unique)] {
+				if other != j-1 && weight > 0 && math.Abs(weight-weights[idx][j-1]) <= 2 {
+					ambiguous++
+					break
+				}
+			}
 		}
 	}
-	return out, len(out)
+	return out, evaluations, preferred, ambiguous
+}
+
+func desiredReleaseTrackClaim(track ResolvedTrack, policy VersionPolicy) string {
+	if policy == PolicyRelease && (track.VersionClaim == "uncensored" || track.VersionClaim == "clean") {
+		return track.VersionClaim
+	}
+	return desiredVersionClaim(track.Title, policy)
 }

@@ -231,8 +231,8 @@ document.addEventListener('alpine:init', () => {
             if (!candURL) {
                 return null;
             }
-            // Ищем трек кандидата по DirectURL или VideoID
-            return cand.tracks.find(t => (t.direct_url && t.direct_url === candURL) || (t.video_id && candURL.includes(t.video_id))) || null;
+            // Сервер возвращает тот же URL в дорожке и таблице сопоставления.
+            return cand.tracks.find(t => t.direct_url === candURL) || null;
         },
 
         getTrackDelta(targetDur, candDur) {
@@ -258,13 +258,18 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        selectableTracks() {
+            return this.currentCandidate()?.tracks?.filter(track => track.direct_url) || [];
+        },
+
         remapTrack(targetIdx, candTrack) {
+            if (!candTrack?.direct_url) return;
             this.manualOverrides[targetIdx] = candTrack;
             this.activeRemapTargetIdx = null;
         },
 
         clearTrackRemap(targetIdx) {
-            // Метка трека как намеренно исключенного из релиза (будет найден поштучно)
+            // Исключённый трек остаётся без назначенного источника.
             this.manualOverrides[targetIdx] = null;
             this.activeRemapTargetIdx = null;
         },
@@ -303,6 +308,7 @@ document.addEventListener('alpine:init', () => {
                         artist: this.artist,
                         album: this.album,
                         target_tracks: this.targetTracks,
+                        version_policy: this.versionPolicy,
                     }),
                 });
 
@@ -337,8 +343,8 @@ document.addEventListener('alpine:init', () => {
                 const trackMapping = {};
                 for (let i = 0; i < this.targetTracks.length; i++) {
                     const mapped = this.getMappedCandidateTrack(i);
-                    if (mapped) {
-                        trackMapping[i] = mapped.direct_url || (mapped.video_id ? `https://music.youtube.com/watch?v=${mapped.video_id}` : '');
+                    if (mapped?.direct_url) {
+                        trackMapping[i] = mapped.direct_url;
                     }
                 }
 

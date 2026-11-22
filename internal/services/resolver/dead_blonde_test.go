@@ -23,22 +23,22 @@ func TestDeadBlonde_RejectRemixesAndSlowed(t *testing.T) {
 		reason      string
 	}{
 		{
-			cand:        AlbumTrackCandidate{VideoID: "slow1", Title: "Мальчик на девятке (slowed + reverb)", Duration: 235},
+			cand:        AlbumTrackCandidate{VideoID: "slow1", Title: "Мальчик на девятке (slowed + reverb)", Artist: "DEAD BLONDE", Duration: 235},
 			shouldMatch: false,
 			reason:      "Slowed версия с искаженной длительностью должна отсекаться (дельта 48с > 12с)",
 		},
 		{
-			cand:        AlbumTrackCandidate{VideoID: "sped1", Title: "Мальчик на девятке [Sped Up]", Duration: 130},
+			cand:        AlbumTrackCandidate{VideoID: "sped1", Title: "Мальчик на девятке [Sped Up]", Artist: "DEAD BLONDE", Duration: 130},
 			shouldMatch: false,
 			reason:      "Sped Up версия с ускоренным хронометражем должна отсекаться (дельта 57с > 12с)",
 		},
 		{
-			cand:        AlbumTrackCandidate{VideoID: "remix1", Title: "Мальчик на девятке (DJ Club Remix)", Duration: 220},
+			cand:        AlbumTrackCandidate{VideoID: "remix1", Title: "Мальчик на девятке (DJ Club Remix)", Artist: "DEAD BLONDE", Duration: 220},
 			shouldMatch: false,
 			reason:      "Клубный ремикс должен отсекаться (дельта 33с > 12с)",
 		},
 		{
-			cand:        AlbumTrackCandidate{VideoID: "official", Title: "Мальчик на девятке", Duration: 188},
+			cand:        AlbumTrackCandidate{VideoID: "official", Title: "Мальчик на девятке", Artist: "DEAD BLONDE", Duration: 188},
 			shouldMatch: true,
 			reason:      "Официальная альбомная дорожка (дельта 1с <= 12с) должна успешно сопоставляться",
 		},
@@ -94,18 +94,18 @@ func TestDeadBlonde_FullAlbumSpletnitsa_Matching(t *testing.T) {
 
 	// Кандидат из официального YouTube Music релиза (с небольшими дельтами длительности в пределах 2 сек)
 	candTracks := []AlbumTrackCandidate{
-		{VideoID: "m80jEPGrr7o", Title: "Банкомат", Duration: 200, Index: 1},
-		{VideoID: "0pd_z_x144M", Title: "Красный свет", Duration: 198, Index: 2},
-		{VideoID: "B2dcmYaRzaY", Title: "Самолёт", Duration: 182, Index: 3},
-		{VideoID: "6pnnNP_S63U", Title: "Без шансов", Duration: 214, Index: 4},
-		{VideoID: "4C7dbuDzYjw", Title: "Beauty Queen", Duration: 206, Index: 5},
-		{VideoID: "rMrVN4uI_5o", Title: "VIP CLUB", Duration: 151, Index: 6},
-		{VideoID: "2SmIbl0xahc", Title: "Всего лишь друг", Duration: 209, Index: 7},
-		{VideoID: "l666MnTi0_I", Title: "Мираж", Duration: 199, Index: 8},
-		{VideoID: "bmnChhr1K7A", Title: "Тело", Duration: 175, Index: 9},
-		{VideoID: "8P0fClE7neo", Title: "Не такая, как все", Duration: 168, Index: 10},
-		{VideoID: "1sV6s65qC7U", Title: "Сталкер", Duration: 218, Index: 11},
-		{VideoID: "7XSaGy3TMEo", Title: "Ту-лу-ла", Duration: 168, Index: 12},
+		{VideoID: "m80jEPGrr7o", Title: "Банкомат", Artist: "DEAD BLONDE", Duration: 200, Index: 1},
+		{VideoID: "0pd_z_x144M", Title: "Красный свет", Artist: "DEAD BLONDE", Duration: 198, Index: 2},
+		{VideoID: "B2dcmYaRzaY", Title: "Самолёт", Artist: "DEAD BLONDE", Duration: 182, Index: 3},
+		{VideoID: "6pnnNP_S63U", Title: "Без шансов", Artist: "DEAD BLONDE", Duration: 214, Index: 4},
+		{VideoID: "4C7dbuDzYjw", Title: "Beauty Queen", Artist: "DEAD BLONDE", Duration: 206, Index: 5},
+		{VideoID: "rMrVN4uI_5o", Title: "VIP CLUB", Artist: "DEAD BLONDE", Duration: 151, Index: 6},
+		{VideoID: "2SmIbl0xahc", Title: "Всего лишь друг", Artist: "DEAD BLONDE", Duration: 209, Index: 7},
+		{VideoID: "l666MnTi0_I", Title: "Мираж", Artist: "DEAD BLONDE", Duration: 199, Index: 8},
+		{VideoID: "bmnChhr1K7A", Title: "Тело", Artist: "DEAD BLONDE", Duration: 175, Index: 9},
+		{VideoID: "8P0fClE7neo", Title: "Не такая, как все", Artist: "DEAD BLONDE", Duration: 168, Index: 10},
+		{VideoID: "1sV6s65qC7U", Title: "Сталкер", Artist: "DEAD BLONDE", Duration: 218, Index: 11},
+		{VideoID: "7XSaGy3TMEo", Title: "Ту-лу-ла", Artist: "DEAD BLONDE", Duration: 168, Index: 12},
 	}
 
 	urls, matched := matcher.MatchTracklists(targetTracks, candTracks)
