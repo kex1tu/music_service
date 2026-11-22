@@ -35,17 +35,14 @@ func TestManualSourceSelectionsSurviveReload(t *testing.T) {
 		t.Fatalf("manual completion not reflected: %+v", snap)
 	}
 }
-func TestWaitingSourceDoesNotConsumePinOrCache(t *testing.T) {
+func TestWaitingSourceRequiresChoice(t *testing.T) {
 	database, e := db.Open(filepath.Join(t.TempDir(), "jobs.db"))
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer database.Close()
 	repo := NewRepository(database.Conn())
-	pin := PinnedTrackSourceDTO{CacheKey: resolver.BuildCacheKey("", "Artist", "Song"), PinnedURL: "https://soundcloud.com/a/b"}
-	if e = repo.SavePinnedSource(context.Background(), pin); e != nil {
-		t.Fatal(e)
-	}
+
 	s := NewService(ServiceConfig{Repo: repo})
 	j := &Job{ID: "waiting", Tracks: []resolver.ResolvedTrack{{TrackID: "one", Title: "Song", Artist: "Artist"}}}
 	ok := s.processSingleTrack(context.Background(), j, &resolver.ReleaseMetadata{}, 1, j.Snapshot().Tracks[0], "", "", nil, 1)
@@ -70,7 +67,7 @@ func TestManualReleaseSandboxErrorDoesNotExposeHostPaths(t *testing.T) {
 	}
 }
 
-func TestManualSourcesUseRecordingIdentityAcrossJobs(t *testing.T) {
+func TestManualSourcesStayInTheirJob(t *testing.T) {
 	env := testkit.NewEnv(t)
 	repo := NewRepository(env.DB.Conn())
 	service := NewService(ServiceConfig{Repo: repo, Matcher: resolver.NewAudioMatcher("")})
@@ -101,34 +98,20 @@ func TestManualSourcesUseRecordingIdentityAcrossJobs(t *testing.T) {
 		if track.AudioSourceURL != sources[index] || track.VersionStatus != "manual" {
 			t.Fatalf("track %d lost its job selection: %+v", index, track)
 		}
-		if pin, err := repo.GetPinnedSource(t.Context(), track.TrackID); err != nil || pin != nil {
-			t.Fatalf("job track ID used as global pin: %+v, %v", pin, err)
-		}
+
 	}
 
 	newTask := &Job{ID: "next-task", Status: StatusWaitingSource, Tracks: tracks}
 	if err := repo.CreateJob(t.Context(), newTask); err != nil {
 		t.Fatal(err)
 	}
-	for index, track := range newTask.Tracks {
-		var code string
-		if track.ISRC != nil {
-			// The title can be different in another catalog when ISRC is known.
-			track.Title = "Another catalog title"
-			code = strings.ToLower(*track.ISRC)
-		}
-		candidates, err := restarted.GetCandidates(t.Context(), track.Artist, track.Title, 0, "", code)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var saved []string
-		for _, candidate := range candidates {
-			if candidate.SavedSelection {
-				saved = append(saved, candidate.URL)
-			}
-		}
-		if len(saved) != 1 || saved[0] != sources[index] {
-			t.Fatalf("%s saved selection = %v, want %s", track.Title, saved, sources[index])
+	fresh, err := repo.GetJob(t.Context(), newTask.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, track := range fresh.Tracks {
+		if track.AudioSourceURL != "" {
+			t.Fatalf("source leaked between jobs: %+v", track)
 		}
 	}
 }

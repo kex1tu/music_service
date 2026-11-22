@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"music-manager/internal/core/textkey"
 	"music-manager/internal/db"
 )
 
@@ -32,18 +31,21 @@ type TrackCandidateDTO struct {
 
 // IncompleteAlbumDTO — запись неполного альбома из SQLite.
 type IncompleteAlbumDTO struct {
-	ID            int64
-	FolderPath    string
-	Title         string
-	Artist        string
-	Year          *int
-	HasCover      bool
-	CoverPath     *string
-	PresentCount  int
-	ExpectedCount int
-	TotalTracks   int
-	TotalDiscs    int
-	DeezerAlbumID *string
+	catalogRevision int64
+	ID              int64
+	FolderPath      string
+	Title           string
+	Artist          string
+	Year            *int
+	HasCover        bool
+	CoverPath       *string
+	PresentCount    int
+	ExpectedCount   int
+	TotalTracks     int
+	TotalDiscs      int
+	Completeness    string
+	DeezerAlbumID   *string
+	DeezerArtistID  string
 }
 
 // TagAuditTrackDTO — запись трека для инспекции тегов.
@@ -73,7 +75,7 @@ type AuditRepository interface {
 	GetIncompleteAlbums(ctx context.Context, limit int) ([]IncompleteAlbumDTO, error)
 	GetPresentTrackNumbers(ctx context.Context, albumID int64) ([]int, error)
 	GetAlbumMetadataByPath(ctx context.Context, folderPath string) (*IncompleteAlbumDTO, error)
-	VerifyCatalog(ctx context.Context, albumID int64, deezerID string, catalog []db.CatalogTrack) (map[db.TrackPosition]bool, error)
+	VerifyCatalog(ctx context.Context, albumID int64, deezerID string, catalog []db.CatalogTrack, expectedRevision ...int64) (map[db.TrackPosition]bool, error)
 
 	// 4. Invalid Paths & Reorganization
 	GetInvalidPaths(ctx context.Context) ([]InvalidPathRecord, error)
@@ -129,122 +131,54 @@ func (r *Repository) WithTx(tx DBTX) *Repository {
 // ----------------------------------------------------------------------------
 
 func (r *Repository) GetAuditSummary(ctx context.Context) (*AuditSummary, error) {
+	query := `
+	SELECT
+		(SELECT COUNT(*) FROM tracks),
+		(SELECT COUNT(*) FROM albums),
+		(SELECT COUNT(*) FROM tracks WHERE lyrics_status = 'none'),
+		(SELECT COUNT(*) FROM tracks WHERE has_embedded_cover = 0),
+		(SELECT COUNT(*) FROM albums WHERE catalog_checked_at IS NOT NULL AND is_complete = 0),
+		(SELECT COUNT(*) FROM tracks WHERE is_path_valid = 0),
+		(SELECT COUNT(DISTINCT g.id) FROM genres g JOIN track_genres tg ON g.id = tg.genre_id WHERE g.is_valid_en = 0);
+	`
 	var summary AuditSummary
-
-	_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM tracks;").Scan(&summary.TotalTracks)
-	_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM albums;").Scan(&summary.TotalAlbums)
-	_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM tracks WHERE lyrics_status = 'none';").Scan(&summary.MissingLyricsCount)
-	_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM tracks WHERE has_embedded_cover = 0;").Scan(&summary.MissingCoversCount)
-	_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM albums WHERE is_complete = 0;").Scan(&summary.IncompleteAlbumsCount)
-	_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM tracks WHERE is_path_valid = 0;").Scan(&summary.InvalidPathsCount)
-	_ = r.db.QueryRowContext(ctx, "SELECT COUNT(DISTINCT g.id) FROM genres g JOIN track_genres tg ON g.id = tg.genre_id WHERE g.is_valid_en = 0;").Scan(&summary.NonEnGenresCount)
+	err := r.db.QueryRowContext(ctx, query).Scan(
+		&summary.TotalTracks,
+		&summary.TotalAlbums,
+		&summary.MissingLyricsCount,
+		&summary.MissingCoversCount,
+		&summary.IncompleteAlbumsCount,
+		&summary.InvalidPathsCount,
+		&summary.NonEnGenresCount,
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	return &summary, nil
 }
 
 func (r *Repository) SearchLibrary(ctx context.Context, query string, limit int) (*SearchLibraryResult, error) {
-	if limit <= 0 {
-		limit = 50
+	found, err := db.QueryLibrarySearch(ctx, r.db, query, limit, true)
+	if err != nil {
+		return nil, err
 	}
-	term := textkey.Search(query)
-
 	result := &SearchLibraryResult{
-		Tracks:  make([]SearchTrackItem, 0),
-		Albums:  make([]SearchAlbumItem, 0),
-		Artists: make([]SearchArtistItem, 0),
+		Tracks:  make([]SearchTrackItem, 0, len(found.Tracks)),
+		Albums:  make([]SearchAlbumItem, 0, len(found.Albums)),
+		Artists: make([]SearchArtistItem, 0, len(found.Artists)),
 	}
-
-	// 1. Tracks search
-	trackQuery := `
-	SELECT t.id, t.title, ar.name AS artist, al.title AS album, al.year, t.duration, t.file_path, t.lyrics_status, al.has_cover, al.cover_path
-	FROM tracks t
-	JOIN albums al ON t.album_id = al.id
-	JOIN artists ar ON t.artist_id = ar.id
-	WHERE instr(t.search_title, ?) > 0 OR instr(t.search_clean_title, ?) > 0
-	LIMIT ?;
-	`
-	tRows, err := r.db.QueryContext(ctx, trackQuery, term, term, limit)
-	if err == nil {
-		defer tRows.Close()
-		for tRows.Next() {
-			var it SearchTrackItem
-			var artName, albTitle, fPath, lyrStatus, covPath sql.NullString
-			var yr sql.NullInt64
-			if err := tRows.Scan(&it.ID, &it.Title, &artName, &albTitle, &yr, &it.Duration, &fPath, &lyrStatus, &it.HasCover, &covPath); err == nil {
-				if artName.Valid {
-					it.Artist = artName.String
-				}
-				if albTitle.Valid {
-					it.Album = albTitle.String
-				}
-				if yr.Valid {
-					it.Year = int(yr.Int64)
-				}
-				if fPath.Valid {
-					it.Path = filepath.ToSlash(fPath.String)
-				}
-				if lyrStatus.Valid {
-					it.LyricsStatus = lyrStatus.String
-				}
-				if covPath.Valid {
-					it.CoverPath = covPath.String
-				}
-				result.Tracks = append(result.Tracks, it)
-			}
-		}
+	for _, track := range found.Tracks {
+		result.Tracks = append(result.Tracks, SearchTrackItem{ID: track.ID, Title: track.Title, Artist: track.Artist, Album: track.Album, Year: track.Year,
+			Duration: track.Duration, Path: track.Path, LyricsStatus: track.LyricsStatus, HasCover: track.HasCover, CoverPath: track.CoverPath})
 	}
-
-	// 2. Albums search
-	albumQuery := `
-	SELECT al.id, al.title, ar.name AS artist, al.year, al.has_cover, al.cover_path, al.folder_path
-	FROM albums al
-	JOIN artists ar ON al.artist_id = ar.id
-	WHERE instr(al.search_title, ?) > 0 OR instr(al.search_clean_title, ?) > 0
-	LIMIT ?;
-	`
-	aRows, err := r.db.QueryContext(ctx, albumQuery, term, term, limit)
-	if err == nil {
-		defer aRows.Close()
-		for aRows.Next() {
-			var it SearchAlbumItem
-			var artName, covPath, fPath sql.NullString
-			var yr sql.NullInt64
-			if err := aRows.Scan(&it.ID, &it.Title, &artName, &yr, &it.HasCover, &covPath, &fPath); err == nil {
-				if artName.Valid {
-					it.Artist = artName.String
-				}
-				if yr.Valid {
-					it.Year = int(yr.Int64)
-				}
-				if covPath.Valid {
-					it.CoverPath = covPath.String
-				}
-				if fPath.Valid {
-					it.Path = filepath.ToSlash(fPath.String)
-				}
-				result.Albums = append(result.Albums, it)
-			}
-		}
+	for _, album := range found.Albums {
+		result.Albums = append(result.Albums, SearchAlbumItem{ID: album.ID, Title: album.Title, Artist: album.PrimaryArtist, Year: album.Year,
+			Path: album.Path, HasCover: album.HasCover, CoverPath: album.CoverPath})
 	}
-
-	// 3. Artists search
-	artistQuery := `
-	SELECT id, name
-	FROM artists
-	WHERE instr(clean_name, ?) > 0
-	LIMIT ?;
-	`
-	arRows, err := r.db.QueryContext(ctx, artistQuery, term, limit)
-	if err == nil {
-		defer arRows.Close()
-		for arRows.Next() {
-			var it SearchArtistItem
-			if err := arRows.Scan(&it.ID, &it.Name); err == nil {
-				result.Artists = append(result.Artists, it)
-			}
-		}
+	for _, artist := range found.Artists {
+		result.Artists = append(result.Artists, SearchArtistItem{ID: artist.ID, Name: artist.Name})
 	}
-
 	return result, nil
 }
 
@@ -296,12 +230,13 @@ func (r *Repository) GetIncompleteAlbums(ctx context.Context, limit int) ([]Inco
 	query := `
 	SELECT al.id, al.folder_path, al.title, a.name, al.year, al.has_cover, al.cover_path,
 	       al.present_tracks_count, al.expected_tracks_count, al.total_tracks, al.deezer_id,
-	       COALESCE(al.total_discs, 1), COALESCE((SELECT MAX(MAX(t.disc_number, t.disc_total)) FROM tracks t WHERE t.album_id = al.id), 1)
+	       COALESCE(al.total_discs, 1), COALESCE((SELECT MAX(MAX(t.disc_number, t.disc_total)) FROM tracks t WHERE t.album_id = al.id), 1),
+       CASE WHEN al.catalog_checked_at IS NULL THEN 'unknown' WHEN al.is_complete THEN 'complete' ELSE 'incomplete' END
 	FROM albums al
 	JOIN artists a ON al.artist_id = a.id
-	WHERE al.present_tracks_count > 0
-	  AND (al.is_complete = 0 OR (al.expected_tracks_count > 0 AND al.expected_tracks_count > al.present_tracks_count) OR (al.total_tracks > 1 AND al.present_tracks_count < al.total_tracks))
-	ORDER BY al.title
+	WHERE (al.catalog_checked_at IS NOT NULL AND al.is_complete = 0)
+	   OR (al.catalog_checked_at IS NULL AND EXISTS(SELECT 1 FROM tracks WHERE album_id = al.id))
+	ORDER BY al.catalog_checked_at IS NULL, al.title
 	LIMIT ?;
 	`
 	rows, err := r.db.QueryContext(ctx, query, limit)
@@ -318,7 +253,7 @@ func (r *Repository) GetIncompleteAlbums(ctx context.Context, limit int) ([]Inco
 		var cov, dz sql.NullString
 		if err := rows.Scan(
 			&item.ID, &item.FolderPath, &item.Title, &item.Artist, &yr, &item.HasCover, &cov,
-			&item.PresentCount, &exp, &tot, &dz, &item.TotalDiscs, &taggedDiscs,
+			&item.PresentCount, &exp, &tot, &dz, &item.TotalDiscs, &taggedDiscs, &item.Completeness,
 		); err != nil {
 			return nil, err
 		}
@@ -362,8 +297,9 @@ func (r *Repository) GetAlbumMetadataByPath(ctx context.Context, folderPath stri
 	cleanPath := db.AlbumRoot(filepath.ToSlash(folderPath))
 
 	query := `
-	SELECT al.id, al.title, ar.name, COALESCE(al.year, 0), COALESCE(al.deezer_id, ''),
-	       COALESCE(al.expected_tracks_count, 0), COALESCE(al.present_tracks_count, 0), COALESCE(al.total_tracks, 0)
+	SELECT al.id, al.catalog_revision, al.title, ar.name, COALESCE(al.year, 0), COALESCE(al.deezer_id, ''), COALESCE(ar.deezer_id, ''),
+	       COALESCE(al.expected_tracks_count, 0), COALESCE(al.present_tracks_count, 0), COALESCE(al.total_tracks, 0),
+       CASE WHEN al.catalog_checked_at IS NULL THEN 'unknown' WHEN al.is_complete THEN 'complete' ELSE 'incomplete' END
 	FROM albums al
 	JOIN artists ar ON al.artist_id = ar.id
 	WHERE al.folder_path = ?
@@ -373,8 +309,8 @@ func (r *Repository) GetAlbumMetadataByPath(ctx context.Context, folderPath stri
 	var dz string
 	var yr int
 	err := r.db.QueryRowContext(ctx, query, cleanPath).Scan(
-		&item.ID, &item.Title, &item.Artist, &yr, &dz,
-		&item.ExpectedCount, &item.PresentCount, &item.TotalTracks,
+		&item.ID, &item.catalogRevision, &item.Title, &item.Artist, &yr, &dz, &item.DeezerArtistID,
+		&item.ExpectedCount, &item.PresentCount, &item.TotalTracks, &item.Completeness,
 	)
 	if err != nil {
 		return nil, err
@@ -389,14 +325,14 @@ func (r *Repository) GetAlbumMetadataByPath(ctx context.Context, folderPath stri
 	return &item, nil
 }
 
-func (r *Repository) VerifyCatalog(ctx context.Context, albumID int64, deezerID string, catalog []db.CatalogTrack) (map[db.TrackPosition]bool, error) {
+func (r *Repository) VerifyCatalog(ctx context.Context, albumID int64, deezerID string, catalog []db.CatalogTrack, expectedRevision ...int64) (map[db.TrackPosition]bool, error) {
 	conn, ok := r.db.(interface {
 		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 	})
 	if !ok {
 		return nil, fmt.Errorf("catalog verification requires a database connection")
 	}
-	return db.VerifyCatalog(ctx, conn, albumID, deezerID, catalog)
+	return db.VerifyCatalog(ctx, conn, albumID, deezerID, catalog, expectedRevision...)
 }
 
 // ----------------------------------------------------------------------------
@@ -623,7 +559,7 @@ func (r *Repository) RetagTrackGenre(ctx context.Context, trackID int64, canonic
 
 func (r *Repository) GetTracksForTagAudit(ctx context.Context) ([]TagAuditTrackDTO, error) {
 	query := `
-	SELECT t.id, t.file_path, t.title, a.name, al.title, COALESCE(al.year, 0), t.track_number, t.duration, COALESCE(al.album_artist, '')
+	SELECT t.id, t.file_path, t.title, a.name, al.title, COALESCE(al.year, 0), COALESCE(t.track_number, 0), COALESCE(t.duration, 0), COALESCE(al.album_artist, '')
 	FROM tracks t
 	JOIN artists a ON t.artist_id = a.id
 	JOIN albums al ON t.album_id = al.id
@@ -638,11 +574,12 @@ func (r *Repository) GetTracksForTagAudit(ctx context.Context) ([]TagAuditTrackD
 	var list []TagAuditTrackDTO
 	for rows.Next() {
 		var tr TagAuditTrackDTO
-		if err := rows.Scan(&tr.ID, &tr.FilePath, &tr.Title, &tr.Artist, &tr.Album, &tr.Year, &tr.TrackNumber, &tr.Duration, &tr.AlbumArtist); err == nil {
-			list = append(list, tr)
+		if err := rows.Scan(&tr.ID, &tr.FilePath, &tr.Title, &tr.Artist, &tr.Album, &tr.Year, &tr.TrackNumber, &tr.Duration, &tr.AlbumArtist); err != nil {
+			return nil, err
 		}
+		list = append(list, tr)
 	}
-	return list, nil
+	return list, rows.Err()
 }
 
 func (r *Repository) GetTrackForTagAuditByPath(ctx context.Context, path string) (*TagAuditTrackDTO, error) {
@@ -727,26 +664,5 @@ func (r *Repository) GetMissingTracksForAlbum(ctx context.Context, albumPath str
 	if err != nil || meta == nil {
 		return nil, err
 	}
-	query := `
-	SELECT title, artist, track_number, COALESCE(disc_number, 1), COALESCE(expected_duration, 0),
-	       COALESCE(deezer_id, ''), COALESCE(deezer_url, ''), COALESCE(isrc, '')
-	FROM missing_tracks
-	WHERE album_id = ?
-	ORDER BY disc_number, track_number;
-	`
-	rows, err := r.db.QueryContext(ctx, query, meta.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var list []db.CatalogTrack
-	for rows.Next() {
-		var m db.CatalogTrack
-		if err := rows.Scan(&m.Title, &m.Artist, &m.TrackNumber, &m.DiscNumber, &m.Duration, &m.DeezerID, &m.DeezerURL, &m.ISRC); err != nil {
-			return nil, err
-		}
-		list = append(list, m)
-	}
-	return list, rows.Err()
+	return db.ReleaseTracklist(ctx, r.db, meta.ID, true)
 }

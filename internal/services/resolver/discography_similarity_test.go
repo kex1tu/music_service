@@ -12,37 +12,6 @@ import (
 	"music-manager/internal/db"
 )
 
-func TestLastfmClient(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		method := r.URL.Query().Get("method")
-		if method != "artist.getsimilar" {
-			http.Error(w, "bad method", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"similarartists": {
-				"artist": [
-					{"name": "Justice", "match": "0.95", "url": "https://last.fm/music/Justice"},
-					{"name": "Kavinsky", "match": "0.88", "url": "https://last.fm/music/Kavinsky"}
-				]
-			}
-		}`))
-	}))
-	defer ts.Close()
-
-	client := NewLastfmClient("dummy_key")
-	client.SetBaseURL(ts.URL)
-
-	res, err := client.GetSimilarArtists(context.Background(), "Daft Punk", 5)
-	if err != nil {
-		t.Fatalf("GetSimilarArtists failed: %v", err)
-	}
-	if len(res) != 2 || res[0].Name != "Justice" || res[0].Match != 0.95 {
-		t.Fatalf("unexpected similar artists: %+v", res)
-	}
-}
-
 func TestDeezerArtistMethods(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -50,14 +19,6 @@ func TestDeezerArtistMethods(t *testing.T) {
 			_, _ = w.Write([]byte(`{
 				"data": [
 					{"id": 27, "name": "Daft Punk", "picture_xl": "https://example.com/dp.jpg"}
-				]
-			}`))
-			return
-		}
-		if r.URL.Path == "/artist/27/related" {
-			_, _ = w.Write([]byte(`{
-				"data": [
-					{"id": 100, "name": "Justice", "picture_medium": "https://example.com/justice.jpg"}
 				]
 			}`))
 			return
@@ -90,14 +51,6 @@ func TestDeezerArtistMethods(t *testing.T) {
 	}
 	if art.ID != 27 || art.Name != "Daft Punk" {
 		t.Fatalf("unexpected artist: %+v", art)
-	}
-
-	related, err := client.GetRelatedArtists(context.Background(), "27")
-	if err != nil {
-		t.Fatalf("GetRelatedArtists failed: %v", err)
-	}
-	if len(related) != 1 || related[0].Name != "Justice" {
-		t.Fatalf("unexpected related: %+v", related)
 	}
 
 	albums, err := client.GetArtistAlbums(context.Background(), "27")
@@ -209,63 +162,6 @@ func TestDiscographyAggregator_DeduplicationAndReconcile(t *testing.T) {
 		if r.CleanTitle == "old rare album" && (r.Status != "missing" || r.IsRadar) {
 			t.Errorf("expected Old Rare Album to be missing/!is_radar, got status=%s is_radar=%v", r.Status, r.IsRadar)
 		}
-	}
-}
-
-func TestSimilarityEngine(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "sim_test_*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	dbPath := filepath.Join(tempDir, "test.db")
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer database.Close()
-
-	ctx := context.Background()
-
-	tsDeezer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/search/artist" {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": []map[string]any{{"id": 27, "name": "Daft Punk"}},
-			})
-			return
-		}
-		if r.URL.Path == "/artist/27/related" {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": []map[string]any{
-					{"id": 1, "name": "Justice"},
-					{"id": 2, "name": "Kavinsky"},
-				},
-			})
-			return
-		}
-	}))
-	defer tsDeezer.Close()
-
-	deezerClient := NewDeezerClient()
-	deezerClient.baseURL = tsDeezer.URL
-
-	simEngine := NewSimilarityEngine(deezerClient, nil, database)
-	names, err := simEngine.FetchAndCacheRelations(ctx, "Daft Punk")
-	if err != nil {
-		t.Fatalf("FetchAndCacheRelations failed: %v", err)
-	}
-	if len(names) != 2 {
-		t.Fatalf("expected 2 related artists, got %d", len(names))
-	}
-
-	cached, err := simEngine.GetRelatedArtistsFromCache(ctx, "Daft Punk", 5)
-	if err != nil {
-		t.Fatalf("GetRelatedArtistsFromCache failed: %v", err)
-	}
-	if len(cached) != 2 || cached[0] != "justice" {
-		t.Fatalf("unexpected cached related artists: %+v", cached)
 	}
 }
 

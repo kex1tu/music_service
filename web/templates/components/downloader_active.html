@@ -394,7 +394,7 @@
 
         <!-- Кнопки действий задачи -->
         <div class="flex items-center justify-end space-x-2 pt-1">
-            <template x-if="job.status === 'READY'">
+            <template x-if="job.status === 'READY' && !job.is_redownload">
                 <div class="flex flex-wrap items-center gap-2">
                     <button
                         type="button"

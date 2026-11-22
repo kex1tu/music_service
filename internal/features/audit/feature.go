@@ -37,6 +37,8 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 
 		// File paths & reorganization
 		r.Get("/invalid-paths", m.InvalidPaths)
+		r.Get("/artist-conflicts", m.ArtistConflicts)
+		r.Post("/artist-conflicts/resolve", m.ResolveArtistConflict)
 		r.Post("/fix-path", m.FixPath)
 		r.Post("/fix-all-paths", m.FixAllPaths)
 		r.Post("/reorganize", m.Reorganize)

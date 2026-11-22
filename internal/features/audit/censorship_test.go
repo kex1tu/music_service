@@ -246,11 +246,11 @@ func TestReferenceComparisonRejectsUniformMasteringChange(t *testing.T) {
 	}
 }
 
-func TestCensorshipRetriesEvidenceAndTranscriptWrites(t *testing.T) {
+func TestCensorshipRetriesResultAndTranscriptWrites(t *testing.T) {
 	// The counters are outside SQLite, so the one-shot faults survive rollback.
-	var transcriptWrites, evidenceWrites atomic.Int32
+	var transcriptWrites, resultWrites atomic.Int32
 	functions := make(map[string]string)
-	for name, calls := range map[string]*atomic.Int32{"transcripts": &transcriptWrites, "evidence": &evidenceWrites} {
+	for name, calls := range map[string]*atomic.Int32{"transcripts": &transcriptWrites, "runs": &resultWrites} {
 		function := fmt.Sprintf("audit_test_%s_%d", name, time.Now().UnixNano())
 		if err := sqlite.RegisterScalarFunction(function, 0, func(_ *sqlite.FunctionContext, _ []driver.Value) (driver.Value, error) {
 			return calls.Add(1) == 1, nil
@@ -262,9 +262,15 @@ func TestCensorshipRetriesEvidenceAndTranscriptWrites(t *testing.T) {
 	database, sb := auditFixture(t)
 	conn := database.Conn()
 	for table, function := range functions {
-		trigger := fmt.Sprintf(`CREATE TRIGGER test_%s_fault BEFORE INSERT ON censorship_%s
-			WHEN %s() BEGIN SELECT RAISE(FAIL, 'one-shot storage failure'); END`,
-			table, table, function)
+		operation := "INSERT"
+		condition := function + "()"
+		if table == "runs" {
+			operation = "UPDATE OF state"
+			condition = "CASE WHEN NEW.state='completed' THEN " + condition + " ELSE 0 END"
+		}
+		trigger := fmt.Sprintf(`CREATE TRIGGER test_%s_fault BEFORE %s ON censorship_%s
+			WHEN %s BEGIN SELECT RAISE(FAIL, 'one-shot storage failure'); END`,
+			table, operation, table, condition)
 		if _, err := conn.ExecContext(t.Context(), trigger); err != nil {
 			t.Fatal(err)
 		}
@@ -286,16 +292,13 @@ func TestCensorshipRetriesEvidenceAndTranscriptWrites(t *testing.T) {
 	if err != nil || len(items) != 1 || items[0].State != "done" || items[0].Verdict != "checked_words_preserved" {
 		t.Fatalf("result did not survive storage failure: %+v, %v", items, err)
 	}
-	var evidenceCount, seconds int
-	if err := conn.QueryRowContext(t.Context(), "SELECT count(*) FROM censorship_evidence WHERE item_id=?", items[0].ID).Scan(&evidenceCount); err != nil {
-		t.Fatal(err)
-	}
+	var seconds int
 	if err := conn.QueryRowContext(t.Context(), "SELECT seconds FROM censorship_cloud_usage WHERE provider='gemini'").Scan(&seconds); err != nil {
 		t.Fatal(err)
 	}
-	if transcriptWrites.Load() != 2 || evidenceWrites.Load() < 2 || evidenceCount != len(items[0].Result.Evidence) || cloud.calls.Load() != 1 || seconds <= 0 {
-		t.Fatalf("transcript writes=%d, evidence writes=%d, evidence=%d, calls=%d, quota=%d",
-			transcriptWrites.Load(), evidenceWrites.Load(), evidenceCount, cloud.calls.Load(), seconds)
+	if transcriptWrites.Load() != 2 || resultWrites.Load() < 2 || len(items[0].Result.Evidence) == 0 || cloud.calls.Load() != 1 || seconds <= 0 {
+		t.Fatalf("transcript writes=%d, result writes=%d, evidence=%d, calls=%d, quota=%d",
+			transcriptWrites.Load(), resultWrites.Load(), len(items[0].Result.Evidence), cloud.calls.Load(), seconds)
 	}
 
 	a.Close()

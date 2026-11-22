@@ -330,9 +330,6 @@ func (r *Repository) UpdateTrackTags(ctx context.Context, relPath string, tags T
 	albumDir := filepath.ToSlash(filepath.Dir(cleanRel))
 	tags.DiscNumber = librarydb.LocalDiscNumber(albumDir, tags.DiscNumber)
 	displayAlbumArtist := strings.TrimSpace(tags.AlbumArtist)
-	if displayAlbumArtist == "" {
-		displayAlbumArtist = effAlbumArtist
-	}
 	albumID, err := r.GetOrCreateAlbum(ctx, albumTitle, albumArtistID, displayAlbumArtist, tags.Year, albumDir, tags.HasCover)
 	if err != nil {
 		return err
@@ -436,39 +433,7 @@ func (r *Repository) UpdateTrackFilePath(ctx context.Context, oldPath, newPath s
 
 // GetOrCreateArtist находит или вставляет артиста, поддерживая tracked_artists.
 func (r *Repository) GetOrCreateArtist(ctx context.Context, name string) (int64, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = "Unknown Artist"
-	}
-	cleanName := librarydb.CleanArtistKey(name)
-
-	// 1. Автоматическая регистрация в tracked_artists
-	_, _ = r.db.ExecContext(ctx, `
-		INSERT INTO tracked_artists (name, clean_name, is_followed)
-		VALUES (?, ?, 1)
-		ON CONFLICT(name) DO NOTHING;
-	`, name, cleanName)
-
-	// 2. Поиск в таблице artists
-	var id int64
-	err := r.db.QueryRowContext(ctx, "SELECT id FROM artists WHERE name = ?;", name).Scan(&id)
-	if err == nil {
-		return id, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, err
-	}
-
-	// 3. Вставка нового артиста
-	res, err := r.db.ExecContext(ctx, "INSERT INTO artists (name, clean_name) VALUES (?, ?);", name, cleanName)
-	if err != nil {
-		// Конкурентная гонка: повторная попытка чтения
-		if err2 := r.db.QueryRowContext(ctx, "SELECT id FROM artists WHERE name = ?;", name).Scan(&id); err2 == nil {
-			return id, nil
-		}
-		return 0, err
-	}
-	return res.LastInsertId()
+	return librarydb.GetOrCreateLibraryArtist(ctx, r.db, name)
 }
 
 // GetOrCreateAlbum находит или вставляет альбом.
@@ -506,33 +471,25 @@ func (r *Repository) UpdateAlbumStats(ctx context.Context, albumID int64) error 
 	if r == nil || r.db == nil {
 		return nil
 	}
-	queryCount := `
-	UPDATE albums SET
-		present_tracks_count = (SELECT COUNT(*) FROM tracks WHERE album_id = ?),
-		total_tracks = CASE
-			WHEN total_tracks <= 0 THEN COALESCE((SELECT MAX(track_total) FROM tracks WHERE album_id = ?), 0)
-			ELSE total_tracks
-		END,
-		updated_at = CURRENT_TIMESTAMP
-	WHERE id = ?;
-	`
-	if _, err := r.db.ExecContext(ctx, queryCount, albumID, albumID, albumID); err != nil {
+	if tx, ok := r.db.(*sql.Tx); ok {
+		_, err := librarydb.RefreshReleaseCompleteness(ctx, tx, albumID)
 		return err
 	}
-
-	queryComplete := `
-	UPDATE albums SET
-		is_complete = CASE
-			WHEN (SELECT COUNT(*) FROM missing_tracks WHERE album_id = ?) > 0 THEN 0
-			WHEN total_tracks > 1 AND present_tracks_count < total_tracks THEN 0
-			WHEN (total_tracks <= 1 OR total_tracks IS NULL) AND present_tracks_count >= 1 THEN 1
-			ELSE 1
-		END,
-		updated_at = CURRENT_TIMESTAMP
-	WHERE id = ?;
-	`
-	_, err := r.db.ExecContext(ctx, queryComplete, albumID, albumID)
-	return err
+	conn, ok := r.db.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	})
+	if !ok {
+		return errors.New("album statistics require a database transaction")
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := librarydb.RefreshReleaseCompleteness(ctx, tx, albumID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ----------------------------------------------------------------------------
@@ -656,17 +613,14 @@ func (r *Repository) DeleteSetting(ctx context.Context, key string) error {
 	return err
 }
 
-const musicBrainzTokenKeys = `'mb_access_token','mb_refresh_token','mb_expires_at','mb_username',
-	'musicbrainz_access_token','musicbrainz_refresh_token','musicbrainz_expires_at','musicbrainz_username'`
+const musicBrainzTokenKeys = `'mb_access_token','mb_refresh_token','mb_expires_at','mb_username'`
 
-// SaveMusicBrainzTokens updates both compatible key sets in one transaction.
+// SaveMusicBrainzTokens updates the session in one transaction.
 func (r *Repository) SaveMusicBrainzTokens(ctx context.Context, accessToken, refreshToken string, expiresAt time.Time, username string) error {
 	return r.writeMusicBrainzTokens(ctx, `
 	INSERT INTO app_settings(key, value, updated_at) VALUES
 	    ('mb_access_token', ?1, CURRENT_TIMESTAMP), ('mb_refresh_token', ?2, CURRENT_TIMESTAMP),
-	    ('mb_expires_at', ?3, CURRENT_TIMESTAMP), ('mb_username', ?4, CURRENT_TIMESTAMP),
-	    ('musicbrainz_access_token', ?1, CURRENT_TIMESTAMP), ('musicbrainz_refresh_token', ?2, CURRENT_TIMESTAMP),
-	    ('musicbrainz_expires_at', ?3, CURRENT_TIMESTAMP), ('musicbrainz_username', ?4, CURRENT_TIMESTAMP)
+	    ('mb_expires_at', ?3, CURRENT_TIMESTAMP), ('mb_username', ?4, CURRENT_TIMESTAMP)
 	ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
 		accessToken, refreshToken, expiresAt.UTC().Format(time.RFC3339), username)
 }
@@ -705,7 +659,7 @@ func (r *Repository) writeMusicBrainzTokens(ctx context.Context, query string, a
 	return err
 }
 
-// LoadMusicBrainzTokens reads one snapshot and chooses the active key set.
+// LoadMusicBrainzTokens reads the session in a single snapshot.
 func (r *Repository) LoadMusicBrainzTokens(ctx context.Context) (accessToken, refreshToken, username string, expiresAt time.Time, err error) {
 	rows, err := r.db.QueryContext(ctx, "SELECT key,value FROM app_settings WHERE key IN ("+musicBrainzTokenKeys+")")
 	if err != nil {
@@ -723,18 +677,14 @@ func (r *Repository) LoadMusicBrainzTokens(ctx context.Context) (accessToken, re
 	if err := rows.Err(); err != nil {
 		return "", "", "", time.Time{}, err
 	}
-	prefix := "mb_"
-	if settings[prefix+"access_token"] == "" {
-		prefix = "musicbrainz_"
-	}
-	if settings[prefix+"access_token"] == "" {
+	if settings["mb_access_token"] == "" {
 		return "", "", "", time.Time{}, nil
 	}
-	expiresAt, _ = time.Parse(time.RFC3339Nano, settings[prefix+"expires_at"])
-	return settings[prefix+"access_token"], settings[prefix+"refresh_token"], settings[prefix+"username"], expiresAt.UTC(), nil
+	expiresAt, _ = time.Parse(time.RFC3339Nano, settings["mb_expires_at"])
+	return settings["mb_access_token"], settings["mb_refresh_token"], settings["mb_username"], expiresAt.UTC(), nil
 }
 
-// ClearMusicBrainzTokens deletes both key sets atomically.
+// ClearMusicBrainzTokens deletes the session atomically.
 func (r *Repository) ClearMusicBrainzTokens(ctx context.Context) error {
 	return r.writeMusicBrainzTokens(ctx, "DELETE FROM app_settings WHERE key IN ("+musicBrainzTokenKeys+")")
 }

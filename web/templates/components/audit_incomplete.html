@@ -3,7 +3,7 @@
 <div x-show="activeSubTab === 'incomplete'" class="space-y-4">
     <template x-if="!incompleteLoading && incompleteAlbums.length === 0">
         <div class="bg-surface-panel border border-surface-border rounded-xl p-8 text-center text-content-muted text-sm">
-            Отлично! Все альбомы в медиатеке укомплектованы, недостающих треков не обнаружено.
+            Нет неполных или несверенных релизов в списке.
         </div>
     </template>
 
@@ -62,6 +62,7 @@
                                 <span>Выбрать источник</span>
                             </button>
 
+                            <span x-show="alb.completeness === 'unknown'" class="text-xs text-content-muted">Не сверено</span>
                             <!-- Кнопка Скачать все недостающие -->
                             <template x-if="alb.expected_count > alb.present_count">
                                 <button
@@ -75,7 +76,7 @@
                                     <span x-text="isDownloading(alb) ? 'Отправка...' : `Скачать недостающие (${alb.expected_count - alb.present_count})`"></span>
                                 </button>
                             </template>
-                            <template x-if="alb.expected_count <= alb.present_count">
+                            <template x-if="alb.completeness === 'complete'">
                                 <span class="px-2.5 py-1 bg-brand/10 border border-brand/20 text-brand rounded-lg text-xs font-medium flex items-center space-x-1">
                                     <svg class="w-3.5 h-3.5" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
                                     <span>Укомплектован</span>

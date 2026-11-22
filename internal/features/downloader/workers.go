@@ -27,6 +27,27 @@ func (s *Service) Start(ctx context.Context) error {
 			s.cancel()
 			return fmt.Errorf("load download jobs: %w", err)
 		}
+		for _, job := range savedJobs {
+			recovered, err := s.recoverLegacyStaging(job)
+			if err != nil {
+				log.Printf("[Downloader] recover staged files for %s: %v", job.ID, err)
+				job.Tracks = nil
+				job.SetError("Не удалось прочитать готовые файлы старой задачи")
+				recovered = true
+			}
+			if !recovered {
+				continue
+			}
+			if job.legacySelection {
+				err = s.repo.UpdateJobStatus(s.ctx, job.ID, job.Status, job.CurrentStep, job.Error)
+			} else {
+				err = s.repo.SaveJob(s.ctx, job)
+			}
+			if err != nil {
+				s.cancel()
+				return fmt.Errorf("save recovered download %s: %w", job.ID, err)
+			}
+		}
 		s.jobsMu.Lock()
 		for _, job := range savedJobs {
 			s.registerJobLocked(job)

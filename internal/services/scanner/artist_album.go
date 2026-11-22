@@ -8,27 +8,20 @@ import (
 )
 
 func getOrCreateArtist(ctx context.Context, tx *sql.Tx, name string) (int64, error) {
-	cleanName := db.CleanArtistKey(name)
-	if err := db.RegisterTrackedArtist(ctx, tx, name); err != nil {
-		return 0, err
-	}
-
-	var id int64
-	err := tx.QueryRowContext(ctx, "SELECT id FROM artists WHERE name = ?", name).Scan(&id)
-	if err == nil {
-		return id, nil
-	}
-	if err != sql.ErrNoRows {
-		return 0, err
-	}
-
-	res, err := tx.ExecContext(ctx, "INSERT INTO artists (name, clean_name) VALUES (?, ?)", name, cleanName)
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
+	return db.GetOrCreateLibraryArtist(ctx, tx, name)
 }
 
 func getOrCreateAlbum(ctx context.Context, tx *sql.Tx, title string, artistID int64, albumArtistName string, year int, albumDir string, hasCover bool) (int64, error) {
+	if albumArtistName == "" {
+		// A track without TPE2 supplies no evidence about the album's artists.
+		// Reuse the existing artist even when the original import only had TPE1.
+		err := tx.QueryRowContext(ctx, `SELECT artist_id, COALESCE(album_artist, '') FROM albums
+			WHERE folder_path = ? AND (NULLIF(TRIM(album_artist), '') IS NOT NULL
+				OR (search_title = music_search_key(?2) AND (COALESCE(year, 0) = 0 OR ?3 = 0 OR year = ?3)))`,
+			db.AlbumRoot(albumDir), title, year).Scan(&artistID, &albumArtistName)
+		if err != nil && err != sql.ErrNoRows {
+			return 0, err
+		}
+	}
 	return db.UpsertLocalAlbum(ctx, tx, title, artistID, albumArtistName, year, albumDir, hasCover)
 }

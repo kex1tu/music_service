@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"music-manager/internal/core/sandbox"
@@ -128,9 +129,8 @@ func TestDownloaderService_ProcessSingleTrack_PreservesTrackAlbumForPlaylists(t 
 		t.Fatal(err)
 	}
 
-	svc := NewService(ServiceConfig{
-		TmpSandbox: tmpBox,
-	})
+	// The registry keeps only a weak reference to the sandbox.
+	defer runtime.KeepAlive(tmpBox)
 
 	playlistMeta := &resolver.ReleaseMetadata{
 		AlbumTitle:  "Mega Hits Playlist",
@@ -207,5 +207,4 @@ func TestDownloaderService_ProcessSingleTrack_PreservesTrackAlbumForPlaylists(t 
 		t.Errorf("readTags.Artist = %q, want 'Original Singer'", readTags.Artist)
 	}
 
-	_ = svc
 }

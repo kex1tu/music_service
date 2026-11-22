@@ -326,11 +326,10 @@ func RankCandidateItems(items []CandidateTrackItem, title, artist string, durati
 		item.BitrateInfo = "Не проверено"
 		if index, ok := seen[key]; ok {
 			old := out[index]
-			saved, incomplete := item.SavedSelection || old.SavedSelection, item.SearchIncomplete || old.SearchIncomplete
+			incomplete := item.SearchIncomplete || old.SearchIncomplete
 			if representative(item, old) {
 				out[index] = item
 			}
-			out[index].SavedSelection = saved
 			out[index].SearchIncomplete = incomplete
 			continue
 		}

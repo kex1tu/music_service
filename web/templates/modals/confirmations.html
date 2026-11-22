@@ -155,7 +155,7 @@
 
             <p class="text-xs text-content-secondary leading-relaxed">
                 Текущие файлы сохранятся. Новую загрузку можно прослушать и проверить перед приёмкой в медиатеку.
-                При совпадении пути разные версии сохраняются отдельно.
+                Готовые дорожки можно принять отдельным подтверждением.
             </p>
 
             <div class="pt-2 flex justify-end space-x-3">
@@ -164,6 +164,12 @@
                     @click="$store.app.activeModal = null"
                     class="px-4 py-2 bg-surface-elevated hover:bg-surface-hover text-content-secondary hover:text-content-primary text-xs font-semibold rounded-lg transition border border-surface-border">
                     Отмена
+                </button>
+                <button type="button"
+                    x-show="['track', 'file'].includes($store.app.redownloadConfirmData?.type)"
+                    @click="$store.app.executeRedownloadConfirm(true)"
+                    class="min-h-11 px-4 text-xs rounded-md border border-surface-border text-content-secondary hover:bg-surface-hover">
+                    Выбрать другой источник
                 </button>
                 <button
                     type="button"
@@ -177,5 +183,38 @@
             </div>
         </div>
     </div>
+<template x-if="$store.app.activeModal === 'redownload_replace' && $store.app.redownloadReplacement">
+    <div role="dialog" aria-modal="true" aria-labelledby="redownload-replace-title"
+        x-data="{ get replacement() { return $store.app.redownloadReplacement } }"
+        class="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-3"
+        @keydown.escape.window="if (!replacement.busy) $store.app.activeModal = null">
+        <div class="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg border border-surface-border bg-surface-panel p-4 space-y-4">
+            <h3 id="redownload-replace-title" class="text-base font-semibold text-content-primary">Подтвердить замену</h3>
+            <p class="text-sm text-content-secondary">Выбранные версии заменят текущие файлы. Недостающие дорожки будут добавлены в релиз.</p>
+            <ul class="divide-y divide-surface-border">
+                <template x-for="track in replacement.tracks" :key="track.track_id">
+                    <li class="py-2 space-y-1">
+                        <label class="flex min-h-11 items-center gap-2 text-sm text-content-primary">
+                            <input type="checkbox" :value="track.track_id" x-model="replacement.selected" :disabled="replacement.busy">
+                            <span x-text="track.title"></span>
+                        </label>
+                        <audio controls preload="none" class="w-full"
+                            :src="'/files/stream?path=' + encodeURIComponent('tmp_downloads/' + track.converted_path)"
+                            :aria-label="'Прослушать ' + track.title"></audio>
+                        <p x-show="replacement.errors[track.track_id]" x-text="replacement.errors[track.track_id]" class="text-xs text-rose-300" role="alert"></p>
+                    </li>
+                </template>
+            </ul>
+            <div class="flex flex-wrap justify-end gap-2">
+                <button type="button" :disabled="replacement.busy" @click="$store.app.activeModal = null"
+                    class="min-h-11 rounded-md border border-surface-border px-3 text-sm text-content-secondary">Отмена</button>
+                <button type="button" :disabled="replacement.busy || !replacement.selected.length"
+                    @click="$store.app.confirmRedownloadReplacement()"
+                    class="min-h-11 rounded-md bg-brand px-3 text-sm font-semibold text-zinc-950 disabled:opacity-50">Принять выбранные</button>
+            </div>
+        </div>
+    </div>
+</template>
+
 {{ end }}
 

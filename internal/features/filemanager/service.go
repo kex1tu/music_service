@@ -32,40 +32,46 @@ type LibraryIndex interface {
 
 // ServiceConfig определяет зависимости для инициализации сервиса FileManager.
 type ServiceConfig struct {
-	LibraryIndex LibraryIndex
-	MusicSandbox *sandbox.PathSandbox
-	TmpSandbox   *sandbox.PathSandbox
-	Repo         Repository
-	Organizer    Organizer
-	Scanner      Scanner
-	JobCreator   JobCreator
-	SourceFinder SourceFinder
+	LibraryIndex        LibraryIndex
+	MusicSandbox        *sandbox.PathSandbox
+	TmpSandbox          *sandbox.PathSandbox
+	Repo                Repository
+	Organizer           Organizer
+	Scanner             Scanner
+	JobCreator          JobCreator
+	SourceFinder        SourceFinder
+	RedownloadQueue     RedownloadQueue
+	RedownloadOrganizer RedownloadOrganizer
 }
 
 // Service инкапсулирует операции файлового менеджера, стриминга и организации медиатеки.
 type Service struct {
-	libraryIndex LibraryIndex
-	musicSandbox *sandbox.PathSandbox
-	tmpSandbox   *sandbox.PathSandbox
-	repo         Repository
-	organizer    Organizer
-	scanner      Scanner
-	jobCreator   JobCreator
-	sourceFinder SourceFinder
-	trackCache   sync.Map
+	libraryIndex        LibraryIndex
+	musicSandbox        *sandbox.PathSandbox
+	tmpSandbox          *sandbox.PathSandbox
+	repo                Repository
+	organizer           Organizer
+	scanner             Scanner
+	jobCreator          JobCreator
+	sourceFinder        SourceFinder
+	redownloadQueue     RedownloadQueue
+	redownloadOrganizer RedownloadOrganizer
+	trackCache          sync.Map
 }
 
 // NewService создает новый экземпляр Service.
 func NewService(cfg ServiceConfig) *Service {
 	return &Service{
-		musicSandbox: cfg.MusicSandbox,
-		tmpSandbox:   cfg.TmpSandbox,
-		repo:         cfg.Repo,
-		organizer:    cfg.Organizer,
-		scanner:      cfg.Scanner,
-		libraryIndex: cfg.LibraryIndex,
-		jobCreator:   cfg.JobCreator,
-		sourceFinder: cfg.SourceFinder,
+		musicSandbox:        cfg.MusicSandbox,
+		tmpSandbox:          cfg.TmpSandbox,
+		repo:                cfg.Repo,
+		organizer:           cfg.Organizer,
+		scanner:             cfg.Scanner,
+		libraryIndex:        cfg.LibraryIndex,
+		jobCreator:          cfg.JobCreator,
+		sourceFinder:        cfg.SourceFinder,
+		redownloadQueue:     cfg.RedownloadQueue,
+		redownloadOrganizer: cfg.RedownloadOrganizer,
 	}
 }
 

@@ -18,7 +18,7 @@ import (
 
 // TestUserJourney_RadarDeduplicationAndDownload:
 // Пользовательский сценарий Радара:
-// 1. Отслеживаются 2 артиста, выпустившие совместный сингл.
+// 1. Два артиста выпустили совместный сингл.
 // 2. В ленте новинок (/api/radar/feed) карточка релиза отображается СТРОГО 1 РАЗ (дедупликация подтверждена).
 // 3. Пользователь нажимает "Скачать" -> статус переходит в 'downloaded', релиз мгновенно ИСЧЕЗАЕТ из ленты новинок.
 // 4. Пользователь нажимает "Скрыть" на другом релизе -> статус переходит в 'ignored', релиз ИСЧЕЗАЕТ из ленты.
@@ -28,10 +28,6 @@ func TestUserJourney_RadarDeduplicationAndDownload(t *testing.T) {
 	client := it.server.Client()
 
 	ctx := context.Background()
-
-	// 1. Пользователь добавляет отслеживаемых артистов
-	_ = it.database.UpsertTrackedArtist(ctx, "Big Baby Tape")
-	_ = it.database.UpsertTrackedArtist(ctx, "Aarne")
 
 	// 2. Радар находит совместный релиз обоих артистов
 	jointRelease := &db.RadarReleaseEntity{

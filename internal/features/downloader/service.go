@@ -72,6 +72,7 @@ type Service struct {
 	// In-memory кэш разрешения источников (5-минутный TTL)
 	resolveCacheMu sync.RWMutex
 	resolveCache   map[string]*cachedResolveResult
+	preflightCache map[string]preflightSnapshot
 
 	client          *http.Client
 	cleanerMaxAge   time.Duration
@@ -111,6 +112,7 @@ func NewService(cfg ServiceConfig) *Service {
 		jobs:            make(map[string]*Job),
 		syncTimers:      make(map[string]*time.Timer),
 		resolveCache:    make(map[string]*cachedResolveResult),
+		preflightCache:  make(map[string]preflightSnapshot),
 		client:          &http.Client{Timeout: 30 * time.Second},
 		cleanerMaxAge:   cleanerAge,
 		cleanerInterval: cleanerInt,

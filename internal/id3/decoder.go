@@ -14,7 +14,6 @@ func decodeSynchsafe(b []byte) int {
 	return int(b[0]&0x7F)<<21 | int(b[1]&0x7F)<<14 | int(b[2]&0x7F)<<7 | int(b[3]&0x7F)
 }
 
-
 // isValidFrameID проверяет, состоит ли 4-байтный идентификатор фрейма из допустимых символов [A-Z0-9].
 func isValidFrameID(id string) bool {
 	if len(id) != 4 {
@@ -32,7 +31,7 @@ func isValidFrameID(id string) bool {
 // isTextFrame определяет, является ли идентификатор фрейма текстовым фреймом ID3v2.
 func isTextFrame(id string) bool {
 	switch id {
-	case "TIT2", "TPE1", "TPE2", "TALB", "TCON", "TRCK", "TPOS", "TDRC", "TYER", "TLEN":
+	case "TIT2", "TPE1", "TPE2", "TALB", "TCON", "TRCK", "TPOS", "TDRC", "TYER", "TLEN", "TXXX", "TSRC":
 		return true
 	default:
 		return false

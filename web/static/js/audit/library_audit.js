@@ -38,6 +38,7 @@ function libraryAuditComponent() {
         duplicatesData: { groups: [], total_duplicate_files: 0 },
         incompleteAlbums: [],
         invalidPaths: [],
+        artistConflicts: [],
         nonEnGenres: [],
         incompleteLoading: false,
         expandedAlbums: {},
@@ -123,6 +124,7 @@ function libraryAuditComponent() {
                     this.loadDuplicates(),
                     this.loadIncompleteAlbums(),
                     this.loadInvalidPaths(),
+                    this.loadArtistConflicts(),
                     this.loadNonEnGenres(),
                     this.loadTagIssues ? this.loadTagIssues() : Promise.resolve(),
                 ]);
@@ -183,6 +185,30 @@ function libraryAuditComponent() {
                 }
             } catch (e) {
                 console.error('Ошибка загрузки некорректных путей:', e);
+            }
+        },
+
+        async loadArtistConflicts() {
+            try {
+                const response = await window.api.raw('/files/audit/artist-conflicts');
+                if (response.ok) this.artistConflicts = await response.json();
+            } catch (error) {
+                console.error('Не удалось загрузить конфликты исполнителей', error);
+            }
+        },
+
+        async resolveArtistConflict(conflict, artistID) {
+            try {
+                const response = await window.api.raw('/files/audit/artist-conflicts/resolve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: conflict.path, album_artist: conflict.album_artist, artist_id: artistID }),
+                });
+                if (!response.ok) throw new Error('Не удалось применить выбор');
+                await this.loadArtistConflicts();
+                await this.loadSummary();
+            } catch (error) {
+                Alpine.store('app').toast(error.message, 'error');
             }
         },
 

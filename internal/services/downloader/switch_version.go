@@ -15,8 +15,8 @@ import (
 
 	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
-	"music-manager/internal/db"
 	"music-manager/internal/id3"
+	"music-manager/internal/services/downloadmedia"
 	"music-manager/internal/services/resolver"
 )
 
@@ -54,19 +54,7 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 		return nil, fmt.Errorf("%w: domain %q is not in allowed sources whitelist", ErrInvalidURL, host)
 	}
 
-	sourceType := "direct"
-	if strings.Contains(host, "youtube.com") || strings.Contains(host, "youtu.be") {
-		sourceType = "youtube"
-		if strings.Contains(host, "music.youtube.com") {
-			sourceType = "ytmusic"
-		}
-	} else if strings.Contains(host, "soundcloud.com") {
-		sourceType = "soundcloud"
-	} else if strings.Contains(host, "bandcamp.com") {
-		sourceType = "bandcamp"
-	}
-
-	var artist, title, isrc, relFilePath, absFilePath string
+	var artist, title, relFilePath, absFilePath string
 	var foundJob *DownloadJob
 	var foundIdx int = -1
 	var expectedDuration int
@@ -79,9 +67,6 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 				artist = tr.Artist
 				title = tr.Title
 				expectedDuration = tr.Duration
-				if tr.ISRC != nil {
-					isrc = *tr.ISRC
-				}
 				if tr.ConvertedPath != nil && *tr.ConvertedPath != "" {
 					relFilePath = *tr.ConvertedPath
 				}
@@ -96,14 +81,12 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 	}
 
 	// 2. Если трек не найден в задачах — ищем в базе данных медиатеки по ID/Hash/FilePath
-	var dbTrackID int64
 	if foundJob == nil && s.Database() != nil {
 		entity, err := s.Database().GetTrackByIDOrHash(ctx, trackID)
 		if err == nil && entity != nil {
 			artist = entity.Artist
 			title = entity.Title
 			relFilePath = entity.FilePath
-			dbTrackID = entity.ID
 			if entity.Duration > 0 && expectedDuration <= 0 {
 				expectedDuration = int(entity.Duration)
 			}
@@ -136,23 +119,11 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 		}
 	}
 
-	// 4. Определение канонического ключа и длительности кандидата
-	cacheKey := resolver.BuildCacheKey(isrc, artist, title)
 	candDuration := 0
-	if s.Database() != nil {
-		if entry, err := s.Database().GetSoundCloudCache(ctx, cacheKey, 720); err == nil && entry != nil {
-			for _, c := range entry.Candidates {
-				if c.URL == targetURL {
-					candDuration = c.Duration
-					break
-				}
-			}
-		}
-	}
 
 	// 5. Скачивание аудиопотока во временный каталог через yt-dlp
 	tmpOutTemplate := filepath.Join(s.tmpSandbox.Root(), fmt.Sprintf("switch_%d_%%(ext)s", time.Now().UnixNano()))
-	rawFile, dErr := s.downloadAndValidateRawStream(ctx, targetURL, tmpOutTemplate, expectedDuration, nil)
+	rawFile, sourcePage, dErr := downloadmedia.DownloadAndValidateAudioSource(ctx, s.cookiesPath, targetURL, tmpOutTemplate, expectedDuration, nil)
 	if dErr != nil {
 		if foundJob != nil && foundIdx >= 0 {
 			errStr := dErr.Error()
@@ -239,7 +210,10 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 		tagData = id3.TrackTags{Title: title, Artist: artist, Duration: float64(candDuration)}
 	}
 
-	_ = id3.WriteTags(tmpMP3File, tagData, cover)
+	tagData.SourceURL = sourcePage
+	if err := id3.WriteTags(tmpMP3File, tagData, cover); err != nil {
+		return nil, err
+	}
 
 	// 9. Атомарная замена или создание файла в целевой папке
 	destPath := absFilePath
@@ -274,23 +248,6 @@ func (s *Service) SwitchTrackVersion(ctx context.Context, trackID, targetURL str
 		_ = safefs.Remove(tmpMP3File)
 	}
 	_ = safefs.Chmod(destPath, 0644)
-
-	// 10. Фиксация ручного выбора в SQLite базе данных
-	if s.Database() != nil {
-		_ = s.Database().SavePinnedSource(ctx, db.PinnedTrackSource{
-			CacheKey:   cacheKey,
-			ArtistName: artist,
-			TrackTitle: title,
-			ISRC:       &isrc,
-			PinnedURL:  targetURL,
-			SourceType: sourceType,
-			Duration:   candDuration,
-		})
-		_ = s.Database().PinSoundCloudVersion(ctx, cacheKey, artist, title, targetURL, candDuration)
-		if dbTrackID > 0 {
-			_ = s.Database().UpdateTrackPinnedURL(ctx, dbTrackID, targetURL)
-		}
-	}
 
 	// 11. Обновление состояния задачи в памяти
 	if foundJob != nil {

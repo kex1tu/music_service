@@ -185,7 +185,7 @@
                     <!-- Колонка 3: Кнопки действий (всегда доступны в 1 клик без наведения) -->
                     <div class="flex items-center space-x-1 shrink-0">
                         <!-- Кнопка выбора/смены источника цельного релиза -->
-                        <template x-if="j.status !== 'CANCELLED'">
+                        <template x-if="j.status !== 'CANCELLED' && (!j.is_redownload || (j.status === 'WAITING_SOURCE' && j.total_tracks > 1))">
                             <button
                                 type="button"
                                 @click="$store.releaseSourcePicker.openForJob(j)"
@@ -199,6 +199,12 @@
                             </button>
                         </template>
 
+                        <template x-if="(j.status === 'READY' || j.status === 'PARTIAL_READY') && j.is_redownload && (j.completed_tracks > (j.confirmed_redownload_tracks || []).length)">
+                            <button type="button" @click="$store.app.openRedownloadReplacement(j.id)"
+                                class="min-h-11 rounded-md bg-brand px-2 text-xs font-semibold text-zinc-950">
+                                Подтвердить замену
+                            </button>
+                        </template>
                         <template x-if="(j.status === 'READY' || j.status === 'PARTIAL_READY') && j.is_backfill">
                             <div class="flex items-center space-x-1">
                                 <button
@@ -222,7 +228,7 @@
                                 </button>
                             </div>
                         </template>
-                        <template x-if="(j.status === 'READY' || j.status === 'PARTIAL_READY') && !j.is_backfill">
+                        <template x-if="(j.status === 'READY' || j.status === 'PARTIAL_READY') && !j.is_backfill && !j.is_redownload">
                             <div class="flex items-center space-x-1">
                                 <button
                                     type="button"

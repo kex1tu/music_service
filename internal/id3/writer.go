@@ -15,7 +15,19 @@ import (
 func WriteTags(filePath string, tags TrackTags, cover *CoverInfo) error {
 	// Считываем существующие фреймы для сохранения нетипизированных тегов (COMM, TCOP, ISRC и др.)
 	existingFrames, _ := ReadRawFrames(filePath)
+	return writeTags(filePath, tags, cover, existingFrames, tags.SourceURL != "")
+}
 
+// ReplaceAudioTags keeps the original file's metadata frames on newly downloaded audio.
+func ReplaceAudioTags(downloaded, original string, tags TrackTags) error {
+	existingFrames, err := ReadRawFrames(original)
+	if err != nil {
+		return err
+	}
+	return writeTags(downloaded, tags, nil, existingFrames, true)
+}
+
+func writeTags(filePath string, tags TrackTags, cover *CoverInfo, existingFrames []RawFrame, replaceSource bool) error {
 	// 1. Считываем аудиопоток (пропуская существующий ID3v2 заголовок)
 	file, err := safefs.Open(filePath)
 	if err != nil {
@@ -110,8 +122,18 @@ func WriteTags(filePath string, tags TrackTags, cover *CoverInfo) error {
 	if cover != nil && len(cover.Data) > 0 {
 		managed["APIC"] = true
 	}
+	if tags.ISRC != "" {
+		managed["TSRC"] = true
+		writeTextFrame(&framesBuf, "TSRC", tags.ISRC)
+	}
+	if tags.SourceURL != "" {
+		writeTextFrame(&framesBuf, "TXXX", sourceURLDescription+"\x00"+tags.SourceURL)
+	}
 
 	for _, ef := range existingFrames {
+		if replaceSource && ef.ID == "TXXX" && strings.EqualFold(ExtractTXXXDesc(ef.Data), sourceURLDescription) {
+			continue
+		}
 		if !managed[ef.ID] && isValidFrameID(ef.ID) && len(ef.Data) > 0 && !isArtistOrConflictingTXXX(ef) {
 			writeRawFrame(&framesBuf, ef)
 		}

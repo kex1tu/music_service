@@ -14,6 +14,7 @@ import (
 	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
+	"music-manager/internal/services/downloadmedia"
 	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/resolver"
 )
@@ -107,10 +108,10 @@ func (s *Service) runBackfillPipeline(jobID, deezerAlbumID string, trackURLs []s
 
 	if len(tracks) == 0 && s.jobs != nil && s.jobs.Database() != nil && job.TargetAlbumPath != nil {
 		rows, qErr := s.jobs.Database().Conn().QueryContext(ctx, `
-			SELECT mt.title, mt.artist, mt.track_number, COALESCE(mt.expected_duration, 0), COALESCE(mt.deezer_url, '')
-			FROM missing_tracks mt
+			SELECT mt.title, COALESCE(NULLIF(mt.artist_credit, ''), ar.name), mt.track_number, COALESCE(mt.expected_duration, 0), COALESCE(mt.deezer_url, '')
+			FROM release_tracklist mt JOIN artists ar ON ar.id = mt.artist_id
 			JOIN albums al ON mt.album_id = al.id
-			WHERE (al.folder_path = ? OR al.folder_path = ?)
+			WHERE mt.is_present = 0 AND (al.folder_path = ? OR al.folder_path = ?)
 		`, *job.TargetAlbumPath, filepath.Clean(*job.TargetAlbumPath))
 		if qErr == nil {
 			for rows.Next() {
@@ -397,7 +398,7 @@ trackLoop:
 			rawOutTemplate := filepath.Join(rawDir, fmt.Sprintf("%02d.%%(ext)s", trackIdx))
 			job.SetStepAndStatus(fmt.Sprintf("Загрузка трека %d/%d: %s", trackIdx, total, track.Title), StatusDownloading)
 
-			rawAudioFile, dErr := s.downloadAndValidateRawStream(ctx, track.AudioSourceURL, rawOutTemplate, track.Duration, func(p float64) {
+			rawAudioFile, sourcePage, dErr := downloadmedia.DownloadAndValidateAudioSource(ctx, s.cookiesPath, track.AudioSourceURL, rawOutTemplate, track.Duration, func(p float64) {
 				job.UpdateTrackProgress(trackIdx-1, p, fmt.Sprintf("Загрузка трека %d/%d: %s (%.0f%%)", trackIdx, total, track.Title, p))
 			})
 			// A failed explicit source requires a new manual choice; never rotate or fallback.
@@ -499,7 +500,14 @@ trackLoop:
 				}
 			}
 
-			_ = id3.WriteTags(mp3Path, tagData, cover)
+			tagData.SourceURL = sourcePage
+			if err := id3.WriteTags(mp3Path, tagData, cover); err != nil {
+				message := err.Error()
+				job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+					tr.Status, tr.Error = "error", &message
+				})
+				return
+			}
 
 			// Поиск текста песни через Яндекс Музыку / LRCLIB (синхронизированного .lrc или обычного .txt)
 			// ВАЖНО: Тексты песен сохраняются строго во внешние файлы рядом с треком, никогда в ID3-тег

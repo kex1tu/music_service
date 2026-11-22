@@ -15,7 +15,6 @@ import (
 	"music-manager/internal/api"
 	"music-manager/internal/api/handlers"
 	"music-manager/internal/config"
-	"music-manager/internal/core/auth"
 	"music-manager/internal/core/mediaexec"
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
@@ -23,19 +22,25 @@ import (
 	featureDownloader "music-manager/internal/features/downloader"
 	featureFileManager "music-manager/internal/features/filemanager"
 	featureRadar "music-manager/internal/features/radar"
-	featureRadio "music-manager/internal/features/radio"
 	featureTagEditor "music-manager/internal/features/tageditor"
 	"music-manager/internal/services/censorcheck"
-	"music-manager/internal/services/downloader"
 	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/organizer"
 	"music-manager/internal/services/radar"
-	"music-manager/internal/services/radio"
 	"music-manager/internal/services/resolver"
 	"music-manager/internal/services/scanner"
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--prepare-sqlite-snapshot" {
+		if len(os.Args) != 3 {
+			log.Fatal("usage: music-manager --prepare-sqlite-snapshot DATABASE")
+		}
+		if err := db.PrepareOfflineSnapshot(context.Background(), os.Args[2]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	log.Println("[Main] Starting Music Manager (Go Backend)...")
 
 	// 1. Load configuration
@@ -72,7 +77,6 @@ func main() {
 
 	deezerClient := resolver.NewDeezerClient()
 	audioMatcher := resolver.NewAudioMatcher(cfg.CookiesFile)
-	audioMatcher.SetDB(database)
 	audioMatcher.SetConfig(cfg)
 	audioMatcher.SetCatalogClients(deezerClient, resolver.NewITunesClient(nil))
 	sourceResolver := resolver.NewSourceResolver(
@@ -83,18 +87,6 @@ func main() {
 		cfg.YandexMusicProxy,
 	)
 
-	jobManager := downloader.NewJobManager(database)
-	downloadService := downloader.NewService(
-		appCtx,
-		jobManager,
-		sourceResolver,
-		tmpSandbox,
-		musicSandbox,
-		cfg.CookiesFile,
-		cfg.MaxConcurrentDownloads,
-	)
-	defer downloadService.Close()
-
 	scannerService := scanner.NewScanner(musicSandbox, database, deezerClient, tmpSandbox)
 	organizerService := organizer.NewService(musicSandbox, tmpSandbox)
 	organizerService.SetTrackChanger(scannerService)
@@ -102,7 +94,6 @@ func main() {
 	yandexClient := resolver.NewYandexMusicClient(cfg.YandexMusicToken, cfg.YandexMusicProxy)
 	yandexClient.SetSignKey(cfg.YandexLyricsSignKey)
 	lyricsService.SetYandexClient(yandexClient)
-	downloadService.SetLyricsService(lyricsService)
 
 	// Initialize Downloader Vertical Feature Slice
 	downloaderRepo := featureDownloader.NewRepository(database.Conn())
@@ -152,7 +143,6 @@ func main() {
 
 	// 6. Initialize HTTP Handlers
 	authHandler := handlers.NewAuthHandler(cfg)
-	downloadHandler := handlers.NewDownloadHandler(downloadService, deezerClient)
 	tagHandler := handlers.NewTagHandler(musicSandbox, tmpSandbox, organizerService, deezerClient, sourceResolver.Enricher())
 	tagHandler.SetDB(database)
 
@@ -174,19 +164,6 @@ func main() {
 	tagHandler.SetMusicBrainz(mbClient)
 	tagHandler.SetShazam(shazamProvider)
 
-	fileHandler := handlers.NewFileHandler(handlers.FileHandlerParams{
-		MusicSandbox: musicSandbox,
-		TmpSandbox:   tmpSandbox,
-		Database:     database,
-		Downloader:   downloadService,
-		Organizer:    organizerService,
-		Deezer:       deezerClient,
-		Lyrics:       lyricsService,
-		Scanner:      scannerService,
-		Yandex:       yandexClient,
-		YTMusic:      ytmusicClient,
-		ITunes:       itunesClient,
-	})
 	lyricsHandler := handlers.NewLyricsHandler(lyricsService)
 
 	// Initialize Audit Vertical Feature Slice
@@ -256,81 +233,26 @@ func main() {
 	// Initialize FileManager Vertical Feature Slice
 	fileManagerRepo := featureFileManager.NewRepository(database.Conn())
 	fileManagerFeatureSvc := featureFileManager.NewService(featureFileManager.ServiceConfig{
-		MusicSandbox: musicSandbox,
-		TmpSandbox:   tmpSandbox,
-		Repo:         fileManagerRepo,
-		Organizer:    &fileManagerOrganizerAdapter{sb: musicSandbox, index: scannerService},
-		LibraryIndex: scannerService,
-		Scanner:      &fileManagerScannerAdapter{scanner: scannerService, sb: musicSandbox},
-		JobCreator:   &downloaderBackfillAdapter{svc: downloaderFeatureSvc},
-		SourceFinder: &fileManagerSourceFinder{deezer: deezerClient, matcher: audioMatcher},
+		MusicSandbox:        musicSandbox,
+		TmpSandbox:          tmpSandbox,
+		Repo:                fileManagerRepo,
+		Organizer:           &fileManagerOrganizerAdapter{sb: musicSandbox, index: scannerService},
+		LibraryIndex:        scannerService,
+		Scanner:             &fileManagerScannerAdapter{scanner: scannerService, sb: musicSandbox},
+		JobCreator:          &downloaderBackfillAdapter{svc: downloaderFeatureSvc},
+		SourceFinder:        &fileManagerSourceFinder{deezer: deezerClient, matcher: audioMatcher},
+		RedownloadQueue:     downloaderFeatureSvc,
+		RedownloadOrganizer: organizerService,
 	})
 	fileManagerModule := featureFileManager.NewModule(fileManagerFeatureSvc)
 
-	// 7. Initialize Radar & Radio Services
+	// 7. Initialize Radar Services
 	discographyAggregator := resolver.NewDiscographyAggregator(deezerClient, mbClient, itunesClient, database)
-	lastfmClient := resolver.NewLastfmClient(cfg.LastfmAPIKey)
-	similarityEngine := resolver.NewSimilarityEngine(deezerClient, lastfmClient, database)
 
-	navidromeMusicRoot := cfg.NavidromeMusicRoot
-	if navidromeMusicRoot == "" {
-		navidromeMusicRoot = musicSandbox.Root()
-	}
-	navidromeReader := radio.NewNavidromeReader(cfg.NavidromeDBPath, navidromeMusicRoot)
-	navidromeSubsonic := radio.NewNavidromeSubsonicClient(cfg.NavidromeURL, cfg.NavidromeUser, cfg.NavidromePassword)
-
-	waveSelector := radio.NewWaveSelector(database, navidromeReader, similarityEngine)
-	icyStreamer := radio.NewIcyStreamer(waveSelector, musicSandbox, database, cfg.RadioStreamToken)
-	m3uGenerator := radio.NewM3UGenerator(waveSelector, musicSandbox, cfg.RadioWaveSize)
-
-	radarService := radar.NewService(database, discographyAggregator, downloadService, cfg)
+	radarService := radar.NewService(database, discographyAggregator, cfg)
 	radarService.Start(appCtx)
 
-	// Daily 05:00 cron for «Моя Волна.m3u»
-	go func() {
-		// Generate once on startup in background if not generated
-		if path, err := m3uGenerator.GenerateWaveM3U(appCtx); err == nil && path != "" {
-			log.Printf("[Wave] Начальный плейлист «Моя Волна.m3u» сгенерирован: %s", path)
-		}
-
-		for {
-			now := time.Now()
-			next := time.Date(now.Year(), now.Month(), now.Day(), 5, 0, 0, 0, now.Location())
-			if !next.After(now) {
-				next = next.Add(24 * time.Hour)
-			}
-			select {
-			case <-time.After(time.Until(next)):
-				log.Println("[Wave] Обновление ежедневного плейлиста «Моя Волна.m3u»...")
-				if path, err := m3uGenerator.GenerateWaveM3U(appCtx); err != nil {
-					log.Printf("[Wave] Ошибка генерации M3U: %v", err)
-				} else {
-					log.Printf("[Wave] Плейлист «Моя Волна.m3u» обновлен: %s", path)
-				}
-			case <-appCtx.Done():
-				return
-			}
-		}
-	}()
-
 	radarHandler := handlers.NewRadarHandler(radarService, database)
-	radioHandler := handlers.NewRadioHandler(waveSelector, icyStreamer, m3uGenerator, navidromeSubsonic, navidromeReader, database, cfg)
-
-	// Initialize Radio & Radar Vertical Feature Slices
-	radioRepo := featureRadio.NewRepository(database.Conn())
-	radioFeatureSvc := featureRadio.NewService(featureRadio.ServiceConfig{
-		SessionPolicy:    auth.Policy{Name: cfg.SessionCookieName, TTL: cfg.SessionTTL, Secure: cfg.SessionCookieSecure},
-		Selector:         waveSelector,
-		Streamer:         icyStreamer,
-		M3U:              m3uGenerator,
-		Subsonic:         navidromeSubsonic,
-		NavidromeReader:  navidromeReader,
-		Repo:             radioRepo,
-		RadioStreamToken: cfg.RadioStreamToken,
-		SecretKey:        cfg.SecretKey,
-		RadioWaveSize:    cfg.RadioWaveSize,
-	})
-	radioModule := featureRadio.NewModule(radioFeatureSvc)
 
 	radarRepo := featureRadar.NewRepository(database.Conn())
 	radarFeatureSvc := featureRadar.NewService(featureRadar.ServiceConfig{
@@ -343,18 +265,14 @@ func main() {
 	router := api.NewRouter(api.RouterParams{
 		Config:            cfg,
 		AuthHandler:       authHandler,
-		DownloadHandler:   downloadHandler,
 		DownloaderModule:  downloaderModule,
 		AuditModule:       auditModule,
 		TagEditorModule:   tagEditorModule,
 		FileManagerModule: fileManagerModule,
-		RadioModule:       radioModule,
 		RadarModule:       radarModule,
 		TagHandler:        tagHandler,
-		FileHandler:       fileHandler,
 		LyricsHandler:     lyricsHandler,
 		RadarHandler:      radarHandler,
-		RadioHandler:      radioHandler,
 	})
 
 	// 9. Start HTTP Server

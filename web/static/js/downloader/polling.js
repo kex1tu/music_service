@@ -34,7 +34,7 @@ window.DownloaderPolling = {
                 } else {
                     Alpine.store('app').toast('Загрузка завершена! Открываем редактор тегов...', 'success');
                 }
-                await this.openTagEditorForJob(jobId);
+                if (!currentJob.is_redownload) await this.openTagEditorForJob(jobId);
             } else if (currentJob.status === 'ERROR') {
                 if (downloader.pollInterval) {
                     clearInterval(downloader.pollInterval);

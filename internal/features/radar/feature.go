@@ -31,10 +31,7 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Route("/api/radar", func(r chi.Router) {
 		r.Get("/feed", m.GetFeed)
 		r.Get("/unread-count", m.GetUnreadCount)
-		r.Get("/artists", m.GetTrackedArtists)
-		r.Post("/artists", m.AddTrackedArtist)
-		r.Post("/artists/{name}/follow", m.FollowArtist)
-		r.Post("/artists/{name}/auto-download", m.SetAutoDownload)
+		r.Get("/artists", m.GetLibraryArtists)
 		r.Post("/artists/{name}/custom-links", m.UpdateCustomLinks)
 		r.Get("/artists/{name}/discography", m.GetArtistDiscography)
 		r.Post("/scan", m.TriggerScan)

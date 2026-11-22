@@ -1,20 +1,24 @@
 package resolver
 
+import "music-manager/internal/db"
+
 // CatalogReleaseSummary содержит краткую информацию о найденном релизе для списка выбора.
 type CatalogReleaseSummary struct {
-	ReleaseType string `json:"release_type,omitempty"`
-	ID          string `json:"id"`
-	Source      string `json:"source"` // "deezer", "musicbrainz", "shazam"
-	Title       string `json:"title"`
-	Artist      string `json:"artist"`
-	CoverURL    string `json:"cover_url,omitempty"`
-	Year        int    `json:"year,omitempty"`
-	Date        string `json:"date,omitempty"`
-	TrackCount  int    `json:"track_count"`
-	Label       string `json:"label,omitempty"`
-	Country     string `json:"country,omitempty"`
-	Barcode     string `json:"barcode,omitempty"`
-	Score       int    `json:"score,omitempty"`
+	ProviderCredits  []db.RadarCredit `json:"-"`
+	DeezerAlbumLinks []string         `json:"-"`
+	ReleaseType      string           `json:"release_type,omitempty"`
+	ID               string           `json:"id"`
+	Source           string           `json:"source"` // "deezer", "musicbrainz", "shazam"
+	Title            string           `json:"title"`
+	Artist           string           `json:"artist"`
+	CoverURL         string           `json:"cover_url,omitempty"`
+	Year             int              `json:"year,omitempty"`
+	Date             string           `json:"date,omitempty"`
+	TrackCount       int              `json:"track_count"`
+	Label            string           `json:"label,omitempty"`
+	Country          string           `json:"country,omitempty"`
+	Barcode          string           `json:"barcode,omitempty"`
+	Score            int              `json:"score,omitempty"`
 }
 
 // CatalogTrackDetail представляет отдельную дорожку в треклисте релиза.

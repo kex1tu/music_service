@@ -20,23 +20,5 @@ func (s *Service) GetCandidatesWithLimit(ctx context.Context, artist, title stri
 	if s.matcher == nil {
 		return nil, errors.New("audio matcher is not available")
 	}
-	items, err := s.matcher.SearchMultiCandidatesWithLimit(ctx, artist, title, duration, query, limit)
-	if s.repo != nil {
-		if pin, e := s.repo.GetPinnedSource(ctx, resolver.BuildCacheKey(code, artist, title)); e == nil && pin != nil && resolver.IsAllowedURL(pin.PinnedURL) {
-			found := false
-			for i := range items {
-				if resolver.SameAudioSource(items[i].URL, pin.PinnedURL) {
-					items[i].SavedSelection = true
-					found = true
-				}
-			}
-			if !found {
-				items = append(items, resolver.CandidateTrackItem{URL: pin.PinnedURL, Title: "Сохранённый источник (требует проверки)", SavedSelection: true, SearchIncomplete: err != nil})
-			}
-		}
-	}
-	if len(items) == 0 && err != nil {
-		return nil, err
-	}
-	return items, nil
+	return s.matcher.SearchMultiCandidatesWithLimit(ctx, artist, title, duration, query, limit)
 }

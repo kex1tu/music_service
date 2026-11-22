@@ -9,7 +9,6 @@ import (
 
 	"music-manager/internal/core/httputil"
 	"music-manager/internal/core/safefs"
-	"music-manager/internal/db"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
@@ -40,7 +39,6 @@ func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var present map[db.TrackPosition]bool
 	if missingOnly {
 		if path == "" || m.service.MusicSandbox() == nil || m.service.Repo() == nil {
 			httputil.RespondError(w, http.StatusBadRequest, "укажите папку целевого релиза")
@@ -62,16 +60,13 @@ func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, gap := range missing {
-			track := resolvedBackfillTrack(gap.CatalogTrack, "")
+			track := resolvedBackfillTrack(gap.CatalogTrack)
 			track.Album, track.AlbumArtist = album, artist
 			targetTracks = append(targetTracks, track)
 		}
 		if len(targetTracks) == 0 {
-			present, err = m.service.Repo().GetAlbumTrackPositions(r.Context(), path)
-			if err != nil {
-				httputil.RespondError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
+			httputil.RespondError(w, http.StatusNotFound, "нет подтверждённых пропусков для докачки")
+			return
 		}
 	}
 
@@ -112,10 +107,7 @@ func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
 				catalog, err := resolver.DeezerCatalogTracks(dAlbum)
 				if err == nil {
 					for _, item := range catalog {
-						if present[item.TrackPosition] {
-							continue
-						}
-						track := resolvedBackfillTrack(item, "")
+						track := resolvedBackfillTrack(item)
 						track.Album, track.AlbumArtist = dAlbum.Title, dAlbum.Artist.Name
 						targetTracks = append(targetTracks, track)
 					}

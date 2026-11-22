@@ -20,13 +20,15 @@ import (
 
 var progressRegex = regexp.MustCompile(`(?:\[download\]|\bdownload:)?\s*(\d+(?:\.\d+)?)%`)
 
-func downloadRawStream(ctx context.Context, cookiesPath string, sourceURL, outputTemplate string, onProgress func(float64)) (string, error) {
+func downloadRawStream(ctx context.Context, cookiesPath string, sourceURL, outputTemplate string, onProgress func(float64)) (string, string, error) {
 	args := []string{
 		"--ignore-config",
 		"--no-download-archive",
 		"-f", "ba/b",
 		"-o", outputTemplate,
 		"--no-playlist",
+		"--no-simulate",
+		"--print", "after_move:music-manager-source:%(webpage_url)j",
 		"--newline",
 		"--no-colors",
 		"--progress",
@@ -49,25 +51,16 @@ func downloadRawStream(ctx context.Context, cookiesPath string, sourceURL, outpu
 	defer cmd.Close()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("failed to start yt-dlp: %w", err)
+		return "", "", fmt.Errorf("failed to start yt-dlp: %w", err)
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		line := scanner.Text()
-		match := progressRegex.FindStringSubmatch(line)
-		if len(match) >= 2 && onProgress != nil {
-			if val, pErr := strconv.ParseFloat(match[1], 64); pErr == nil {
-				onProgress(val)
-			}
-		}
-	}
+	page := readDownloadOutput(bufio.NewScanner(stdout), onProgress)
 
 	if err := cmd.Wait(); err != nil {
 		// Fallback: если yt-dlp отклонил куки, повторяем загрузку в гостевом режиме
@@ -87,40 +80,59 @@ func downloadRawStream(ctx context.Context, cookiesPath string, sourceURL, outpu
 				var stderrRetry bytes.Buffer
 				cmdRetry.Stderr = &stderrRetry
 				if sErr := cmdRetry.Start(); sErr == nil {
-					scannerRetry := bufio.NewScanner(stdoutRetry)
-					for scannerRetry.Scan() {
-						line := scannerRetry.Text()
-						match := progressRegex.FindStringSubmatch(line)
-						if len(match) >= 2 && onProgress != nil {
-							if val, valErr := strconv.ParseFloat(match[1], 64); valErr == nil {
-								onProgress(val)
-							}
-						}
-					}
+					page = readDownloadOutput(bufio.NewScanner(stdoutRetry), onProgress)
 					if wErr := cmdRetry.Wait(); wErr == nil {
-						return findDownloadedFile(outputTemplate)
+						path, err := findDownloadedFile(outputTemplate)
+						return path, page, err
 					}
 					stderr = stderrRetry
 				}
 			}
 		}
-		return "", fmt.Errorf("yt-dlp download failed: %w: %s", err, stderr.String())
+		return "", "", fmt.Errorf("yt-dlp download failed: %w: %s", err, stderr.String())
 	}
 
-	return findDownloadedFile(outputTemplate)
+	path, err := findDownloadedFile(outputTemplate)
+	return path, page, err
 }
 
 // DownloadAndValidateAudio downloads audio to the supplied temporary template and rejects short previews.
 func DownloadAndValidateAudio(ctx context.Context, cookiesPath string, sourceURL, outputTemplate string, expectedDurationSec int, onProgress func(float64)) (string, error) {
-	rawFile, err := downloadRawStream(ctx, cookiesPath, sourceURL, outputTemplate, onProgress)
+	path, _, err := DownloadAndValidateAudioSource(ctx, cookiesPath, sourceURL, outputTemplate, expectedDurationSec, onProgress)
+	return path, err
+}
+
+// DownloadAndValidateAudioSource also returns the public page reported by the downloader.
+func DownloadAndValidateAudioSource(ctx context.Context, cookiesPath string, sourceURL, outputTemplate string, expectedDurationSec int, onProgress func(float64)) (string, string, error) {
+	rawFile, page, err := downloadRawStream(ctx, cookiesPath, sourceURL, outputTemplate, onProgress)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if vErr := validateDownloadedStreamAudio(ctx, rawFile, expectedDurationSec); vErr != nil {
+	if err := validateDownloadedStreamAudio(ctx, rawFile, expectedDurationSec); err != nil {
 		_ = safefs.Remove(rawFile)
-		return "", vErr
+		return "", "", err
 	}
-	return rawFile, nil
+	if page == "" {
+		page = sourceURL
+	}
+	return rawFile, resolver.PublicTrackSource(page), nil
+}
+
+func readDownloadOutput(scanner *bufio.Scanner, onProgress func(float64)) string {
+	var page string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if value, ok := strings.CutPrefix(line, "music-manager-source:"); ok {
+			_ = json.Unmarshal([]byte(value), &page)
+			continue
+		}
+		if match := progressRegex.FindStringSubmatch(line); len(match) >= 2 && onProgress != nil {
+			if value, err := strconv.ParseFloat(match[1], 64); err == nil {
+				onProgress(value)
+			}
+		}
+	}
+	return page
 }
 
 func findDownloadedFile(outputTemplate string) (string, error) {

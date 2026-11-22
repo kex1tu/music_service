@@ -18,19 +18,6 @@ var (
 	remixRegex  = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(remix|ремикс)(?:$|[^\p{L}\p{N}])`)
 )
 
-// BuildCacheKey формирует детерминированный ключ для кэша SoundCloud Resolver.
-// Если указан ISRC — используется префикс isrc:<ISRC>.
-// В противном случае используется track:<artist>:<title>.
-func BuildCacheKey(isrc, artist, title string) string {
-	isrc = strings.TrimSpace(isrc)
-	if isrc != "" {
-		return "isrc:" + strings.ToUpper(isrc)
-	}
-	cleanArt := strings.ToLower(CleanQueryText(ExtractPrimaryArtist(artist)))
-	cleanTit := strings.ToLower(CleanQueryTextFull(title))
-	return fmt.Sprintf("track:%s:%s", cleanArt, cleanTit)
-}
-
 // ExtractSaviorsAndCheckBad анализирует название трека-кандидата.
 // Реализует Anti-Glue алгоритм замещения фраз-спасителей и Anti-Collision защиту от ложных
 // срабатываний стоп-слов при их совпадении с целевым артистом или названием трека (кейс Clean Bandit).

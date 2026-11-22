@@ -15,6 +15,7 @@ document.addEventListener('alpine:init', () => {
         tagEditorData: null,
         deleteConfirmData: null,
         redownloadConfirmData: null,
+        redownloadReplacement: null,
 
         // Подключаем менеджер очереди
         queue: null,
@@ -101,7 +102,7 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async executeRedownloadConfirm() {
+        async executeRedownloadConfirm(chooseSource = false) {
             const item = this.redownloadConfirmData;
             if (!item || !item.path) return;
             try {
@@ -109,6 +110,7 @@ document.addEventListener('alpine:init', () => {
                     path: item.path,
                     type: item.type || 'track',
                     delete_existing: false,
+                    choose_source: chooseSource,
                 };
                 let resData;
                 if (window.api && window.api.files && window.api.files.redownload) {
@@ -129,6 +131,13 @@ document.addEventListener('alpine:init', () => {
                 this.toast(resData.message || `Поставлено в очередь: ${item.name}`, 'success');
                 this.activeModal = null;
                 this.redownloadConfirmData = null;
+                if (resData.job_id && (resData.type === 'album' || !resData.source_url)) {
+                    const response = await window.api.raw(`/downloads/${encodeURIComponent(resData.job_id)}`);
+                    if (!response.ok) throw new Error('Не удалось открыть задачу');
+                    const job = await response.json();
+                    if (resData.type === 'album') Alpine.store('releaseSourcePicker').openForJob(job);
+                    else if (job.tracks?.length) Alpine.store('sourcePicker').openForQueueTrack(job, job.tracks[0]);
+                }
 
                 if (this.queue && this.queue.fetchQueue) {
                     await this.queue.fetchQueue();
@@ -139,6 +148,54 @@ document.addEventListener('alpine:init', () => {
                 window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
             } catch (e) {
                 this.toast(`Ошибка: ${e.message}`, 'error');
+            }
+        },
+
+        async openRedownloadReplacement(jobID) {
+            try {
+                const response = await window.api.raw(`/downloads/${encodeURIComponent(jobID)}`);
+                if (!response.ok) throw new Error('Не удалось открыть задачу');
+                const job = await response.json();
+                const confirmed = job.confirmed_redownload_tracks || [];
+                const tracks = (job.tracks || []).filter(t => t.status === 'ready' && t.converted_path && !confirmed.includes(t.track_id));
+                if (!tracks.length) {
+                    this.toast('Нет новых дорожек для подтверждения', 'info');
+                    return;
+                }
+                this.redownloadReplacement = { jobID, tracks, selected: tracks.map(t => t.track_id), busy: false, errors: {} };
+                this.activeModal = 'redownload_replace';
+            } catch (error) {
+                this.toast(error.message, 'error');
+            }
+        },
+
+        async confirmRedownloadReplacement() {
+            const data = this.redownloadReplacement;
+            if (!data || data.busy || !data.selected.length) return;
+            data.busy = true;
+            try {
+                const response = await window.api.raw(`/files/redownload/${encodeURIComponent(data.jobID)}/confirm`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ track_ids: data.selected }),
+                });
+                const payload = await response.json();
+                if (!response.ok) throw new Error(payload.error || 'Не удалось сохранить дорожки');
+                const applied = new Set((payload.results || []).filter(r => !r.error).map(r => r.track_id));
+                const errors = (payload.results || []).filter(r => r.error);
+                data.tracks = data.tracks.filter(t => !applied.has(t.track_id));
+                data.selected = data.selected.filter(id => !applied.has(id));
+                data.errors = Object.fromEntries(errors.map(r => [r.track_id, r.error]));
+                if (!errors.length) this.activeModal = null;
+                if (applied.size) {
+                    this.toast(`Сохранено дорожек: ${applied.size}`, 'success');
+                    await this.queue?.fetchQueue?.();
+                    window.dispatchEvent(new CustomEvent('refresh-file-manager', { detail: '' }));
+                }
+            } catch (error) {
+                this.toast(error.message, 'error');
+            } finally {
+                data.busy = false;
             }
         },
 
@@ -189,32 +246,6 @@ document.addEventListener('alpine:init', () => {
         closeLoginModal() {
             if (this.activeModal === 'login') {
                 this.activeModal = null;
-            }
-        },
-
-        mobileMoreOpen: false,
-
-        toggleMobileMore() {
-            this.mobileMoreOpen = !this.mobileMoreOpen;
-        },
-
-        closeMobileMore() {
-            this.mobileMoreOpen = false;
-        },
-
-        openTabFromMobileMore(tab) {
-            this.activeTab = tab;
-            this.mobileMoreOpen = false;
-            if (tab === 'audit') {
-                window.dispatchEvent(new CustomEvent('refresh-audit'));
-            } else if (tab === 'radar' && Alpine.store('radar')) {
-                Alpine.store('radar').fetchFeed(1);
-                Alpine.store('radar').fetchUnreadCount();
-            } else if (tab === 'radio' && Alpine.store('radio')) {
-                Alpine.store('radio').fetchStats();
-                Alpine.store('radio').fetchQueue();
-            } else if (tab === 'player' && Alpine.store('player')) {
-                Alpine.store('player').onTabOpened();
             }
         },
 

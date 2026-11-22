@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -329,42 +328,26 @@ func TestStartCleaner_NoLeakAfterClose(t *testing.T) {
 	}
 }
 
-func TestSyncJob_Debounce(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "test_debounce.db")
-	database, err := db.Open(dbPath)
+func TestLegacyJobManagerLeavesStoredQueueToFeatureService(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "legacy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer database.Close()
-
-	mgr := NewJobManager(database)
-	job := &DownloadJob{
-		ID:          "debounce-job",
-		Status:      StatusDownloading,
-		URL:         "https://www.deezer.com/album/123",
-		Progress:    0.0,
-		CurrentStep: "Step 0",
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
-		UpdatedAt:   time.Now().UTC(),
-	}
-	mgr.Add(job)
-
-	// Fire 5 rapid progress updates (non-terminal state) within 50ms
-	for i := 1; i <= 5; i++ {
-		job.UpdateProgress(float64(i*10), fmt.Sprintf("Step %d", i))
-		time.Sleep(10 * time.Millisecond)
+	ctx := t.Context()
+	if err := database.SaveJob(ctx, db.DownloadJobEntity{ID: "stored", Status: "QUEUED"}); err != nil {
+		t.Fatal(err)
 	}
 
-	// Wait for debounce timer (500ms) to settle and sync to SQLite
-	time.Sleep(650 * time.Millisecond)
-
-	ctx := context.Background()
-	saved, err := database.GetJob(ctx, "debounce-job")
-	if err != nil {
-		t.Fatalf("failed to get job from DB: %v", err)
+	manager := NewJobManager(database)
+	if len(manager.GetAll()) != 0 {
+		t.Fatal("compatibility manager restored the persistent queue")
 	}
-	if saved.Progress != 50.0 {
-		t.Errorf("expected final debounced progress 50.0, got %f", saved.Progress)
+	manager.Add(&DownloadJob{ID: "stored", Status: StatusError})
+	manager.ClearCompleted()
+	saved, err := database.GetJob(ctx, "stored")
+	if err != nil || saved == nil || saved.Status != "QUEUED" {
+		t.Fatalf("compatibility manager changed the persistent queue: %+v %v", saved, err)
 	}
 }
 

@@ -90,7 +90,7 @@ func setupIntegrationServer(t *testing.T) *integrationContext {
 	scannerSvc := scanner.NewScanner(musicSb, database, deezerClient)
 
 	agg := resolver.NewDiscographyAggregator(deezerClient, nil, nil, database)
-	radarSvc := radar.NewService(database, agg, downSvc, cfg)
+	radarSvc := radar.NewService(database, agg, cfg)
 
 	authHandler := handlers.NewAuthHandler(cfg)
 	downHandler := handlers.NewDownloadHandler(downSvc, deezerClient)
@@ -637,4 +637,3 @@ func (f *testFileManagerSourceFinder) FindAlbumURL(ctx context.Context, artist, 
 	}
 	return "", fmt.Errorf("source not found for album %s - %s", artist, album)
 }
-

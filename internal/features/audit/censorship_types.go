@@ -42,16 +42,27 @@ type CensorshipResult struct {
 	TotalWindows       int                  `json:"total_windows"`
 }
 
+type CensorshipDecision struct {
+	RunID     string `json:"run_id"`
+	Decision  string `json:"decision"`
+	DecidedAt string `json:"decided_at"`
+}
+
 type CensorshipItem struct {
-	ID        int64            `json:"id"`
-	Path      string           `json:"path"`
-	Reference string           `json:"reference"`
-	State     string           `json:"state"`
-	Verdict   string           `json:"verdict"`
-	Result    CensorshipResult `json:"result"`
-	Error     string           `json:"error"`
-	Decision  string           `json:"manual_decision"`
-	Note      string           `json:"manual_note"`
+	ID               int64               `json:"id"`
+	Path             string              `json:"path"`
+	Reference        string              `json:"reference"`
+	CurrentPath      string              `json:"current_path"`
+	CurrentReference string              `json:"current_reference"`
+	State            string              `json:"state"`
+	Verdict          string              `json:"verdict"`
+	Result           CensorshipResult    `json:"result"`
+	Error            string              `json:"error"`
+	Decision         string              `json:"manual_decision"`
+	Note             string              `json:"manual_note"`
+	DecidedAt        string              `json:"decided_at,omitempty"`
+	DecisionVerified bool                `json:"decision_verified"`
+	PreviousDecision *CensorshipDecision `json:"previous_decision,omitempty"`
 }
 
 type CensorshipRun struct {

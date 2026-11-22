@@ -98,9 +98,23 @@ func (s *Service) freezeBackfillSelection(ctx context.Context, folder string, se
 }
 
 func (s *Service) resolveBackfill(ctx context.Context, job *Job) (*resolver.ReleaseMetadata, []resolver.ResolvedTrack, error) {
-	if job.Source == "release_picker" && job.Backfill != nil && len(job.Tracks) > 0 {
+	var folder string
+	var checked bool
+	if job.TargetAlbumPath != nil {
+		folder = *job.TargetAlbumPath
+	}
+	if s.repo != nil && folder != "" {
+		var err error
+		checked, err = s.repo.albumCatalogChecked(ctx, folder)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	pickedRelease := job.Source == "release_picker" && job.Backfill != nil && len(job.Tracks) > 0
+	if pickedRelease && !checked {
 		return &job.AlbumMetadata, job.Tracks, nil
 	}
+
 	var selection BackfillRequest
 	if job.Backfill != nil {
 		selection = *job.Backfill
@@ -111,19 +125,18 @@ func (s *Service) resolveBackfill(ctx context.Context, job *Job) (*resolver.Rele
 		selection.TrackURLs = []string{job.URL}
 	}
 
-	var folder string
-	if job.TargetAlbumPath != nil {
-		folder = *job.TargetAlbumPath
-	}
-
 	manuallyBound := make(map[db.TrackPosition]resolver.ResolvedTrack)
+	pickedTracks := make(map[db.TrackPosition]resolver.ResolvedTrack)
 	for _, track := range job.Tracks {
 		position := db.ReleasePosition(track.DiscNumber, track.TrackNumber)
+		if pickedRelease {
+			pickedTracks[position] = track
+		}
 		if track.VersionStatus == "manual" && track.AudioSourceURL != "" {
 			manuallyBound[position] = track
 		}
 	}
-	if len(manuallyBound) > 0 && len(manuallyBound) == selection.selectionCount() && len(manuallyBound) == len(job.Tracks) {
+	if !checked && len(manuallyBound) > 0 && len(manuallyBound) == selection.selectionCount() && len(manuallyBound) == len(job.Tracks) {
 		return &job.AlbumMetadata, job.Tracks, nil
 	}
 
@@ -146,13 +159,18 @@ func (s *Service) resolveBackfill(ctx context.Context, job *Job) (*resolver.Rele
 				return nil, nil, fmt.Errorf("track %d occurs on multiple discs; select a disc", gap.TrackNumber)
 			}
 			numbers[gap.TrackNumber] = true
-			track := resolvedBackfillTrack(gap.CatalogTrack, gap.PinnedURL)
-			if manual, ok := manuallyBound[gap.TrackPosition]; ok && manual.TrackID == track.TrackID {
+			track := resolvedBackfillTrack(gap.CatalogTrack)
+			if mapped, ok := pickedTracks[gap.TrackPosition]; ok && (gap.DeezerID == "" || mapped.TrackID == track.TrackID) {
+				track.AudioSourceURL, track.VersionStatus, track.VersionPolicy = mapped.AudioSourceURL, mapped.VersionStatus, mapped.VersionPolicy
+			} else if manual, ok := manuallyBound[gap.TrackPosition]; ok && manual.TrackID == track.TrackID {
 				track.AudioSourceURL, track.VersionStatus, track.VersionPolicy = manual.AudioSourceURL, manual.VersionStatus, manual.VersionPolicy
 			}
 			tracks = append(tracks, track)
 			selectedGaps[gap.TrackPosition] = true
 		}
+	}
+	if checked {
+		return &job.AlbumMetadata, tracks, nil
 	}
 	if count := selection.selectionCount(); len(tracks) > 0 && (count == 0 || len(tracks) == count) {
 		return nil, tracks, nil
@@ -213,14 +231,14 @@ func (s *Service) resolveBackfill(ctx context.Context, job *Job) (*resolver.Rele
 	return meta, tracks, nil
 }
 
-func resolvedBackfillTrack(track db.CatalogTrack, pin string) resolver.ResolvedTrack {
+func resolvedBackfillTrack(track db.CatalogTrack) resolver.ResolvedTrack {
 	id := fmt.Sprintf("backfill_%d_%d", track.DiscNumber, track.TrackNumber)
 	if track.DeezerID != "" {
 		id = "dz_" + track.DeezerID
 	}
 	resolved := resolver.ResolvedTrack{
 		TrackID: id, TrackNumber: track.TrackNumber, DiscNumber: track.DiscNumber,
-		Title: track.Title, Artist: track.Artist, Duration: track.Duration, AudioSourceURL: pin, Status: "pending",
+		Title: track.Title, Artist: track.Artist, Duration: track.Duration, Status: "pending",
 	}
 	if track.ISRC != "" {
 		resolved.ISRC = &track.ISRC

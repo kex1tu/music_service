@@ -2,7 +2,7 @@
  * client.js — Единый типизированный API-клиент Music Manager.
  * 
  * Инкапсулирует все HTTP-взаимодействия с 6 вертикальными слайсами бэкенда
- * (Downloader, TagEditor, FileManager, Audit, Radio, Radar) и подсистемами Auth/Lyrics.
+ * (Downloader, TagEditor, FileManager, Audit, Radar) и подсистемами Auth/Lyrics.
  * Работает в no-build среде браузера (Vanilla JS / Alpine.js CDN).
  */
 (function(global) {
@@ -214,25 +214,11 @@
             applyCatalogAlbum: (payload) => request('/files/audit/tag-issues/apply-catalog-album', { method: 'POST', body: payload }),
         },
 
-        // ==================== RADIO & MY WAVE ====================
-        radio: {
-            nowPlaying: () => request('/api/radio/now-playing'),
-            waveQueue: (mode) => request(`/api/radio/wave/queue${toQueryString({ mode })}`),
-            waveStats: () => request('/api/radio/wave/stats'),
-            genres: () => request('/api/radio/genres'),
-            generateM3U: () => request('/api/radio/m3u/generate', { method: 'POST' }),
-            syncNavidrome: () => request('/api/radio/navidrome/sync-radio', { method: 'POST' }),
-            streamUrl: (mode = 'wave') => `/api/radio/stream/${encodeURIComponent(mode)}`,
-        },
-
         // ==================== RELEASE RADAR ====================
         radar: {
             feed: (params = {}) => request(`/api/radar/feed${toQueryString(params)}`),
             unreadCount: () => request('/api/radar/unread-count'),
             artists: (params = {}) => request(`/api/radar/artists${toQueryString(params)}`),
-            addArtist: (name) => request('/api/radar/artists', { method: 'POST', body: { name } }),
-            followArtist: (name) => request(`/api/radar/artists/${encodeURIComponent(name)}/follow`, { method: 'POST' }),
-            setAutoDownload: (name, autoDownload = true) => request(`/api/radar/artists/${encodeURIComponent(name)}/auto-download`, { method: 'POST', body: { auto_download: autoDownload } }),
             customLinks: (name, links) => request(`/api/radar/artists/${encodeURIComponent(name)}/custom-links`, { method: 'POST', body: { links } }),
             discography: (name) => request(`/api/radar/artists/${encodeURIComponent(name)}/discography`),
             scan: () => request('/api/radar/scan', { method: 'POST' }),
