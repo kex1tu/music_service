@@ -139,7 +139,7 @@ func moveTrackWithCompanions(srcMP3, destMP3 string, overwrite bool, apply func(
 		}
 
 		// Move companion files (.lrc, .txt, .jpg, .png, etc.)
-		if err := moveCompanionFiles(srcMP3, targetMP3); err != nil {
+		if err := moveCompanionFiles(srcMP3, targetMP3, false); err != nil {
 			rollback := moveFile(targetMP3, srcMP3)
 			return errors.Join(err, rollback)
 		}
@@ -193,7 +193,7 @@ func cleanCompanionFiles(srcAudio, destAudio string) error {
 	return nil
 }
 
-func moveCompanionFiles(srcAudio, destAudio string) error {
+func moveCompanionFiles(srcAudio, destAudio string, resume bool) error {
 	var moved [][2]string
 	srcBase := strings.TrimSuffix(srcAudio, filepath.Ext(srcAudio))
 	destBase := strings.TrimSuffix(destAudio, filepath.Ext(destAudio))
@@ -201,25 +201,42 @@ func moveCompanionFiles(srcAudio, destAudio string) error {
 	for _, ext := range companionExtensions {
 		srcComp := srcBase + ext
 		destComp := destBase + ext
-		if fileExists(srcComp) && srcComp != destComp {
-			var moveErr error
-			if _, err := safefs.Lstat(destComp); err == nil {
-				moveErr = fmt.Errorf("companion destination already exists: %s", destComp)
+		if srcComp == destComp {
+			continue
+		}
+		info, moveErr := safefs.Lstat(srcComp)
+		if errors.Is(moveErr, os.ErrNotExist) || (moveErr == nil && info.IsDir()) {
+			continue
+		}
+		if moveErr == nil && !info.Mode().IsRegular() {
+			moveErr = fmt.Errorf("companion is not a regular file: %s", srcComp)
+		}
+		if moveErr == nil {
+			if destInfo, err := safefs.Lstat(destComp); err == nil {
+				if resume && destInfo.Mode().IsRegular() && sameTrackFiles(srcComp, destComp) {
+					// A cross-filesystem move can be interrupted after publishing
+					// the complete destination and before deleting the source.
+					if moveErr = safefs.Remove(srcComp); moveErr == nil {
+						continue
+					}
+				} else {
+					moveErr = fmt.Errorf("companion destination already exists: %s", destComp)
+				}
 			} else if !errors.Is(err, os.ErrNotExist) {
 				moveErr = err
 			}
-			if moveErr == nil {
-				moveErr = moveFile(srcComp, destComp)
-			}
-			if err := moveErr; err != nil {
-				errs := []error{err}
-				for i := len(moved) - 1; i >= 0; i-- {
-					errs = append(errs, moveFile(moved[i][1], moved[i][0]))
-				}
-				return errors.Join(errs...)
-			}
-			moved = append(moved, [2]string{srcComp, destComp})
 		}
+		if moveErr == nil {
+			moveErr = moveFile(srcComp, destComp)
+		}
+		if moveErr != nil {
+			errs := []error{moveErr}
+			for i := len(moved) - 1; i >= 0; i-- {
+				errs = append(errs, moveFile(moved[i][1], moved[i][0]))
+			}
+			return errors.Join(errs...)
+		}
+		moved = append(moved, [2]string{srcComp, destComp})
 	}
 	return nil
 }

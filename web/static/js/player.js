@@ -44,7 +44,6 @@ document.addEventListener('alpine:init', () => {
         peakVelocities: new Float32Array(32),
         vuMeterL: 0,
         vuMeterR: 0,
-        radioPollInterval: null,
 
         // Движок караоке LRC
         lyricsLines: [],
@@ -175,7 +174,6 @@ document.addEventListener('alpine:init', () => {
 
         playTrack(track, playlist = []) {
             if (!track) return;
-            this.stopRadioMetadataPolling();
 
             // Если кликнули на уже играющий трек — переключаем паузу/воспроизведение
             if (this.currentTrack && (this.currentTrack.path === track.path || (this.currentTrack.id && this.currentTrack.id === track.id))) {
@@ -330,81 +328,6 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        playRadioStream(streamUrl, stationName) {
-            if (!streamUrl) return;
-            if (this.currentTrack && this.currentTrack.stream_url === streamUrl && this.isPlaying) {
-                this.togglePlay();
-                return;
-            }
-            this.currentTrack = {
-                title: stationName || 'Моя Волна',
-                artist: 'Бесконечный ICY-поток (320 kbps)',
-                duration: 0,
-                is_radio: true,
-                stream_url: streamUrl,
-            };
-            this.isVisible = true;
-            this.currentTime = 0;
-            this.duration = 0;
-            this.ensureAudioContext();
-            if (this.audioElement) {
-                this.isLoading = true;
-                this.audioElement.src = streamUrl;
-                this.audioElement.load();
-                this.audioElement.play()
-                    .then(() => {
-                        this.isPlaying = true;
-                        this.isLoading = false;
-                        this.startVisualizer();
-                        this.startRadioMetadataPolling();
-                    })
-                    .catch((err) => {
-                        console.warn('Ошибка воспроизведения радиопотока:', err);
-                        this.isPlaying = false;
-                        this.isLoading = false;
-                        this.stopRadioMetadataPolling();
-                    });
-            }
-        },
-
-        startRadioMetadataPolling() {
-            this.stopRadioMetadataPolling();
-            const poll = async () => {
-                if (!this.isPlaying || !this.currentTrack || !this.currentTrack.is_radio) {
-                    return;
-                }
-                try {
-                    const res = await window.api.raw('/api/radio/stream/now-playing');
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (data && data.current_track && this.currentTrack && this.currentTrack.is_radio) {
-                            const cur = data.current_track;
-                            if (this.currentTrack.title !== cur.title || this.currentTrack.artist !== cur.artist) {
-                                this.currentTrack.title = cur.title;
-                                this.currentTrack.artist = cur.artist;
-                                this.currentTrack.album = cur.album || '';
-                                if (cur.duration) {
-                                    this.currentTrack.duration = cur.duration;
-                                }
-                                if (cur.id) {
-                                    this.coverUrl = `/api/tracks/${cur.id}/cover`;
-                                }
-                            }
-                        }
-                    }
-                } catch (e) {}
-            };
-            poll();
-            this.radioPollInterval = setInterval(poll, 4000);
-        },
-
-        stopRadioMetadataPolling() {
-            if (this.radioPollInterval) {
-                clearInterval(this.radioPollInterval);
-                this.radioPollInterval = null;
-            }
-        },
-
         togglePlay() {
             if (!this.audioElement || !this.currentTrack) return;
 
@@ -414,15 +337,11 @@ document.addEventListener('alpine:init', () => {
                 this.audioElement.pause();
                 this.isPlaying = false;
                 this.stopVisualizer();
-                this.stopRadioMetadataPolling();
             } else {
                 this.audioElement.play()
                     .then(() => {
                         this.isPlaying = true;
                         this.startVisualizer();
-                        if (this.currentTrack && this.currentTrack.is_radio) {
-                            this.startRadioMetadataPolling();
-                        }
                     })
                     .catch((err) => {
                         console.error('Ошибка воспроизведения:', err);

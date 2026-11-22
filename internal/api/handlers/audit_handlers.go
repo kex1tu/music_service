@@ -258,7 +258,7 @@ func (h *FileHandler) IncompleteAlbums(w http.ResponseWriter, r *http.Request) {
 	for _, a := range albumRows {
 		it := a.item
 		// Query missing track numbers from missing_tracks table
-		mRows, mErr := h.database.Conn().QueryContext(r.Context(), "SELECT track_number FROM missing_tracks WHERE album_id = ? ORDER BY track_number", a.id)
+		mRows, mErr := h.database.Conn().QueryContext(r.Context(), "SELECT track_number FROM release_tracklist WHERE is_present = 0 AND album_id = ? ORDER BY track_number", a.id)
 		if mErr == nil {
 			for mRows.Next() {
 				var tn int

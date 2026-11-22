@@ -14,6 +14,7 @@ import (
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/censorcheck"
+	"music-manager/internal/services/downloadmedia"
 	"music-manager/internal/services/lyrics"
 	"music-manager/internal/services/resolver"
 )
@@ -141,7 +142,7 @@ func (s *Service) processSingleTrack(
 	job.SetStepAndStatus(fmt.Sprintf("Скачивание трека %d/%d: %s", trackIdx, total, track.Title), StatusDownloading)
 
 	outTemplate := filepath.Join(rawDir, fmt.Sprintf("%02d_track.%%(ext)s", trackIdx))
-	rawAudioFile, err := s.downloadAndValidateRawStream(ctx, streamURL, outTemplate, track.Duration, func(pct float64) {
+	rawAudioFile, sourcePage, err := downloadmedia.DownloadAndValidateAudioSource(ctx, s.cookiesPath, streamURL, outTemplate, track.Duration, func(pct float64) {
 		job.UpdateTrackProgress(trackIdx-1, pct, fmt.Sprintf("Скачивание %d/%d: %.0f%%", trackIdx, total, pct))
 	})
 	// Never replace a user-selected source after failure.
@@ -164,8 +165,11 @@ func (s *Service) processSingleTrack(
 	job.SetStepAndStatus(fmt.Sprintf("Конвертация трека %d/%d: %s в MP3 320k", trackIdx, total, track.Title), StatusConverting)
 	cleanTitle := id3.CleanTitle(track.Title, fmt.Sprintf("Track_%02d", trackIdx))
 	trackPrefix := fmt.Sprintf("%02d. ", track.TrackNumber)
-	if job.IsBackfill && track.DiscNumber > 0 {
+	if (job.IsBackfill || job.IsRedownload) && track.DiscNumber > 0 {
 		trackPrefix = fmt.Sprintf("%02d-%02d. ", track.DiscNumber, track.TrackNumber)
+	}
+	if job.IsRedownload && track.TrackNumber <= 0 {
+		trackPrefix = fmt.Sprintf("track-%02d. ", trackIdx)
 	}
 	maxTitleBytes := 255 - len(trackPrefix) - len(".mp3")
 	if maxTitleBytes <= 0 {
@@ -207,6 +211,7 @@ func (s *Service) processSingleTrack(
 	}
 
 	tagData := id3.TrackTags{
+		SourceURL:   sourcePage,
 		Path:        mp3Path,
 		Title:       track.Title,
 		Artist:      art,
@@ -215,6 +220,9 @@ func (s *Service) processSingleTrack(
 		TrackNumber: track.TrackNumber,
 		DiscNumber:  track.DiscNumber,
 		Duration:    float64(track.Duration),
+	}
+	if track.ISRC != nil {
+		tagData.ISRC = *track.ISRC
 	}
 	if track.TrackTotal != nil {
 		tagData.TrackTotal = *track.TrackTotal
@@ -262,7 +270,13 @@ func (s *Service) processSingleTrack(
 		}
 	}
 
-	_ = id3.WriteTags(mp3Path, tagData, cover)
+	if err := id3.WriteTags(mp3Path, tagData, cover); err != nil {
+		message := err.Error()
+		job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
+			tr.Status, tr.Error = "error", &message
+		})
+		return false
+	}
 
 	// Поиск текста песни через LRCLIB (синхронизированного .lrc или обычного .txt)
 	// ВАЖНО: Тексты песен сохраняются строго во внешние файлы рядом с треком, никогда в ID3-тег

@@ -50,6 +50,7 @@ func generateUUID() string {
 
 // JobOptions содержит дополнительные параметры постановки задачи на загрузку.
 type JobOptions struct {
+	PreflightID          string
 	SelectedTrackIndices []int
 	SkipExisting         bool
 }
@@ -59,6 +60,11 @@ func (s *Service) CreateJobWithOptions(ctx context.Context, rawURL, source strin
 	job, err := s.newQueuedJob(rawURL, source, opts)
 	if err != nil {
 		return nil, err
+	}
+	if len(job.SelectedTrackIndices) > 0 {
+		if err := s.freezePreflightSelection(job, opts.PreflightID); err != nil {
+			return nil, err
+		}
 	}
 	return s.enqueueNewJob(ctx, job)
 }
@@ -198,6 +204,13 @@ func (s *Service) CreateBackfillJob(
 		UpdatedAt:       time.Now().UTC(),
 	}
 
+	if s.repo != nil && targetAlbumPath != "" {
+		id, err := s.repo.albumArtistForFolder(ctx, targetAlbumPath)
+		if err != nil {
+			return nil, err
+		}
+		job.ArtistID = id
+	}
 	return s.enqueueNewJob(ctx, job)
 }
 
@@ -224,10 +237,38 @@ func (s *Service) RetryJob(ctx context.Context, jobID string) (*Job, error) {
 		return job, nil
 	}
 
+	if draft.IsRedownload && draft.manualTrackIndex == nil {
+		for _, target := range draft.RedownloadTargets {
+			if target.Confirmed || target.ResultHash != "" {
+				return nil, errors.New("для оставшихся дорожек выберите источник отдельно")
+			}
+		}
+		if draft.Status == StatusWaitingSource && draft.URL == "" && !hasManualSource(draft.Tracks) {
+			return nil, errors.New("сначала выберите источник")
+		}
+	}
+
+	if len(draft.SelectedTrackIndices) > 0 && len(draft.Tracks) == 0 {
+		return nil, errPreflightExpired
+	}
+	preserveStaging := draft.legacySelection || draft.Status == StatusReady || draft.Status == StatusPartialReady ||
+		slices.ContainsFunc(draft.Tracks, func(track resolver.ResolvedTrack) bool {
+			return track.ConvertedPath != nil && track.Status == "ready"
+		})
+	if preserveStaging && s.tmpSandbox != nil && draft.manualTrackIndex == nil {
+		pending, err := downloadstaging.HasPendingImport(s.tmpSandbox, jobID)
+		if err != nil {
+			return nil, err
+		}
+		if pending {
+			return nil, errors.New("сначала импортируйте готовые файлы задачи")
+		}
+	}
+
 	previous := draft.Status
 	draft.resetForQueue("Задача перезапущена, ожидает очереди")
 	if s.repo != nil {
-		if err := s.repo.updateJobWithSelection(ctx, draft, previous, nil); err != nil {
+		if err := s.repo.updateJobWithSelection(ctx, draft, previous); err != nil {
 			// Jobs registered by compatibility callers may exist only in memory.
 			if !errors.Is(err, ErrJobNotFound) {
 				return nil, fmt.Errorf("%w: %w", errQueueStorage, err)

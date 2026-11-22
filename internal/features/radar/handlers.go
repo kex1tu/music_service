@@ -1,6 +1,8 @@
 package radar
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -10,6 +12,7 @@ import (
 
 	"music-manager/internal/core/httputil"
 	"music-manager/internal/core/textkey"
+	"music-manager/internal/db"
 )
 
 // GetFeed обрабатывает GET /api/radar/feed.
@@ -43,10 +46,9 @@ func (m *Module) GetFeed(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetTrackedArtists обрабатывает GET /api/radar/artists.
-func (m *Module) GetTrackedArtists(w http.ResponseWriter, r *http.Request) {
-	onlyFollowed := httputil.QueryBool(r, "followed", false)
-	artists, err := m.service.GetTrackedArtists(r.Context(), onlyFollowed)
+// GetLibraryArtists обрабатывает GET /api/radar/artists.
+func (m *Module) GetLibraryArtists(w http.ResponseWriter, r *http.Request) {
+	artists, err := m.service.GetLibraryArtists(r.Context())
 	if err != nil {
 		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -69,56 +71,6 @@ func (m *Module) GetTrackedArtists(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// AddTrackedArtist обрабатывает POST /api/radar/artists.
-func (m *Module) AddTrackedArtist(w http.ResponseWriter, r *http.Request) {
-	var req AddTrackedArtistRequest
-	if err := httputil.DecodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
-		httputil.RespondError(w, http.StatusBadRequest, "Некорректное имя артиста")
-		return
-	}
-
-	if err := m.service.AddTrackedArtist(r.Context(), req.Name); err != nil {
-		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	httputil.RespondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// FollowArtist обрабатывает POST /api/radar/artists/{name}/follow.
-func (m *Module) FollowArtist(w http.ResponseWriter, r *http.Request) {
-	name, _ := url.PathUnescape(chi.URLParam(r, "name"))
-	var req FollowArtistRequest
-	if err := httputil.DecodeJSON(r, &req); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "Некорректный JSON запрос")
-		return
-	}
-
-	if err := m.service.FollowArtist(r.Context(), name, req.Followed, req.ArtistID); err != nil {
-		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	httputil.RespondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// SetAutoDownload обрабатывает POST /api/radar/artists/{name}/auto-download.
-func (m *Module) SetAutoDownload(w http.ResponseWriter, r *http.Request) {
-	name, _ := url.PathUnescape(chi.URLParam(r, "name"))
-	var req AutoDownloadRequest
-	if err := httputil.DecodeJSON(r, &req); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "Некорректный JSON запрос")
-		return
-	}
-
-	if err := m.service.SetAutoDownload(r.Context(), name, req.AutoDownload, req.ArtistID); err != nil {
-		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	httputil.RespondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
 // UpdateCustomLinks обрабатывает POST /api/radar/artists/{name}/custom-links.
 func (m *Module) UpdateCustomLinks(w http.ResponseWriter, r *http.Request) {
 	name, _ := url.PathUnescape(chi.URLParam(r, "name"))
@@ -129,6 +81,10 @@ func (m *Module) UpdateCustomLinks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := m.service.UpdateCustomLinks(r.Context(), name, req.Alias, req.DeezerID, req.MusicBrainzID, req.YandexID, req.ArtistID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			httputil.RespondError(w, http.StatusNotFound, "Артист не найден")
+			return
+		}
 		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -139,7 +95,8 @@ func (m *Module) UpdateCustomLinks(w http.ResponseWriter, r *http.Request) {
 // GetArtistDiscography обрабатывает GET /api/radar/artists/{name}/discography.
 func (m *Module) GetArtistDiscography(w http.ResponseWriter, r *http.Request) {
 	name, _ := url.PathUnescape(chi.URLParam(r, "name"))
-	releases, tracked, err := m.service.GetArtistDiscography(r.Context(), name)
+	artistID, _ := strconv.ParseInt(r.URL.Query().Get("artist_id"), 10, 64)
+	releases, tracked, err := m.service.GetArtistDiscography(r.Context(), name, artistID)
 	if err != nil {
 		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -157,9 +114,13 @@ func (m *Module) TriggerScan(w http.ResponseWriter, r *http.Request) {
 	var req ScanRequest
 	_ = httputil.DecodeJSON(r, &req)
 
-	if strings.TrimSpace(req.Artist) != "" {
-		res, err := m.service.ScanArtist(r.Context(), req.Artist)
+	if req.ArtistID > 0 || strings.TrimSpace(req.Artist) != "" {
+		res, err := m.service.ScanArtist(r.Context(), req.Artist, req.ArtistID)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				httputil.RespondError(w, http.StatusNotFound, "Артист не найден")
+				return
+			}
 			httputil.RespondError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -203,6 +164,14 @@ func (m *Module) SetReleaseStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := m.service.SetReleaseStatus(r.Context(), id, req.Status); err != nil {
+		if errors.Is(err, db.ErrInvalidRadarStatus) {
+			httputil.RespondError(w, http.StatusBadRequest, "Некорректный статус релиза")
+			return
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			httputil.RespondError(w, http.StatusNotFound, "Релиз не найден")
+			return
+		}
 		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -1,6 +1,27 @@
 {{ define "audit_paths" }}
 <!-- СЕКЦИЯ 5: Некорректные пути файлов -->
 <div x-show="activeSubTab === 'paths'" class="space-y-4">
+    <section x-show="artistConflicts.length" class="rounded-lg border border-surface-border bg-surface-panel p-4 space-y-3">
+        <h3 class="text-sm font-semibold text-content-primary">Выбор исполнителя</h3>
+        <template x-for="conflict in artistConflicts" :key="conflict.path + ':' + conflict.album_artist">
+            <form x-data="{ artistID: '' }" @submit.prevent="resolveArtistConflict(conflict, Number(artistID))"
+                class="flex flex-col gap-2 border-t border-surface-border pt-3 sm:flex-row sm:items-center">
+                <div class="min-w-0 flex-1">
+                    <p class="break-words text-sm text-content-primary" x-text="conflict.path"></p>
+                    <p class="text-xs text-content-secondary" x-text="(conflict.album_artist ? 'Исполнитель альбома · ' : 'Исполнитель трека · ') + conflict.name"></p>
+                </div>
+                <select x-model="artistID" aria-label="Исполнитель" required class="min-h-11 rounded-md bg-surface-input text-sm text-content-primary">
+                    <option value="">Выберите исполнителя</option>
+                    <template x-for="choice in conflict.choices" :key="choice.id">
+                        <option :value="choice.id" x-text="choice.name + ' · ID ' + choice.id + (choice.deezer_id ? ' · Deezer ' + choice.deezer_id : '')"></option>
+                    </template>
+                </select>
+                <button type="submit" :disabled="!artistID" class="min-h-11 rounded-md bg-brand px-3 text-sm font-semibold text-zinc-950 disabled:opacity-50">
+                    Применить
+                </button>
+            </form>
+        </template>
+    </section>
     <div class="bg-surface-panel border border-surface-border rounded-xl p-4 shadow-panel flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
             <h3 class="text-sm font-bold text-content-primary">Файлы с нарушением канонической структуры</h3>

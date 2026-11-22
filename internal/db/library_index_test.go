@@ -45,7 +45,6 @@ func TestDeleteLibraryTracks_CompilationGuestTrack(t *testing.T) {
 		INSERT INTO genres (id, name) VALUES (501, 'Rock'), (502, 'Electronic');
 		INSERT INTO track_genres (track_id, genre_id) VALUES (101, 501), (102, 502);
 
-		INSERT INTO radio_history (track_id, station_type) VALUES (102, 'wave');
 
 		-- Typed issue for track 101 and numerically overlapping album issue for album 101
 		INSERT INTO audit_issues (issue_type, entity_type, entity_id, file_path) VALUES
@@ -80,9 +79,6 @@ func TestDeleteLibraryTracks_CompilationGuestTrack(t *testing.T) {
 		t.Fatalf("expected genre 2 to be preserved, found %d", c)
 	}
 
-	if c := libraryRowCount(t, conn, "SELECT COUNT(*) FROM radio_history WHERE track_id = ?", 102); c != 1 {
-		t.Fatalf("guest play history count = %d", c)
-	}
 	if c := libraryRowCount(t, conn, "SELECT COUNT(*) FROM artists WHERE id = ?", 20); c != 0 {
 		t.Fatalf("orphan guest artist count = %d", c)
 	}
@@ -94,8 +90,8 @@ func TestDeleteLibraryTracks_CompilationGuestTrack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to query album: %v", err)
 	}
-	if presentTracks != 1 || totalTracks != 2 || isComplete != 0 {
-		t.Fatalf("expected album counts (present=1, total=2, is_complete=0), got (present=%d, total=%d, is_complete=%d)",
+	if presentTracks != 1 || totalTracks != 1 || isComplete != 0 {
+		t.Fatalf("expected album counts (present=1, total=1, is_complete=0), got (present=%d, total=%d, is_complete=%d)",
 			presentTracks, totalTracks, isComplete)
 	}
 

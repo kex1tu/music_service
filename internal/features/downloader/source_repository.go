@@ -1,8 +1,6 @@
 package downloader
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 
@@ -14,26 +12,22 @@ var ErrCorruptJobSelection = errors.New("сохранённый треклист
 type sourceSelectionPayload struct {
 	Tracks               []resolver.ResolvedTrack `json:"tracks"`
 	Metadata             resolver.ReleaseMetadata `json:"metadata"`
+	CoverRelativePath    string                   `json:"cover_relative_path,omitempty"`
 	SelectedTrackIndices []int                    `json:"selected_track_indices,omitempty"`
 	SkipExisting         bool                     `json:"skip_existing,omitempty"`
 	ManualTrackIndex     *int                     `json:"manual_track_index,omitempty"`
 	BackfillTrackNumbers []int                    `json:"backfill_track_numbers,omitempty"`
 	BackfillTrackURLs    []string                 `json:"backfill_track_urls,omitempty"`
+	RedownloadTargets    []RedownloadTarget       `json:"redownload_targets,omitempty"`
 }
 
-func saveSourceSelection(ctx context.Context, tx *sql.Tx, job *Job) error {
-	raw, err := json.Marshal(sourceSelectionPayload{
-		Tracks: job.Tracks, Metadata: job.AlbumMetadata,
+func marshalSourceSelection(job *Job) ([]byte, error) {
+	return json.Marshal(sourceSelectionPayload{
+		Tracks: job.Tracks, Metadata: job.AlbumMetadata, CoverRelativePath: job.CoverRelativePath,
 		SelectedTrackIndices: job.SelectedTrackIndices, SkipExisting: job.SkipExisting,
 		ManualTrackIndex: job.manualTrackIndex, BackfillTrackNumbers: job.backfillTrackNumbers, BackfillTrackURLs: job.backfillTrackURLs,
+		RedownloadTargets: job.RedownloadTargets,
 	})
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO download_source_selections(job_id,payload_json) VALUES(?,?)
-		ON CONFLICT(job_id) DO UPDATE SET payload_json=excluded.payload_json`, job.ID, string(raw))
-	return err
 }
 
 func loadSourceSelection(job *Job, raw string) {
@@ -48,9 +42,12 @@ func loadSourceSelection(job *Job, raw string) {
 	}
 	job.Tracks = selection.Tracks
 	job.AlbumMetadata = selection.Metadata
+	job.CoverRelativePath = selection.CoverRelativePath
 	job.SelectedTrackIndices = selection.SelectedTrackIndices
 	job.SkipExisting = selection.SkipExisting
 	job.manualTrackIndex = selection.ManualTrackIndex
 	job.backfillTrackNumbers = selection.BackfillTrackNumbers
 	job.backfillTrackURLs = selection.BackfillTrackURLs
+	job.RedownloadTargets = selection.RedownloadTargets
+	job.IsRedownload = len(selection.RedownloadTargets) > 0
 }

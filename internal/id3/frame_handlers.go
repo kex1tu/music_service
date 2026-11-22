@@ -1,7 +1,6 @@
 package id3
 
 import (
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -11,12 +10,24 @@ import (
 
 // applyFrame применяет декодированное значение фрейма к структуре TrackTags.
 func applyFrame(id string, data []byte, tags *TrackTags) {
+	if id == "TXXX" {
+		if len(data) > 1 && data[0] == 3 {
+			description, value, ok := strings.Cut(string(data[1:]), "\x00")
+			value = strings.TrimRight(value, "\x00")
+			if ok && strings.EqualFold(description, sourceURLDescription) && !strings.ContainsRune(value, 0) {
+				tags.SourceURL = strings.TrimSpace(value)
+			}
+		}
+		return
+	}
 	val := decodeText(data)
 	if val == "" {
 		return
 	}
 
 	switch id {
+	case "TSRC":
+		tags.ISRC = val
 	case "TIT2":
 		tags.Title = val
 	case "TPE1":
@@ -28,7 +39,7 @@ func applyFrame(id string, data []byte, tags *TrackTags) {
 	case "TCON":
 		tags.Genre = val
 	case "TRCK":
-		parseTrackNum(val, &tags.TrackNumber, &tags.TrackTotal)
+		tags.HasTrackNumber = parseTrackNum(val, &tags.TrackNumber, &tags.TrackTotal) || tags.HasTrackNumber
 	case "TPOS":
 		parseTrackNum(val, &tags.DiscNumber, &tags.DiscTotal)
 	case "TDRC", "TYER":
@@ -45,18 +56,19 @@ func applyFrame(id string, data []byte, tags *TrackTags) {
 }
 
 // parseTrackNum парсит номер и общее количество треков/дисков из формата "n" или "n/total".
-func parseTrackNum(val string, num *int, total *int) {
+func parseTrackNum(val string, num *int, total *int) bool {
 	parts := strings.Split(val, "/")
-	if len(parts) > 0 {
-		if n, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil && n > 0 {
-			*num = n
-		}
+	n, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	hasNumber := err == nil && n > 0
+	if hasNumber {
+		*num = n
 	}
 	if len(parts) > 1 {
 		if t, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil && t > 0 {
 			*total = t
 		}
 	}
+	return hasNumber
 }
 
 // parseAPIC извлекает бинарные данные обложки и MIME-тип из фрейма APIC.
@@ -126,16 +138,4 @@ func checkLyrics(filePath string) string {
 		return "txt"
 	}
 	return "none"
-}
-
-// estimateDurationAndBitrate рассчитывает приблизительный битрейт и длительность трека по размеру аудиопотока.
-func estimateDurationAndBitrate(file *os.File, fileSize int64, tagSize int, tags *TrackTags) {
-	audioSize := fileSize - int64(tagSize)
-	if audioSize <= 0 {
-		return
-	}
-	// По умолчанию стандартный 320 kbps MP3
-	tags.Bitrate = 320
-	// 320 kbps = 40 000 байт/сек
-	tags.Duration = float64(audioSize) / 40000.0
 }

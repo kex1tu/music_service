@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,6 +16,58 @@ type cachedResolveResult struct {
 	meta      *resolver.ReleaseMetadata
 	tracks    []resolver.ResolvedTrack
 	expiresAt time.Time
+}
+
+type preflightSnapshot struct {
+	cachedResolveResult
+	url, source string
+}
+
+var errPreflightExpired = errors.New("откройте предпросмотр релиза заново")
+
+func (s *Service) rememberPreflight(url, source string, meta *resolver.ReleaseMetadata, tracks []resolver.ResolvedTrack) string {
+	s.resolveCacheMu.Lock()
+	defer s.resolveCacheMu.Unlock()
+	now := time.Now()
+	for id, entry := range s.preflightCache {
+		if !now.Before(entry.expiresAt) {
+			delete(s.preflightCache, id)
+		}
+	}
+	if len(s.preflightCache) >= 100 {
+		var oldest string
+		for id, entry := range s.preflightCache {
+			if oldest == "" || entry.expiresAt.Before(s.preflightCache[oldest].expiresAt) {
+				oldest = id
+			}
+		}
+		delete(s.preflightCache, oldest)
+	}
+	id := generateUUID()
+	s.preflightCache[id] = preflightSnapshot{
+		cachedResolveResult: cachedResolveResult{meta: meta, tracks: slices.Clone(tracks), expiresAt: now.Add(5 * time.Minute)},
+		url:                 url, source: source,
+	}
+	return id
+}
+
+func (s *Service) freezePreflightSelection(job *Job, id string) error {
+	s.resolveCacheMu.RLock()
+	entry, found := s.preflightCache[id]
+	s.resolveCacheMu.RUnlock()
+	if !found || !time.Now().Before(entry.expiresAt) || entry.url != job.URL || entry.source != job.Source {
+		return errPreflightExpired
+	}
+	seen := make(map[int]bool, len(job.SelectedTrackIndices))
+	for _, i := range job.SelectedTrackIndices {
+		if i < 0 || i >= len(entry.tracks) || seen[i] {
+			return errors.New("некорректный выбор дорожек")
+		}
+		seen[i] = true
+		job.Tracks = append(job.Tracks, entry.tracks[i])
+	}
+	job.SetMetadata(*entry.meta, job.Tracks)
+	return nil
 }
 
 func (s *Service) resolveURL(ctx context.Context, rawURL, source string) (*resolver.ReleaseMetadata, []resolver.ResolvedTrack, error) {
@@ -116,7 +169,7 @@ func (s *Service) PreflightRelease(ctx context.Context, rawURL, source string) (
 		}
 
 		if s.repo != nil {
-			existing, err := s.repo.CheckTrackInLibrary(ctx, tr.Title, tr.Artist)
+			existing, err := s.repo.CheckTrackInLibrary(ctx, tr.Title, tr.Artist, tr.ISRC)
 			if err == nil && existing != nil {
 				item.ExistingTrack = existing
 				if existing.QualityTier == "true_320k" {
@@ -149,6 +202,7 @@ func (s *Service) PreflightRelease(ctx context.Context, rawURL, source string) (
 	skippedTracks := meta.SkippedTracks
 
 	return &PreflightResponse{
+		PreflightID: s.rememberPreflight(cleanURL, source, meta, tracks),
 		Release: PreflightReleaseInfo{
 			Title:         meta.AlbumTitle,
 			Artist:        meta.AlbumArtist,

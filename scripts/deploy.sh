@@ -43,15 +43,18 @@ service=music-manager.service
 bin="$app_dir/bin/music-manager"
 staged="$bin.new.$deploy_id"
 backup="$bin.bak.$deploy_id"
+db_backup="$bin.db.bak.$deploy_id"
+db_guard="$bin.deploy-db"
+db_guard_owner="$db_guard.$deploy_id"
 cd "$app_dir"
 [[ "$(systemctl show "$service" -p WorkingDirectory --value)" == "$app_dir" ]]
 [[ -f "$bin" ]]
 runtime_config() {
-    local pid key value config_host='' config_port=''
+    local key value config_host='' config_port=''
     pid="$(systemctl show "$service" -p MainPID --value)"
     [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
     [[ "$(readlink "/proc/$pid/exe")" == "$bin" ]] || return 1
-    # Read only HOST and PORT; never print the environment or secrets.
+    # Read only the settings needed by health checks.
     while IFS='=' read -r -d '' key value; do
         case "$key" in HOST) config_host="$value" ;; PORT) config_port="$value" ;; esac
     done < "/proc/$pid/environ"
@@ -71,6 +74,41 @@ runtime_config() {
     local_url="http://$config_host:$config_port"
     echo "Service=$service app=$app_dir local=$local_url"
 }
+find_running_database() {
+    local fd path
+    database_path=''
+    for fd in "/proc/$pid/fd/"*; do
+        [[ -f "$fd" ]] || continue
+        IFS= read -r -d '' path < <(readlink -z -- "$fd") || continue
+        [[ "$path" = /* && "$path" -ef "$fd" ]] || continue
+        head -c 16 -- "$fd" | cmp -s - <(printf 'SQLite format 3\0') || continue
+        if [[ -n "$database_path" && ! "$database_path" -ef "$fd" ]]; then
+            echo 'The running service has more than one SQLite database open.' >&2
+            return 1
+        fi
+        database_path="$path"
+    done
+    if [[ -z "$database_path" ]]; then
+        echo 'Could not identify the SQLite database opened by the running service.' >&2
+        return 1
+    fi
+}
+prepare_database() {
+    local journal
+    "$1" --prepare-sqlite-snapshot "$2" || return
+    for journal in "$2-wal" "$2-shm" "$2-journal"; do
+        if [[ -e "$journal" || -L "$journal" ]]; then
+            echo "SQLite journal still exists: $journal" >&2
+            return 1
+        fi
+    done
+}
+release_database_guard() {
+    if [[ "$db_guard" -ef "$db_guard_owner" ]]; then
+        rm -f -- "$db_guard"
+    fi
+    rm -f -- "$db_guard_owner"
+}
 wait_for_health() {
     # SQLite and filesystem initialization on nl_music can take over a minute.
     local deadline=$((SECONDS + 180))
@@ -87,14 +125,26 @@ case "$mode" in
     preflight)
         systemctl is-active --quiet "$service"
         runtime_config
+        find_running_database
         curl --noproxy '*' --fail --silent --show-error --max-time 5 "$local_url/api/health"
         echo
         ;;
     install)
         [[ -f "$staged" ]]
         [[ "$(sha256sum "$staged" | cut -d ' ' -f1)" == "$expected_sha" ]]
-        cp -p "$bin" "$backup"
+        runtime_config
+        find_running_database
         chmod 755 "$staged"
+        printf '%s\0' "$database_path" > "$db_guard_owner"
+        chmod 644 "$db_guard_owner"
+        ln -- "$db_guard_owner" "$db_guard"
+        systemctl stop "$service"
+        prepare_database "$staged" "$database_path"
+        install -d -m 700 "$db_backup"
+        cp -p -- "$database_path" "$db_backup/database"
+        printf '%s\0' "$database_path" > "$db_backup/path"
+        cp -p "$bin" "$backup"
+        sync -- "$db_backup/database" "$db_backup/path" "$db_backup" "$backup" "$(dirname "$backup")"
         chown --reference="$bin" "$staged"
         mv -f "$staged" "$bin"
         systemctl restart "$service"
@@ -108,15 +158,83 @@ case "$mode" in
         echo "Installed SHA256=$expected_sha backup=$backup"
         ;;
     rollback)
-        if [[ ! -f "$backup" ]]; then
-            echo 'No backup created; binary replacement was not reached.' >&2
-            exit 1
+        if [[ -f "$staged" ]] || { [[ -f "$backup" ]] && cmp -s -- "$bin" "$backup"; }; then
+            # Installation stopped before replacing the running binary.
+            if [[ -e "$db_guard" && ! "$db_guard" -ef "$db_guard_owner" ]]; then
+                echo 'Another deployment owns the database guard.' >&2
+                exit 1
+            fi
+            release_database_guard
+            systemctl start "$service"
+            wait_for_health
+            exit 0
         fi
-        cp -p "$backup" "$bin.rollback.$deploy_id"
-        mv -f "$bin.rollback.$deploy_id" "$bin"
+        [[ -f "$backup" && -f "$db_backup/path" && -f "$db_backup/database" ]]
+        IFS= read -r -d '' database_path < "$db_backup/path"
+        [[ "$database_path" = /* ]]
+        restored_db="$database_path.rollback.$deploy_id"
+        restored_bin="$bin.rollback.$deploy_id"
+        cp -p -- "$db_backup/database" "$restored_db"
+        cp -p -- "$backup" "$restored_bin"
+        sync -- "$restored_db" "$restored_bin"
+
+        was_active=0
+        if systemctl is-active --quiet "$service"; then was_active=1; fi
+        database_replaced=0
+        recovery_dir=''
+        journals=(-wal -shm -journal)
+        rollback_failed() {
+            local status="$1"
+            trap - ERR
+            local suffix
+            if [[ -n "$recovery_dir" ]]; then
+                if (( database_replaced )); then
+                    if [[ -e "$recovery_dir/database" ]]; then
+                        mv -fT -- "$recovery_dir/database" "$database_path" || {
+                            echo "Could not restore pre-rollback files from $recovery_dir." >&2
+                            exit "$status"
+                        }
+                    else
+                        rm -f -- "$database_path" || exit "$status"
+                    fi
+                fi
+                for suffix in "${journals[@]}"; do
+                    if [[ -e "$recovery_dir/database$suffix" ]]; then
+                        mv -fT -- "$recovery_dir/database$suffix" "$database_path$suffix" || {
+                            echo "Could not restore the SQLite journal from $recovery_dir." >&2
+                            exit "$status"
+                        }
+                    fi
+                done
+            fi
+            if (( was_active )); then systemctl start "$service" || true; fi
+            exit "$status"
+        }
+        trap 'rollback_failed $?' ERR
+        systemctl stop "$service"
+        # Preserve the failed database and its journals without opening it.
+        # A broken database or binary must not block restoring a known-good pair.
+        recovery_dir="$(mktemp -d -- "$database_path.before-rollback.$deploy_id.XXXXXX")"
+        if [[ -e "$database_path" ]]; then
+            ln -- "$database_path" "$recovery_dir/database"
+        fi
+        for suffix in "${journals[@]}"; do
+            if [[ -e "$database_path$suffix" ]]; then
+                mv -T -- "$database_path$suffix" "$recovery_dir/database$suffix"
+            fi
+        done
+        sync -- "$recovery_dir" "$(dirname "$database_path")"
+        mv -fT -- "$restored_db" "$database_path"
+        database_replaced=1
+        mv -fT -- "$restored_bin" "$bin"
+        trap - ERR
+        release_database_guard
         systemctl restart "$service"
         wait_for_health
-        echo "Rollback completed: $backup"
+        echo "Rollback completed: $backup. Pre-rollback database preserved at $recovery_dir"
+        ;;
+    finalize)
+        release_database_guard
         ;;
     *) exit 2 ;;
 esac
@@ -170,6 +288,7 @@ for server in "${servers[@]}"; do
         remote_run rollback || { echo "ROLLBACK FAILED on $SERVER_ID; manual attention required." >&2; exit 1; }
         exit 1
     fi
+    remote_run finalize
     echo "SUCCESS: $SERVER_ID $PUBLIC_URL SHA256=$BIN_SHA"
 done
 echo 'Deployment completed on all requested servers.'

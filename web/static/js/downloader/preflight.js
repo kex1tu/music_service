@@ -9,6 +9,7 @@ document.addEventListener('alpine:init', () => {
         isStartingDownload: false,
         url: '',
         source: 'auto',
+        preflightId: '',
         release: null,
         tracks: [],
         summary: null,
@@ -33,6 +34,7 @@ document.addEventListener('alpine:init', () => {
             this.isLoading = false;
             this.isStartingDownload = false;
             this.release = null;
+            this.preflightId = '';
             this.tracks = [];
             this.summary = null;
             this.selectedIndices = {};
@@ -47,6 +49,7 @@ document.addEventListener('alpine:init', () => {
             this.reset();
             this.url = url;
             this.source = source;
+            this.preflightId = data.preflight_id;
             this.release = data.release || null;
             this.tracks = data.tracks || [];
             this.summary = data.summary || null;
@@ -77,6 +80,7 @@ document.addEventListener('alpine:init', () => {
                 }
 
                 const data = await resp.json();
+                this.preflightId = data.preflight_id;
                 this.release = data.release;
                 this.tracks = data.tracks || [];
                 this.summary = data.summary;
@@ -186,6 +190,7 @@ document.addEventListener('alpine:init', () => {
                         url: this.url,
                         source: this.source,
                         selected_track_indices: selected,
+                        preflight_id: this.preflightId,
                     }),
                 });
 

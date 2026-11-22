@@ -23,16 +23,18 @@ func TestMusicBrainzOAuthAtomicPersistence(t *testing.T) {
 	}
 	checkPrevious := func() {
 		t.Helper()
-		for _, prefix := range []string{"mb_", "musicbrainz_"} {
-			for key, want := range map[string]string{
-				"access_token": "old-access", "refresh_token": "old-refresh",
-				"username": "old-user", "expires_at": expiry.Format(time.RFC3339),
-			} {
-				got, err := repo.GetSetting(ctx, prefix+key)
-				if err != nil || got != want {
-					t.Fatalf("previous setting %s%s was changed", prefix, key)
-				}
+		for key, want := range map[string]string{
+			"mb_access_token": "old-access", "mb_refresh_token": "old-refresh",
+			"mb_username": "old-user", "mb_expires_at": expiry.Format(time.RFC3339),
+		} {
+			got, err := repo.GetSetting(ctx, key)
+			if err != nil || got != want {
+				t.Fatalf("previous setting %s was changed", key)
 			}
+		}
+		var legacyKeys int
+		if err := conn.QueryRowContext(ctx, "SELECT count(*) FROM app_settings WHERE key GLOB 'musicbrainz_*'").Scan(&legacyKeys); err != nil || legacyKeys != 0 {
+			t.Fatalf("unexpected legacy key count: %d, %v", legacyKeys, err)
 		}
 	}
 	if _, err := conn.ExecContext(ctx, `
@@ -40,7 +42,7 @@ func TestMusicBrainzOAuthAtomicPersistence(t *testing.T) {
 		WHEN NEW.key='mb_refresh_token'
 		BEGIN SELECT RAISE(FAIL, 'test refresh write rejected'); END;
 		CREATE TRIGGER reject_disconnect BEFORE DELETE ON app_settings
-		WHEN OLD.key='musicbrainz_username'
+		WHEN OLD.key='mb_username'
 		BEGIN SELECT RAISE(FAIL, 'test disconnect rejected'); END;`); err != nil {
 		t.Fatal(err)
 	}

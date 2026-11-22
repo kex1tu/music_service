@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,17 +19,14 @@ import (
 )
 
 type mockScannerEngine struct {
-	followed     map[string]bool
-	autoDownload map[string]bool
-	customLinks  map[string]string
-	isRunning    bool
+	customLinks     map[string]string
+	isRunning       bool
+	scannedArtistID atomic.Int64
 }
 
 func newMockScanner() *mockScannerEngine {
 	return &mockScannerEngine{
-		followed:     make(map[string]bool),
-		autoDownload: make(map[string]bool),
-		customLinks:  make(map[string]string),
+		customLinks: make(map[string]string),
 	}
 }
 
@@ -39,6 +37,11 @@ func (m *mockScannerEngine) ScanArtist(ctx context.Context, artistName string) (
 		NewReleases:     2,
 		Releases:        []resolver.AggregatedRelease{},
 	}, nil
+}
+
+func (m *mockScannerEngine) ScanArtistByID(ctx context.Context, artistID int64) (*serviceRadar.ScanArtistResult, error) {
+	m.scannedArtistID.Store(artistID)
+	return m.ScanArtist(ctx, "One")
 }
 
 func (m *mockScannerEngine) ScanAll(ctx context.Context, trigger string) error {
@@ -58,16 +61,6 @@ func (m *mockScannerEngine) GetProgress() serviceRadar.ScanProgress {
 
 func (m *mockScannerEngine) CancelScan() {
 	m.isRunning = false
-}
-
-func (m *mockScannerEngine) FollowArtist(ctx context.Context, artistName string, followed bool) error {
-	m.followed[artistName] = followed
-	return nil
-}
-
-func (m *mockScannerEngine) SetAutoDownload(ctx context.Context, artistName string, auto bool) error {
-	m.autoDownload[artistName] = auto
-	return nil
 }
 
 func (m *mockScannerEngine) UpdateArtistCustomLinks(ctx context.Context, artistName, alias, deezerID, mbID, yandexID string) error {
@@ -155,57 +148,34 @@ func TestRadar_GetFeed_And_UnreadCount(t *testing.T) {
 	}
 }
 
-func TestRadar_TrackedArtists_Lifecycle(t *testing.T) {
-	env, _, scanner := setupRadarEnv(t)
-
-	// 1. Добавляем артиста
-	addReq := featureRadar.AddTrackedArtistRequest{Name: "Radiohead"}
-	respAdd := env.PostJSON("/api/radar/artists", addReq)
-	if respAdd.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", respAdd.StatusCode, string(env.ReadBody(respAdd)))
+func TestRadarListsLibraryArtistsWithoutSubscriptions(t *testing.T) {
+	env, _, _ := setupRadarEnv(t)
+	if _, err := env.DB.Conn().Exec(`
+        INSERT INTO artists(id, name, clean_name) VALUES
+          (1, 'Radiohead', 'radiohead'), (2, 'Outside', 'outside'), (3, 'Guest', 'guest');
+        INSERT INTO albums(id, artist_id, title, clean_title, folder_path)
+          VALUES (1, 1, 'Album', 'album', 'Album');
+        INSERT INTO album_artists(album_id, artist_id, position) VALUES (1, 3, 1);
+        INSERT INTO tracked_artists(id, name, clean_name, artist_id, is_followed, auto_download) VALUES
+          (11, 'Radiohead', 'radiohead', 1, 0, 1), (12, 'Outside', 'outside', 2, 1, 1),
+          (13, 'Guest', 'guest', 3, 0, 0);
+    `); err != nil {
+		t.Fatal(err)
 	}
 
-	// 2. Проверяем список
-	respList := env.Get("/api/radar/artists")
-	var listResp featureRadar.TrackedArtistsResponse
-	if err := json.Unmarshal(env.ReadBody(respList), &listResp); err != nil {
-		t.Fatalf("failed to decode artists: %v", err)
-	}
-	if listResp.Total != 1 || listResp.Items[0].Name != "Radiohead" {
-		t.Errorf("expected Radiohead in tracked artists, got %+v", listResp)
+	resp := env.Get("/api/radar/artists?followed=true")
+	var list featureRadar.TrackedArtistsResponse
+	if err := json.Unmarshal(env.ReadBody(resp), &list); err != nil || list.Total != 2 ||
+		list.Items[0].Name != "Guest" || list.Items[1].Name != "Radiohead" || list.Items[0].AlbumCount != 1 {
+		t.Fatalf("unexpected library artists: %+v, %v", list, err)
 	}
 
-	// 3. Переключаем Follow
-	followReq := featureRadar.FollowArtistRequest{Followed: true}
-	respFollow := env.PostJSON("/api/radar/artists/"+url.PathEscape("Radiohead")+"/follow", followReq)
-	if respFollow.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 from follow, got %d", respFollow.StatusCode)
-	}
-	if !scanner.followed["Radiohead"] {
-		t.Errorf("expected scanner.followed[Radiohead] to be true")
-	}
-
-	// 4. Переключаем AutoDownload
-	autoReq := featureRadar.AutoDownloadRequest{AutoDownload: true}
-	respAuto := env.PostJSON("/api/radar/artists/"+url.PathEscape("Radiohead")+"/auto-download", autoReq)
-	if respAuto.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 from auto-download, got %d", respAuto.StatusCode)
-	}
-	if !scanner.autoDownload["Radiohead"] {
-		t.Errorf("expected scanner.autoDownload[Radiohead] to be true")
-	}
-
-	// 5. Обновляем кастомные ссылки
-	customReq := featureRadar.CustomLinksRequest{
-		Alias:    "RH",
-		DeezerID: "12345",
-	}
-	respCustom := env.PostJSON("/api/radar/artists/"+url.PathEscape("Radiohead")+"/custom-links", customReq)
-	if respCustom.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 from custom-links, got %d", respCustom.StatusCode)
-	}
-	if scanner.customLinks["Radiohead"] != "RH:12345" {
-		t.Errorf("unexpected custom links: %s", scanner.customLinks["Radiohead"])
+	for _, path := range []string{"/api/radar/artists", "/api/radar/artists/Radiohead/follow", "/api/radar/artists/Radiohead/auto-download"} {
+		resp := env.PostJSON(path, map[string]any{"name": "Outside", "auto_download": true, "followed": true})
+		if resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("obsolete POST %s returned %d", path, resp.StatusCode)
+		}
+		env.ReadBody(resp)
 	}
 }
 
@@ -294,11 +264,14 @@ func TestRadar_Scan_Progress_And_Cancel(t *testing.T) {
 	}
 }
 
-func TestRadarUpdatesSelectedUnicodeSubscription(t *testing.T) {
+func TestRadarUpdatesSelectedUnicodeArtistSettings(t *testing.T) {
 	env, _, _ := setupRadarEnv(t)
 	if _, err := env.DB.Conn().Exec(`
-		INSERT INTO tracked_artists (id, name, clean_name, deezer_id)
-		VALUES (1, 'Ёлка', 'ёлка', '100'), (2, 'ЁЛКА', 'ёлка', '200')
+		INSERT INTO artists (id, name, clean_name) VALUES (1, 'Ёлка', 'ёлка'), (2, 'ЁЛКА', 'ёлка');
+        INSERT INTO albums (artist_id, title, clean_title, folder_path)
+            VALUES (1, 'First', 'first', 'First'), (2, 'Second', 'second', 'Second');
+        INSERT INTO tracked_artists (id, name, clean_name, artist_id, deezer_id)
+        VALUES (11, 'Ёлка', 'ёлка', 1, '100'), (22, 'ЁЛКА', 'ёлка', 2, '200')
 	`); err != nil {
 		t.Fatal(err)
 	}
@@ -309,17 +282,44 @@ func TestRadarUpdatesSelectedUnicodeSubscription(t *testing.T) {
 			t.Fatalf("Unicode search %q: %+v, %v", query, artists, err)
 		}
 	}
-	resp := env.PostJSON("/api/radar/artists/"+url.PathEscape("ЁЛКА")+"/follow",
-		featureRadar.FollowArtistRequest{ArtistID: 2, Followed: false})
+	resp := env.PostJSON("/api/radar/artists/"+url.PathEscape("ЁЛКА")+"/custom-links",
+		featureRadar.CustomLinksRequest{ArtistID: 22, DeezerID: "222"})
 	body := env.ReadBody(resp)
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("follow failed: %s", body)
+		t.Fatalf("custom links failed: %s", body)
 	}
-	var first, second bool
+	var first, second string
 	if err := env.DB.Conn().QueryRow(`SELECT
-		(SELECT is_followed FROM tracked_artists WHERE id=1),
-		(SELECT is_followed FROM tracked_artists WHERE id=2)`).Scan(&first, &second); err != nil ||
-		!first || second {
-		t.Fatalf("follow changed the wrong subscription: %v %v %v", first, second, err)
+		(SELECT deezer_id FROM tracked_artists WHERE id=11),
+		(SELECT deezer_id FROM tracked_artists WHERE id=22)`).Scan(&first, &second); err != nil ||
+		first != "100" || second != "222" {
+		t.Fatalf("custom links changed the wrong artist: %v %v %v", first, second, err)
 	}
+}
+
+func TestRadarCustomLinksUsesLocalArtistIDWithOverlappingSettingsIDs(t *testing.T) {
+	env, _, scanner := setupRadarEnv(t)
+	if _, err := env.DB.Conn().Exec(`
+		INSERT INTO artists(id, name, clean_name) VALUES(501,'One','one'),(502,'Two','two');
+		INSERT INTO tracked_artists(id, artist_id, name, clean_name)
+			VALUES(502,501,'One','one'),(501,502,'Two','two');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	resp := env.PostJSON("/api/radar/artists/One/custom-links",
+		featureRadar.CustomLinksRequest{ArtistID: 501, Alias: "custom"})
+	body := env.ReadBody(resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("custom links failed: %s", body)
+	}
+	var name string
+	if err := env.DB.Conn().QueryRow("SELECT name FROM tracked_artists WHERE custom_search_alias='custom'").Scan(&name); err != nil || name != "One" {
+		t.Fatalf("updated artist=%q err=%v", name, err)
+	}
+	resp = env.PostJSON("/api/radar/scan", featureRadar.ScanRequest{Artist: "One", ArtistID: 501})
+	env.ReadBody(resp)
+	if resp.StatusCode != http.StatusOK || scanner.scannedArtistID.Load() != 501 {
+		t.Fatalf("scan used ID %d, status %d", scanner.scannedArtistID.Load(), resp.StatusCode)
+	}
+
 }

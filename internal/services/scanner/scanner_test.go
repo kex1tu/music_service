@@ -45,6 +45,7 @@ func TestScanner_ScanAll(t *testing.T) {
 		Title:       "TestSong",
 		Artist:      "TestArtist",
 		Album:       "TestAlbum",
+		AlbumArtist: "TestArtist\x00Co-Artist",
 		TrackNumber: 1,
 	}
 	_ = id3.WriteTags(mp3Path, tags, nil)
@@ -63,6 +64,10 @@ func TestScanner_ScanAll(t *testing.T) {
 	err = database.Conn().QueryRow("SELECT COUNT(*) FROM tracks WHERE title = 'TestSong'").Scan(&count)
 	if err != nil || count != 1 {
 		t.Errorf("expected track in SQLite, got count %d, err: %v", count, err)
+	}
+	if err := database.Conn().QueryRow(`SELECT COUNT(*) FROM album_artists aa JOIN artists ar ON ar.id = aa.artist_id
+		JOIN albums al ON al.id = aa.album_id WHERE al.title = 'TestAlbum' AND ar.name = 'Co-Artist' AND aa.position = 2`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("scanner missed the second TPE2 credit: %d, %v", count, err)
 	}
 }
 
@@ -304,8 +309,13 @@ func TestScanner_MultiArtistAlbum_Completeness(t *testing.T) {
 	if totalTracks != 3 {
 		t.Errorf("expected total_tracks = 3, got %d", totalTracks)
 	}
-	if isComplete != 1 {
-		t.Errorf("expected is_complete = 1 for complete multi-artist album, got %d", isComplete)
+	if isComplete != 0 {
+		t.Errorf("catalog has not been verified, got is_complete = %d", isComplete)
+	}
+	var albumCredits int
+	if err := database.Conn().QueryRow(`SELECT COUNT(*) FROM album_artists aa JOIN albums al ON al.id = aa.album_id
+		WHERE al.title = 'Dragonborn'`).Scan(&albumCredits); err != nil || albumCredits != 1 {
+		t.Fatalf("track features became album credits: %d credits, err: %v", albumCredits, err)
 	}
 }
 
@@ -347,6 +357,11 @@ func TestScanner_RemoveFile(t *testing.T) {
 		t.Fatalf("expected present_tracks_count 2, got %d, err=%v", presentCount, err)
 	}
 
+	var artistID int64
+	if err := database.Conn().QueryRow("SELECT id FROM artists WHERE name = 'ArtistX'").Scan(&artistID); err != nil {
+		t.Fatal(err)
+	}
+
 	// Remove track 1
 	rel1 := filepath.Join("RemoveAlbum", "01. Song1.mp3")
 	if err := s.RemoveFile(rel1); err != nil {
@@ -370,15 +385,23 @@ func TestScanner_RemoveFile(t *testing.T) {
 		t.Fatalf("RemoveFile failed: %v", err)
 	}
 
-	// Verify album and artist are completely cleaned up
+	// Remove the album and retain the artist referenced by radar settings.
 	var albumCount, artistCount int
 	_ = database.Conn().QueryRow("SELECT COUNT(*) FROM albums WHERE title = 'RemoveAlbum'").Scan(&albumCount)
 	_ = database.Conn().QueryRow("SELECT COUNT(*) FROM artists WHERE name = 'ArtistX'").Scan(&artistCount)
 	if albumCount != 0 {
 		t.Errorf("expected album to be deleted, got %d", albumCount)
 	}
-	if artistCount != 0 {
-		t.Errorf("expected artist to be deleted, got %d", artistCount)
+	if artistCount != 1 {
+		t.Errorf("expected referenced artist to remain, got %d", artistCount)
+	}
+	if err := s.IndexFile(f1, rel1); err != nil {
+		t.Fatal(err)
+	}
+	var reimportedID int64
+	err = database.Conn().QueryRow("SELECT artist_id FROM tracks WHERE file_path = ?", rel1).Scan(&reimportedID)
+	if err != nil || reimportedID != artistID {
+		t.Fatalf("reimport artist id=%d, want %d (err=%v)", reimportedID, artistID, err)
 	}
 }
 
@@ -647,7 +670,7 @@ func TestScanner_CheckIncompleteAlbums_MockDeezer(t *testing.T) {
 
 	// Verify missing_tracks has Song Two and Song Three
 	var missingCount int
-	err = database.Conn().QueryRow("SELECT COUNT(*) FROM missing_tracks").Scan(&missingCount)
+	err = database.Conn().QueryRow("SELECT COUNT(*) FROM release_tracklist WHERE is_present = 0").Scan(&missingCount)
 	if err != nil {
 		t.Fatalf("failed to query missing_tracks: %v", err)
 	}
@@ -663,7 +686,7 @@ func TestScanner_CheckIncompleteAlbums_MockDeezer(t *testing.T) {
 
 func TestSelectBestDeezerAlbumScanner(t *testing.T) {
 	// 1. Empty candidates
-	if got := selectBestDeezerAlbumScanner(nil, "Artist", "Album", 1); got != nil {
+	if got := selectBestDeezerAlbumScanner(nil, "Artist", "Album", 1, ""); got != nil {
 		t.Errorf("expected nil for empty candidates, got %+v", got)
 	}
 
@@ -682,9 +705,16 @@ func TestSelectBestDeezerAlbumScanner(t *testing.T) {
 			Artist:   resolver.DeezerArtist{Name: "Artist"},
 		},
 	}
-	best := selectBestDeezerAlbumScanner(cands, "Artist", "My Best Album", 3)
+	best := selectBestDeezerAlbumScanner(cands, "Artist", "My Best Album", 3, "")
 	if best == nil || best.ID != 20 {
 		t.Errorf("expected best album ID 20, got %+v", best)
+	}
+	homonyms := []resolver.DeezerAlbum{
+		{ID: 10, Title: "My Best Album", NbTracks: 5, Artist: resolver.DeezerArtist{ID: 101, Name: "Artist"}},
+		{ID: 20, Title: "My Best Album", NbTracks: 5, Artist: resolver.DeezerArtist{ID: 202, Name: "Artist"}},
+	}
+	if best := selectBestDeezerAlbumScanner(homonyms, "Artist", "My Best Album", 3, "202"); best == nil || best.ID != 20 {
+		t.Fatalf("selected a release by the wrong Deezer artist: %+v", best)
 	}
 
 	// 3. Single track penalty for multi-track local album
@@ -696,7 +726,7 @@ func TestSelectBestDeezerAlbumScanner(t *testing.T) {
 			Artist:   resolver.DeezerArtist{Name: "Band"},
 		},
 	}
-	bestSingle := selectBestDeezerAlbumScanner(candsSingle, "Band", "Single Track Version", 10)
+	bestSingle := selectBestDeezerAlbumScanner(candsSingle, "Band", "Single Track Version", 10, "")
 	if bestSingle != nil {
 		t.Errorf("expected nil due to single-track penalty on 10-track album, got %+v", bestSingle)
 	}
@@ -767,7 +797,3 @@ func TestScanner_StartWatcher(t *testing.T) {
 		t.Fatalf("StartWatcher failed: %v", err)
 	}
 }
-
-
-
-

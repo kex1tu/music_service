@@ -1118,14 +1118,38 @@ paths:
     get:
       tags: [Audit]
       security: [{sessionCookie: []}]
-      summary: Последние запуски аудита цензуры и доступные провайдеры
+      summary: История запусков аудита цензуры и квота провайдеров
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 25}}
+        - {name: cursor, in: query, schema: {type: string}, description: Значение next_cursor предыдущей страницы}
+        - {name: run_id, in: query, schema: {type: string}, description: ID запуска для прямого поиска}
       responses:
         '200':
-          description: До 25 запусков, providers и daily_audio_seconds
+          description: Страница истории и суточная квота UTC
           content:
             application/json:
-              schema: {type: object}
+              schema:
+                type: object
+                properties:
+                  runs: {type: array, items: {type: object}}
+                  selected_run: {type: object}
+                  next_cursor: {type: string, description: Пустая строка на последней странице}
+                  active: {type: boolean, description: В очереди есть запуски в состоянии running}
+                  providers: {type: array, items: {type: string}}
+                  daily_audio_seconds: {type: integer}
+                  quota:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        provider: {type: string}
+                        day: {type: string, format: date}
+                        limit_seconds: {type: integer}
+                        reserved_seconds: {type: integer}
+                        remaining_seconds: {type: integer}
+        '400': {description: Неверный курсор или размер страницы}
         '401': {description: Требуется сессия}
+        '404': {description: Запуск с указанным run_id не найден}
     post:
       tags: [Audit]
       security: [{sessionCookie: []}]
@@ -1216,6 +1240,32 @@ paths:
         '200': {description: Решение сохранено; MP3 и теги не изменены}
         '400': {description: Неверный идентификатор или решение}
         '401': {description: Требуется сессия}
+        '404': {description: Элемент не найден}
+        '409': {description: Для решения требуется завершённый элемент с аудиохэшем}
+
+  /api/audit/censorship-items/{itemID}/relink:
+    post:
+      tags: [Audit]
+      security: [{sessionCookie: []}]
+      summary: Привязать сохранённый результат к новому расположению того же аудио
+      parameters:
+        - {name: itemID, in: path, required: true, schema: {type: integer}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role, path]
+              properties:
+                role: {type: string, enum: [target, reference]}
+                path: {type: string, description: Относительный путь MP3 внутри медиатеки}
+      responses:
+        '200': {description: Путь обновлён}
+        '400': {description: Неверные роль или путь}
+        '401': {description: Требуется сессия}
+        '404': {description: Завершённый элемент не найден}
+        '409': {description: Аудио недоступно или отличается от проверенного}
 
   /api/audit/censorship-items/{itemID}/audio:
     get:
@@ -1229,7 +1279,8 @@ paths:
         '200': {description: Аудиопоток, content: {audio/mpeg: {schema: {type: string, format: binary}}}}
         '206': {description: Диапазон аудиопотока}
         '401': {description: Требуется сессия}
-        '404': {description: Запись или безопасный MP3 недоступны}
+        '404': {description: Завершённый элемент не найден}
+        '409': {description: Аудио недоступно или отличается от проверенного}
 
   /files/audit/censorship:
     $ref: '#/paths/~1api~1audit~1censorship'
@@ -1239,5 +1290,7 @@ paths:
     $ref: '#/paths/~1api~1audit~1censorship~1{runID}~1{action}'
   /files/audit/censorship-items/{itemID}/decision:
     $ref: '#/paths/~1api~1audit~1censorship-items~1{itemID}~1decision'
+  /files/audit/censorship-items/{itemID}/relink:
+    $ref: '#/paths/~1api~1audit~1censorship-items~1{itemID}~1relink'
   /files/audit/censorship-items/{itemID}/audio:
     $ref: '#/paths/~1api~1audit~1censorship-items~1{itemID}~1audio'

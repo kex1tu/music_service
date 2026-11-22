@@ -141,7 +141,13 @@ func TestDownloader_Preflight_DeduplicationAndSelection(t *testing.T) {
 	})
 
 	t.Run("CreateJobWithOptions preserves SelectedTrackIndices", func(t *testing.T) {
-		job, err := svc.CreateJobWithOptions(context.Background(), "https://music.youtube.com/watch?v=mock123", "youtube", downloader.JobOptions{
+		const url = "https://www.deezer.com/album/302127"
+		preview, err := svc.PreflightRelease(t.Context(), url, "deezer")
+		if err != nil {
+			t.Fatal(err)
+		}
+		job, err := svc.CreateJobWithOptions(t.Context(), url, "deezer", downloader.JobOptions{
+			PreflightID:          preview.PreflightID,
 			SelectedTrackIndices: []int{0, 2},
 			SkipExisting:         true,
 		})
@@ -220,9 +226,14 @@ func TestDownloader_Preflight_DeduplicationAndSelection(t *testing.T) {
 	})
 
 	t.Run("POST /downloads with selected_track_indices filters job", func(t *testing.T) {
+		const url = "https://www.deezer.com/album/302127"
+		previewResp := env.PostJSON("/downloads/preflight", downloader.PreflightRequest{URL: url, Source: "deezer"})
+		var preview downloader.PreflightResponse
+		env.DecodeJSON(previewResp, &preview)
 		createResp := env.PostJSON("/downloads", downloader.CreateJobRequest{
 			URL:                  "https://www.deezer.com/album/302127",
 			Source:               "deezer",
+			PreflightID:          preview.PreflightID,
 			SelectedTrackIndices: []int{1, 2},
 		})
 		if createResp.StatusCode != http.StatusOK {

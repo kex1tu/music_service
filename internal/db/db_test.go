@@ -144,168 +144,6 @@ func TestResetLibraryTablesRollsBackOnFailure(t *testing.T) {
 	}
 }
 
-func TestSoundCloudCache(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "db_sc_test_*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	dbPath := filepath.Join(tempDir, "test.db")
-	database, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer database.Close()
-
-	ctx := context.Background()
-
-	// 1. TTL тест: запись старше 30 дней с is_manual = 0 протухает (nil), а с is_manual = 1 возвращается
-	_, err = database.conn.ExecContext(ctx, `
-		INSERT INTO soundcloud_uncensored_cache (
-			cache_key, track_title, artist_name, selected_url, status, duration, is_manual, candidates_json, checked_at
-		) VALUES ('key_expired_auto', 'Title', 'Artist', 'https://sc.com/1', 'likely', 180, 0, '[]', datetime('now', '-35 days')),
-		         ('key_expired_manual', 'Title', 'Artist', 'https://sc.com/2', 'manual', 180, 1, '[]', datetime('now', '-35 days'));
-	`)
-	if err != nil {
-		t.Fatalf("failed to insert expired entries: %v", err)
-	}
-
-	resAuto, err := database.GetSoundCloudCache(ctx, "key_expired_auto", 720)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resAuto != nil {
-		t.Errorf("expected expired auto entry to be nil (cache miss), got: %+v", resAuto)
-	}
-
-	resManual, err := database.GetSoundCloudCache(ctx, "key_expired_manual", 720)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resManual == nil || resManual.SelectedURL != "https://sc.com/2" {
-		t.Errorf("expected expired manual entry to be returned, got: %+v", resManual)
-	}
-
-	// 2. link_dead тест: автоматическая запись с status = 'link_dead' или selected_url = '' возвращает nil (MISS)
-	_, err = database.conn.ExecContext(ctx, `
-		INSERT INTO soundcloud_uncensored_cache (
-			cache_key, track_title, artist_name, selected_url, status, duration, is_manual, candidates_json, checked_at
-		) VALUES ('key_dead_auto', 'Title', 'Artist', 'https://sc.com/dead', 'link_dead', 180, 0, '[]', datetime('now')),
-		         ('key_empty_url', 'Title', 'Artist', '', 'marked', 180, 0, '[]', datetime('now'));
-	`)
-	if err != nil {
-		t.Fatalf("failed to insert dead entries: %v", err)
-	}
-
-	deadAuto, err := database.GetSoundCloudCache(ctx, "key_dead_auto", 720)
-	if err != nil || deadAuto != nil {
-		t.Errorf("expected dead auto entry to return nil, err: %v, entry: %+v", err, deadAuto)
-	}
-	emptyUrl, err := database.GetSoundCloudCache(ctx, "key_empty_url", 720)
-	if err != nil || emptyUrl != nil {
-		t.Errorf("expected empty selected_url to return nil, err: %v, entry: %+v", err, emptyUrl)
-	}
-
-	// 3. Ротация 404: InvalidateSoundCloudURL удаляет битый URL и переключается на следующий лучший из candidates_json
-	cands := []SoundCloudCandidateItem{
-		{URL: "https://sc.com/first", Title: "Track 1", Duration: 180, Score: 90, Status: "marked"},
-		{URL: "https://sc.com/second", Title: "Track 2", Duration: 182, Score: 85, Status: "likely"},
-	}
-	saveEntry := SoundCloudCacheEntry{
-		CacheKey:    "key_rotation",
-		TrackTitle:  "Track",
-		ArtistName:  "Artist",
-		SelectedURL: "https://sc.com/first",
-		Status:      "marked",
-		Duration:    180,
-		IsManual:    false,
-		Candidates:  cands,
-	}
-	if err := database.SaveSoundCloudCache(ctx, saveEntry); err != nil {
-		t.Fatalf("failed to save cache entry: %v", err)
-	}
-
-	// Инвалидируем первый URL
-	inv1, err := database.InvalidateSoundCloudURL(ctx, "key_rotation", "https://sc.com/first")
-	if err != nil {
-		t.Fatalf("failed to invalidate URL: %v", err)
-	}
-	if inv1.SelectedURL != "https://sc.com/second" || inv1.Status != "likely" || inv1.Duration != 182 {
-		t.Errorf("unexpected rotated entry: %+v", inv1)
-	}
-	if len(inv1.Candidates) != 1 {
-		t.Errorf("expected 1 remaining candidate, got %d", len(inv1.Candidates))
-	}
-
-	// Инвалидируем второй (последний) URL
-	inv2, err := database.InvalidateSoundCloudURL(ctx, "key_rotation", "https://sc.com/second")
-	if err != nil {
-		t.Fatalf("failed to invalidate URL: %v", err)
-	}
-	if inv2.SelectedURL != "" || inv2.Status != "link_dead" {
-		t.Errorf("expected empty url and link_dead status, got: %+v", inv2)
-	}
-
-	// 4. Защита ручного пина: автоматический резолвер не перезаписывает строку с is_manual = 1
-	if err := database.PinSoundCloudVersion(ctx, "key_pin", "Artist", "Title", "https://sc.com/pinned", 200); err != nil {
-		t.Fatalf("failed to pin version: %v", err)
-	}
-
-	// Попытка авто-сохранения поверх ручного пина
-	autoOverwrite := SoundCloudCacheEntry{
-		CacheKey:    "key_pin",
-		TrackTitle:  "Overwritten Title",
-		ArtistName:  "Artist",
-		SelectedURL: "https://sc.com/auto",
-		Status:      "likely",
-		Duration:    150,
-		IsManual:    false,
-	}
-	if err := database.SaveSoundCloudCache(ctx, autoOverwrite); err != nil {
-		t.Fatalf("failed to run SaveSoundCloudCache: %v", err)
-	}
-
-	pinnedGet, err := database.GetSoundCloudCache(ctx, "key_pin", 720)
-	if err != nil || pinnedGet == nil {
-		t.Fatalf("failed to get pinned entry: %v", err)
-	}
-	if pinnedGet.SelectedURL != "https://sc.com/pinned" || !pinnedGet.IsManual || pinnedGet.Duration != 200 {
-		t.Errorf("pinned entry was overwritten! got: %+v", pinnedGet)
-	}
-
-	// 5. Безопасный UPSERT: повторное закрепление не затирает ранее сохранённый candidates_json
-	upsertEntry := SoundCloudCacheEntry{
-		CacheKey:    "key_upsert",
-		TrackTitle:  "Track",
-		ArtistName:  "Artist",
-		SelectedURL: "https://sc.com/orig",
-		Status:      "marked",
-		Duration:    190,
-		IsManual:    false,
-		Candidates:  cands,
-	}
-	if err := database.SaveSoundCloudCache(ctx, upsertEntry); err != nil {
-		t.Fatalf("failed to save initial entry: %v", err)
-	}
-
-	// Закрепляем вручную
-	if err := database.PinSoundCloudVersion(ctx, "key_upsert", "Artist", "Track", "https://sc.com/manual_choice", 195); err != nil {
-		t.Fatalf("failed to pin version: %v", err)
-	}
-
-	retrievedPinned, err := database.GetSoundCloudCache(ctx, "key_upsert", 720)
-	if err != nil || retrievedPinned == nil {
-		t.Fatalf("failed to get pinned entry: %v", err)
-	}
-	if retrievedPinned.SelectedURL != "https://sc.com/manual_choice" || !retrievedPinned.IsManual {
-		t.Errorf("pin failed: %+v", retrievedPinned)
-	}
-	if len(retrievedPinned.Candidates) != 2 {
-		t.Errorf("candidates_json was wiped out! expected 2 candidates, got %d", len(retrievedPinned.Candidates))
-	}
-}
-
 func TestDB_SearchLibrary(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "db_search_test_*")
 	if err != nil {
@@ -454,26 +292,6 @@ func TestDB_ConcurrentWALStress(t *testing.T) {
 					return
 				}
 
-				// 3. Save cache
-				cacheEntry := SoundCloudCacheEntry{
-					CacheKey:    "key-" + string(rune('a'+workerID)),
-					TrackTitle:  "Title",
-					ArtistName:  "Artist",
-					SelectedURL: "https://soundcloud.com/1",
-					Status:      "likely",
-					Duration:    180,
-				}
-				if err := database.SaveSoundCloudCache(ctx, cacheEntry); err != nil {
-					errCh <- err
-					return
-				}
-
-				// 4. Read cache
-				if _, err := database.GetSoundCloudCache(ctx, "key-"+string(rune('a'+workerID)), 720); err != nil {
-					errCh <- err
-					return
-				}
-
 				_ = jobID
 			}
 			errCh <- nil
@@ -551,125 +369,8 @@ func TestDB_GetTracksMetadataCache(t *testing.T) {
 	}
 }
 
-func TestDB_PinnedSources(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "db_pinned_test_*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	dbPath := filepath.Join(tempDir, "test.db")
-	database, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer database.Close()
-
-	ctx := context.Background()
-
-	// 1. Проверяем сохранение и получение pinned source
-	pin := PinnedTrackSource{
-		CacheKey:   "artist_track_key",
-		ArtistName: "The Beatles",
-		TrackTitle: "Yesterday",
-		PinnedURL:  "https://www.youtube.com/watch?v=pinned123",
-		SourceType: "manual",
-	}
-
-	if err := database.SavePinnedSource(ctx, pin); err != nil {
-		t.Fatalf("failed to save pinned source: %v", err)
-	}
-
-	retrieved, err := database.GetPinnedSource(ctx, "artist_track_key")
-	if err != nil {
-		t.Fatalf("failed to get pinned source: %v", err)
-	}
-	if retrieved == nil {
-		t.Fatal("expected retrieved pinned source, got nil")
-	}
-	if retrieved.PinnedURL != pin.PinnedURL {
-		t.Errorf("expected url %s, got %s", pin.PinnedURL, retrieved.PinnedURL)
-	}
-	if retrieved.SourceType != "manual" {
-		t.Errorf("expected source_type manual, got %s", retrieved.SourceType)
-	}
-
-	// Обновление существующего пина (UPSERT)
-	pin.PinnedURL = "https://soundcloud.com/thebeatles/yesterday"
-	if err := database.SavePinnedSource(ctx, pin); err != nil {
-		t.Fatalf("failed to update pinned source: %v", err)
-	}
-
-	retrievedUpdated, err := database.GetPinnedSource(ctx, "artist_track_key")
-	if err != nil {
-		t.Fatalf("failed to get updated pinned source: %v", err)
-	}
-	if retrievedUpdated.PinnedURL != pin.PinnedURL {
-		t.Errorf("expected updated url %s, got %s", pin.PinnedURL, retrievedUpdated.PinnedURL)
-	}
-
-	// Удаление пина
-	if err := database.DeletePinnedSource(ctx, "artist_track_key"); err != nil {
-		t.Fatalf("failed to delete pinned source: %v", err)
-	}
-	deleted, err := database.GetPinnedSource(ctx, "artist_track_key")
-	if err != nil {
-		t.Fatalf("unexpected error getting deleted pin: %v", err)
-	}
-	if deleted != nil {
-		t.Fatalf("expected nil for deleted pinned source, got %+v", deleted)
-	}
-
-	// 2. Тест обновления pinned_source_url у tracks
-	_, err = database.conn.ExecContext(ctx, `
-		INSERT INTO artists (id, name, clean_name) VALUES (10, 'The Beatles', 'the beatles');
-		INSERT INTO albums (id, artist_id, title, clean_title, album_artist, year, folder_path, has_cover) 
-		VALUES (10, 10, 'Help!', 'help', 'The Beatles', 1965, 'The Beatles - Help!', 0);
-		INSERT INTO tracks (id, album_id, artist_id, title, clean_title, track_number, duration, bitrate, file_path, file_size, mtime)
-		VALUES (100, 10, 10, 'Yesterday', 'yesterday', 1, 125, 320, 'The Beatles/Help!/01. Yesterday.mp3', 1000, 1234567.0);
-	`)
-	if err != nil {
-		t.Fatalf("failed to insert test track: %v", err)
-	}
-
-	if err := database.UpdateTrackPinnedURL(ctx, 100, "https://soundcloud.com/thebeatles/yesterday"); err != nil {
-		t.Fatalf("UpdateTrackPinnedURL failed: %v", err)
-	}
-
-	var trackPinned string
-	err = database.conn.QueryRowContext(ctx, "SELECT COALESCE(pinned_source_url, '') FROM tracks WHERE id = 100").Scan(&trackPinned)
-	if err != nil {
-		t.Fatalf("query track failed: %v", err)
-	}
-	if trackPinned != "https://soundcloud.com/thebeatles/yesterday" {
-		t.Errorf("expected pinned url 'https://soundcloud.com/thebeatles/yesterday', got %q", trackPinned)
-	}
-
-	// 3. Тест UpdateMissingTrackPinnedURL
-	_, err = database.conn.ExecContext(ctx, `
-		INSERT INTO missing_tracks (id, album_id, track_number, title, artist) 
-		VALUES (200, 10, 2, 'Act Naturally', 'The Beatles');
-	`)
-	if err != nil {
-		t.Fatalf("failed to insert test missing track: %v", err)
-	}
-
-	if err := database.UpdateMissingTrackPinnedURL(ctx, 200, "https://youtube.com/watch?v=123"); err != nil {
-		t.Fatalf("UpdateMissingTrackPinnedURL failed: %v", err)
-	}
-
-	var missingPinned string
-	err = database.conn.QueryRowContext(ctx, "SELECT COALESCE(pinned_source_url, '') FROM missing_tracks WHERE id = 200").Scan(&missingPinned)
-	if err != nil {
-		t.Fatalf("query missing track failed: %v", err)
-	}
-	if missingPinned != "https://youtube.com/watch?v=123" {
-		t.Errorf("expected missing track pinned url 'https://youtube.com/watch?v=123', got %q", missingPinned)
-	}
-}
-
-func TestRadarAndRadioQueries(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "db_radar_radio_test_*")
+func TestRadarQueries(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "db_radar_test_*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -692,27 +393,12 @@ func TestRadarAndRadioQueries(t *testing.T) {
 		t.Fatalf("UpsertTrackedArtist failed: %v", err)
 	}
 
-	artists, err := database.GetTrackedArtists(ctx, false)
+	artists, err := database.GetTrackedArtists(ctx)
 	if err != nil {
 		t.Fatalf("GetTrackedArtists failed: %v", err)
 	}
 	if len(artists) != 2 {
 		t.Fatalf("expected 2 tracked artists, got %d", len(artists))
-	}
-
-	if err := database.SetArtistAutoDownload(ctx, "Daft Punk", true); err != nil {
-		t.Fatalf("SetArtistAutoDownload failed: %v", err)
-	}
-	if err := database.SetArtistFollowed(ctx, "The Weeknd", false); err != nil {
-		t.Fatalf("SetArtistFollowed failed: %v", err)
-	}
-
-	followedOnly, err := database.GetTrackedArtists(ctx, true)
-	if err != nil {
-		t.Fatalf("GetTrackedArtists(followed=true) failed: %v", err)
-	}
-	if len(followedOnly) != 1 || followedOnly[0].Name != "Daft Punk" || !followedOnly[0].AutoDownload {
-		t.Fatalf("unexpected followed artists: %+v", followedOnly)
 	}
 
 	if err := database.UpdateArtistCustomLinks(ctx, "Daft Punk", "DaftPunkAlias", "dz-123", "mb-456", "ya-789"); err != nil {
@@ -812,6 +498,17 @@ func TestRadarAndRadioQueries(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	var editionID int64
+	if err := database.Conn().QueryRowContext(ctx, "SELECT id FROM albums WHERE folder_path = 'path'").Scan(&editionID); err != nil {
+		t.Fatal(err)
+	}
+	catalog := make([]CatalogTrack, rel1.TrackCount)
+	for i := range catalog {
+		catalog[i] = CatalogTrack{BackfillSelection: BackfillSelection{TrackPosition: ReleasePosition(1, i+1)}, Title: "Track", Artist: "Daft Punk"}
+	}
+	if _, err := VerifyCatalog(ctx, database.Conn(), editionID, "dz-ram", catalog); err != nil {
+		t.Fatal(err)
+	}
 	fixedCount, err := database.ReconcileAllRadarReleases(ctx)
 	if err != nil {
 		t.Fatalf("ReconcileAllRadarReleases failed: %v", err)
@@ -832,24 +529,7 @@ func TestRadarAndRadioQueries(t *testing.T) {
 		IsRadar:     true,
 	})
 
-	// 3. Тест Artist Relations
-	sims := []ArtistRelationItem{
-		{ArtistName: "Daft Punk", RelatedName: "Justice", Score: 0.95, Source: "deezer"},
-		{ArtistName: "Daft Punk", RelatedName: "Kavinsky", Score: 0.88, Source: "lastfm"},
-	}
-	if err := database.SaveArtistRelations(ctx, "Daft Punk", sims); err != nil {
-		t.Fatalf("SaveArtistRelations failed: %v", err)
-	}
-	related, err := database.GetRelatedArtists(ctx, "Daft Punk", 5)
-	if err != nil {
-		t.Fatalf("GetRelatedArtists failed: %v", err)
-	}
-	if len(related) != 2 || related[0] != "justice" {
-		t.Fatalf("unexpected related artists: %+v", related)
-	}
-
-	// 4. Тест Radio History
-	// Создаем тестовый трек для foreign key
+	// Добавляем трек для проверки очистки индекса
 	_, err = database.conn.ExecContext(ctx, `
 		INSERT OR IGNORE INTO artists (id, name, clean_name) VALUES (1, 'Daft Punk', 'daft punk');
 		INSERT OR IGNORE INTO albums (id, title, clean_title, artist_id, folder_path) VALUES (1, 'RAM', 'ram', 1, 'RAM');
@@ -857,29 +537,10 @@ func TestRadarAndRadioQueries(t *testing.T) {
 		VALUES (500, 1, 1, 'Get Lucky', 'get lucky', 'Daft Punk/RAM/01. Get Lucky.mp3', 248, 320, 10000000, CURRENT_TIMESTAMP, 'hash500');
 	`)
 	if err != nil {
-		t.Fatalf("failed to insert test track for radio: %v", err)
+		t.Fatalf("failed to insert test track: %v", err)
 	}
 
-	if err := database.RecordRadioPlay(ctx, 500, "wave", ""); err != nil {
-		t.Fatalf("RecordRadioPlay failed: %v", err)
-	}
-	recentTracks, err := database.GetRecentRadioTracks(ctx, "wave", 6)
-	if err != nil {
-		t.Fatalf("GetRecentRadioTracks failed: %v", err)
-	}
-	if len(recentTracks) != 1 || recentTracks[0] != 500 {
-		t.Fatalf("unexpected recent tracks: %+v", recentTracks)
-	}
-
-	recentArtists, err := database.GetRecentRadioArtists(ctx, "wave", 5)
-	if err != nil {
-		t.Fatalf("GetRecentRadioArtists failed: %v", err)
-	}
-	if len(recentArtists) != 1 || recentArtists[0] != "daft punk" {
-		t.Fatalf("unexpected recent artists: %+v", recentArtists)
-	}
-
-	// 5. Тест сохранения персистентных данных при ResetLibraryTables
+	// 3. Тест сохранения персистентных данных при ResetLibraryTables
 	if err := database.ResetLibraryTables(ctx); err != nil {
 		t.Fatalf("ResetLibraryTables failed: %v", err)
 	}
@@ -892,7 +553,7 @@ func TestRadarAndRadioQueries(t *testing.T) {
 	}
 
 	// Проверяем, что tracked_artists и radar_releases сохранены!
-	artistsAfterReset, err := database.GetTrackedArtists(ctx, false)
+	artistsAfterReset, err := database.GetTrackedArtists(ctx)
 	if err != nil || len(artistsAfterReset) != 2 {
 		t.Fatalf("tracked_artists lost after ResetLibraryTables: err=%v, count=%d", err, len(artistsAfterReset))
 	}

@@ -7,6 +7,7 @@ import (
 
 	"music-manager/internal/core/httputil"
 	"music-manager/internal/core/sandbox"
+	"music-manager/internal/db"
 )
 
 // Summary handles GET /files/audit/summary, GET /api/audit/summary
@@ -344,9 +345,12 @@ func (m *Module) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 
 	match, err := m.service.CatalogMatchAlbum(r.Context(), albumPath, deezerID)
 	if err != nil {
-		if errors.Is(err, ErrAlbumNotFound) {
+		switch {
+		case errors.Is(err, ErrAlbumNotFound):
 			httputil.RespondError(w, http.StatusNotFound, err.Error())
-		} else {
+		case errors.Is(err, db.ErrAmbiguousArtist):
+			httputil.RespondError(w, http.StatusConflict, "Не удалось однозначно определить исполнителя. "+err.Error())
+		default:
 			httputil.RespondError(w, http.StatusInternalServerError, err.Error())
 		}
 		return

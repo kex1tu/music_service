@@ -69,11 +69,16 @@ func (s *Service) switchJobTrackSource(ctx context.Context, jobID, trackID, targ
 		return nil, errSelectionConflict
 	}
 	track := &draft.Tracks[trackIndex]
+	for _, target := range draft.RedownloadTargets {
+		if target.TrackID == trackID && (target.Confirmed || target.ResultHash != "") {
+			return nil, errSelectionConflict
+		}
+	}
 	selectManualSource(track, targetURL, policy)
 	draft.manualTrackIndex = &trackIndex
 	draft.resetForQueue("Выбранный источник ожидает очереди")
 	if s.repo != nil {
-		if err := s.repo.updateJobWithSelection(ctx, draft, previous, []PinnedTrackSourceDTO{pinForTrack(*track)}); err != nil {
+		if err := s.repo.updateJobWithSelection(ctx, draft, previous); err != nil {
 			return nil, fmt.Errorf("%w: %w", errQueueStorage, err)
 		}
 	}
@@ -176,6 +181,9 @@ func (s *Service) SwitchReleaseSource(ctx context.Context, req SwitchReleaseSour
 		if draft.selectionCorrupt {
 			return nil, ErrCorruptJobSelection
 		}
+		if draft.IsRedownload && draft.Status != StatusWaitingSource {
+			return nil, errSelectionConflict
+		}
 		switch draft.Status {
 		case StatusDownloading, StatusConverting, StatusTagging, StatusResolving, StatusQueued:
 			return nil, errSelectionConflict
@@ -246,12 +254,10 @@ func (s *Service) SwitchReleaseSource(ctx context.Context, req SwitchReleaseSour
 			return nil, errors.New("индекс трека вне треклиста")
 		}
 	}
-	pins := make([]PinnedTrackSourceDTO, 0, len(req.TrackMapping))
 	for idx := range draft.Tracks {
 		track := &draft.Tracks[idx]
 		if audioURL, ok := req.TrackMapping[idx]; ok {
 			selectManualSource(track, strings.TrimSpace(audioURL), req.VersionPolicy)
-			pins = append(pins, pinForTrack(*track))
 		} else {
 			// Unmatched tracks wait for another explicit source choice.
 			track.AudioSourceURL = ""
@@ -268,9 +274,9 @@ func (s *Service) SwitchReleaseSource(ctx context.Context, req SwitchReleaseSour
 	if s.repo != nil {
 		var err error
 		if existing == nil {
-			err = s.repo.createJobWithPins(ctx, draft, pins)
+			err = s.repo.CreateJob(ctx, draft)
 		} else {
-			err = s.repo.updateJobWithSelection(ctx, draft, previous, pins)
+			err = s.repo.updateJobWithSelection(ctx, draft, previous)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", errQueueStorage, err)
@@ -290,7 +296,7 @@ func (s *Service) SwitchReleaseSource(ctx context.Context, req SwitchReleaseSour
 
 	return &SwitchReleaseSourceResult{
 		JobID:        draft.ID,
-		UpdatedCount: len(pins),
+		UpdatedCount: len(req.TrackMapping),
 		TotalTracks:  len(draft.Tracks),
 		Status:       "queued",
 	}, nil

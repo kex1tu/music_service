@@ -180,16 +180,6 @@
                 </template>
             </button>
             <button
-                @click="$store.app.activeTab = 'radio'; if ($store.radio) { $store.radio.fetchStats(); $store.radio.fetchQueue(); }"
-                :aria-current="$store.app.activeTab === 'radio' ? 'page' : false"
-                :class="$store.app.activeTab === 'radio' ? 'bg-white text-zinc-950 font-semibold shadow-xs' : 'text-content-secondary hover:text-white hover:bg-white/[0.04]'"
-                class="h-8 px-2 sm:px-3 rounded-sm text-xs transition-all flex items-center space-x-1.5 shrink-0 relative focus-visible:ring-2 focus-visible:ring-white/30">
-                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M3.24 6.15C2.51 6.43 2 7.17 2 8v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-.83-.51-1.57-1.24-1.85L12 2.62 3.24 6.15zM12 4.47l6.38 2.53H5.62L12 4.47zM4 9h16v11H4V9zm8 3c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3zm0 4.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
-                </svg>
-                <span class="hidden sm:inline">Радио</span>
-            </button>
-            <button
                 @click="$store.app.activeTab = 'player'; $store.player.onTabOpened()"
                 :aria-current="$store.app.activeTab === 'player' ? 'page' : false"
                 :class="$store.app.activeTab === 'player' ? 'bg-white text-zinc-950 font-semibold shadow-xs' : 'text-content-secondary hover:text-white hover:bg-white/[0.04]'"

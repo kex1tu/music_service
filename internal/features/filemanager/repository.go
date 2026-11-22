@@ -128,7 +128,7 @@ func (r *SQLiteRepository) GetTracksMetadataCache(ctx context.Context) (map[stri
 		COALESCE(t.lyrics_status, 'none'),
 		COALESCE((SELECT GROUP_CONCAT(g.name, '\\') FROM track_genres tg JOIN genres g ON tg.genre_id = g.id WHERE tg.track_id = t.id), ''),
 		COALESCE(t.deezer_id, ''),
-		COALESCE(t.pinned_source_url, ''),
+		COALESCE(t.source_url, ''),
 		COALESCE(al.deezer_id, '')
 	FROM tracks t
 	LEFT JOIN albums al ON t.album_id = al.id
@@ -206,7 +206,7 @@ func (r *SQLiteRepository) GetTracksMetadataCache(ctx context.Context) (map[stri
 		it.LyricsStatus = lyr
 		it.HasLyrics = lyr == "lrc" || lyr == "txt"
 		it.DeezerID = dzID.String
-		it.PinnedSourceURL = pinnedURL.String
+		it.SourceURL = pinnedURL.String
 		it.AlbumDeezerID = albDzID.String
 
 		cache[cleanPath] = it
@@ -296,83 +296,26 @@ func (r *SQLiteRepository) ListLibraryTracks(ctx context.Context, query string, 
 
 // SearchLibrary выполняет глобальный поиск по трекам, альбомам и артистам.
 func (r *SQLiteRepository) SearchLibrary(ctx context.Context, query string, limit int) (*SearchLibraryResult, error) {
-	if limit <= 0 {
-		limit = 50
+	found, err := db.QueryLibrarySearch(ctx, r.db, query, limit, false)
+	if err != nil {
+		return nil, err
 	}
-	term := textkey.Search(query)
-
 	result := &SearchLibraryResult{
-		Tracks:  make([]SearchTrackItem, 0),
-		Albums:  make([]SearchAlbumItem, 0),
-		Artists: make([]SearchArtistItem, 0),
+		Tracks:  make([]SearchTrackItem, 0, len(found.Tracks)),
+		Albums:  make([]SearchAlbumItem, 0, len(found.Albums)),
+		Artists: make([]SearchArtistItem, 0, len(found.Artists)),
 	}
-
-	// 1. Поиск по трекам
-	trackQuery := `
-	SELECT t.id, t.title, ar.name AS artist, al.title AS album,
-	       COALESCE(t.duration, 0.0), COALESCE(t.bitrate, 0), t.file_path, COALESCE(t.lyrics_status, 'none')
-	FROM tracks t
-	JOIN albums al ON t.album_id = al.id
-	JOIN artists ar ON t.artist_id = ar.id
-	WHERE instr(t.search_title, ?) > 0 OR instr(t.search_clean_title, ?) > 0
-	LIMIT ?;
-	`
-	tRows, err := r.db.QueryContext(ctx, trackQuery, term, term, limit)
-	if err == nil {
-		defer tRows.Close()
-		for tRows.Next() {
-			var it SearchTrackItem
-			if err := tRows.Scan(&it.ID, &it.Title, &it.Artist, &it.Album, &it.Duration, &it.Bitrate, &it.FilePath, &it.LyricsStatus); err == nil {
-				it.StreamURL = fmt.Sprintf("/api/tracks/%d/stream", it.ID)
-				result.Tracks = append(result.Tracks, it)
-			}
-		}
+	for _, track := range found.Tracks {
+		result.Tracks = append(result.Tracks, SearchTrackItem{ID: track.ID, Title: track.Title, Artist: track.Artist, Album: track.Album, Duration: track.Duration,
+			Bitrate: track.Bitrate, FilePath: track.Path, LyricsStatus: track.LyricsStatus, StreamURL: fmt.Sprintf("/api/tracks/%d/stream", track.ID)})
 	}
-
-	// 2. Поиск по альбомам
-	albumQuery := `
-	SELECT al.id, al.title, ar.name AS artist, COALESCE(al.album_artist, ''), COALESCE(al.year, 0),
-	       al.folder_path, al.has_cover, COUNT(t.id) AS track_count
-	FROM albums al
-	JOIN artists ar ON al.artist_id = ar.id
-	LEFT JOIN tracks t ON t.album_id = al.id
-	WHERE instr(al.search_title, ?) > 0 OR instr(al.search_clean_title, ?) > 0
-	GROUP BY al.id
-	LIMIT ?;
-	`
-	aRows, err := r.db.QueryContext(ctx, albumQuery, term, term, limit)
-	if err == nil {
-		defer aRows.Close()
-		for aRows.Next() {
-			var it SearchAlbumItem
-			if err := aRows.Scan(&it.ID, &it.Title, &it.Artist, &it.AlbumArtist, &it.Year, &it.FolderPath, &it.HasCover, &it.TrackCount); err == nil {
-				result.Albums = append(result.Albums, it)
-			}
-		}
+	for _, album := range found.Albums {
+		result.Albums = append(result.Albums, SearchAlbumItem{ID: album.ID, Title: album.Title, Artist: album.PrimaryArtist, AlbumArtist: album.RawAlbumArtist,
+			Year: album.Year, FolderPath: album.Path, HasCover: album.HasCover, TrackCount: album.TrackCount})
 	}
-
-	// 3. Поиск по артистам
-	artistQuery := `
-	SELECT ar.id, ar.name, COUNT(DISTINCT t.id) AS track_count,
-	       COALESCE((SELECT al.folder_path FROM albums al WHERE al.artist_id = ar.id LIMIT 1), ''),
-	       COALESCE((SELECT t.file_path FROM tracks t WHERE t.artist_id = ar.id LIMIT 1), '')
-	FROM artists ar
-	LEFT JOIN tracks t ON t.artist_id = ar.id
-	WHERE instr(ar.clean_name, ?) > 0
-	GROUP BY ar.id
-	LIMIT ?;
-	`
-	arRows, err := r.db.QueryContext(ctx, artistQuery, term, limit)
-	if err == nil {
-		defer arRows.Close()
-		for arRows.Next() {
-			var it SearchArtistItem
-			if err := arRows.Scan(&it.ID, &it.Name, &it.TrackCount, &it.FolderPath, &it.FirstPath); err == nil {
-				result.Artists = append(result.Artists, it)
-			}
-		}
+	for _, artist := range found.Artists {
+		result.Artists = append(result.Artists, SearchArtistItem{ID: artist.ID, Name: artist.Name, TrackCount: artist.TrackCount, FolderPath: artist.CreditFolder, FirstPath: artist.TrackPath})
 	}
-
 	return result, nil
 }
 
@@ -415,7 +358,7 @@ func (r *SQLiteRepository) GetTrackDetailsForRedownload(ctx context.Context, rel
 		COALESCE(t.title, ''), 
 		COALESCE(al.title, ''), 
 		COALESCE(t.deezer_id, ''), 
-		COALESCE(t.pinned_source_url, ''), 
+		COALESCE(t.source_url, ''),
 		COALESCE(t.duration, 0.0), 
 		COALESCE(al.deezer_id, '')
 	FROM tracks t

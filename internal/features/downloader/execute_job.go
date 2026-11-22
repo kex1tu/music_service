@@ -24,11 +24,16 @@ func (s *Service) executeJob(ctx context.Context, job *Job) {
 
 func (s *Service) executeRegular(ctx context.Context, job *Job) {
 	snapshot := job.Snapshot()
-	hasManual := hasManualSource(snapshot.Tracks)
+	hasManual := snapshot.IsRedownload || hasManualSource(snapshot.Tracks)
+	frozen := len(snapshot.SelectedTrackIndices) > 0
+	if frozen && len(snapshot.Tracks) == 0 {
+		job.SetError(errPreflightExpired.Error())
+		return
+	}
 	job.SetStatus(StatusResolving)
 	job.UpdateProgress(5.0, "Определение источника и метаданных")
 
-	if s.resolver == nil && !hasManual {
+	if s.resolver == nil && !hasManual && !frozen {
 		// Режим без внешнего резолвера (например, минимальные тесты)
 		job.SetReady(job.CompletedTracks, job.TotalTracks)
 		return
@@ -37,7 +42,7 @@ func (s *Service) executeRegular(ctx context.Context, job *Job) {
 	var meta *resolver.ReleaseMetadata
 	var tracks []resolver.ResolvedTrack
 	var err error
-	if hasManual {
+	if hasManual || frozen {
 		meta = &snapshot.AlbumMetadata
 		tracks = snapshot.Tracks
 	} else {
@@ -52,24 +57,13 @@ func (s *Service) executeRegular(ctx context.Context, job *Job) {
 		meta = &resolver.ReleaseMetadata{}
 	}
 
-	selectedIndices := snapshot.SelectedTrackIndices
-	if len(selectedIndices) > 0 && !hasManual {
-		var filteredTracks []resolver.ResolvedTrack
-		for _, idx := range selectedIndices {
-			if idx >= 0 && idx < len(tracks) {
-				filteredTracks = append(filteredTracks, tracks[idx])
-			}
-		}
-		tracks = filteredTracks
-	}
-
 	if len(tracks) == 0 {
 		job.SetError("Не выбрано ни одного трека для загрузки")
 		return
 	}
 	if snapshot.SkipExisting && !hasManual && s.repo != nil {
 		tracks = slices.DeleteFunc(tracks, func(track resolver.ResolvedTrack) bool {
-			existing, err := s.repo.CheckTrackInLibrary(ctx, track.Title, track.Artist)
+			existing, err := s.repo.CheckTrackInLibrary(ctx, track.Title, track.Artist, track.ISRC)
 			return err == nil && existing != nil
 		})
 		if len(tracks) == 0 {

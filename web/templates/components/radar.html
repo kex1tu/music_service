@@ -19,7 +19,7 @@
                                 <span class="px-2 py-0.5 text-xs font-mono font-bold bg-brand text-zinc-950 rounded-full animate-pulse" x-text="`+${$store.radar.unreadCount}`"></span>
                             </template>
                         </h2>
-                        <p class="text-xs text-content-muted">Мониторинг дискографий, свежих альбомов и синглов отслеживаемых исполнителей</p>
+                        <p class="text-xs text-content-muted">Новые релизы и дискографии артистов медиатеки</p>
                     </div>
                 </div>
             </div>
@@ -68,14 +68,14 @@
         </template>
     </div>
 
-    <!-- Вкладки подраздела: Лента новинок vs Отслеживаемые артисты -->
+    <!-- Вкладки подраздела: Лента новинок vs Артисты медиатеки -->
     <div class="flex items-center justify-between border-b border-surface-border pb-3">
         <div class="flex items-center space-x-2 overflow-x-auto no-scrollbar">
             <button
                 @click="$store.radar.activeSubTab = 'feed'; $store.radar.fetchFeed(1)"
                 :class="$store.radar.activeSubTab === 'feed' ? 'bg-surface-elevated text-brand font-bold border-brand' : 'text-content-secondary hover:text-white border-transparent'"
-                class="px-4 py-2 rounded-xl text-xs border transition flex items-center space-x-2 shrink-0">
-                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                class="min-h-11 sm:min-h-0 px-2 sm:px-4 py-2 rounded-xl text-xs border transition flex items-center gap-1 sm:gap-2 shrink-0">
+                <svg class="hidden sm:block w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
                 </svg>
                 <span>Лента новинок</span>
@@ -84,11 +84,11 @@
             <button
                 @click="$store.radar.activeSubTab = 'artists'; $store.radar.fetchArtists()"
                 :class="$store.radar.activeSubTab === 'artists' ? 'bg-surface-elevated text-brand font-bold border-brand' : 'text-content-secondary hover:text-white border-transparent'"
-                class="px-4 py-2 rounded-xl text-xs border transition flex items-center space-x-2 shrink-0">
-                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                class="min-h-11 sm:min-h-0 px-2 sm:px-4 py-2 rounded-xl text-xs border transition flex items-center gap-1 sm:gap-2 shrink-0">
+                <svg class="hidden sm:block w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
                 </svg>
-                <span>Отслеживаемые артисты</span>
+                <span>Артисты медиатеки</span>
                 <span class="px-1.5 py-0.2 bg-surface-input text-xs font-mono rounded" x-text="$store.radar.artistsTotal"></span>
             </button>
         </div>
@@ -264,50 +264,25 @@
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm0-14c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z"/>
                 </svg>
                 <div class="text-sm font-medium text-white">Релизы не найдены</div>
-                <div class="text-xs">Нажмите «Проверить все новинки» или добавьте новых артистов во вкладке «Отслеживаемые артисты».</div>
+                <div class="text-xs">Нажмите «Проверить все новинки».</div>
             </div>
         </template>
     </div>
 
-    <!-- ПОДРАЗДЕЛ 2: ОТСЛЕЖИВАЕМЫЕ АРТИСТЫ -->
+    <!-- ПОДРАЗДЕЛ 2: АРТИСТЫ МЕДИАТЕКИ -->
     <div x-show="$store.radar.activeSubTab === 'artists'" class="space-y-4">
-        <!-- Панель добавления артиста и фильтров -->
-        <div class="flex flex-col sm:flex-row items-center justify-between gap-3 bg-surface-panel/50 p-4 rounded-xl border border-surface-border">
-            <div class="flex-1 w-full sm:max-w-md flex items-center space-x-2">
-                <input
-                    type="text"
-                    x-model="$store.radar.newArtistName"
-                    @keydown.enter="$store.radar.addArtist()"
-                    placeholder="Имя исполнителя для отслеживания..."
-                    aria-label="Имя исполнителя для отслеживания"
-                    class="flex-1 bg-surface-input border border-surface-border rounded-lg px-3 py-2 text-xs text-white placeholder-content-muted focus:outline-none focus:border-brand">
-                <button
-                    @click="$store.radar.addArtist()"
-                    class="px-4 py-2 bg-brand hover:bg-brand-hover text-zinc-950 text-xs font-semibold rounded-lg transition shrink-0">
-                    Добавить
-                </button>
-            </div>
+        <input
+            type="search"
+            x-model="$store.radar.artistsSearch"
+            @input.debounce.250ms="$store.radar.fetchArtists()"
+            placeholder="Поиск по артистам..."
+            aria-label="Поиск по артистам"
+            class="w-full sm:max-w-sm min-h-11 bg-surface-input border border-surface-border rounded-lg px-3 text-sm text-white placeholder-content-muted focus:outline-none focus:border-brand">
 
-            <div class="flex flex-wrap items-center gap-3 w-full sm:w-auto">
-                <label class="flex items-center space-x-2 text-xs text-content-secondary cursor-pointer">
-                    <input
-                        type="checkbox"
-                        x-model="$store.radar.artistsOnlyFollowed"
-                        @change="$store.radar.fetchArtists()"
-                        class="rounded bg-surface-input border-surface-border text-brand focus:ring-brand">
-                    <span>Только активные</span>
-                </label>
-                <input
-                    type="text"
-                    x-model="$store.radar.artistsSearch"
-                    @input.debounce.250ms="$store.radar.fetchArtists()"
-                    placeholder="Фильтр артистов..."
-                    aria-label="Фильтр артистов"
-                    class="flex-1 min-w-0 sm:flex-none bg-surface-input border border-surface-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-content-muted focus:outline-none focus:border-brand">
-            </div>
-        </div>
+        <p x-show="!$store.radar.isLoading && $store.radar.artists.length === 0"
+           class="py-6 text-center text-sm text-content-muted"
+           x-text="$store.radar.artistsSearch.trim() ? 'Артисты не найдены' : 'В медиатеке пока нет артистов'"></p>
 
-        <!-- Таблица артистов -->
         <!-- Мобильный список карточек артистов (< md) -->
         <div class="md:hidden space-y-2.5">
             <template x-for="art in ($store.app.isDesktopLayout ? [] : $store.radar.artists)" :key="'mob-' + (art.id || art.name)">
@@ -334,29 +309,13 @@
                     </div>
 
                     <div class="flex flex-wrap items-center gap-2 pt-2 border-t border-surface-borderSubtle">
-                        <button
-                            type="button"
-                            @click="$store.radar.toggleFollow(art)"
-                            :aria-label="'Отслеживание исполнителя ' + art.name + ': ' + (art.is_followed ? 'Включено' : 'Выключено')"
-                            :class="art.is_followed ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-surface-input text-content-muted border-surface-border'"
-                            class="px-2.5 py-1 rounded-full border text-xs font-medium transition">
-                            <span x-text="art.is_followed ? 'Отсл.: Вкл' : 'Отсл.: Выкл'"></span>
-                        </button>
-                        <button
-                            type="button"
-                            @click="$store.radar.toggleAutoDownload(art)"
-                            :aria-label="'Автозагрузка для ' + art.name + ': ' + (art.auto_download ? 'Да' : 'Нет')"
-                            :class="art.auto_download ? 'bg-brand/20 text-brand border-brand/40' : 'bg-surface-input text-content-muted border-surface-border'"
-                            class="px-2.5 py-1 rounded-full border text-xs font-medium transition">
-                            <span x-text="art.auto_download ? 'Авто: Да' : 'Авто: Нет'"></span>
-                        </button>
                         <div class="ml-auto flex items-center space-x-1.5">
                             <button
                                 type="button"
                                 @click="$store.radar.triggerScan(art.name)"
                                 :aria-label="'Проверить дискографию ' + art.name + ' сейчас'"
                                 title="Проверить дискографию сейчас"
-                                class="p-1.5 rounded-lg bg-surface-elevated hover:bg-brand hover:text-zinc-950 text-content-secondary transition">
+                                class="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg bg-surface-elevated hover:bg-brand hover:text-zinc-950 text-content-secondary transition">
                                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                     <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
                                 </svg>
@@ -364,7 +323,7 @@
                             <button
                                 type="button"
                                 @click="$store.radar.openDiscography(art)"
-                                class="px-3 py-1.5 rounded-lg bg-surface-elevated hover:bg-surface-hover text-white transition text-xs font-semibold">
+                                class="min-h-11 px-3 rounded-lg bg-surface-elevated hover:bg-surface-hover text-white transition text-xs font-semibold">
                                 Дискография
                             </button>
                         </div>
@@ -374,7 +333,7 @@
         </div>
 
         <!-- Таблица артистов -->
-        <div class="hidden md:block bg-surface-panel border border-surface-border rounded-2xl overflow-hidden shadow-sm">
+        <div x-show="$store.radar.artists.length > 0" class="hidden md:block bg-surface-panel border border-surface-border rounded-2xl overflow-hidden shadow-sm">
             <div class="overflow-x-auto">
                 <table class="w-full text-left text-xs">
                     <thead class="bg-surface-input border-b border-surface-border text-content-muted font-mono uppercase text-xs">
@@ -382,8 +341,6 @@
                             <th class="p-3.5">Исполнитель</th>
                             <th class="p-3.5 text-center">Релизов / Треков</th>
                             <th class="p-3.5 text-center">Пробелов (Gaps)</th>
-                            <th class="p-3.5 text-center">Отслеживание</th>
-                            <th class="p-3.5 text-center">Автозагрузка</th>
                             <th class="p-3.5 text-right">Действия</th>
                         </tr>
                     </thead>
@@ -408,24 +365,6 @@
                                     </template>
                                 </td>
                                 <td class="p-3.5 text-center font-mono font-semibold" :class="art.gap_count > 0 ? 'text-amber-400 font-bold' : 'text-content-muted'" x-text="art.gap_count || 0"></td>
-                                <td class="p-3.5 text-center">
-                                    <button
-                                        @click="$store.radar.toggleFollow(art)"
-                                        :aria-label="'Отслеживание исполнителя ' + art.name + ': ' + (art.is_followed ? 'Включено' : 'Выключено')"
-                                        :class="art.is_followed ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-surface-input text-content-muted border-surface-border'"
-                                        class="px-2.5 py-1 rounded-full border text-xs font-medium transition">
-                                        <span x-text="art.is_followed ? 'Включено' : 'Выключено'"></span>
-                                    </button>
-                                </td>
-                                <td class="p-3.5 text-center">
-                                    <button
-                                        @click="$store.radar.toggleAutoDownload(art)"
-                                        :aria-label="'Автозагрузка для ' + art.name + ': ' + (art.auto_download ? 'Да' : 'Нет')"
-                                        :class="art.auto_download ? 'bg-brand/20 text-brand border-brand/40' : 'bg-surface-input text-content-muted border-surface-border'"
-                                        class="px-2.5 py-1 rounded-full border text-xs font-medium transition">
-                                        <span x-text="art.auto_download ? 'Да' : 'Нет'"></span>
-                                    </button>
-                                </td>
                                 <td class="p-3.5 text-right">
                                     <div class="flex items-center justify-end space-x-2">
                                         <button
@@ -453,6 +392,4 @@
     </div>
 </div>
 
-<!-- Модальное окно Дискографии артиста -->
-{{ template "radar_discography_modal" . }}
 {{ end }}

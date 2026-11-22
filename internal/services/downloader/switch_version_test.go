@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"music-manager/internal/core/sandbox"
 	"music-manager/internal/db"
@@ -131,20 +130,6 @@ exit 0
 
 	// Candidate on SoundCloud has duration 30s (snippet!)
 	candURL := "https://soundcloud.com/test-artist/snippet-candidate"
-	cacheKey := resolver.BuildCacheKey("", "Test Artist", "Long Song")
-	_ = database.SaveSoundCloudCache(ctx, db.SoundCloudCacheEntry{
-		CacheKey:    cacheKey,
-		TrackTitle:  "Long Song",
-		ArtistName:  "Test Artist",
-		SelectedURL: candURL,
-		Status:      "found",
-		Duration:    30,
-		Candidates: []db.SoundCloudCandidateItem{
-			{URL: candURL, Title: "Long Song (Snippet)", Duration: 30},
-		},
-		CheckedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	})
 
 	tmpDir := t.TempDir()
 	musicDir := t.TempDir()
@@ -174,7 +159,7 @@ exit 0
 	}
 	jobMgr.Add(job)
 
-	// User switches version to candURL (which has 30s candidate in DB and 30.0s actual duration from ffprobe)
+	// User switches version to candURL
 	_, sErr := svc.SwitchTrackVersion(ctx, "track-long-1", candURL)
 	if sErr == nil {
 		t.Fatal("expected SwitchTrackVersion to fail because of preview snippet, got nil")

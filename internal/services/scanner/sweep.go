@@ -11,7 +11,7 @@ import (
 )
 
 func (s *Scanner) deleteMissingFiles(ctx context.Context, seen, unread map[string]bool) error {
-	rows, err := s.database.Conn().QueryContext(ctx, "SELECT id, file_path FROM tracks")
+	rows, err := s.database.Conn().QueryContext(ctx, "SELECT id, file_path FROM tracks UNION ALL SELECT 0, file_path FROM library_artist_conflicts GROUP BY file_path")
 	if err != nil {
 		return err
 	}
@@ -66,6 +66,10 @@ func (s *Scanner) sweepTrack(ctx context.Context, id int64, relPath string) erro
 	}
 	missing, err := s.pathMissing(ctx, relPath)
 	if err != nil || !missing {
+		return err
+	}
+	if id == 0 {
+		_, err := db.DeleteLibraryTracks(ctx, s.database.Conn(), relPath, false)
 		return err
 	}
 	return db.DeleteIndexedTrack(ctx, s.database.Conn(), id, relPath)

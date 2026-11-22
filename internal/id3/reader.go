@@ -1,6 +1,7 @@
 package id3
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -19,22 +20,28 @@ type CoverInfo struct {
 
 // ReadTags считывает метаданные из MP3-файла с защитой от поврежденных фреймов.
 func ReadTags(filePath string, relPath string) (*TrackTags, error) {
+	return ReadTagsContext(context.Background(), filePath, relPath)
+}
+
+func ReadTagsContext(ctx context.Context, filePath, relPath string) (*TrackTags, error) {
 	file, err := safefs.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("не удалось открыть файл '%s': %w", filePath, err)
 	}
 	defer file.Close()
-	return ReadTagsFromFile(file, relPath)
+	return readTagsFromFile(ctx, file, relPath)
 }
 
 // ReadTagsFromFile reads tags from an open MP3 positioned at the start.
 func ReadTagsFromFile(file *os.File, relPath string) (*TrackTags, error) {
-	filePath := file.Name()
-	stat, err := file.Stat()
-	if err != nil {
+	return readTagsFromFile(context.Background(), file, relPath)
+}
+
+func readTagsFromFile(ctx context.Context, file *os.File, relPath string) (*TrackTags, error) {
+	if _, err := file.Stat(); err != nil {
 		return nil, err
 	}
-
+	filePath := file.Name()
 	fileName := filepath.Base(filePath)
 	cleanName := strings.TrimSuffix(fileName, filepath.Ext(fileName))
 
@@ -50,24 +57,12 @@ func ReadTagsFromFile(file *os.File, relPath string) (*TrackTags, error) {
 
 	header := make([]byte, 10)
 	n, err := io.ReadFull(file, header)
-	if err != nil || n < 10 || string(header[0:3]) != "ID3" {
-		// Нет ID3v2 заголовка — возвращаем базовые теги из имени файла
-		estimateDurationAndBitrate(file, stat.Size(), 0, tags)
-		return tags, nil
+	if err == nil && n == len(header) && string(header[:3]) == "ID3" {
+		parseFrames(file, header[3], header[5], decodeSynchsafe(header[6:10]), tags, nil)
 	}
-
-	version := header[3]
-	flags := header[5]
-	tagSize := decodeSynchsafe(header[6:10])
-	totalTagSize := 10 + tagSize
-	if (flags & 0x10) != 0 {
-		totalTagSize += 10 // ID3v2.4 footer
-	}
-
-	parseFrames(file, version, flags, tagSize, tags, nil)
-
-	if tags.Duration <= 0 {
-		estimateDurationAndBitrate(file, stat.Size(), totalTagSize, tags)
+	probeMP3(ctx, file, tags)
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	// Финальная очистка названия

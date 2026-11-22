@@ -15,14 +15,14 @@ func (s *Service) GetSummary(ctx context.Context) (*AuditSummary, error) {
 
 	// Compute real-time tag issues count
 	tracks, err := s.repo.GetTracksForTagAudit(ctx)
-	if err == nil {
-		count := 0
-		for _, t := range tracks {
-			if analyzeTrackIssues(t.ID, t.FilePath, t.Title, t.Artist, t.Album, t.Year, t.TrackNumber, t.Duration, t.AlbumArtist) != nil {
-				count++
-			}
+	if err != nil {
+		return nil, err
+	}
+	for _, track := range tracks {
+		if analyzeTrackIssues(track.ID, track.FilePath, track.Title, track.Artist, track.Album, track.Year,
+			track.TrackNumber, track.Duration, track.AlbumArtist) != nil {
+			summary.TagIssuesCount++
 		}
-		summary.TagIssuesCount = count
 	}
 
 	return summary, nil
@@ -30,7 +30,9 @@ func (s *Service) GetSummary(ctx context.Context) (*AuditSummary, error) {
 
 func (s *Service) Refresh(ctx context.Context) (*AuditSummary, error) {
 	if s.scanner != nil {
-		_, _ = s.scanner.ScanAll(ctx)
+		if _, err := s.scanner.ScanAll(ctx); err != nil {
+			return nil, err
+		}
 	}
 	return s.GetSummary(ctx)
 }

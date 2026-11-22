@@ -12,7 +12,6 @@ import (
 
 // CandidateTrackItem представляет найденного кандидата для ручного выбора источника.
 type CandidateTrackItem struct {
-	SavedSelection   bool            `json:"saved_selection"`
 	SearchIncomplete bool            `json:"search_incomplete"`
 	ID               string          `json:"id"`
 	Source           string          `json:"source"` // "ytmusic", "soundcloud", "youtube", "bandcamp"

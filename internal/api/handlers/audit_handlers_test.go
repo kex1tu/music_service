@@ -122,8 +122,8 @@ func TestFileHandler_IncompleteAlbums(t *testing.T) {
 	albID, _ := albRes.LastInsertId()
 
 	// Insert missing tracks records
-	_, _ = database.Conn().Exec("INSERT INTO missing_tracks (album_id, track_number, title, artist) VALUES (?, 2, 'Missing Track 2', 'TestBand')", albID)
-	_, _ = database.Conn().Exec("INSERT INTO missing_tracks (album_id, track_number, title, artist) VALUES (?, 4, 'Missing Track 4', 'TestBand')", albID)
+	_, _ = database.Conn().Exec("INSERT INTO release_tracklist (album_id, track_number, disc_number, title, artist_id, artist_credit) SELECT id, 2, 1, 'Missing Track 2', artist_id, 'TestBand' FROM albums WHERE id = ?", albID)
+	_, _ = database.Conn().Exec("INSERT INTO release_tracklist (album_id, track_number, disc_number, title, artist_id, artist_credit) SELECT id, 4, 1, 'Missing Track 4', artist_id, 'TestBand' FROM albums WHERE id = ?", albID)
 
 	req := httptest.NewRequest(http.MethodGet, "/files/audit/incomplete-albums", nil)
 	w := httptest.NewRecorder()
@@ -441,4 +441,3 @@ func TestFileHandler_DeleteFile_JSONBody(t *testing.T) {
 		t.Errorf("expected 0 tracks in DB after delete, got %d", count)
 	}
 }
-

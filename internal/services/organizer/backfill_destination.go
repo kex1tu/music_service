@@ -2,7 +2,9 @@ package organizer
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -34,7 +36,7 @@ func (s *Service) MoveAlbumIntoContext(ctx context.Context, target, fallbackAlbu
 		return nil, fmt.Errorf("backfill target must be the root of the release")
 	}
 	entries, err := safefs.ReadDir(full)
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
 	dest := &backfillDestination{root: root, discs: make(map[int]string)}

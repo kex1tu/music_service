@@ -129,15 +129,3 @@ func TestRankCandidates_StatusesAndDeltas(t *testing.T) {
 		t.Fatalf("expected candidate with delta 10s and no savior to be dropped, got %+v", r6)
 	}
 }
-
-func TestBuildCacheKey(t *testing.T) {
-	k1 := BuildCacheKey("US-S1Z-22-00001", "Artist", "Track")
-	if k1 != "isrc:US-S1Z-22-00001" {
-		t.Errorf("unexpected ISRC key: %s", k1)
-	}
-
-	k2 := BuildCacheKey("", "Clean Bandit feat. Zara Larsson", "Symphony")
-	if k2 != "track:clean bandit:symphony" {
-		t.Errorf("unexpected track key: %s", k2)
-	}
-}

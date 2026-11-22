@@ -304,6 +304,10 @@ func (m *Module) Redownload(w http.ResponseWriter, r *http.Request) {
 
 	res, err := m.service.Redownload(r.Context(), req)
 	if err != nil {
+		if errors.Is(err, ErrFileNotFound) {
+			httputil.RespondError(w, http.StatusNotFound, "Файл или альбом не найден")
+			return
+		}
 		if errors.Is(err, ErrSandboxViolation) || errors.Is(err, sandbox.ErrPathTraversal) {
 			httputil.RespondError(w, http.StatusForbidden, "Доступ запрещен (path traversal)")
 			return

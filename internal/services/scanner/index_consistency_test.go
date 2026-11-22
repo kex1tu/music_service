@@ -168,7 +168,7 @@ func TestIndexRollsBackGenresIssuesAndAlbumOnError(t *testing.T) {
 	}
 }
 
-func TestRestartRecoversPendingMoveAndRadioHistory(t *testing.T) {
+func TestRestartRecoversPendingMove(t *testing.T) {
 	s, dbPath := newIndexFixture(t)
 	ctx := context.Background()
 	sourceName, targetName := "Album/song.mp3", "Album/renamed.mp3"
@@ -181,9 +181,9 @@ func TestRestartRecoversPendingMoveAndRadioHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := indexFixtureInt(t, s, "SELECT id FROM tracks WHERE file_path = ?", sourceName)
-	if err := s.database.RecordRadioPlay(ctx, id, "wave", ""); err != nil {
-		t.Fatal(err)
-	}
+	indexFixtureExec(t, s, "INSERT INTO censorship_runs(id,options_json) VALUES('historical','{}')")
+	indexFixtureExec(t, s, `INSERT INTO censorship_items(run_id,file_path,reference_path)
+		VALUES ('historical',?,?),('historical','Other.mp3',?)`, sourceName, "Reference.mp3", sourceName)
 	indexFixtureExec(t, s, "CREATE TRIGGER fail_move BEFORE UPDATE ON tracks BEGIN SELECT RAISE(ABORT, 'index unavailable'); END")
 	moved, err := organizer.MoveIndexedTrack(ctx, s, source, target, false, nil)
 	if moved != target || err == nil || !strings.Contains(err.Error(), "queued") {
@@ -212,8 +212,10 @@ func TestRestartRecoversPendingMoveAndRadioHistory(t *testing.T) {
 	if got := indexFixtureInt(t, restarted, "SELECT id FROM tracks WHERE file_path = ?", targetName); got != id {
 		t.Fatalf("restart changed the track ID from %d to %d", id, got)
 	}
-	if n := indexFixtureInt(t, restarted, "SELECT COUNT(*) FROM radio_history WHERE track_id = ?", id); n != 1 {
-		t.Fatalf("restart lost the radio event: count=%d", n)
+	if n := indexFixtureInt(t, restarted, `SELECT count(*) FROM censorship_items WHERE
+		(file_path=? AND current_file_path=?) OR (reference_path=? AND current_reference_path=?)`,
+		sourceName, targetName, sourceName, targetName); n != 2 {
+		t.Fatalf("recovered %d censorship paths, want 2", n)
 	}
 	if n := indexFixtureInt(t, restarted, "SELECT COUNT(*) FROM library_index_pending"); n != 0 {
 		t.Fatalf("successful recovery left %d pending changes", n)

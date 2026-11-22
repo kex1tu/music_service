@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -14,6 +17,15 @@ var migrations = [...]func(context.Context, *sql.Conn) error{
 	migrateTracksAlbumIndex,
 	migrateLibraryIndex,
 	migrateReleaseModel,
+	migrateArtistIdentity,
+	migrateAlbumArtists,
+	migrateTrackSources,
+	migrateDownloadQueue,
+	migrateOAuthAndRadarSettings,
+	migrateRadarReleaseSources,
+	migrateRemoveRadio,
+	migrateCensorshipHistory,
+	migrateAuditConsistency,
 }
 
 func (db *DB) migrate() error {
@@ -50,6 +62,11 @@ func (db *DB) migrate() error {
 	if version < 0 || version > len(migrations) {
 		return fmt.Errorf("неподдерживаемая версия схемы user_version=%d (максимальная версия %d)", version, len(migrations))
 	}
+	if version < 7 {
+		if err := db.backupBeforeTrackSources(ctx, conn); err != nil {
+			return fmt.Errorf("резервная копия SQLite перед миграцией 7: %w", err)
+		}
+	}
 	for ; version < len(migrations); version++ {
 		if err := migrations[version](ctx, conn); err != nil {
 			return fmt.Errorf("миграция %d → %d: %w", version, version+1, err)
@@ -63,6 +80,39 @@ func (db *DB) migrate() error {
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return fmt.Errorf("фиксация миграций SQLite: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) backupBeforeTrackSources(ctx context.Context, writer *sql.Conn) error {
+	var existing bool
+	if err := writer.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'artists')").Scan(&existing); err != nil || !existing {
+		return err
+	}
+	var seq int
+	var schema, path string
+	if err := writer.QueryRowContext(ctx, "SELECT seq, name, file FROM pragma_database_list WHERE name = 'main'").Scan(&seq, &schema, &path); err != nil || path == "" {
+		return err
+	}
+	backup, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".pre-v7-*.sqlite")
+	if err != nil {
+		return err
+	}
+	if err := backup.Close(); err != nil {
+		_ = os.Remove(backup.Name())
+		return err
+	}
+	// A separate WAL reader sees the consistent pre-migration state while the
+	// writer reserved by BEGIN IMMEDIATE prevents changes to that state.
+	source, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: path}).String()+"?mode=ro")
+	if err != nil {
+		_ = os.Remove(backup.Name())
+		return err
+	}
+	defer source.Close()
+	if _, err := source.ExecContext(ctx, "VACUUM INTO ?", backup.Name()); err != nil {
+		_ = os.Remove(backup.Name())
+		return err
 	}
 	return nil
 }

@@ -116,7 +116,7 @@ func (s *Scanner) scanAll(ctx context.Context, walk func(string, fs.WalkDirFunc)
 		seenPaths[relPath] = true
 		if err := s.indexPath(ctx, relPath); err == nil {
 			count++
-		} else if !errors.Is(err, errIndexPending) && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, sandbox.ErrPathTraversal) && firstFailure == nil {
+		} else if !errors.Is(err, db.ErrAmbiguousArtist) && !errors.Is(err, errIndexPending) && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, sandbox.ErrPathTraversal) && firstFailure == nil {
 			firstFailure = fmt.Errorf("index %q: %w", relPath, err)
 		}
 		return nil

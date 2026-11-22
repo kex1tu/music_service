@@ -11,7 +11,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"music-manager/internal/db"
 	"music-manager/internal/services/downloader"
 	"music-manager/internal/services/downloadstaging"
 	"music-manager/internal/services/resolver"
@@ -343,22 +342,6 @@ func (h *DownloadHandler) BindBackfillSource(w http.ResponseWriter, r *http.Requ
 	if !resolver.IsAllowedURL(req.TargetURL) {
 		http.Error(w, `{"error":"target_url domain is not allowed"}`, http.StatusBadRequest)
 		return
-	}
-
-	// 1. Сохранение ручного пина в SQLite
-	if h.service.Database() != nil {
-		tTitle := req.TrackTitle
-		if tTitle == "" {
-			tTitle = req.AlbumTitle
-		}
-		cacheKey := resolver.BuildCacheKey("", req.ArtistName, tTitle)
-		_ = h.service.Database().SavePinnedSource(r.Context(), db.PinnedTrackSource{
-			CacheKey:   cacheKey,
-			ArtistName: req.ArtistName,
-			TrackTitle: tTitle,
-			PinnedURL:  req.TargetURL,
-			SourceType: "manual",
-		})
 	}
 
 	// 2. Создание задачи дозагрузки (Backfill Job)

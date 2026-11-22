@@ -14,6 +14,9 @@ import (
 
 // Redownload stages a fresh download while preserving the existing library files.
 func (s *Service) Redownload(ctx context.Context, req RedownloadRequest) (*RedownloadResponse, error) {
+	if s.redownloadQueue != nil {
+		return s.prepareRedownload(ctx, req)
+	}
 	relPath := strings.TrimSpace(req.Path)
 	if relPath == "" || relPath == "." {
 		return nil, ErrInvalidPath

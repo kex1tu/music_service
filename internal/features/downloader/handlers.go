@@ -42,6 +42,7 @@ func (m *Module) CreateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job, err := m.service.CreateJobWithOptions(r.Context(), req.URL, req.Source, JobOptions{
+		PreflightID:          req.PreflightID,
 		SelectedTrackIndices: req.SelectedTrackIndices,
 		SkipExisting:         req.SkipExisting,
 	})
@@ -310,7 +311,7 @@ func respondQueueChangeError(w http.ResponseWriter, err error) {
 		httputil.RespondError(w, http.StatusInternalServerError, errQueueStorage.Error())
 	case errors.Is(err, ErrJobNotFound):
 		httputil.RespondError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, errSelectionConflict):
+	case errors.Is(err, errSelectionConflict), errors.Is(err, errPreflightExpired):
 		httputil.RespondError(w, http.StatusConflict, err.Error())
 	default:
 		httputil.RespondError(w, http.StatusBadRequest, err.Error())

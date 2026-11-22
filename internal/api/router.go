@@ -15,7 +15,6 @@ import (
 	"music-manager/internal/features/downloader"
 	featureFileManager "music-manager/internal/features/filemanager"
 	featureRadar "music-manager/internal/features/radar"
-	featureRadio "music-manager/internal/features/radio"
 	featureTagEditor "music-manager/internal/features/tageditor"
 	"music-manager/web"
 )
@@ -28,13 +27,11 @@ type RouterParams struct {
 	AuditModule       *featureAudit.Module
 	TagEditorModule   *featureTagEditor.Module
 	FileManagerModule *featureFileManager.Module
-	RadioModule       *featureRadio.Module
 	RadarModule       *featureRadar.Module
 	TagHandler        *handlers.TagHandler
 	FileHandler       *handlers.FileHandler
 	LyricsHandler     *handlers.LyricsHandler
 	RadarHandler      *handlers.RadarHandler
-	RadioHandler      *handlers.RadioHandler
 }
 
 // NewRouter constructs and configures the main Chi HTTP router.
@@ -308,66 +305,13 @@ func NewRouter(p RouterParams) http.Handler {
 			r.Use(authMiddleware)
 			r.Get("/feed", p.RadarHandler.GetFeed)
 			r.Get("/unread-count", p.RadarHandler.GetUnreadCount)
-			r.Get("/artists", p.RadarHandler.GetTrackedArtists)
-			r.Post("/artists", p.RadarHandler.AddTrackedArtist)
-			r.Post("/artists/{name}/follow", p.RadarHandler.FollowArtist)
-			r.Post("/artists/{name}/auto-download", p.RadarHandler.SetAutoDownload)
+			r.Get("/artists", p.RadarHandler.GetLibraryArtists)
 			r.Post("/artists/{name}/custom-links", p.RadarHandler.UpdateCustomLinks)
 			r.Get("/artists/{name}/discography", p.RadarHandler.GetArtistDiscography)
 			r.Post("/scan", p.RadarHandler.TriggerScan)
 			r.Get("/progress", p.RadarHandler.GetScanProgress)
 			r.Post("/cancel", p.RadarHandler.CancelScan)
 			r.Post("/releases/{id}/status", p.RadarHandler.SetReleaseStatus)
-		})
-	}
-
-	// Radio & Wave Control API - Radio Vertical Slice
-	if p.RadioModule != nil {
-		// Public/Token-authorized ICY Radio Stream Endpoints
-		r.Route("/api/radio/stream", func(r chi.Router) {
-			r.Options("/*", p.RadioModule.HandleStreamOptions)
-			r.Get("/now-playing", p.RadioModule.GetNowPlaying)
-			r.Get("/wave", p.RadioModule.StreamWave)
-			r.Head("/wave", p.RadioModule.StreamWave)
-			r.Get("/wave.mp3", p.RadioModule.StreamWave)
-			r.Head("/wave.mp3", p.RadioModule.StreamWave)
-			r.Get("/genre/{name}", p.RadioModule.StreamGenre)
-			r.Head("/genre/{name}", p.RadioModule.StreamGenre)
-			r.Get("/artist/{name}", p.RadioModule.StreamArtist)
-			r.Head("/artist/{name}", p.RadioModule.StreamArtist)
-		})
-
-		r.Route("/api/radio", func(r chi.Router) {
-			r.Use(authMiddleware)
-			r.Get("/now-playing", p.RadioModule.GetNowPlaying)
-			r.Get("/wave/queue", p.RadioModule.GetWaveQueue)
-			r.Get("/wave/stats", p.RadioModule.GetWaveStats)
-			r.Get("/genres", p.RadioModule.GetGenres)
-			r.Post("/m3u/generate", p.RadioModule.GenerateM3U)
-			r.Post("/navidrome/sync-radio", p.RadioModule.SyncNavidromeRadio)
-		})
-	} else if p.RadioHandler != nil {
-		r.Route("/api/radio/stream", func(r chi.Router) {
-			r.Options("/*", p.RadioHandler.HandleStreamOptions)
-			r.Get("/now-playing", p.RadioHandler.GetNowPlaying)
-			r.Get("/wave", p.RadioHandler.StreamWave)
-			r.Head("/wave", p.RadioHandler.StreamWave)
-			r.Get("/wave.mp3", p.RadioHandler.StreamWave)
-			r.Head("/wave.mp3", p.RadioHandler.StreamWave)
-			r.Get("/genre/{name}", p.RadioHandler.StreamGenre)
-			r.Head("/genre/{name}", p.RadioHandler.StreamGenre)
-			r.Get("/artist/{name}", p.RadioHandler.StreamArtist)
-			r.Head("/artist/{name}", p.RadioHandler.StreamArtist)
-		})
-
-		r.Route("/api/radio", func(r chi.Router) {
-			r.Use(authMiddleware)
-			r.Get("/now-playing", p.RadioHandler.GetNowPlaying)
-			r.Get("/wave/queue", p.RadioHandler.GetWaveQueue)
-			r.Get("/wave/stats", p.RadioHandler.GetWaveStats)
-			r.Get("/genres", p.RadioHandler.GetGenres)
-			r.Post("/m3u/generate", p.RadioHandler.GenerateM3U)
-			r.Post("/navidrome/sync-radio", p.RadioHandler.SyncNavidromeRadio)
 		})
 	}
 

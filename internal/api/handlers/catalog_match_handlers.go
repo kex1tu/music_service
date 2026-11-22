@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"music-manager/internal/core/safefs"
+	"music-manager/internal/db"
 	"music-manager/internal/id3"
 	"music-manager/internal/services/resolver"
 )
@@ -94,16 +95,16 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Query database for album metadata
-	var albumID int64
+	var albumID, catalogRevision int64
 	var dbArtist, dbAlbum, dbDeezerID string
 	var dbYear int
 	_ = h.database.Conn().QueryRowContext(r.Context(), `
-		SELECT al.id, ar.name, al.title, COALESCE(al.year, 0), COALESCE(al.deezer_id, '')
+		SELECT al.id, al.catalog_revision, ar.name, al.title, COALESCE(al.year, 0), COALESCE(al.deezer_id, '')
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
 		WHERE al.folder_path = ? OR al.folder_path = ?
 		LIMIT 1
-	`, albumPath, filepath.Clean(albumPath)).Scan(&albumID, &dbArtist, &dbAlbum, &dbYear, &dbDeezerID)
+	`, albumPath, filepath.Clean(albumPath)).Scan(&albumID, &catalogRevision, &dbArtist, &dbAlbum, &dbYear, &dbDeezerID)
 
 	if deezerID == "" && dbDeezerID != "" {
 		deezerID = dbDeezerID
@@ -395,50 +396,14 @@ func (h *FileHandler) CatalogMatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 3. Update database with verification results
-	isComplete := 1
-	if len(missingTracks) > 0 || (expectedCount > 1 && presentCount < expectedCount) {
-		isComplete = 0
-	}
-
 	if albumID > 0 {
-		_, _ = h.database.Conn().ExecContext(r.Context(), `
-			UPDATE albums SET
-				expected_tracks_count = ?,
-				total_tracks = ?,
-				present_tracks_count = ?,
-				deezer_id = ?,
-				is_complete = ?,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ?
-		`, expectedCount, expectedCount, presentCount, strconv.FormatInt(matchedAlbum.ID, 10), isComplete, albumID)
-
-		// Repopulate missing_tracks table
-		_, _ = h.database.Conn().ExecContext(r.Context(), "DELETE FROM missing_tracks WHERE album_id = ?", albumID)
-		for _, mt := range missingTracks {
-			tNum, _ := mt["track_number"].(int)
-			dNum, _ := mt["disc_number"].(int)
-			if dNum <= 0 {
-				dNum = 1
-			}
-			tit, _ := mt["title"].(string)
-			art, _ := mt["artist"].(string)
-			dur, _ := mt["duration"].(int)
-			dzID, _ := mt["deezer_id"].(string)
-			dzURL, _ := mt["deezer_url"].(string)
-
-			_, _ = h.database.Conn().ExecContext(r.Context(), `
-				INSERT INTO missing_tracks (
-					album_id, title, artist, track_number, disc_number,
-					expected_duration, deezer_id, deezer_url, status, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'missing', CURRENT_TIMESTAMP)
-				ON CONFLICT(album_id, track_number, disc_number) DO UPDATE SET
-					title = excluded.title,
-					artist = excluded.artist,
-					deezer_id = excluded.deezer_id,
-					deezer_url = excluded.deezer_url,
-					updated_at = CURRENT_TIMESTAMP
-			`, albumID, tit, art, tNum, dNum, dur, dzID, dzURL)
+		catalog, err := resolver.DeezerCatalogTracks(matchedAlbum)
+		if err == nil {
+			_, err = db.VerifyCatalog(r.Context(), h.database.Conn(), albumID, strconv.FormatInt(matchedAlbum.ID, 10), catalog, catalogRevision)
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
 		}
 	}
 
