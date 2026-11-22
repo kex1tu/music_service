@@ -3,6 +3,7 @@ package resolver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,8 +17,9 @@ import (
 )
 
 var (
-	deezerURLPattern       = regexp.MustCompile(`(?i)(?:https?://)?(?:www\.)?deezer\.com/(?:[a-zA-Z]{2}(?:-[a-zA-Z]{2})?/)?(track|album|playlist|artist)/(\d+)`)
-	deezerShortLinkPattern = regexp.MustCompile(`(?i)(?:https?://)?(?:www\.)?(?:deezer\.page\.link/[a-zA-Z0-9_\-]+|link\.deezer\.com/(?:s/)?[a-zA-Z0-9_\-]+)`)
+	deezerURLPattern        = regexp.MustCompile(`(?i)(?:https?://)?(?:www\.)?deezer\.com/(?:[a-zA-Z]{2}(?:-[a-zA-Z]{2})?/)?(track|album|playlist|artist)/(\d+)`)
+	deezerShortLinkPattern  = regexp.MustCompile(`(?i)(?:https?://)?(?:www\.)?(?:deezer\.page\.link/[a-zA-Z0-9_\-]+|link\.deezer\.com/(?:s/)?[a-zA-Z0-9_\-]+)`)
+	errDeezerArtistNotFound = errors.New("artist not found")
 )
 
 // DeezerTrack represents track metadata from Deezer API.
@@ -299,7 +301,7 @@ func (c *DeezerClient) GetArtistAlbums(ctx context.Context, artistID string) ([]
 			if len(allAlbums) > 0 {
 				return allAlbums, nil
 			}
-			return nil, fmt.Errorf("deezer api returned status 403 (доступ заблокирован Cloudflare/Akamai; настройте DEEZER_PROXY в .env)")
+			return nil, err
 		}
 
 		allAlbums = append(allAlbums, res.Data...)
@@ -533,7 +535,7 @@ func (c *DeezerClient) SearchArtist(ctx context.Context, name string) (*DeezerAr
 		return nil, fmt.Errorf("deezer API error: %s", result.Error.Message)
 	}
 	if len(result.Data) == 0 {
-		return nil, fmt.Errorf("artist not found: %s", name)
+		return nil, fmt.Errorf("%w: %s", errDeezerArtistNotFound, name)
 	}
 
 	return &result.Data[0], nil

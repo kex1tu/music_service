@@ -319,7 +319,14 @@ func (m *Module) GetCatalogShazamTrack(w http.ResponseWriter, r *http.Request) {
 
 	track, err := m.service.GetCatalogShazamTrack(r.Context(), id, query, audioPath)
 	if err != nil {
-		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
+		switch {
+		case errors.Is(err, ErrSandboxViolation):
+			httputil.RespondError(w, http.StatusForbidden, "access denied: invalid path")
+		case errors.Is(err, ErrFileNotFound):
+			httputil.RespondError(w, http.StatusNotFound, "track not found")
+		default:
+			httputil.RespondError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 

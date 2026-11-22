@@ -1,6 +1,7 @@
 package organizer_test
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"strings"
@@ -82,5 +83,52 @@ func TestRedownloadResumesCompanionImport(t *testing.T) {
 			check(fullStage, ".lrc", "")
 			check(fullStage, ".txt", "")
 		})
+	}
+}
+
+func TestRedownloadPreservesOriginalEditedAfterReceipt(t *testing.T) {
+	env := testkit.NewEnv(t)
+	const destination = "Album/01. Track.mp3"
+	const staged = "job/converted/01. Track.mp3"
+	tags := id3.TrackTags{Title: "Track", Artist: "Band", Album: "Album", TrackNumber: 1}
+	full := env.CreateDummyMP3WithTags(destination, tags, nil)
+	originalHash, err := organizer.FileSHA256(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tags.SourceURL = "https://soundcloud.com/band/replacement"
+	fullStage, err := testkit.CreateDummyMP3WithTags(env.TmpSandbox, staged, tags, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeStage, err := safefs.ReadFile(fullStage)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var edited []byte
+	service := organizer.NewService(env.MusicSandbox, env.TmpSandbox)
+	result, err := service.ApplyRedownload(t.Context(), organizer.RedownloadImport{
+		StagedPath: staged, OriginalPath: destination, OriginalHash: originalHash,
+	}, func() error { return nil }, func(path, hash string) error {
+		if path != destination || hash == "" {
+			t.Fatalf("incorrect receipt: path=%q hash=%q", path, hash)
+		}
+		tags.Title, tags.SourceURL = "Edited while confirming", ""
+		if err := id3.WriteTags(full, tags, nil); err != nil {
+			return err
+		}
+		var err error
+		edited, err = safefs.ReadFile(full)
+		return err
+	})
+	if len(edited) == 0 || result != "" || err == nil || !strings.Contains(err.Error(), "исходный файл изменился во время замены") {
+		t.Fatalf("expected conflict after saving receipt, got %q, %v", result, err)
+	}
+	if got, err := safefs.ReadFile(full); err != nil || !bytes.Equal(got, edited) {
+		t.Fatalf("confirmation overwrote the edited original: %v", err)
+	}
+	if got, err := safefs.ReadFile(fullStage); err != nil || !bytes.Equal(got, beforeStage) {
+		t.Fatalf("confirmation changed the staged file: %v", err)
 	}
 }

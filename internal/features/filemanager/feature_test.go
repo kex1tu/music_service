@@ -1,8 +1,10 @@
 package filemanager_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -190,7 +192,7 @@ func TestFileManager_StreamAudio_RFC7233Range(t *testing.T) {
 func TestFileManager_StreamTrack_AndMetadata(t *testing.T) {
 	env, _ := setupFileManagerEnv(t)
 
-	env.CreateDummyMP3("SingleAlbum/01. Song.mp3", "Awesome Title", "Cool Artist", "SingleAlbum")
+	path := env.CreateDummyMP3("SingleAlbum/01. Song.mp3", "Awesome Title", "Cool Artist", "SingleAlbum")
 
 	// Индексируем в базу SQLite
 	_, _ = env.DB.Conn().Exec("INSERT INTO artists (id, name, clean_name) VALUES (1, 'Cool Artist', 'cool artist')")
@@ -226,6 +228,34 @@ func TestFileManager_StreamTrack_AndMetadata(t *testing.T) {
 	}
 	if len(env.ReadBody(respStream)) != 51 {
 		t.Errorf("expected 51 bytes for bytes=0-50 range")
+	}
+
+	audio, err := os.ReadFile(path)
+	if err != nil || len(audio) < 2 {
+		t.Fatalf("invalid audio fixture: %d bytes, error = %v", len(audio), err)
+	}
+	n := len(audio)
+	lastByte := fmt.Sprintf("bytes %d-%d/%d", n-1, n-1, n)
+	for _, tc := range []struct {
+		name, requestRange, contentRange string
+		status                           int
+	}{
+		{"suffix byte", "bytes=-1", lastByte, http.StatusPartialContent},
+		{"end clipped to EOF", fmt.Sprintf("bytes=%d-%d", n-1, n+10), lastByte, http.StatusPartialContent},
+		{"start at EOF", fmt.Sprintf("bytes=%d-", n), fmt.Sprintf("bytes */%d", n), http.StatusRequestedRangeNotSatisfiable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := env.NewRequest(http.MethodGet, "/api/tracks/42/stream", nil)
+			req.Header.Set("Range", tc.requestRange)
+			resp := env.Do(req)
+			body := env.ReadBody(resp)
+			if resp.StatusCode != tc.status || resp.Header.Get("Content-Range") != tc.contentRange {
+				t.Fatalf("range %q: HTTP %d, Content-Range = %q", tc.requestRange, resp.StatusCode, resp.Header.Get("Content-Range"))
+			}
+			if tc.status == http.StatusPartialContent && !bytes.Equal(body, audio[n-1:]) {
+				t.Fatalf("range %q returned %d bytes, want the last byte of the fixture", tc.requestRange, len(body))
+			}
+		})
 	}
 
 	// 3. Проверяем xHTTP чанки алиас

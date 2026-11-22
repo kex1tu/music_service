@@ -39,9 +39,14 @@ type Service struct {
 	aggregator *resolver.DiscographyAggregator
 	cfg        *config.Config
 
-	mu         sync.RWMutex
-	progress   ScanProgress
-	cancelScan context.CancelFunc
+	mu   sync.RWMutex
+	scan *scanRun
+}
+
+type scanRun struct {
+	cancel   context.CancelFunc
+	done     chan struct{}
+	progress ScanProgress
 }
 
 // NewService создает новый сервис Release Radar & Gap Detector.
@@ -77,7 +82,9 @@ func (s *Service) Start(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				s.CancelScan()
+				if done := s.cancelCurrentScan(); done != nil {
+					<-done
+				}
 				return
 			case <-ticker.C:
 				log.Printf("[Radar] Запуск планового сканирования релизов (интервал %dч)...", intervalHours)
@@ -93,64 +100,80 @@ func (s *Service) Start(ctx context.Context) {
 func (s *Service) GetProgress() ScanProgress {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.progress
+	if s.scan == nil {
+		return ScanProgress{}
+	}
+	return s.scan.progress
 }
 
 // CancelScan прерывает текущее фоновое сканирование.
 func (s *Service) CancelScan() {
+	s.cancelCurrentScan()
+}
+
+func (s *Service) cancelCurrentScan() <-chan struct{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cancelScan != nil {
-		s.cancelScan()
-		s.cancelScan = nil
+	if s.scan == nil {
+		return nil
 	}
-	s.progress.IsRunning = false
+	s.scan.cancel()
+	s.scan.progress.IsRunning = false
+	return s.scan.done
 }
 
 // ScanAll запускает процесс обхода всех артистов медиатеки с задержкой 1.5 сек между запросами.
-func (s *Service) ScanAll(parentCtx context.Context, trigger string) error {
+func (s *Service) ScanAll(_ context.Context, trigger string) error {
 	s.mu.Lock()
-	if s.progress.IsRunning {
+	if s.scan != nil && s.scan.progress.IsRunning {
 		s.mu.Unlock()
 		return errors.New("сканирование уже выполняется")
 	}
 
+	// Background scans outlive the HTTP request that started them.
 	scanCtx, cancel := context.WithCancel(context.Background())
-	s.cancelScan = cancel
-	s.progress = ScanProgress{
-		IsRunning:        true,
-		StartedAt:        time.Now(),
-		CurrentIndex:     0,
-		TotalArtists:     0,
-		CurrentArtist:    "Сбор списка исполнителей...",
-		NewReleasesFound: 0,
-		LastError:        "",
+	run := &scanRun{
+		cancel: cancel,
+		done:   make(chan struct{}),
+		progress: ScanProgress{
+			IsRunning:     true,
+			StartedAt:     time.Now(),
+			CurrentArtist: "Сбор списка исполнителей...",
+		},
 	}
+	s.scan = run
 	s.mu.Unlock()
 
 	go func() {
 		defer func() {
-			s.mu.Lock()
-			s.progress.IsRunning = false
-			s.cancelScan = nil
-			s.mu.Unlock()
-			if count, err := s.db.ReconcileAllRadarReleases(context.Background()); err == nil && count > 0 {
-				log.Printf("[Radar] Пост-сканирование: скрыто %d ранее скачанных релизов из ленты", count)
+			defer close(run.done)
+			defer cancel()
+			if scanCtx.Err() == nil {
+				if count, err := s.db.ReconcileAllRadarReleases(scanCtx); err == nil && count > 0 {
+					log.Printf("[Radar] Пост-сканирование: скрыто %d ранее скачанных релизов из ленты", count)
+				}
 			}
-			log.Printf("[Radar] Сканирование завершено (триггер: %s, найдено новинок: %d)", trigger, s.GetProgress().NewReleasesFound)
+			s.mu.Lock()
+			run.progress.IsRunning = false
+			newCount := run.progress.NewReleasesFound
+			s.mu.Unlock()
+			log.Printf("[Radar] Сканирование завершено (триггер: %s, найдено новинок: %d)", trigger, newCount)
 		}()
 
 		artists, err := s.db.GetRadarLibraryArtists(scanCtx)
+		if scanCtx.Err() != nil {
+			return
+		}
 		if err != nil {
 			s.mu.Lock()
-			s.progress.LastError = err.Error()
+			run.progress.LastError = err.Error()
 			s.mu.Unlock()
 			log.Printf("[Radar] Ошибка получения списка артистов: %v", err)
 			return
 		}
 
 		s.mu.Lock()
-		s.progress.TotalArtists = len(artists)
+		run.progress.TotalArtists = len(artists)
 		s.mu.Unlock()
 
 		for i, artist := range artists {
@@ -162,16 +185,22 @@ func (s *Service) ScanAll(parentCtx context.Context, trigger string) error {
 			}
 
 			s.mu.Lock()
-			s.progress.CurrentIndex = i + 1
-			s.progress.CurrentArtist = artist.Name
+			run.progress.CurrentIndex = i + 1
+			run.progress.CurrentArtist = artist.Name
 			s.mu.Unlock()
 
 			res, err := s.scanArtist(scanCtx, artist.Name, &artist)
+			if scanCtx.Err() != nil {
+				return
+			}
 			if err != nil {
-				log.Printf("[Radar] Ошибка сканирования дискографии %q: %v", artist.Name, err)
-			} else if res != nil && res.NewReleases > 0 {
 				s.mu.Lock()
-				s.progress.NewReleasesFound += res.NewReleases
+				run.progress.LastError = err.Error()
+				s.mu.Unlock()
+				log.Printf("[Radar] Ошибка сканирования дискографии %q: %v", artist.Name, err)
+			} else {
+				s.mu.Lock()
+				run.progress.NewReleasesFound += res.NewReleases
 				s.mu.Unlock()
 			}
 
@@ -225,7 +254,10 @@ func (s *Service) scanArtist(ctx context.Context, artistName string, tracked *db
 	}
 
 	newCount := 0
-	for _, rel := range releases {
+	for i, rel := range releases {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		entity := db.RadarReleaseEntity{
 			CatalogCredits:      rel.CatalogCredits,
 			ProviderCredits:     rel.ProviderCredits,
@@ -253,6 +285,7 @@ func (s *Service) scanArtist(ctx context.Context, artistName string, tracked *db
 			continue
 		}
 
+		releases[i].Status, releases[i].IsRadar = entity.Status, entity.IsRadar
 		if entity.Status == "new" {
 			newCount++
 		}
@@ -262,6 +295,9 @@ func (s *Service) scanArtist(ctx context.Context, artistName string, tracked *db
 		if err := s.db.UpdateArtistLastCheckedByID(ctx, tracked.ID); err != nil {
 			log.Printf("[Radar] Ошибка обновления времени проверки %q: %v", artistName, err)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	return &ScanArtistResult{

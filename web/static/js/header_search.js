@@ -8,12 +8,15 @@ function headerSearchComponent() {
         searchQuery: '',
         isOpen: false,
         isLoading: false,
+        searchGeneration: 0,
         results: { query: '', artists: [], albums: [], tracks: [], total_matches: 0 },
 
         async performSearch() {
+            const generation = ++this.searchGeneration;
             const q = this.searchQuery.trim();
             if (!q) {
                 this.isOpen = false;
+                this.isLoading = false;
                 this.results = { query: '', artists: [], albums: [], tracks: [], total_matches: 0 };
                 return;
             }
@@ -21,13 +24,15 @@ function headerSearchComponent() {
             try {
                 const res = await window.api.raw('/files/search?query=' + encodeURIComponent(q));
                 if (res.ok) {
-                    this.results = await res.json();
+                    const results = await res.json();
+                    if (generation !== this.searchGeneration || q !== this.searchQuery.trim()) return;
+                    this.results = results;
                     this.isOpen = true;
                 }
             } catch (e) {
                 console.error('Ошибка глобального поиска:', e);
             } finally {
-                this.isLoading = false;
+                if (generation === this.searchGeneration) this.isLoading = false;
             }
         },
 

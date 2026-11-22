@@ -422,3 +422,56 @@ func TestQueueRestoresSavedStatuses(t *testing.T) {
 		}
 	}
 }
+
+func TestQueueRejectsInvalidPreflightSelectionWithoutEnqueueing(t *testing.T) {
+	const releaseURL = "https://www.deezer.com/album/123"
+	tracks := []resolver.ResolvedTrack{{Title: "First"}, {Title: "Second"}}
+	for _, tc := range []struct {
+		name    string
+		url     string
+		indices []int
+	}{
+		{"negative index", releaseURL, []int{-1}},
+		{"index after last track", releaseURL, []int{0, len(tracks)}},
+		{"duplicate index", releaseURL, []int{0, 0}},
+		{"different release", "https://www.deezer.com/album/456", []int{0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			database, err := db.Open(filepath.Join(t.TempDir(), "queue.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			repo := NewRepository(database.Conn())
+			svc := NewService(ServiceConfig{Repo: repo})
+			defer svc.Close()
+			id := svc.rememberPreflight(releaseURL, "deezer", &resolver.ReleaseMetadata{}, tracks)
+			rejected, err := svc.CreateJobWithOptions(ctx, tc.url, "deezer", JobOptions{
+				PreflightID: id, SelectedTrackIndices: tc.indices,
+			})
+			if rejected != nil || err == nil || len(svc.GetAllJobs()) != 0 {
+				t.Fatalf("invalid selection created a job: %+v, %v", rejected, err)
+			}
+			if stored, err := repo.GetAllJobs(ctx); err != nil || len(stored) != 0 {
+				t.Fatalf("jobs in SQLite after rejection: %+v, %v", stored, err)
+			}
+
+			accepted, err := svc.CreateJobWithOptions(ctx, releaseURL, "deezer", JobOptions{
+				PreflightID: id, SelectedTrackIndices: []int{1},
+			})
+			if err != nil || accepted == nil || len(svc.GetAllJobs()) != 1 {
+				t.Fatalf("valid selection after rejection: %+v, %v", accepted, err)
+			}
+			stored, err := repo.GetAllJobs(ctx)
+			if err != nil || len(stored) != 1 {
+				t.Fatalf("jobs in SQLite after retry: %+v, %v", stored, err)
+			}
+			job := stored[0]
+			if job.ID != accepted.ID || job.Status != StatusQueued || !slices.Equal(job.SelectedTrackIndices, []int{1}) ||
+				len(job.Tracks) != 1 || job.Tracks[0].Title != "Second" {
+				t.Fatalf("unexpected persisted selection: %+v", job)
+			}
+		})
+	}
+}

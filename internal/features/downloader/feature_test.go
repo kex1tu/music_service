@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"music-manager/internal/core/auth"
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/features/downloader"
 	"music-manager/internal/services/censorcheck"
 	"music-manager/internal/services/lyrics"
@@ -918,16 +919,21 @@ func TestDownloader_FinishImportRetainsUnselectedTracks(t *testing.T) {
 	first, second := "job/converted/first.mp3", "job/converted/second.mp3"
 	secondFile := env.CreateDummyFile(env.TmpSandbox, second, []byte("not yet imported"))
 	notes := env.CreateDummyFile(env.TmpSandbox, "job/notes.dat", []byte("keep"))
-	mod.Service().AddJob(&downloader.Job{
+	job := &downloader.Job{
 		ID:     "job",
 		Status: downloader.StatusPartialReady,
 		Tracks: []resolver.ResolvedTrack{
 			{Title: "First", ConvertedPath: &first},
 			{Title: "Second", ConvertedPath: &second},
 		},
-	})
+	}
+	repo := downloader.NewRepository(env.DB.Conn())
+	if err := repo.CreateJob(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	mod.Service().AddJob(job)
 
-	finish := func(want string) {
+	finish := func(t *testing.T, want string) {
 		t.Helper()
 		resp := env.Do(env.NewRequest(http.MethodDelete, "/downloads/job?imported=true", nil))
 		if resp.StatusCode != http.StatusOK {
@@ -939,7 +945,7 @@ func TestDownloader_FinishImportRetainsUnselectedTracks(t *testing.T) {
 			t.Fatalf("finish status = %q, want %q", result.Status, want)
 		}
 	}
-	finish("pending")
+	finish(t, "pending")
 	if cleared := mod.Service().ClearCompletedJobs(t.Context()); cleared != 0 {
 		t.Fatalf("bulk cleanup removed %d jobs with pending imports", cleared)
 	}
@@ -951,11 +957,33 @@ func TestDownloader_FinishImportRetainsUnselectedTracks(t *testing.T) {
 	if err := os.Remove(secondFile); err != nil {
 		t.Fatal(err)
 	}
-	finish("deleted")
+	for _, ext := range []string{".lrc", ".txt"} {
+		t.Run("pending "+ext, func(t *testing.T) {
+			content := []byte("pending lyrics")
+			path := env.CreateDummyFile(env.TmpSandbox, "job/converted/second"+ext, content)
+			finish(t, "pending")
+			if cleared := mod.Service().ClearCompletedJobs(t.Context()); cleared != 0 {
+				t.Fatalf("bulk cleanup removed %d jobs with pending %s", cleared, ext)
+			}
+			if job, err := repo.GetJob(t.Context(), "job"); err != nil || job == nil {
+				t.Fatalf("job was lost from SQLite while %s was pending: %+v, %v", ext, job, err)
+			}
+			if got, err := safefs.ReadFile(path); err != nil || string(got) != string(content) {
+				t.Fatalf("pending %s changed: %q, %v", ext, got, err)
+			}
+			if err := safefs.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	finish(t, "deleted")
 	if resp := env.Get("/downloads/job"); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("finished job still in queue: %d", resp.StatusCode)
 	}
 	if _, err := os.Stat(notes); err != nil {
 		t.Fatalf("finalization removed unrelated staging files: %v", err)
+	}
+	if job, err := repo.GetJob(t.Context(), "job"); err != nil || job != nil {
+		t.Fatalf("finished job still in SQLite: %+v, %v", job, err)
 	}
 }
