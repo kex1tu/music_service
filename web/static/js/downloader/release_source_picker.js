@@ -22,6 +22,7 @@ document.addEventListener('alpine:init', () => {
         selectedCandidateIndex: -1,
         versionPolicy: "release",
         searchSerial: 0,
+        directSerial: 0,
         soundCloudLimit: 30,
         hasMoreSoundCloud: false,
         albumOffset: 0,
@@ -84,6 +85,7 @@ document.addEventListener('alpine:init', () => {
             this.albumToken = '';
             this.playlistToken = '';
             this.searchSerial++;
+            this.directSerial++;
             this.versionPolicy = 'release';
             this.isLoading = false;
             this.isParsingUrl = false;
@@ -124,6 +126,9 @@ document.addEventListener('alpine:init', () => {
         async loadCandidates(expand = false) {
             const serial = ++this.searchSerial;
             if (!expand) {
+                this.directSerial++;
+                this.isParsingUrl = false;
+                this.directError = '';
                 this.soundCloudLimit = 30;
                 this.albumOffset = 0;
                 this.playlistOffset = 0;
@@ -290,12 +295,14 @@ document.addEventListener('alpine:init', () => {
         },
 
         async parseDirectUrl() {
+            if (this.isParsingUrl) return;
             const url = this.directUrl.trim();
             if (!url) {
                 this.directError = 'Вставьте ссылку на сет SoundCloud или альбом YouTube Music';
                 return;
             }
 
+            const serial = ++this.directSerial;
             this.isParsingUrl = true;
             this.directError = '';
 
@@ -318,16 +325,18 @@ document.addEventListener('alpine:init', () => {
                 }
 
                 const cand = await res.json();
+                if (serial !== this.directSerial) return;
                 this.candidates.unshift(cand);
                 this.selectedCandidateIndex = -1;
                 this.manualOverrides = {};
                 this.activeTab = 'candidates';
                 this.directUrl = '';
             } catch (err) {
+                if (serial !== this.directSerial) return;
                 console.error('[ReleaseSourcePicker] parseDirectUrl error:', err);
                 this.directError = err.message || 'Не удалось разобрать ссылку';
             } finally {
-                this.isParsingUrl = false;
+                if (serial === this.directSerial) this.isParsingUrl = false;
             }
         },
 

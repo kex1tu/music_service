@@ -164,15 +164,29 @@ func evaluateTracklists(targets []ResolvedTrack, candidates []AlbumTrackCandidat
 			if desired[idx] != "unknown" && e.VersionClaim == desired[idx] {
 				preferred++
 			}
-			for other, weight := range weights[idx][:len(unique)] {
-				if other != j-1 && weight > 0 && math.Abs(weight-weights[idx][j-1]) <= 2 {
-					ambiguous++
-					break
-				}
+			if ambiguousReleasePair(weights, idx, j-1, len(unique)) {
+				ambiguous++
 			}
 		}
 	}
 	return out, evaluations, preferred, ambiguous
+}
+
+// Check both directions: a URL can be equally suitable for multiple target
+// positions even when each of those positions has only one eligible source.
+func ambiguousReleasePair(weights [][]float64, target, candidate, candidateCount int) bool {
+	chosen := weights[target][candidate]
+	for other, weight := range weights[target][:candidateCount] {
+		if other != candidate && weight > 0 && math.Abs(weight-chosen) <= 2 {
+			return true
+		}
+	}
+	for other, row := range weights {
+		if other != target && row[candidate] > 0 && math.Abs(row[candidate]-chosen) <= 2 {
+			return true
+		}
+	}
+	return false
 }
 
 func desiredReleaseTrackClaim(track ResolvedTrack, policy VersionPolicy) string {

@@ -238,7 +238,13 @@ func TestFullReleaseMatcher_MatchFullRelease_Success(t *testing.T) {
 													"playlistItemData": {"videoId": "v2"},
 													"flexColumns": [
 														{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Красный свет"}]}}},
-														{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "DEAD BLONDE"}]}}}
+														{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [
+															{"text": "DEAD BLONDE", "navigationEndpoint": {"browseEndpoint": {"browseEndpointContextSupportedConfigs": {"browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_ARTIST"}}}}},
+															{"text": " & "},
+															{"text": "GSPD", "navigationEndpoint": {"browseEndpoint": {"browseEndpointContextSupportedConfigs": {"browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_ARTIST"}}}}},
+															{"text": " • "},
+															{"text": "СПЛЕТНИЦА", "navigationEndpoint": {"browseEndpoint": {"browseEndpointContextSupportedConfigs": {"browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_ALBUM"}}}}}
+														]}}}
 													],
 													"fixedColumns": [{"musicResponsiveListItemFixedColumnRenderer": {"text": {"runs": [{"text": "3:18"}]}}}]
 												}
@@ -263,7 +269,7 @@ func TestFullReleaseMatcher_MatchFullRelease_Success(t *testing.T) {
 
 	targetTracks := []ResolvedTrack{
 		{TrackID: "dz_1", TrackNumber: 1, Title: "Банкомат", Artist: "DEAD BLONDE", Duration: 200, VersionClaim: "uncensored"},
-		{TrackID: "dz_2", TrackNumber: 2, Title: "Красный свет", Artist: "DEAD BLONDE", Duration: 198},
+		{TrackID: "dz_2", TrackNumber: 2, Title: "Красный свет", Artist: "DEAD BLONDE\\\\GSPD", Duration: 198},
 	}
 
 	res, err := matcher.MatchFullRelease(context.Background(), "DEAD BLONDE", "СПЛЕТНИЦА", targetTracks)

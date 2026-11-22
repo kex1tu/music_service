@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -80,6 +81,9 @@ func NewEnv(t *testing.T) *TestEnv {
 	}
 	t.Cleanup(func() {
 		_ = database.Close()
+		// Absolute-path fixture consumers resolve these roots through weak references.
+		runtime.KeepAlive(musicSb)
+		runtime.KeepAlive(tmpSb)
 	})
 
 	mockTransport := NewMockTransport(nil)

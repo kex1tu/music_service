@@ -114,6 +114,7 @@ func TestAutoSelectReleaseCoverageAndAmbiguity(t *testing.T) {
 		{"foreign album", 20, "foreign", false},
 		{"two equivalent editions", 20, "tie", false},
 		{"ambiguous versions in one release", 20, "versions", false},
+		{"one source for two equivalent positions", 19, "shared_source", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			searcher.SetCustomSearchFunc(func(context.Context, string, string, int) ([]AlbumReleaseCandidate, error) {
@@ -135,7 +136,16 @@ func TestAutoSelectReleaseCoverageAndAmbiguity(t *testing.T) {
 				}
 				return []AlbumReleaseCandidate{candidate}, nil
 			})
-			match, err := matcher.AutoSelectRelease(t.Context(), "Vega", "Night", targets)
+			selectedTracks := targets
+			if tc.mode == "shared_source" {
+				selectedTracks = append([]ResolvedTrack(nil), targets...)
+				selectedTracks[19] = targets[0]
+				mapping, _, _, ambiguous := evaluateTracklists(selectedTracks, candidates[:tc.count], PolicyRelease)
+				if len(mapping) != 19 || ambiguous != 1 {
+					t.Fatalf("expected 19/20 matched tracks and one contested source, got %d matches and %d conflicts", len(mapping), ambiguous)
+				}
+			}
+			match, err := matcher.AutoSelectRelease(t.Context(), "Vega", "Night", selectedTracks)
 			if err != nil || (match != nil) != tc.want {
 				t.Fatalf("auto choice: %+v %v", match, err)
 			}
