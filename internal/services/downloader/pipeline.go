@@ -8,6 +8,7 @@ import (
 
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -253,10 +254,24 @@ func (s *Service) runPipeline(jobID string) {
 	job.SetStatus(StatusResolving)
 	job.UpdateProgress(5.0, "Определение источника и получение метаданных")
 
-	meta, tracks, err := s.resolver.Resolve(ctx, job.URL, job.Source)
-	if err != nil {
-		s.failJob(job, fmt.Sprintf("Ошибка разрешения метаданных: %v", err))
-		return
+	snapshot := job.Snapshot()
+	meta, tracks := &snapshot.AlbumMetadata, snapshot.Tracks
+	boundRelease := slices.ContainsFunc(tracks, func(track resolver.ResolvedTrack) bool {
+		return track.VersionStatus == resolver.AutoReleaseVersionStatus || track.VersionStatus == "manual"
+	})
+	if !boundRelease {
+		var err error
+		meta, tracks, err = s.resolver.Resolve(ctx, snapshot.URL, snapshot.Source)
+		if err != nil {
+			s.failJob(job, fmt.Sprintf("Ошибка разрешения метаданных: %v", err))
+			return
+		}
+		job.UpdateProgress(8.0, "Поиск источника релиза")
+		_, _ = s.resolver.BindAutomaticRelease(ctx, snapshot.URL, meta, tracks)
+		if ctx.Err() != nil {
+			s.failJob(job, "Загрузка отменена")
+			return
+		}
 	}
 
 	// Create temporary working directories inside TMP_DIR sandbox
@@ -355,7 +370,6 @@ func (s *Service) processTracksPipeline(
 		return
 	}
 
-	// Source matching is a proposal only. Missing sources require an explicit user binding.
 	// Process each track
 	var wg sync.WaitGroup
 	maxConcurrentTracks := runtime.NumCPU() / 2

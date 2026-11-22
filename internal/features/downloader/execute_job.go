@@ -25,6 +25,9 @@ func (s *Service) executeJob(ctx context.Context, job *Job) {
 func (s *Service) executeRegular(ctx context.Context, job *Job) {
 	snapshot := job.Snapshot()
 	hasManual := snapshot.IsRedownload || hasManualSource(snapshot.Tracks)
+	hasAutoRelease := slices.ContainsFunc(snapshot.Tracks, func(track resolver.ResolvedTrack) bool {
+		return track.VersionStatus == resolver.AutoReleaseVersionStatus
+	})
 	frozen := len(snapshot.SelectedTrackIndices) > 0
 	if frozen && len(snapshot.Tracks) == 0 {
 		job.SetError(errPreflightExpired.Error())
@@ -42,7 +45,7 @@ func (s *Service) executeRegular(ctx context.Context, job *Job) {
 	var meta *resolver.ReleaseMetadata
 	var tracks []resolver.ResolvedTrack
 	var err error
-	if hasManual || frozen {
+	if hasManual || hasAutoRelease || frozen {
 		meta = &snapshot.AlbumMetadata
 		tracks = snapshot.Tracks
 	} else {
@@ -61,7 +64,7 @@ func (s *Service) executeRegular(ctx context.Context, job *Job) {
 		job.SetError("Не выбрано ни одного трека для загрузки")
 		return
 	}
-	if snapshot.SkipExisting && !hasManual && s.repo != nil {
+	if snapshot.SkipExisting && !hasManual && !hasAutoRelease && s.repo != nil {
 		tracks = slices.DeleteFunc(tracks, func(track resolver.ResolvedTrack) bool {
 			existing, err := s.repo.CheckTrackInLibrary(ctx, track.Title, track.Artist, track.ISRC)
 			return err == nil && existing != nil
@@ -72,8 +75,20 @@ func (s *Service) executeRegular(ctx context.Context, job *Job) {
 		}
 	}
 
+	step := "Метаданные получены, запуск загрузки"
+	if !hasManual && !hasAutoRelease {
+		job.UpdateProgress(8.0, "Поиск источника релиза")
+		match, _ := s.resolver.BindAutomaticRelease(ctx, snapshot.URL, meta, tracks)
+		if ctx.Err() != nil {
+			job.SetError("Загрузка отменена")
+			return
+		}
+		if match != nil {
+			step = fmt.Sprintf("Источник релиза выбран автоматически (%d/%d)", match.MatchedCount, match.TotalCount)
+		}
+	}
 	job.SetMetadata(*meta, tracks)
-	job.UpdateProgress(10.0, "Метаданные получены, запуск загрузки")
+	job.UpdateProgress(10.0, step)
 
 	rawDir := ""
 	convertedDir := ""

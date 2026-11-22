@@ -226,6 +226,7 @@
 
                                         <span class="text-xs font-mono text-content-muted" x-text="`Соответствие: ${cand.score}/100`"></span>
                                         <span class="text-xs text-content-muted" x-text="`Пропусков: ${cand.missing_tracks || 0} · дополнительных: ${cand.extra_tracks || 0}`"></span>
+                                        <span x-show="cand.ambiguous_tracks" class="text-xs text-amber-300" x-text="`Спорных пар: ${cand.ambiguous_tracks}`"></span>
                                         <span x-show="cand.mapping_limited" class="text-xs text-amber-300">Треклист слишком большой для цельного сопоставления; выберите дорожки отдельно.</span>
                                         <span class="text-xs text-amber-300" x-show="cand.evaluation && cand.evaluation.conflicts.length" x-text="$store.sourcePicker.explain(cand.evaluation)"></span>
                                     </div>
@@ -347,7 +348,7 @@
                                             </div>
 
                                             <div class="max-h-40 overflow-y-auto divide-y divide-surface-border/40">
-                                                <template x-for="cTrack in ($store.releaseSourcePicker.currentCandidate() ? $store.releaseSourcePicker.currentCandidate().tracks : [])" :key="cTrack.direct_url || cTrack.video_id || cTrack.index">
+                                                <template x-for="cTrack in $store.releaseSourcePicker.selectableTracks()" :key="cTrack.index || cTrack.direct_url">
                                                     <div
                                                         @click="$store.releaseSourcePicker.remapTrack(tIdx, cTrack)"
                                                         class="px-2 py-1.5 text-xs hover:bg-surface-hover rounded cursor-pointer flex items-center justify-between text-content-primary transition">

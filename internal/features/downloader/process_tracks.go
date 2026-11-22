@@ -55,7 +55,6 @@ func (s *Service) processTracks(
 	completedCount := 0
 	hasErrors := false
 
-	// Alternative sources require an explicit user choice.
 	// Параллельная обработка треков альбома с ограничением
 	concurrency := runtime.NumCPU() / 2
 	if concurrency < 2 {
@@ -307,6 +306,7 @@ func (s *Service) processSingleTrack(
 
 	job.UpdateTrack(trackIdx-1, func(tr *resolver.ResolvedTrack) {
 		tr.Status = "ready"
+		tr.Error = nil
 		convPath := filepath.Join(job.ID, "converted", mp3Filename)
 		tr.ConvertedPath = &convPath
 		if len(spots) > 0 {

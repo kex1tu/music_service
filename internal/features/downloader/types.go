@@ -701,10 +701,11 @@ type ReleaseCandidatesResponse struct {
 
 // ParseReleaseURLRequest — запрос разбора произвольной ссылки на релиз.
 type ParseReleaseURLRequest struct {
-	URL          string                   `json:"url"`
-	Artist       string                   `json:"artist"`
-	Album        string                   `json:"album"`
-	TargetTracks []resolver.ResolvedTrack `json:"target_tracks"`
+	VersionPolicy resolver.VersionPolicy   `json:"version_policy"`
+	URL           string                   `json:"url"`
+	Artist        string                   `json:"artist"`
+	Album         string                   `json:"album"`
+	TargetTracks  []resolver.ResolvedTrack `json:"target_tracks"`
 }
 
 // SwitchReleaseSourceRequest — запрос применения источника цельного релиза.

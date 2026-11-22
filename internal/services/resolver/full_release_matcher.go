@@ -2,9 +2,12 @@ package resolver
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"sort"
+	"maps"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
 )
 
@@ -26,6 +29,8 @@ type ReleaseCandidateItem struct {
 	Policy            VersionPolicy           `json:"version_policy"`
 	Evaluation        MatchEvaluation         `json:"evaluation"`
 	TrackEvaluations  map[int]MatchEvaluation `json:"track_evaluations"`
+	AmbiguousTracks   int                     `json:"ambiguous_tracks,omitempty"`
+	VersionMatches    int                     `json:"version_matches"`
 	MeanTrackScore    int                     `json:"mean_track_score"`
 	WeakestTrackScore int                     `json:"weakest_track_score"`
 	MissingTracks     int                     `json:"missing_tracks"`
@@ -98,43 +103,61 @@ func (m *FullReleaseMatcher) MatchTracklists(targetTracks []ResolvedTrack, candT
 	return assignTracklists(targetTracks, candTracks)
 }
 
-// MatchFullRelease ищет официальный релиз в каталоге YouTube Music и при совпадении треклиста >= 85% возвращает результат.
+// MatchFullRelease is the YouTube Music edition of automatic release selection.
 func (m *FullReleaseMatcher) MatchFullRelease(ctx context.Context, targetArtist, targetAlbum string, targetTracks []ResolvedTrack) (*FullReleaseMatchResult, error) {
-	if len(targetTracks) < 2 {
-		return nil, nil
-	}
-
-	// 1. Поиск официального альбома в YouTube Music
-	albumCand, err := m.ytMusic.SearchAlbumRelease(ctx, targetArtist, targetAlbum)
-	if err != nil || albumCand == nil || len(albumCand.Tracks) == 0 {
+	youtube := &FullReleaseMatcher{ytMusic: m.ytMusic}
+	c, err := youtube.AutoSelectRelease(ctx, targetArtist, targetAlbum, targetTracks)
+	if err != nil || c == nil {
 		return nil, err
 	}
+	return &FullReleaseMatchResult{
+		SourceURL: c.URL, SourceType: c.Source, ReleaseTitle: c.Title,
+		MatchedCount: c.MatchedCount, TotalCount: c.TotalCount, TrackURLs: c.TrackMapping,
+	}, nil
+}
 
-	// 2. Сверка треклиста
-	urls, matched := m.MatchTracklists(targetTracks, albumCand.Tracks)
-	total := len(targetTracks)
-	ratio := float64(matched) / float64(total)
-
-	// Порог принятия: не менее 85% совпадений
-	if ratio >= 0.85 {
-		sourceURL := ""
-		if albumCand.PlaylistID != "" {
-			sourceURL = fmt.Sprintf("https://music.youtube.com/playlist?list=%s", albumCand.PlaylistID)
-		} else if albumCand.BrowseID != "" {
-			sourceURL = fmt.Sprintf("https://music.youtube.com/browse/%s", albumCand.BrowseID)
-		}
-
-		return &FullReleaseMatchResult{
-			SourceURL:    sourceURL,
-			SourceType:   "ytmusic_album",
-			ReleaseTitle: albumCand.Title,
-			MatchedCount: matched,
-			TotalCount:   total,
-			TrackURLs:    urls,
-		}, nil
+// AutoSelectRelease selects a single release with strong identity and at least
+// 85% verified metadata coverage. Equal evidence for distinct audio is ambiguous.
+func (m *FullReleaseMatcher) AutoSelectRelease(ctx context.Context, artist, album string, tracks []ResolvedTrack) (*ReleaseCandidateItem, error) {
+	if strings.TrimSpace(artist) == "" || strings.TrimSpace(album) == "" || len(tracks) == 0 || len(tracks) > maxReleaseTargets {
+		return nil, nil
 	}
+	page, err := m.SearchReleaseCandidatesPaged(ctx, artist, album, tracks, 0, 0, "", "", 30)
+	if err != nil {
+		return nil, err
+	}
+	return selectRankedRelease(page.Candidates, tracks), nil
+}
 
-	return nil, nil
+func selectRankedRelease(items []ReleaseCandidateItem, tracks []ResolvedTrack) *ReleaseCandidateItem {
+	var best *ReleaseCandidateItem
+	for i := range items {
+		c := &items[i]
+		if 100*c.MatchedCount < 85*c.TotalCount || c.MappingLimited || c.AmbiguousTracks > 0 || !c.Evaluation.Compatible ||
+			c.Evaluation.TitleSimilarity != 1 || c.Evaluation.ArtistSimilarity < 0.95 ||
+			!IsAllowedURL(c.URL) || c.ResultType == "playlist" {
+			continue
+		}
+		versionMissing := false
+		for idx, evaluation := range c.TrackEvaluations {
+			if desired := desiredReleaseTrackClaim(tracks[idx], c.Policy); desired != "unknown" && evaluation.VersionClaim != desired {
+				versionMissing = true
+				break
+			}
+		}
+		if versionMissing {
+			continue
+		}
+		if best == nil {
+			best = c
+			continue
+		}
+		if best.MatchedCount == c.MatchedCount && best.VersionMatches == c.VersionMatches &&
+			best.Score-c.Score <= 2 && !maps.EqualFunc(best.TrackMapping, c.TrackMapping, SameAudioSource) {
+			return nil
+		}
+	}
+	return best
 }
 
 // ReleaseCandidatesPageResult содержит список кандидатов цельного релиза и состояние постраничной пагинации.
@@ -168,121 +191,73 @@ func (m *FullReleaseMatcher) SearchReleaseCandidatesPaged(
 	targetTracks []ResolvedTrack,
 	albumOffset, playlistOffset int,
 	albumToken, playlistToken string,
-	soundCloudLimit int,
+	soundCloudLimit int, policies ...VersionPolicy,
 ) (ReleaseCandidatesPageResult, error) {
 	if soundCloudLimit <= 0 {
 		soundCloudLimit = 30
 	}
 	soundCloudLimit = SoundCloudCandidateLimit(soundCloudLimit)
 
-	isCyrillic := ContainsCyrillic(targetArtist) || ContainsCyrillic(targetAlbum)
-	if !isCyrillic {
-		for _, t := range targetTracks {
-			if ContainsCyrillic(t.Title) || ContainsCyrillic(t.Artist) {
-				isCyrillic = true
-				break
-			}
-		}
-	}
+	isCyrillic := releaseUsesCyrillic(targetArtist, targetAlbum, targetTracks)
 
+	policy := PolicyRelease
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
+	_, censorStatus, censorBadge := ScoreReleaseCandidate("", false, 0)
 	isContinuation := albumOffset != 0 || playlistOffset != 0 || albumToken != "" || playlistToken != ""
-	var items []ReleaseCandidateItem
-
-	// 1. Поиск кандидатов на YouTube Music — ТОЛЬКО на первой странице (не при догрузке SoundCloud)
-	if !isContinuation && m.ytMusic != nil {
-		ytCands, err := m.ytMusic.SearchAlbumReleaseCandidates(ctx, targetArtist, targetAlbum, 4)
-		if err == nil {
-			for idx, cand := range ytCands {
-				mapping, matched := m.MatchTracklists(targetTracks, cand.Tracks)
-				ratio := 0.0
-				if len(targetTracks) > 0 {
-					ratio = float64(matched) / float64(len(targetTracks))
-				}
-				score, censorStatus, censorBadge := ScoreReleaseCandidate("ytmusic_album", isCyrillic, ratio)
-
-				candURL := ""
-				if cand.PlaylistID != "" {
-					candURL = fmt.Sprintf("https://music.youtube.com/playlist?list=%s", cand.PlaylistID)
-				} else if cand.BrowseID != "" {
-					candURL = fmt.Sprintf("https://music.youtube.com/browse/%s", cand.BrowseID)
-				}
-
-				items = append(items, ReleaseCandidateItem{
-					ID:           fmt.Sprintf("ytm_%d_%s", idx, cand.BrowseID),
-					Source:       "ytmusic_album",
-					Title:        cand.Title,
-					Artist:       cand.Artist,
-					URL:          candURL,
-					TrackCount:   len(cand.Tracks),
-					CoverURL:     cand.CoverURL,
-					Tracks:       cand.Tracks,
-					MatchedCount: matched,
-					TotalCount:   len(targetTracks),
-					MatchedRatio: ratio,
-					TrackMapping: mapping,
-					IsCyrillic:   isCyrillic,
-					CensorStatus: censorStatus,
-					CensorBadge:  censorBadge,
-					Score:        score,
-				})
-			}
-		}
-	}
-
-	// 2. Поиск кандидатов на SoundCloud
+	var ytCandidates []AlbumReleaseCandidate
 	var scRes SoundCloudSetsPageResult
+	var ytErr, scErr error
+	var searches sync.WaitGroup
+	if !isContinuation && m.ytMusic != nil {
+		searches.Go(func() {
+			providerCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+			defer cancel()
+			ytCandidates, ytErr = m.ytMusic.SearchAlbumReleaseCandidates(providerCtx, targetArtist, targetAlbum, 4)
+		})
+	}
 	if m.scSearcher != nil {
-		var err error
-		if isContinuation {
-			scRes, err = m.scSearcher.SearchSoundCloudSetsPaged(ctx, targetArtist, targetAlbum, albumOffset, playlistOffset, albumToken, playlistToken, soundCloudLimit)
-		} else {
-			scRes, err = m.scSearcher.SearchSoundCloudSetsPaged(ctx, targetArtist, targetAlbum, 0, 0, "", "", soundCloudLimit)
-		}
-		if err != nil && isContinuation {
-			return ReleaseCandidatesPageResult{}, err
-		}
-		if err == nil {
-			for idx, cand := range scRes.Candidates {
-				mapping, matched := m.MatchTracklists(targetTracks, cand.Tracks)
-				ratio := 0.0
-				if len(targetTracks) > 0 {
-					ratio = float64(matched) / float64(len(targetTracks))
-				}
-				score, censorStatus, censorBadge := ScoreReleaseCandidate("soundcloud_set", isCyrillic, ratio)
-
-				items = append(items, ReleaseCandidateItem{
-					ID:           fmt.Sprintf("sc_%d_%s", idx, cand.BrowseID),
-					Source:       "soundcloud_set",
-					ResultType:   cand.ResultType,
-					Title:        cand.Title,
-					Artist:       cand.Artist,
-					URL:          cand.PlaylistID,
-					TrackCount:   len(cand.Tracks),
-					CoverURL:     cand.CoverURL,
-					Tracks:       cand.Tracks,
-					MatchedCount: matched,
-					TotalCount:   len(targetTracks),
-					MatchedRatio: ratio,
-					TrackMapping: mapping,
-					IsCyrillic:   isCyrillic,
-					CensorStatus: censorStatus,
-					CensorBadge:  censorBadge,
-					Score:        score,
-				})
-			}
-		}
+		searches.Go(func() {
+			scRes, scErr = m.scSearcher.SearchSoundCloudSetsPaged(ctx, targetArtist, targetAlbum, albumOffset, playlistOffset, albumToken, playlistToken, soundCloudLimit)
+		})
+	}
+	searches.Wait()
+	if scErr != nil && isContinuation {
+		return ReleaseCandidatesPageResult{}, scErr
 	}
 
-	// 3. Ранжирование кандидатов
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].Score != items[j].Score {
-			return items[i].Score > items[j].Score
+	var items []ReleaseCandidateItem
+	for idx, cand := range ytCandidates {
+		candURL := ""
+		if cand.PlaylistID != "" {
+			candURL = fmt.Sprintf("https://music.youtube.com/playlist?list=%s", cand.PlaylistID)
+		} else if cand.BrowseID != "" {
+			candURL = fmt.Sprintf("https://music.youtube.com/browse/%s", cand.BrowseID)
 		}
-		return items[i].MatchedCount > items[j].MatchedCount
-	})
-
+		items = append(items, ReleaseCandidateItem{
+			ID: fmt.Sprintf("ytm_%d_%s", idx, cand.BrowseID), Source: "ytmusic_album",
+			Title: cand.Title, Artist: cand.Artist, URL: candURL,
+			TrackCount: len(cand.Tracks), CoverURL: cand.CoverURL, Tracks: cand.Tracks,
+			IsCyrillic: isCyrillic, CensorStatus: censorStatus, CensorBadge: censorBadge,
+		})
+	}
+	for idx, cand := range scRes.Candidates {
+		items = append(items, ReleaseCandidateItem{
+			ID: fmt.Sprintf("sc_%d_%s", idx, cand.BrowseID), Source: "soundcloud_set", ResultType: cand.ResultType,
+			Title: cand.Title, Artist: cand.Artist, URL: cand.PlaylistID,
+			TrackCount: len(cand.Tracks), CoverURL: cand.CoverURL, Tracks: cand.Tracks,
+			IsCyrillic: isCyrillic, CensorStatus: censorStatus, CensorBadge: censorBadge,
+		})
+	}
+	if len(items) == 0 && (ytErr != nil || scErr != nil) {
+		return ReleaseCandidatesPageResult{}, errors.Join(ytErr, scErr)
+	}
+	if err := ctx.Err(); err != nil {
+		return ReleaseCandidatesPageResult{}, err
+	}
 	return ReleaseCandidatesPageResult{
-		Candidates:        RankReleaseItems(items, targetArtist, targetAlbum, targetTracks, PolicyRelease),
+		Candidates:        RankReleaseItems(items, targetArtist, targetAlbum, targetTracks, policy),
 		IsCyrillic:        isCyrillic,
 		HasMoreSoundCloud: scRes.HasMoreSoundCloud,
 		AlbumOffset:       scRes.AlbumOffset,
@@ -293,56 +268,47 @@ func (m *FullReleaseMatcher) SearchReleaseCandidatesPaged(
 }
 
 // ParseAndMatchReleaseURL разбирает произвольную прямую ссылку на сет/альбом и сопоставляет её с целевыми треками.
-func (m *FullReleaseMatcher) ParseAndMatchReleaseURL(ctx context.Context, rawURL, targetArtist, targetAlbum string, targetTracks []ResolvedTrack) (*ReleaseCandidateItem, error) {
-	if m.scSearcher == nil {
-		m.scSearcher = NewSoundCloudSetSearcher("")
+func (m *FullReleaseMatcher) ParseAndMatchReleaseURL(ctx context.Context, rawURL, targetArtist, targetAlbum string, targetTracks []ResolvedTrack, policies ...VersionPolicy) (*ReleaseCandidateItem, error) {
+	searcher := m.scSearcher
+	if searcher == nil {
+		searcher = NewSoundCloudSetSearcher("")
 	}
-
-	cand, err := m.scSearcher.ParseSetURL(ctx, rawURL)
+	cand, err := searcher.ParseSetURL(ctx, rawURL)
 	if err != nil {
 		return nil, err
 	}
 
-	isCyrillic := ContainsCyrillic(targetArtist) || ContainsCyrillic(targetAlbum)
-	if !isCyrillic {
-		for _, t := range targetTracks {
-			if ContainsCyrillic(t.Title) || ContainsCyrillic(t.Artist) {
-				isCyrillic = true
-				break
-			}
-		}
+	policy := PolicyRelease
+	if len(policies) > 0 {
+		policy = policies[0]
 	}
-
 	sourceType := "direct_url"
-	if strings.Contains(rawURL, "soundcloud.com") {
+	switch source, _ := (&SourceResolver{}).DetectSource(rawURL); source {
+	case "soundcloud":
 		sourceType = "soundcloud_set"
-	} else if strings.Contains(rawURL, "youtube.com") || strings.Contains(rawURL, "youtu.be") {
+	case "youtube":
 		sourceType = "ytmusic_album"
 	}
 
-	mapping, matched := m.MatchTracklists(targetTracks, cand.Tracks)
-	ratio := 0.0
-	if len(targetTracks) > 0 {
-		ratio = float64(matched) / float64(len(targetTracks))
-	}
-	score, censorStatus, censorBadge := ScoreReleaseCandidate(sourceType, isCyrillic, ratio)
+	_, censorStatus, censorBadge := ScoreReleaseCandidate("", false, 0)
+	items := []ReleaseCandidateItem{{
+		ID: "direct_custom", Source: sourceType, ResultType: cand.ResultType,
+		Title: cand.Title, Artist: cand.Artist, URL: rawURL,
+		TrackCount: len(cand.Tracks), CoverURL: cand.CoverURL, Tracks: cand.Tracks,
+		IsCyrillic:   releaseUsesCyrillic(targetArtist, targetAlbum, targetTracks),
+		CensorStatus: censorStatus, CensorBadge: censorBadge,
+	}}
+	return &RankReleaseItems(items, targetArtist, targetAlbum, targetTracks, policy)[0], nil
+}
 
-	return &ReleaseCandidateItem{
-		ID:           "direct_custom",
-		Source:       sourceType,
-		Title:        cand.Title,
-		Artist:       cand.Artist,
-		URL:          rawURL,
-		TrackCount:   len(cand.Tracks),
-		CoverURL:     cand.CoverURL,
-		Tracks:       cand.Tracks,
-		MatchedCount: matched,
-		TotalCount:   len(targetTracks),
-		MatchedRatio: ratio,
-		TrackMapping: mapping,
-		IsCyrillic:   isCyrillic,
-		CensorStatus: censorStatus,
-		CensorBadge:  censorBadge,
-		Score:        score,
-	}, nil
+func releaseUsesCyrillic(artist, album string, tracks []ResolvedTrack) bool {
+	if ContainsCyrillic(artist) || ContainsCyrillic(album) {
+		return true
+	}
+	for _, track := range tracks {
+		if ContainsCyrillic(track.Title) || ContainsCyrillic(track.Artist) {
+			return true
+		}
+	}
+	return false
 }

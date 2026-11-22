@@ -49,6 +49,7 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 			type trackDetail struct {
 				contributors []DeezerArtist
 				isrc         string
+				explicit     bool
 			}
 			details := make([]trackDetail, total)
 
@@ -73,6 +74,7 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 						details[idx] = trackDetail{
 							contributors: tr.Contributors,
 							isrc:         tr.ISRC,
+							explicit:     tr.ExplicitLyrics,
 						}
 					}
 				}(i, t.ID)
@@ -126,6 +128,9 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 					AlbumArtist: album.Artist.Name,
 					Duration:    t.Duration,
 					Status:      "pending",
+				}
+				if t.ExplicitLyrics || details[i].explicit {
+					tr.VersionClaim = string(PolicyUncensored)
 				}
 				if year > 0 {
 					tr.Year = &year
@@ -226,6 +231,9 @@ func (r *SourceResolver) resolveDeezer(ctx context.Context, rawURL string) (*Rel
 			Duration:    track.Duration,
 			CoverURL:    &coverURL,
 			Status:      "pending",
+		}
+		if track.ExplicitLyrics {
+			tr.VersionClaim = string(PolicyUncensored)
 		}
 		if year > 0 {
 			tr.Year = &year

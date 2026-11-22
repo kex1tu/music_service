@@ -399,12 +399,13 @@ func parseYtResponsiveListItem(r ytResponsiveListItem, addTrack func(YtMusicTrac
 
 // AlbumTrackCandidate представляет трек официального альбома YouTube Music или SoundCloud сета.
 type AlbumTrackCandidate struct {
-	VideoID   string `json:"video_id"`
-	DirectURL string `json:"direct_url,omitempty"`
-	Title     string `json:"title"`
-	Artist    string `json:"artist"`
-	Duration  int    `json:"duration"` // в секундах
-	Index     int    `json:"index"`
+	VideoID      string `json:"video_id"`
+	DirectURL    string `json:"direct_url,omitempty"`
+	Title        string `json:"title"`
+	Artist       string `json:"artist"`
+	Duration     int    `json:"duration"` // в секундах
+	Index        int    `json:"index"`
+	VersionClaim string `json:"version_claim,omitempty"`
 }
 
 // AlbumReleaseCandidate представляет метаданные найденного альбома и его треклист.
@@ -833,23 +834,14 @@ func (c *YouTubeMusicClient) GetAlbumReleaseTracks(ctx context.Context, browseID
 	for _, item := range rawItems {
 		var trItem struct {
 			MusicResponsiveListItemRenderer struct {
-				PlaylistItemData *struct {
-					VideoId string `json:"videoId"`
-				} `json:"playlistItemData"`
-				FlexColumns []struct {
-					MusicResponsiveListItemFlexColumnRenderer struct {
-						Text struct {
-							Runs []struct {
-								Text               string `json:"text"`
-								NavigationEndpoint *struct {
-									WatchEndpoint *struct {
-										VideoId string `json:"videoId"`
-									} `json:"watchEndpoint"`
-								} `json:"navigationEndpoint"`
-							} `json:"runs"`
-						} `json:"text"`
-					} `json:"musicResponsiveListItemFlexColumnRenderer"`
-				} `json:"flexColumns"`
+				ytResponsiveListItem
+				Badges []struct {
+					MusicInlineBadgeRenderer struct {
+						Icon struct {
+							IconType string `json:"iconType"`
+						} `json:"icon"`
+					} `json:"musicInlineBadgeRenderer"`
+				} `json:"badges"`
 				FixedColumns []struct {
 					MusicResponsiveListItemFixedColumnRenderer struct {
 						Text struct {
@@ -872,12 +864,12 @@ func (c *YouTubeMusicClient) GetAlbumReleaseTracks(ctx context.Context, browseID
 		}
 
 		vid := ""
-		if rend.PlaylistItemData != nil && rend.PlaylistItemData.VideoId != "" {
-			vid = rend.PlaylistItemData.VideoId
+		if rend.PlaylistItemData != nil && rend.PlaylistItemData.VideoID != "" {
+			vid = rend.PlaylistItemData.VideoID
 		}
 		if vid == "" && len(rend.FlexColumns[0].MusicResponsiveListItemFlexColumnRenderer.Text.Runs) > 0 {
 			if ep := rend.FlexColumns[0].MusicResponsiveListItemFlexColumnRenderer.Text.Runs[0].NavigationEndpoint; ep != nil && ep.WatchEndpoint != nil {
-				vid = ep.WatchEndpoint.VideoId
+				vid = ep.WatchEndpoint.VideoID
 			}
 		}
 
@@ -886,9 +878,32 @@ func (c *YouTubeMusicClient) GetAlbumReleaseTracks(ctx context.Context, browseID
 			tit = strings.TrimSpace(rend.FlexColumns[0].MusicResponsiveListItemFlexColumnRenderer.Text.Runs[0].Text)
 		}
 
-		art := ""
-		if len(rend.FlexColumns) > 1 && len(rend.FlexColumns[1].MusicResponsiveListItemFlexColumnRenderer.Text.Runs) > 0 {
-			art = strings.TrimSpace(rend.FlexColumns[1].MusicResponsiveListItemFlexColumnRenderer.Text.Runs[0].Text)
+		var artists []string
+		if len(rend.FlexColumns) > 1 {
+			runs := rend.FlexColumns[1].MusicResponsiveListItemFlexColumnRenderer.Text.Runs
+			for _, run := range runs {
+				if run.NavigationEndpoint == nil || run.NavigationEndpoint.BrowseEndpoint == nil {
+					continue
+				}
+				cfg := run.NavigationEndpoint.BrowseEndpoint.BrowseEndpointContextSupportedConfigs
+				if cfg == nil || cfg.BrowseEndpointContextMusicConfig == nil {
+					continue
+				}
+				switch cfg.BrowseEndpointContextMusicConfig.PageType {
+				case "MUSIC_PAGE_TYPE_ARTIST", "MUSIC_PAGE_TYPE_USER_CHANNEL":
+					artists = append(artists, run.Text)
+				}
+			}
+			// Some album tracks only provide a plain primary artist label.
+			if len(artists) == 0 && len(runs) > 0 && runs[0].NavigationEndpoint == nil {
+				if primary := strings.TrimSpace(runs[0].Text); primary != "" {
+					artists = append(artists, primary)
+				}
+			}
+		}
+		if len(artists) > 0 {
+			_, guests := ExtractFeatFromText(tit)
+			artists = append(artists, guests...)
 		}
 
 		durSec := 0
@@ -901,15 +916,20 @@ func (c *YouTubeMusicClient) GetAlbumReleaseTracks(ctx context.Context, browseID
 			continue
 		}
 
-		cleanTit, _ := ExtractFeatFromText(tit)
-		cleanTit = CleanYouTubeVideoTitle(cleanTit)
-
+		versionClaim := ""
+		for _, badge := range rend.Badges {
+			if badge.MusicInlineBadgeRenderer.Icon.IconType == "MUSIC_EXPLICIT_BADGE" {
+				versionClaim = string(PolicyUncensored)
+				break
+			}
+		}
 		tracks = append(tracks, AlbumTrackCandidate{
-			VideoID:  vid,
-			Title:    cleanTit,
-			Artist:   art,
-			Duration: durSec,
-			Index:    len(tracks) + 1,
+			VideoID:      vid,
+			Title:        tit,
+			VersionClaim: versionClaim,
+			Artist:       id3.FormatMultiValue(artists),
+			Duration:     durSec,
+			Index:        len(tracks) + 1,
 		})
 	}
 
