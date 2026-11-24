@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"slices"
@@ -224,7 +223,7 @@ func (m *Module) DeleteJob(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if err := m.service.DeleteJob(r.Context(), id); err != nil {
-		respondQueueChangeError(w, fmt.Errorf("%w: %w", errQueueStorage, err))
+		respondQueueChangeError(w, err)
 		return
 	}
 
@@ -306,6 +305,9 @@ func (m *Module) RetryAllFailed(w http.ResponseWriter, r *http.Request) {
 
 func respondQueueChangeError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, errCleanupPending):
+		log.Printf("[Downloader] %v", err)
+		httputil.RespondError(w, http.StatusInternalServerError, errCleanupPending.Error())
 	case errors.Is(err, errQueueStorage):
 		log.Printf("[Downloader] %v", err)
 		httputil.RespondError(w, http.StatusInternalServerError, errQueueStorage.Error())

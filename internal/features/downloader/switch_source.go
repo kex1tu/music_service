@@ -63,6 +63,9 @@ func (s *Service) switchJobTrackSource(ctx context.Context, jobID, trackID, targ
 	if job == nil {
 		return nil, ErrJobNotFound
 	}
+	if draft.CleanupPending != "" {
+		return nil, errCleanupPending
+	}
 	previous := draft.Status
 	switch previous {
 	case StatusQueued, StatusResolving, StatusDownloading, StatusConverting, StatusTagging:
@@ -178,6 +181,9 @@ func (s *Service) SwitchReleaseSource(ctx context.Context, req SwitchReleaseSour
 			return nil, ErrJobNotFound
 		}
 		draft = existing.Snapshot()
+		if draft.CleanupPending != "" {
+			return nil, errCleanupPending
+		}
 		if draft.selectionCorrupt {
 			return nil, ErrCorruptJobSelection
 		}
