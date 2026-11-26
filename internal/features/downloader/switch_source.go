@@ -66,6 +66,9 @@ func (s *Service) switchJobTrackSource(ctx context.Context, jobID, trackID, targ
 	if draft.CleanupPending != "" {
 		return nil, errCleanupPending
 	}
+	if s.runningJobs[job.ID] {
+		return nil, errSelectionConflict
+	}
 	previous := draft.Status
 	switch previous {
 	case StatusQueued, StatusResolving, StatusDownloading, StatusConverting, StatusTagging:
@@ -183,6 +186,9 @@ func (s *Service) SwitchReleaseSource(ctx context.Context, req SwitchReleaseSour
 		draft = existing.Snapshot()
 		if draft.CleanupPending != "" {
 			return nil, errCleanupPending
+		}
+		if s.runningJobs[existing.ID] {
+			return nil, errSelectionConflict
 		}
 		if draft.selectionCorrupt {
 			return nil, ErrCorruptJobSelection

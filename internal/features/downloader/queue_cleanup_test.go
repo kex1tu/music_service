@@ -376,6 +376,84 @@ func TestQueueCleanupBlocksSourceChanges(t *testing.T) {
 	}
 }
 
+func TestQueueCleanupRejectsRequeueWhileWorkerIsExiting(t *testing.T) {
+	for _, operation := range []string{"retry", "track source", "release source"} {
+		t.Run(operation, func(t *testing.T) {
+			svc, repo, _ := cleanupFixture(t)
+			manualIndex := 0
+			job := &Job{ID: "job", Status: StatusQueued, manualTrackIndex: &manualIndex,
+				Tracks: []resolver.ResolvedTrack{{TrackID: "track", Title: "pending"}}}
+			if err := repo.CreateJob(t.Context(), job); err != nil {
+				t.Fatal(err)
+			}
+			svc.AddJob(job)
+			claimed, _, cancel, err := svc.claimNextJob(t.Context())
+			if err != nil || claimed != job {
+				t.Fatalf("claim: %p, %v", claimed, err)
+			}
+			defer cancel()
+			job.SetError("worker reached a terminal state before exiting")
+
+			const source = "https://soundcloud.com/artist/track"
+			switch operation {
+			case "retry":
+				_, err = svc.RetryJob(t.Context(), job.ID)
+			case "track source":
+				_, err = svc.SwitchTrackVersion(t.Context(), "track", source)
+			case "release source":
+				_, err = svc.SwitchReleaseSource(t.Context(), SwitchReleaseSourceRequest{JobID: job.ID, TrackMapping: map[int]string{0: source}})
+			}
+			if err == nil {
+				t.Fatal("requeued job before its previous worker exited")
+			}
+			if ids, err := svc.RetryAllFailedJobs(t.Context()); err != nil || len(ids) != 0 {
+				t.Fatalf("bulk retry picked up a job whose worker was exiting: %v, %v", ids, err)
+			}
+			if next, _, _, err := svc.claimNextJob(t.Context()); err != nil || next != nil {
+				t.Fatalf("second worker claimed the same job: %p, %v", next, err)
+			}
+			svc.finishJobExecution(t.Context(), job)
+			if _, err := svc.RetryJob(t.Context(), job.ID); err != nil {
+				t.Fatalf("retry after worker exit: %v", err)
+			}
+		})
+	}
+}
+
+func TestQueueCleanupDoesNotBlockBulkRetry(t *testing.T) {
+	for _, action := range []JobStatus{cleanupDelete, cleanupRetry} {
+		t.Run(string(action), func(t *testing.T) {
+			svc, repo, sb := cleanupFixture(t)
+			file := stageCleanupFile(t, sb, "pending/raw/partial.dat")
+			for _, job := range []*Job{
+				{ID: "pending", Status: StatusError, CleanupPending: action},
+				{ID: "failed", Status: StatusError},
+			} {
+				if err := repo.CreateJob(t.Context(), job); err != nil {
+					t.Fatal(err)
+				}
+				svc.AddJob(job)
+			}
+
+			ids, err := svc.RetryAllFailedJobs(t.Context())
+			if err != nil || len(ids) != 1 || ids[0] != "failed" {
+				t.Fatalf("bulk retry returned %v, %v; want only the failed download", ids, err)
+			}
+			got, err := repo.GetJob(t.Context(), "failed")
+			if err != nil || got == nil || got.Status != StatusQueued {
+				t.Fatalf("failed download was not queued: %+v, %v", got, err)
+			}
+			pending, err := repo.GetJob(t.Context(), "pending")
+			if err != nil || pending == nil || pending.CleanupPending != action {
+				t.Fatalf("bulk retry changed pending cleanup: %+v, %v", pending, err)
+			}
+			if _, err := safefs.Stat(file); err != nil {
+				t.Fatalf("bulk retry touched pending staging: %v", err)
+			}
+		})
+	}
+}
+
 func TestQueueCleanupRetriesInBackground(t *testing.T) {
 	svc, repo, sb := cleanupFixture(t)
 	file := stageCleanupFile(t, sb, "job/raw/partial.dat")

@@ -219,13 +219,24 @@ func (s *Service) RetryJob(ctx context.Context, jobID string) (*Job, error) {
 	if !ok {
 		return nil, fmt.Errorf("задача %s не найдена", jobID)
 	}
+	return s.retryJob(ctx, job, false)
+}
 
+func (s *Service) retryJob(ctx context.Context, job *Job, failedOnly bool) (*Job, error) {
 	s.jobsMu.Lock()
 	defer s.jobsMu.Unlock()
+	jobID := job.ID
 	if s.jobs[jobID] != job {
+		if failedOnly {
+			return nil, nil
+		}
 		return nil, ErrJobNotFound
 	}
 	draft := job.Snapshot()
+	running := s.runningJobs[jobID]
+	if failedOnly && (running || draft.CleanupPending != "" || (draft.Status != StatusError && draft.Status != StatusCancelled)) {
+		return nil, nil
+	}
 	if draft.CleanupPending != "" {
 		if draft.CleanupPending != cleanupRetry {
 			return nil, errCleanupPending
@@ -234,6 +245,9 @@ func (s *Service) RetryJob(ctx context.Context, jobID string) (*Job, error) {
 			return nil, err
 		}
 		return job, nil
+	}
+	if running {
+		return nil, errors.New("задача уже выполняется")
 	}
 	if draft.selectionCorrupt {
 		return nil, ErrCorruptJobSelection
@@ -298,18 +312,17 @@ func (s *Service) RetryJob(ctx context.Context, jobID string) (*Job, error) {
 
 // RetryAllFailedJobs перезапускает все упавшие задачи.
 func (s *Service) RetryAllFailedJobs(ctx context.Context) ([]string, error) {
-	all := s.GetAllJobs()
 	var retried []string
-	for _, j := range all {
-		snap := j.Snapshot()
-		if snap.Status == StatusError || snap.Status == StatusCancelled {
-			if _, err := s.RetryJob(ctx, snap.ID); err != nil {
-				if errors.Is(err, ErrCorruptJobSelection) {
-					continue
-				}
-				return retried, err
-			}
-			retried = append(retried, snap.ID)
+	for _, job := range s.GetAllJobs() {
+		retry, err := s.retryJob(ctx, job, true)
+		if errors.Is(err, ErrCorruptJobSelection) {
+			continue
+		}
+		if err != nil {
+			return retried, err
+		}
+		if retry != nil {
+			retried = append(retried, job.ID)
 		}
 	}
 	return retried, nil
