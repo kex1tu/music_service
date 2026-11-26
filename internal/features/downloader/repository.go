@@ -107,6 +107,10 @@ func scanJob(scanner interface{ Scan(dest ...any) error }) (*Job, error) {
 		}
 	}
 	j.Status = JobStatus(statusStr)
+	if j.Status == cleanupDelete || j.Status == cleanupRetry {
+		j.CleanupPending = j.Status
+		j.Status = StatusError
+	}
 	createdAtStr, _ := parseTimeField(createdAtRaw)
 	_, updatedAt := parseTimeField(updatedAtRaw)
 	j.CreatedAt = createdAtStr
@@ -176,7 +180,7 @@ func (r *Repository) SaveJob(ctx context.Context, job *Job) error {
 
 // updateProgressSnapshot only updates an existing job that is no longer queued.
 func (r *Repository) updateProgressSnapshot(ctx context.Context, job *Job) error {
-	return r.writeJob(ctx, job, updateJobSQL+" AND status <> 'QUEUED'", false)
+	return r.writeJob(ctx, job, updateJobSQL+" AND status NOT IN ('QUEUED', 'CLEANUP_DELETE', 'CLEANUP_RETRY')", false)
 }
 
 func (r *Repository) updateJobWithSelection(ctx context.Context, job *Job, expected JobStatus) error {
@@ -214,7 +218,11 @@ func writeJobSnapshot(ctx context.Context, tx *sql.Tx, snap *Job, query string, 
 	if err != nil {
 		return fmt.Errorf("encode job selection: %w", err)
 	}
-	args := []any{snap.Status, snap.Source, snap.URL, snap.Progress, snap.CurrentStep,
+	status := snap.Status
+	if snap.CleanupPending != "" {
+		status = snap.CleanupPending
+	}
+	args := []any{status, snap.Source, snap.URL, snap.Progress, snap.CurrentStep,
 		snap.TotalTracks, snap.CompletedTracks, snap.Error, snap.TargetAlbumPath,
 		snap.IsBackfill, snap.AlbumTitle, snap.ArtistName, backfill, snap.ArtistID, string(selection)}
 	if insert {

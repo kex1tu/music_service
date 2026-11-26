@@ -28,6 +28,9 @@ func (s *Service) Start(ctx context.Context) error {
 			return fmt.Errorf("load download jobs: %w", err)
 		}
 		for _, job := range savedJobs {
+			if job.CleanupPending != "" {
+				continue
+			}
 			recovered, err := s.recoverLegacyStaging(job)
 			if err != nil {
 				log.Printf("[Downloader] recover staged files for %s: %v", job.ID, err)
@@ -53,6 +56,7 @@ func (s *Service) Start(ctx context.Context) error {
 			s.registerJobLocked(job)
 		}
 		s.jobsMu.Unlock()
+		s.retryPendingCleanups(s.ctx)
 	}
 
 	// 2. Запуск фиксированного пула воркеров
@@ -125,6 +129,7 @@ func (s *Service) workerLoop(ctx context.Context) {
 				s.executeJob(jobCtx, job)
 			}
 			cancel()
+			s.finishJobExecution(ctx, job)
 			continue
 		}
 		select {
@@ -183,6 +188,7 @@ func (s *Service) claimNextJob(ctx context.Context) (*Job, context.Context, cont
 
 	jobCtx, cancel := context.WithCancel(ctx)
 	job.SetCancelFunc(cancel)
+	s.runningJobs[job.ID] = true
 	return job, jobCtx, cancel, nil
 }
 
@@ -196,6 +202,7 @@ func (s *Service) cleanerLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			s.retryPendingCleanups(ctx)
 			s.cleanOldTempDirs()
 		}
 	}
