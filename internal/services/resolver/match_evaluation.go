@@ -51,6 +51,11 @@ var versionPhrases = map[string][]string{
 	"sped_up":      {"sped up", "speed up", "nightcore"},
 	"edit":         {"radio edit", "radio version", "tv edit"},
 }
+
+// Parts and movements carry recording identity even if only one character differs.
+var numberedPart = regexp.MustCompile(`(?:^|\s)(part|pt|movement|chapter|vol|volume|часть|глава|том)\s+([0-9]+|[ivxlcdm]+)(?:\s|$)`)
+
+var censorshipSuffix = regexp.MustCompile(`(?i)\s*(?:[-–—|:]\s*|\s+)(?:(?:explicit|uncensored|uncut|clean|censored)\s+(?:version|edition)|без цензуры|до цензуры|с цензурой)\s*$|\s*[-–—|:]\s*(?:explicit|uncensored|uncut|clean|censored)\s*$`)
 var brackets = regexp.MustCompile(`[\(\[]([^\)\]]*)[\)\]]`)
 var artistSep = regexp.MustCompile(`(?i)\s+(?:feat\.?|ft\.?|featuring|with|при уч\.?)\s+|\x00|\\+|\s*[,&;]\s*|\s+/\s+`)
 
@@ -125,6 +130,9 @@ func ParseTrackIdentity(raw string) TrackIdentity {
 		}
 		return b
 	})
+	if r.Censorship != "unknown" {
+		base = censorshipSuffix.ReplaceAllString(base, "")
+	}
 	if base != raw {
 		t = CleanQueryTextFull(NormalizeTrackTitleForMatching(base))
 	}
@@ -186,6 +194,18 @@ func artistSimilarity(a, b string) float64 {
 	return best
 }
 
+func desiredVersionClaim(title string, policy VersionPolicy) string {
+	if policy == PolicyClean || policy == PolicyUncensored {
+		return string(policy)
+	}
+	return ParseTrackIdentity(title).Censorship
+}
+
+func (e MatchEvaluation) strongIdentity() bool {
+	return e.Compatible && e.DurationKnown && len(e.Unknown) == 0 &&
+		e.TitleSimilarity >= 0.85 && e.ArtistSimilarity >= 0.85 && e.Score >= 85
+}
+
 func EvaluateTrack(targetTitle, targetArtist string, targetDuration int, candidateTitle, candidateArtist string, candidateDuration int, uploaderOnly ...bool) MatchEvaluation {
 	for _, s := range []string{targetTitle, targetArtist, candidateTitle, candidateArtist} {
 		if len(s) > 4096 {
@@ -228,6 +248,12 @@ func EvaluateTrack(targetTitle, targetArtist string, targetDuration int, candida
 	}
 	if artistUnknown {
 		e.Unknown = append(e.Unknown, "artist")
+	}
+	targetPart := numberedPart.FindStringSubmatch(t.Title)
+	candidatePart := numberedPart.FindStringSubmatch(c.Title)
+	if (targetPart != nil || candidatePart != nil) &&
+		(targetPart == nil || candidatePart == nil || targetPart[2] != candidatePart[2]) {
+		e.Conflicts = append(e.Conflicts, "numbered_part_mismatch")
 	}
 	if e.TitleSimilarity < 0.65 {
 		e.Conflicts = append(e.Conflicts, "title_mismatch")

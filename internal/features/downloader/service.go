@@ -62,8 +62,9 @@ type Service struct {
 	isPaused bool
 
 	// In-memory реестр задач
-	jobsMu sync.RWMutex
-	jobs   map[string]*Job
+	jobsMu      sync.RWMutex
+	jobs        map[string]*Job
+	runningJobs map[string]bool // protected by jobsMu; cleanup waits for the writer to exit
 
 	// Дебаунс синхронизации с базой данных
 	timersMu   sync.Mutex
@@ -110,6 +111,7 @@ func NewService(cfg ServiceConfig) *Service {
 		workersCount:    maxConcurrent,
 		wake:            make(chan struct{}, maxConcurrent),
 		jobs:            make(map[string]*Job),
+		runningJobs:     make(map[string]bool),
 		syncTimers:      make(map[string]*time.Timer),
 		resolveCache:    make(map[string]*cachedResolveResult),
 		preflightCache:  make(map[string]preflightSnapshot),

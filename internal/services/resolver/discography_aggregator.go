@@ -2,6 +2,7 @@ package resolver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -137,7 +138,8 @@ func (a *DiscographyAggregator) Aggregate(ctx context.Context, artistName, alias
 
 	var mu sync.Mutex
 	var collected []AggregatedRelease
-
+	var deezerErr, musicBrainzErr error
+	mbid := knownIDs["musicbrainz"]
 	var wg sync.WaitGroup
 
 	// 1. Сбор релизов из Deezer API
@@ -152,130 +154,143 @@ func (a *DiscographyAggregator) Aggregate(ctx context.Context, artistName, alias
 
 			if deezerID == "" {
 				art, err := a.deezer.SearchArtist(ctx, searchName)
-				if err == nil && art != nil {
+				if err != nil && !errors.Is(err, errDeezerArtistNotFound) {
+					deezerErr = fmt.Errorf("Deezer: %w", err)
+					return
+				}
+				if art != nil {
 					deezerID = strconv.FormatInt(art.ID, 10)
 				}
 			}
 
 			if deezerID != "" {
 				albums, err := a.deezer.GetArtistAlbums(ctx, deezerID)
-				if err == nil {
-					// Обогащаем альбомы официальными соавторами из Deezer API
-					albums = a.deezer.EnrichAlbumsContributors(ctx, albums)
-
-					mu.Lock()
-					for _, alb := range albums {
-						relType := strings.ToLower(alb.RecordType)
-						if relType == "compile" {
-							relType = "compilation"
-						} else if relType == "" {
-							relType = "album"
-						}
-						year := 0
-						if len(alb.ReleaseDate) >= 4 {
-							year, _ = strconv.Atoi(alb.ReleaseDate[:4])
-						}
-						relDate := alb.ReleaseDate
-						if len(relDate) == 4 {
-							relDate = relDate + "-01-01"
-						} else if relDate == "" && year > 0 {
-							relDate = fmt.Sprintf("%04d-01-01", year)
-						}
-
-						cover := alb.CoverXL
-						if cover == "" {
-							cover = alb.CoverMedium
-						}
-
-						primaryArt := alb.Artist.Name
-						if primaryArt == "" {
-							primaryArt = artistName
-						}
-						credits := deezerRadarCredits(alb)
-						formattedArtist := strings.Join(credits, ", ")
-						if formattedArtist == "" {
-							formattedArtist = primaryArt
-						}
-
-						collected = append(collected, AggregatedRelease{
-							CatalogCredits:  credits,
-							ProviderCredits: deezerProviderCredits(alb),
-							ArtistName:      formattedArtist,
-							CleanArtist:     CleanArtistKey(primaryArt),
-							Title:           alb.Title,
-							CleanTitle:      CleanReleaseTitle(alb.Title),
-							ReleaseType:     relType,
-							ReleaseDate:     relDate,
-							Year:            year,
-							CoverURL:        cover,
-							TrackCount:      alb.NbTracks,
-							DeezerID:        strconv.FormatInt(alb.ID, 10),
-							SourceURL:       fmt.Sprintf("https://www.deezer.com/album/%d", alb.ID),
-						})
-					}
-					mu.Unlock()
+				if err != nil {
+					deezerErr = fmt.Errorf("Deezer: %w", err)
+					return
 				}
+				// Обогащаем альбомы официальными соавторами из Deezer API
+				albums = a.deezer.EnrichAlbumsContributors(ctx, albums)
+
+				mu.Lock()
+				for _, alb := range albums {
+					relType := strings.ToLower(alb.RecordType)
+					if relType == "compile" {
+						relType = "compilation"
+					} else if relType == "" {
+						relType = "album"
+					}
+					year := 0
+					if len(alb.ReleaseDate) >= 4 {
+						year, _ = strconv.Atoi(alb.ReleaseDate[:4])
+					}
+					relDate := alb.ReleaseDate
+					if len(relDate) == 4 {
+						relDate = relDate + "-01-01"
+					} else if relDate == "" && year > 0 {
+						relDate = fmt.Sprintf("%04d-01-01", year)
+					}
+
+					cover := alb.CoverXL
+					if cover == "" {
+						cover = alb.CoverMedium
+					}
+
+					primaryArt := alb.Artist.Name
+					if primaryArt == "" {
+						primaryArt = artistName
+					}
+					credits := deezerRadarCredits(alb)
+					formattedArtist := strings.Join(credits, ", ")
+					if formattedArtist == "" {
+						formattedArtist = primaryArt
+					}
+
+					collected = append(collected, AggregatedRelease{
+						CatalogCredits:  credits,
+						ProviderCredits: deezerProviderCredits(alb),
+						ArtistName:      formattedArtist,
+						CleanArtist:     CleanArtistKey(primaryArt),
+						Title:           alb.Title,
+						CleanTitle:      CleanReleaseTitle(alb.Title),
+						ReleaseType:     relType,
+						ReleaseDate:     relDate,
+						Year:            year,
+						CoverURL:        cover,
+						TrackCount:      alb.NbTracks,
+						DeezerID:        strconv.FormatInt(alb.ID, 10),
+						SourceURL:       fmt.Sprintf("https://www.deezer.com/album/%d", alb.ID),
+					})
+				}
+				mu.Unlock()
 			}
 		}()
 	}
 
 	// 2. Сбор релизов из MusicBrainz API
-	if a.mb != nil {
+	if a.mb != nil && mbid != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			mbid := ""
-			if knownIDs != nil {
-				mbid = knownIDs["musicbrainz"]
+			rgs, err := a.mb.GetArtistReleaseGroups(ctx, mbid)
+			if err != nil {
+				musicBrainzErr = fmt.Errorf("MusicBrainz: %w", err)
+				return
 			}
-
-			if mbid != "" {
-				rgs, err := a.mb.GetArtistReleaseGroups(ctx, mbid)
-				if err == nil {
-					mu.Lock()
-					for _, rg := range rgs {
-						credits := append([]string{}, id3.ParseMultiValue(rg.Artist)...)
-						formattedArtist := strings.Join(credits, ", ")
-						if formattedArtist == "" {
-							formattedArtist = artistName
-						}
-
-						rgDate := rg.Date
-						if len(rgDate) == 4 {
-							rgDate = rgDate + "-01-01"
-						} else if rgDate == "" && rg.Year > 0 {
-							rgDate = fmt.Sprintf("%04d-01-01", rg.Year)
-						}
-
-						collected = append(collected, AggregatedRelease{
-							CatalogCredits:   credits,
-							ProviderCredits:  rg.ProviderCredits,
-							deezerAlbumLinks: rg.DeezerAlbumLinks,
-							ArtistName:       formattedArtist,
-							CleanArtist:      CleanArtistKey(artistName),
-							Title:            rg.Title,
-							CleanTitle:       CleanReleaseTitle(rg.Title),
-							ReleaseType:      rg.ReleaseType,
-							ReleaseDate:      rgDate,
-							Year:             rg.Year,
-							MusicBrainzID:    rg.ID,
-							SourceURL:        fmt.Sprintf("https://musicbrainz.org/release-group/%s", rg.ID),
-						})
-					}
-					mu.Unlock()
+			mu.Lock()
+			for _, rg := range rgs {
+				credits := append([]string{}, id3.ParseMultiValue(rg.Artist)...)
+				formattedArtist := strings.Join(credits, ", ")
+				if formattedArtist == "" {
+					formattedArtist = artistName
 				}
+
+				rgDate := rg.Date
+				if len(rgDate) == 4 {
+					rgDate = rgDate + "-01-01"
+				} else if rgDate == "" && rg.Year > 0 {
+					rgDate = fmt.Sprintf("%04d-01-01", rg.Year)
+				}
+
+				collected = append(collected, AggregatedRelease{
+					CatalogCredits:   credits,
+					ProviderCredits:  rg.ProviderCredits,
+					deezerAlbumLinks: rg.DeezerAlbumLinks,
+					ArtistName:       formattedArtist,
+					CleanArtist:      CleanArtistKey(artistName),
+					Title:            rg.Title,
+					CleanTitle:       CleanReleaseTitle(rg.Title),
+					ReleaseType:      rg.ReleaseType,
+					ReleaseDate:      rgDate,
+					Year:             rg.Year,
+					MusicBrainzID:    rg.ID,
+					SourceURL:        fmt.Sprintf("https://musicbrainz.org/release-group/%s", rg.ID),
+				})
 			}
+			mu.Unlock()
 		}()
 	}
 
 	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	deezerOK := a.deezer != nil && deezerErr == nil
+	musicBrainzOK := a.mb != nil && mbid != "" && musicBrainzErr == nil
+	if !deezerOK && !musicBrainzOK {
+		if err := errors.Join(deezerErr, musicBrainzErr); err != nil {
+			return nil, err
+		}
+	}
 
 	// 3. Дедупликация и слияние
 	deduped := attachRadarMusicBrainzGroups(a.deduplicateReleases(collected))
 
 	// 4. Сверка с локальной библиотекой SQLite
 	a.reconcileWithLibrary(ctx, artistName, deduped)
-
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return deduped, nil
 }
 

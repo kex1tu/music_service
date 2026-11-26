@@ -13,8 +13,12 @@ func (s *Service) GetMissingLyrics(ctx context.Context, limit int) ([]MissingLyr
 
 func (s *Service) StartBatchLyrics(ctx context.Context) (BatchProgress, error) {
 	s.lyricsMu.Lock()
+	if err := s.ctx.Err(); err != nil {
+		s.lyricsMu.Unlock()
+		return BatchProgress{}, err
+	}
 	if s.lyricsState.IsRunning {
-		state := s.lyricsState
+		state := *s.lyricsState
 		s.lyricsMu.Unlock()
 		return state, ErrBatchAlreadyRunning
 	}
@@ -31,23 +35,22 @@ func (s *Service) StartBatchLyrics(ctx context.Context) (BatchProgress, error) {
 	}
 
 	workerCtx, cancel := context.WithCancel(s.ctx)
+	// Each run owns its progress so a cancelled worker can unwind after a restart.
+	progress := &BatchProgress{IsRunning: true, Total: len(tracks)}
+	s.lyricsState = progress
 	s.lyricsCancel = cancel
-	s.lyricsState = BatchProgress{
-		IsRunning: true,
-		Total:     len(tracks),
-		Current:   0,
-		Found:     0,
-		Failed:    0,
-	}
-	s.lyricsMu.Unlock()
-
 	s.wg.Add(1)
+	s.lyricsMu.Unlock()
 	go func() {
 		defer s.wg.Done()
 		defer func() {
+			cancel()
 			s.lyricsMu.Lock()
-			s.lyricsState.IsRunning = false
-			s.lyricsState.CurrentTrack = ""
+			progress.IsRunning = false
+			progress.CurrentTrack = ""
+			if s.lyricsState == progress {
+				s.lyricsCancel = nil
+			}
 			s.lyricsMu.Unlock()
 		}()
 
@@ -59,44 +62,43 @@ func (s *Service) StartBatchLyrics(ctx context.Context) (BatchProgress, error) {
 			}
 
 			s.lyricsMu.Lock()
-			s.lyricsState.Current = i + 1
-			s.lyricsState.CurrentTrack = fmt.Sprintf("%s - %s", tr.Artist, tr.Title)
+			progress.Current = i + 1
+			progress.CurrentTrack = fmt.Sprintf("%s - %s", tr.Artist, tr.Title)
 			s.lyricsMu.Unlock()
 
 			if s.lyrics != nil {
 				res, err := s.lyrics.SearchLyrics(workerCtx, tr.Artist, tr.Title, tr.Album, tr.Duration)
-				if err == nil && res != nil && res.Lyrics != "" {
-					saveErr := s.saveBatchTrackLyrics(workerCtx, tr.FilePath, res)
-					if saveErr == nil {
-
-						s.lyricsMu.Lock()
-						s.lyricsState.Found++
-						s.lyricsMu.Unlock()
-					} else {
-						s.lyricsMu.Lock()
-						s.lyricsState.Failed++
-						s.lyricsMu.Unlock()
-					}
-				} else {
-					s.lyricsMu.Lock()
-					s.lyricsState.Failed++
-					s.lyricsMu.Unlock()
+				if workerCtx.Err() != nil {
+					return
 				}
+				found := err == nil && res != nil && res.Lyrics != "" &&
+					s.saveBatchTrackLyrics(workerCtx, tr.FilePath, res) == nil
+				s.lyricsMu.Lock()
+				if found {
+					progress.Found++
+				} else {
+					progress.Failed++
+				}
+				s.lyricsMu.Unlock()
 			}
 
-			time.Sleep(100 * time.Millisecond)
+			select {
+			case <-workerCtx.Done():
+				return
+			case <-time.After(100 * time.Millisecond):
+			}
 		}
 	}()
 
 	s.lyricsMu.RLock()
 	defer s.lyricsMu.RUnlock()
-	return s.lyricsState, nil
+	return *progress, nil
 }
 
 func (s *Service) GetBatchLyricsProgress() BatchProgress {
 	s.lyricsMu.RLock()
 	defer s.lyricsMu.RUnlock()
-	return s.lyricsState
+	return *s.lyricsState
 }
 
 func (s *Service) CancelBatchLyrics() bool {
@@ -105,6 +107,7 @@ func (s *Service) CancelBatchLyrics() bool {
 	if s.lyricsCancel != nil && s.lyricsState.IsRunning {
 		s.lyricsCancel()
 		s.lyricsState.IsRunning = false
+		s.lyricsState.CurrentTrack = ""
 		return true
 	}
 	return false

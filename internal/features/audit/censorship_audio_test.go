@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 	"music-manager/internal/core/mediaexec"
+	"music-manager/internal/core/safefs"
 	"music-manager/internal/id3"
 )
 
@@ -111,6 +113,103 @@ func TestCensorshipAudioRejectsReplacedTrack(t *testing.T) {
 	}
 	if got := listen(http.MethodHead, ""); got != http.StatusConflict {
 		t.Errorf("legacy evidence: HTTP %d", got)
+	}
+}
+
+func TestCensorshipAudioRelinkChecksBothRoles(t *testing.T) {
+	database, sb := auditFixture(t)
+	ctx := t.Context()
+	audit, err := NewCensorshipAudit(database.Conn(), sb, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer audit.Close()
+
+	resolve := func(path string) string {
+		t.Helper()
+		full, err := sb.Resolve(path, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return full
+	}
+	const target = "track.mp3"
+	const reference = "reference.mp3"
+	const renamedTarget = "renamed track.mp3"
+	const renamedReference = "renamed reference.mp3"
+	writeAudioFixture(t, resolve(reference), 660)
+	for _, path := range []string{target, reference} {
+		if err := id3.WriteTags(resolve(path), id3.TrackTags{Title: "Recording", Artist: "Artist"}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	run, err := audit.Start(ctx, CensorshipOptions{
+		Paths: []string{target}, References: map[string]string{target: reference},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitCensorState(t, audit, run, "completed")
+	readItem := func(t *testing.T) CensorshipItem {
+		t.Helper()
+		items, err := audit.Items(ctx, run, "", 100, 0)
+		if err != nil || len(items) != 1 || items[0].State != "done" {
+			t.Fatalf("items=%+v err=%v", items, err)
+		}
+		return items[0]
+	}
+	item := readItem(t)
+	if item.Result.AudioHash == "" || item.Result.ReferenceAudioHash == "" || item.Result.AudioHash == item.Result.ReferenceAudioHash {
+		t.Fatal("fixture must contain two different, verified audio recordings")
+	}
+	if err := audit.Decide(ctx, item.ID, "uncertain", "historical note"); err != nil {
+		t.Fatal(err)
+	}
+
+	router := chi.NewRouter()
+	NewModule(&Service{censorship: audit}).registerCensorshipRoutes(router)
+	url := fmt.Sprintf("/censorship-items/%d/relink", item.ID)
+	currentTarget, currentReference := target, reference
+	for _, tc := range []struct{ role, original, renamed, wrong string }{
+		{"target", target, renamedTarget, reference},
+		{"reference", reference, renamedReference, renamedTarget},
+	} {
+		t.Run(tc.role, func(t *testing.T) {
+			if err := safefs.Rename(resolve(tc.original), resolve(tc.renamed)); err != nil {
+				t.Fatal(err)
+			}
+			if err := id3.WriteTags(resolve(tc.renamed), id3.TrackTags{Title: "Changed tags"}, nil); err != nil {
+				t.Fatal(err)
+			}
+			relink := func(path string, want int) {
+				t.Helper()
+				body := strings.NewReader(fmt.Sprintf(`{"role":%q,"path":%q}`, tc.role, path))
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, url, body))
+				if rec.Code != want {
+					t.Fatalf("relink %s to %q: HTTP %d, want %d: %s", tc.role, path, rec.Code, want, rec.Body)
+				}
+			}
+			relink(tc.renamed, http.StatusOK)
+			if tc.role == "target" {
+				currentTarget = tc.renamed
+			} else {
+				currentReference = tc.renamed
+			}
+			assertBinding := func() {
+				t.Helper()
+				got := readItem(t)
+				if got.Path != target || got.Reference != reference || got.CurrentPath != currentTarget ||
+					got.CurrentReference != currentReference || got.Decision != "uncertain" ||
+					got.Note != "historical note" || !got.DecisionVerified || got.Verdict != item.Verdict {
+					t.Fatalf("unexpected binding or history: %+v", got)
+				}
+			}
+			assertBinding()
+			relink(tc.wrong, http.StatusConflict)
+			assertBinding()
+		})
 	}
 }
 

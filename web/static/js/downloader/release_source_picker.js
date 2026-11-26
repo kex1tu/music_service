@@ -22,6 +22,7 @@ document.addEventListener('alpine:init', () => {
         selectedCandidateIndex: -1,
         versionPolicy: "release",
         searchSerial: 0,
+        directSerial: 0,
         soundCloudLimit: 30,
         hasMoreSoundCloud: false,
         albumOffset: 0,
@@ -84,6 +85,7 @@ document.addEventListener('alpine:init', () => {
             this.albumToken = '';
             this.playlistToken = '';
             this.searchSerial++;
+            this.directSerial++;
             this.versionPolicy = 'release';
             this.isLoading = false;
             this.isParsingUrl = false;
@@ -124,6 +126,9 @@ document.addEventListener('alpine:init', () => {
         async loadCandidates(expand = false) {
             const serial = ++this.searchSerial;
             if (!expand) {
+                this.directSerial++;
+                this.isParsingUrl = false;
+                this.directError = '';
                 this.soundCloudLimit = 30;
                 this.albumOffset = 0;
                 this.playlistOffset = 0;
@@ -231,8 +236,8 @@ document.addEventListener('alpine:init', () => {
             if (!candURL) {
                 return null;
             }
-            // Ищем трек кандидата по DirectURL или VideoID
-            return cand.tracks.find(t => (t.direct_url && t.direct_url === candURL) || (t.video_id && candURL.includes(t.video_id))) || null;
+            // Сервер возвращает тот же URL в дорожке и таблице сопоставления.
+            return cand.tracks.find(t => t.direct_url === candURL) || null;
         },
 
         getTrackDelta(targetDur, candDur) {
@@ -258,13 +263,18 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        selectableTracks() {
+            return this.currentCandidate()?.tracks?.filter(track => track.direct_url) || [];
+        },
+
         remapTrack(targetIdx, candTrack) {
+            if (!candTrack?.direct_url) return;
             this.manualOverrides[targetIdx] = candTrack;
             this.activeRemapTargetIdx = null;
         },
 
         clearTrackRemap(targetIdx) {
-            // Метка трека как намеренно исключенного из релиза (будет найден поштучно)
+            // Исключённый трек остаётся без назначенного источника.
             this.manualOverrides[targetIdx] = null;
             this.activeRemapTargetIdx = null;
         },
@@ -285,12 +295,14 @@ document.addEventListener('alpine:init', () => {
         },
 
         async parseDirectUrl() {
+            if (this.isParsingUrl) return;
             const url = this.directUrl.trim();
             if (!url) {
                 this.directError = 'Вставьте ссылку на сет SoundCloud или альбом YouTube Music';
                 return;
             }
 
+            const serial = ++this.directSerial;
             this.isParsingUrl = true;
             this.directError = '';
 
@@ -303,6 +315,7 @@ document.addEventListener('alpine:init', () => {
                         artist: this.artist,
                         album: this.album,
                         target_tracks: this.targetTracks,
+                        version_policy: this.versionPolicy,
                     }),
                 });
 
@@ -312,16 +325,18 @@ document.addEventListener('alpine:init', () => {
                 }
 
                 const cand = await res.json();
+                if (serial !== this.directSerial) return;
                 this.candidates.unshift(cand);
                 this.selectedCandidateIndex = -1;
                 this.manualOverrides = {};
                 this.activeTab = 'candidates';
                 this.directUrl = '';
             } catch (err) {
+                if (serial !== this.directSerial) return;
                 console.error('[ReleaseSourcePicker] parseDirectUrl error:', err);
                 this.directError = err.message || 'Не удалось разобрать ссылку';
             } finally {
-                this.isParsingUrl = false;
+                if (serial === this.directSerial) this.isParsingUrl = false;
             }
         },
 
@@ -337,8 +352,8 @@ document.addEventListener('alpine:init', () => {
                 const trackMapping = {};
                 for (let i = 0; i < this.targetTracks.length; i++) {
                     const mapped = this.getMappedCandidateTrack(i);
-                    if (mapped) {
-                        trackMapping[i] = mapped.direct_url || (mapped.video_id ? `https://music.youtube.com/watch?v=${mapped.video_id}` : '');
+                    if (mapped?.direct_url) {
+                        trackMapping[i] = mapped.direct_url;
                     }
                 }
 

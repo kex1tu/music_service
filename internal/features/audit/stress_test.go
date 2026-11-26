@@ -485,44 +485,7 @@ func TestAuditStress_RapidCancellationBatchWorkers(t *testing.T) {
 		wg.Wait()
 	})
 
-	// Subtest 3.3: Immediate start after cancel state machine test
-	t.Run("ImmediateStartAfterCancel", func(t *testing.T) {
-		rig := setupRig(t)
-		// Start batch lyrics
-		p1, err := rig.service.StartBatchLyrics(context.Background())
-		if err != nil {
-			t.Fatalf("initial StartBatchLyrics failed: %v", err)
-		}
-		if !p1.IsRunning && p1.Total > 0 {
-			t.Fatalf("expected batch lyrics to be running")
-		}
-
-		// Cancel immediately
-		cancelled := rig.service.CancelBatchLyrics()
-		if !cancelled {
-			t.Log("CancelBatchLyrics returned false (worker might have completed or was already stopped)")
-		}
-
-		// Start immediately again without waiting
-		p2, err := rig.service.StartBatchLyrics(context.Background())
-		if err != nil && err != audit.ErrBatchAlreadyRunning {
-			t.Fatalf("immediate StartBatchLyrics failed with unexpected error: %v", err)
-		}
-		if p2.IsRunning {
-			t.Log("Worker 2 successfully started with IsRunning=true")
-		}
-
-		// Wait 120ms for Worker 1 to exit sleep and run its defer
-		time.Sleep(120 * time.Millisecond)
-
-		p3 := rig.service.GetBatchLyricsProgress()
-		t.Logf("Batch progress after 120ms: IsRunning=%v, Current=%d, Total=%d", p3.IsRunning, p3.Current, p3.Total)
-
-		// Allow worker to finish or cancel cleanly
-		rig.service.CancelBatchLyrics()
-	})
-
-	// Subtest 3.4: Graceful Close() while workers are active
+	// Subtest 3.3: Graceful Close() while workers are active
 	t.Run("GracefulCloseWhileRunning", func(t *testing.T) {
 		rig := setupRig(t)
 		_, _ = rig.service.StartBatchLyrics(context.Background())

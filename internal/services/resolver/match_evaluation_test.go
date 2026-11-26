@@ -1,6 +1,9 @@
 package resolver
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestUnifiedMatchRegressions(t *testing.T) {
 	exact := EvaluateTrack("abcdef", "uvwxyz", 180, "abcdef", "uvwxyz - Topic", 180)
@@ -46,13 +49,13 @@ func TestCandidateDeduplicationAndPolicies(t *testing.T) {
 
 func TestAssignmentSkipsMissingURLAndWrongVersion(t *testing.T) {
 	m := &FullReleaseMatcher{}
-	for _, c := range []AlbumTrackCandidate{{Title: "Song", Duration: 180}, {Title: "Song (Slowed)", Duration: 180, VideoID: "x"}} {
-		_, n := m.MatchTracklists([]ResolvedTrack{{Title: "Song", Duration: 180}}, []AlbumTrackCandidate{c})
+	for _, c := range []AlbumTrackCandidate{{Title: "Song", Artist: "Vega", Duration: 180}, {Title: "Song (Slowed)", Artist: "Vega", Duration: 180, VideoID: "x"}} {
+		_, n := m.MatchTracklists([]ResolvedTrack{{Title: "Song", Artist: "Vega", Duration: 180}}, []AlbumTrackCandidate{c})
 		if n != 0 {
 			t.Fatalf("invalid candidate counted: %+v", c)
 		}
 	}
-	_, n := m.MatchTracklists([]ResolvedTrack{{Title: "Song", Duration: 180}, {Title: "Song", Duration: 180}}, []AlbumTrackCandidate{{Title: "Song", Duration: 180, VideoID: "x"}, {Title: "Song", Duration: 180, VideoID: "x"}})
+	_, n := m.MatchTracklists([]ResolvedTrack{{Title: "Song", Artist: "Vega", Duration: 180}, {Title: "Song", Artist: "Vega", Duration: 180}}, []AlbumTrackCandidate{{Title: "Song", Artist: "Vega", Duration: 180, VideoID: "x"}, {Title: "Song", Artist: "Vega", Duration: 180, VideoID: "x"}})
 	if n != 1 {
 		t.Fatalf("duplicate source counted twice: %d", n)
 	}
@@ -65,8 +68,8 @@ func TestAssignmentSkipsMissingURLAndWrongVersion(t *testing.T) {
 
 func TestGlobalAssignmentAvoidsGreedyTrap(t *testing.T) {
 	// First target can use either candidate; the second has just one compatible edge.
-	targets := []ResolvedTrack{{Title: "Song One", Duration: 180}, {Title: "Song One", Duration: 190}}
-	candidates := []AlbumTrackCandidate{{Title: "Song One", Duration: 181, VideoID: "both"}, {Title: "Song One", Duration: 170, VideoID: "first_only"}}
+	targets := []ResolvedTrack{{Title: "Song One", Artist: "Vega", Duration: 180}, {Title: "Song One", Artist: "Vega", Duration: 190}}
+	candidates := []AlbumTrackCandidate{{Title: "Song One", Artist: "Vega", Duration: 181, VideoID: "both"}, {Title: "Song One", Artist: "Vega", Duration: 170, VideoID: "first_only"}}
 	mapping, n := assignTracklists(targets, candidates)
 	if n != 2 || mapping[0] != "https://music.youtube.com/watch?v=first_only" {
 		t.Fatalf("not a global assignment: %v %d", mapping, n)
@@ -103,5 +106,32 @@ func TestVersionPreferenceCannotHideMissingIdentityEvidence(t *testing.T) {
 	got := RankCandidateItems([]CandidateTrackItem{{URL: "https://soundcloud.com/a/unknown", Source: "soundcloud", Title: "Song (Uncensored)", Uploader: "Anonymous Uploads", Duration: 180}, {URL: "https://music.youtube.com/watch?v=known", Source: "ytmusic", Title: "Song (Clean)", Uploader: "Artist", Duration: 180}}, "Song", "Artist", 180, PolicyUncensored)
 	if got[0].URL != "https://music.youtube.com/watch?v=known" {
 		t.Fatalf("version claim compensated for unknown artist: %+v", got)
+	}
+}
+
+func TestEvaluateTrackDurationBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		original   int
+		candidate  int
+		compatible bool
+		known      bool
+	}{
+		{"short track below threshold", 150, 161, true, true},
+		{"short track at threshold", 150, 162, true, true},
+		{"short track above threshold", 150, 163, false, true},
+		{"long track below threshold", 300, 323, true, true},
+		{"long track at threshold", 300, 324, true, true},
+		{"long track above threshold", 300, 325, false, true},
+		{"unknown duration", 150, 0, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := EvaluateTrack("Song", "Artist", tc.original, "Song", "Artist", tc.candidate)
+			if got.DurationKnown != tc.known || got.Compatible != tc.compatible ||
+				slices.Contains(got.Conflicts, "duration_mismatch") != !tc.compatible ||
+				slices.Contains(got.Unknown, "duration") != !tc.known {
+				t.Fatalf("duration %d vs %d: %+v", tc.original, tc.candidate, got)
+			}
+		})
 	}
 }

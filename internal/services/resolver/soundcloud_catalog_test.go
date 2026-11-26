@@ -29,7 +29,7 @@ func scFixtureItem(kind string, i int) scAPIAlbumItem {
 		ID: int64(i + 1), Title: fmt.Sprintf("%s %d", kind, i),
 		PermalinkURL: fmt.Sprintf("https://soundcloud.com/artist/%s-%d", kind, i),
 		TrackCount:   1, User: scAPIUser{Username: "Artist"},
-		Tracks: []scAPITrackItem{{ID: int64(i + 1), Title: "Song", PermalinkURL: "https://soundcloud.com/artist/song"}},
+		Tracks: []scAPITrackItem{{ID: int64(i + 1), Title: "Song", PermalinkURL: "https://soundcloud.com/artist/song", User: scAPIUser{Username: "Artist"}}},
 	}
 }
 

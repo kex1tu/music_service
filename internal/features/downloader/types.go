@@ -58,6 +58,7 @@ type Job struct {
 	TotalTracks          int                      `json:"total_tracks"`
 	CompletedTracks      int                      `json:"completed_tracks"`
 	Error                *string                  `json:"error,omitempty"`
+	CleanupPending       JobStatus                `json:"cleanup_pending,omitempty"`
 	TargetAlbumPath      *string                  `json:"target_album_path,omitempty"`
 	Backfill             *BackfillRequest         `json:"backfill,omitempty"`
 	IsBackfill           bool                     `json:"is_backfill"`
@@ -88,12 +89,11 @@ type DownloadJob = Job
 
 // MarshalJSON безопасно сериализует Job под read-lock для предотвращения гонок данных.
 func (j *Job) MarshalJSON() ([]byte, error) {
-	j.mu.RLock()
-	defer j.mu.RUnlock()
+	snap := j.Snapshot()
 
 	type Alias Job
 	var confirmed []string
-	for _, target := range j.RedownloadTargets {
+	for _, target := range snap.RedownloadTargets {
 		if target.Confirmed {
 			confirmed = append(confirmed, target.TrackID)
 		}
@@ -102,7 +102,7 @@ func (j *Job) MarshalJSON() ([]byte, error) {
 		*Alias
 		ConfirmedRedownloadTracks []string `json:"confirmed_redownload_tracks,omitempty"`
 	}{
-		Alias:                     (*Alias)(j),
+		Alias:                     (*Alias)(snap),
 		ConfirmedRedownloadTracks: confirmed,
 	})
 }
@@ -136,6 +136,7 @@ func (j *Job) Snapshot() *Job {
 		RedownloadTargets:    slices.Clone(j.RedownloadTargets),
 		CreatedAt:            j.CreatedAt,
 		UpdatedAt:            j.UpdatedAt,
+		CleanupPending:       j.CleanupPending,
 		CoverRelativePath:    j.CoverRelativePath,
 		AlbumMetadata:        j.AlbumMetadata,
 		SkipExisting:         j.SkipExisting,
@@ -178,6 +179,11 @@ func (j *Job) Snapshot() *Job {
 		snap.SelectedTrackIndices = make([]int, len(j.SelectedTrackIndices))
 		copy(snap.SelectedTrackIndices, j.SelectedTrackIndices)
 	}
+	if snap.CleanupPending != "" {
+		snap.Status = StatusError
+		message := errCleanupPending.Error()
+		snap.Error, snap.CurrentStep = &message, message
+	}
 	return snap
 }
 
@@ -200,6 +206,7 @@ func (j *Job) applyQueueSnapshot(snap *Job) {
 	j.TotalTracks = snap.TotalTracks
 	j.CompletedTracks = snap.CompletedTracks
 	j.Error = snap.Error
+	j.CleanupPending = snap.CleanupPending
 	j.UpdatedAt = snap.UpdatedAt
 	j.Tracks = snap.Tracks
 	j.AlbumMetadata = snap.AlbumMetadata
@@ -701,10 +708,11 @@ type ReleaseCandidatesResponse struct {
 
 // ParseReleaseURLRequest — запрос разбора произвольной ссылки на релиз.
 type ParseReleaseURLRequest struct {
-	URL          string                   `json:"url"`
-	Artist       string                   `json:"artist"`
-	Album        string                   `json:"album"`
-	TargetTracks []resolver.ResolvedTrack `json:"target_tracks"`
+	VersionPolicy resolver.VersionPolicy   `json:"version_policy"`
+	URL           string                   `json:"url"`
+	Artist        string                   `json:"artist"`
+	Album         string                   `json:"album"`
+	TargetTracks  []resolver.ResolvedTrack `json:"target_tracks"`
 }
 
 // SwitchReleaseSourceRequest — запрос применения источника цельного релиза.

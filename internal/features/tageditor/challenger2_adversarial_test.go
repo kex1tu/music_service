@@ -110,21 +110,25 @@ func TestChallenger2_All39EndpointsRegistration(t *testing.T) {
 func TestChallenger2_DirectoryTraversal_AllPathEndpoints(t *testing.T) {
 	env, _ := setupTagEditorTest(t)
 
-	traversalPayloads := []string{
-		"../../etc/passwd",
-		"../../../../../../../../../../../../etc/passwd",
-		"/etc/passwd",
-		"folder/../../../../etc/passwd",
-		"..\\..\\etc\\passwd",
-		"sub/..\\../etc/passwd",
-		"tmp_downloads/../../etc/passwd",
-		"tmp/../../../../etc/shadow",
-		"%2e%2e%2f%2e%2e%2fetc%2fpasswd",
-		"%252e%252e%252fetc%252fpasswd",
-		"\uff0e\uff0e\uff0fetc\uff0fpasswd", // Fullwidth dots and slashes
+	traversalPayloads := []struct {
+		path         string
+		shazamStatus int
+	}{
+		{"../../etc/passwd", http.StatusForbidden},
+		{"../../../../../../../../../../../../etc/passwd", http.StatusForbidden},
+		{"/etc/passwd", http.StatusNotFound},
+		{"folder/../../../../etc/passwd", http.StatusForbidden},
+		{"..\\..\\etc\\passwd", http.StatusForbidden},
+		{"sub/..\\../etc/passwd", http.StatusForbidden},
+		{"tmp_downloads/../../etc/passwd", http.StatusForbidden},
+		{"tmp/../../../../etc/shadow", http.StatusForbidden},
+		{"%2e%2e%2f%2e%2e%2fetc%2fpasswd", http.StatusForbidden},
+		{"%252e%252e%252fetc%252fpasswd", http.StatusForbidden},
+		{"\uff0e\uff0e\uff0fetc\uff0fpasswd", http.StatusForbidden}, // Fullwidth dots and slashes
 	}
 
-	for _, payload := range traversalPayloads {
+	for _, tc := range traversalPayloads {
+		payload := tc.path
 		t.Run("Payload_"+payload, func(t *testing.T) {
 			// 1. GET /tags?path=
 			resp := env.Get("/tags?path=" + payload)
@@ -184,12 +188,9 @@ func TestChallenger2_DirectoryTraversal_AllPathEndpoints(t *testing.T) {
 
 			// 8b. GET /api/catalog/shazam/track/sh123?audio_path=
 			resp = env.Get("/api/catalog/shazam/track/sh123?audio_path=" + payload)
-			if resp.StatusCode == http.StatusInternalServerError {
-				body := string(env.ReadBody(resp))
-				t.Logf("DEFECT CONFIRMED: GET /api/catalog/shazam/track returned HTTP 500 instead of 403 Forbidden for traversal path %q: %s", payload, body)
-			} else if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusNotFound {
-				body := string(env.ReadBody(resp))
-				t.Errorf("GET /api/catalog/shazam/track returned unexpected status %d for traversal path %q: %s", resp.StatusCode, payload, body)
+			if resp.StatusCode != tc.shazamStatus {
+				body := env.ReadBody(resp)
+				t.Errorf("GET /api/catalog/shazam/track with path %q returned %d, want %d: %s", payload, resp.StatusCode, tc.shazamStatus, body)
 			}
 
 			// 9. POST /files/rename-pattern with CurrentPath traversal

@@ -199,3 +199,50 @@ func TestWriteAndReadTags_MultiGenre_NullSeparated(t *testing.T) {
 		t.Errorf("expected Artist %q, got %q", "1.Kla$\\\\1.Царь", readBack.Artist)
 	}
 }
+
+func TestWriteTagsPreservesAudioAtTagBoundary(t *testing.T) {
+	audio := make([]byte, 417)
+	copy(audio, []byte{0xff, 0xfb, 0x90, 0x64})
+	copy(audio[4:], "original audio")
+	for _, tc := range []struct {
+		name    string
+		tagSize int
+		wantErr bool
+	}{
+		{name: "complete tag", tagSize: 16},
+		{name: "truncated tag", tagSize: 1024, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "track.mp3")
+			header := []byte{'I', 'D', '3', 4, 0, 0, 0, 0, 0, 0}
+			encodeSynchsafe(tc.tagSize, header[6:10])
+			before := append(append(header, make([]byte, 16)...), audio...)
+			if err := os.WriteFile(path, before, 0600); err != nil {
+				t.Fatal(err)
+			}
+
+			writeErr := WriteTags(path, TrackTags{Title: "Updated"}, nil)
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantErr {
+				if writeErr == nil || !bytes.Equal(before, after) {
+					t.Fatalf("truncated tag: error=%v, original unchanged=%t", writeErr, bytes.Equal(before, after))
+				}
+				return
+			}
+			if writeErr != nil {
+				t.Fatal(writeErr)
+			}
+			offset := 10 + decodeSynchsafe(after[6:10])
+			if offset > len(after) || !bytes.Equal(after[offset:], audio) {
+				t.Fatal("retagging changed the audio payload")
+			}
+			tags, err := ReadTags(path, "track.mp3")
+			if err != nil || tags.Title != "Updated" {
+				t.Fatalf("updated tags = %+v, error = %v", tags, err)
+			}
+		})
+	}
+}

@@ -1,6 +1,10 @@
 package resolver
 
-import "sort"
+import (
+	"math"
+	"slices"
+	"sort"
+)
 
 // RankReleaseItems separates usable coverage, identity and title-only version
 // claims. Platform and alphabet never establish censorship status.
@@ -10,38 +14,29 @@ func RankReleaseItems(items []ReleaseCandidateItem, artist, album string, target
 	}
 	for i := range items {
 		c := &items[i]
-		c.MappingLimited = len(targets) > 500 || len(c.Tracks) > 1000
+		c.MappingLimited = len(targets) > maxReleaseTargets || len(c.Tracks) > maxReleaseCandidates
 		c.Policy = policy
 		c.Evaluation = EvaluateTrack(album, artist, 0, c.Title, c.Artist, 0)
-		c.TrackEvaluations = map[int]MatchEvaluation{}
-		c.MissingTracks = len(targets) - c.MatchedCount
-		c.ExtraTracks = max(0, len(c.Tracks)-c.MatchedCount)
-		sum := 0
-		c.WeakestTrackScore = 100
-		for idx, raw := range c.TrackMapping {
-			for _, tr := range c.Tracks {
-				if candidateKey(releaseTrackURL(tr)) == candidateKey(raw) {
-					a := tr.Artist
-					if a == "" {
-						a = c.Artist
-					}
-					e := EvaluateTrack(targets[idx].Title, targets[idx].Artist, targets[idx].Duration, tr.Title, a, tr.Duration)
-					c.TrackEvaluations[idx] = e
-					sum += e.Score
-					c.WeakestTrackScore = min(c.WeakestTrackScore, e.Score)
-					break
-				}
+		c.TrackMapping, c.TrackEvaluations, c.VersionMatches, c.AmbiguousTracks = evaluateTracklists(targets, c.Tracks, policy)
+		c.Tracks = slices.Clone(c.Tracks)
+		for j := range c.Tracks {
+			c.Tracks[j].DirectURL = releaseTrackURL(c.Tracks[j])
+		}
+		c.MatchedCount, c.TotalCount = len(c.TrackMapping), len(targets)
+		c.MissingTracks = c.TotalCount - c.MatchedCount
+		c.ExtraTracks = len(c.Tracks) - c.MatchedCount
+		c.MatchedRatio, c.Score, c.MeanTrackScore, c.WeakestTrackScore = 0, 0, 0, 0
+		if c.MatchedCount > 0 {
+			c.MatchedRatio = float64(c.MatchedCount) / float64(c.TotalCount)
+			c.WeakestTrackScore = 100
+			sum := 0
+			for _, e := range c.TrackEvaluations {
+				sum += e.Score
+				c.WeakestTrackScore = min(c.WeakestTrackScore, e.Score)
 			}
-		}
-		if len(c.TrackEvaluations) > 0 {
-			c.MeanTrackScore = sum / len(c.TrackEvaluations)
-		} else {
-			c.WeakestTrackScore = 0
-		}
-		if c.MatchedCount == 0 {
-			c.Score = 0
-		} else {
-			c.Score = int(70*c.MatchedRatio + 20*c.Evaluation.TitleSimilarity + 10*c.Evaluation.ArtistSimilarity)
+			c.MeanTrackScore = sum / c.MatchedCount
+			// Each uncovered position contributes zero track evidence.
+			c.Score = int(math.Round(0.70*float64(sum)/float64(c.TotalCount) + 20*c.Evaluation.TitleSimilarity + 10*c.Evaluation.ArtistSimilarity))
 			if !c.Evaluation.Compatible {
 				c.Score = min(39, c.Score)
 			}
@@ -57,6 +52,9 @@ func RankReleaseItems(items []ReleaseCandidateItem, artist, album string, target
 		}
 		if a.MatchedCount != b.MatchedCount {
 			return a.MatchedCount > b.MatchedCount
+		}
+		if a.VersionMatches != b.VersionMatches {
+			return a.VersionMatches > b.VersionMatches
 		}
 		if policy != PolicyRelease {
 			pa, pb := a.Evaluation.VersionClaim == string(policy), b.Evaluation.VersionClaim == string(policy)

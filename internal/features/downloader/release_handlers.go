@@ -133,12 +133,6 @@ func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
 	playlistToken := strings.TrimSpace(r.URL.Query().Get("playlist_token"))
 	limit := httputil.QueryInt(r, "soundcloud_limit", 30)
 
-	pageRes, err := matcher.SearchReleaseCandidatesPaged(r.Context(), artist, album, targetTracks, albumOffset, playlistOffset, albumToken, playlistToken, limit)
-	if err != nil {
-		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
 	policy := resolver.VersionPolicy(r.URL.Query().Get("version_policy"))
 	if policy == "" {
 		policy = resolver.PolicyRelease
@@ -147,7 +141,11 @@ func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, 400, "invalid version_policy")
 		return
 	}
-	cands := resolver.RankReleaseItems(pageRes.Candidates, artist, album, targetTracks, policy)
+	pageRes, err := matcher.SearchReleaseCandidatesPaged(r.Context(), artist, album, targetTracks, albumOffset, playlistOffset, albumToken, playlistToken, limit, policy)
+	if err != nil {
+		httputil.RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	httputil.RespondJSON(w, http.StatusOK, ReleaseCandidatesResponse{
 		VersionPolicy:     policy,
@@ -156,7 +154,7 @@ func (m *Module) GetReleaseCandidates(w http.ResponseWriter, r *http.Request) {
 		Album:             album,
 		IsCyrillic:        pageRes.IsCyrillic,
 		TargetTracks:      targetTracks,
-		Candidates:        cands,
+		Candidates:        pageRes.Candidates,
 		HasMoreSoundCloud: pageRes.HasMoreSoundCloud,
 		AlbumOffset:       pageRes.AlbumOffset,
 		PlaylistOffset:    pageRes.PlaylistOffset,
@@ -186,8 +184,15 @@ func (m *Module) ParseReleaseURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.VersionPolicy == "" {
+		req.VersionPolicy = resolver.PolicyRelease
+	}
+	if !resolver.ValidVersionPolicy(req.VersionPolicy) {
+		httputil.RespondError(w, http.StatusBadRequest, "invalid version_policy")
+		return
+	}
 	matcher := m.service.Resolver().FullReleaseMatcher()
-	cand, err := matcher.ParseAndMatchReleaseURL(r.Context(), req.URL, req.Artist, req.Album, req.TargetTracks)
+	cand, err := matcher.ParseAndMatchReleaseURL(r.Context(), req.URL, req.Artist, req.Album, req.TargetTracks, req.VersionPolicy)
 	if err != nil {
 		httputil.RespondError(w, http.StatusBadRequest, fmt.Sprintf("ошибка парсинга ссылки: %v", err))
 		return

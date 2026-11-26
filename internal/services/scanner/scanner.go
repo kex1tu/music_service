@@ -5,15 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
 	"os"
-
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
-
-	"github.com/fsnotify/fsnotify"
 
 	"music-manager/internal/core/safefs"
 	"music-manager/internal/core/sandbox"
@@ -57,6 +52,10 @@ func (s *Scanner) IsScanning() bool {
 // ScanAll scans all MP3 files inside MUSIC_DIR and updates SQLite.
 func (s *Scanner) ScanAll(ctx context.Context) (int, error) {
 	return s.scanAll(ctx, safefs.WalkDir)
+}
+
+func excludedLibraryDir(name string) bool {
+	return strings.HasPrefix(name, ".") || name == "tmp" || name == "tmp_downloads"
 }
 
 func (s *Scanner) scanAll(ctx context.Context, walk func(string, fs.WalkDirFunc) error) (int, error) {
@@ -104,7 +103,7 @@ func (s *Scanner) scanAll(ctx context.Context, walk func(string, fs.WalkDirFunc)
 			return nil
 		}
 		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") || d.Name() == "tmp" || d.Name() == "tmp_downloads" {
+			if excludedLibraryDir(d.Name()) {
 				unread[relPath] = true
 				return filepath.SkipDir
 			}
@@ -125,7 +124,7 @@ func (s *Scanner) scanAll(ctx context.Context, walk func(string, fs.WalkDirFunc)
 		return count, err
 	}
 
-	if err := s.deleteMissingFiles(ctx, seenPaths, unread); err != nil {
+	if err := s.deleteMissingFiles(ctx, "", seenPaths, unread); err != nil {
 		return count, errors.Join(firstFailure, err)
 	}
 	if firstFailure == nil && s.deezerClient != nil {
@@ -151,88 +150,4 @@ func (s *Scanner) removeMissingPath(ctx context.Context, relPath string) error {
 	}
 	_, err = db.DeleteLibraryTracks(ctx, s.database.Conn(), relPath, false)
 	return err
-}
-
-// StartWatcher starts the background fsnotify filesystem watcher on MUSIC_DIR.
-func (s *Scanner) StartWatcher(ctx context.Context) error {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return fmt.Errorf("failed to create fsnotify watcher: %w", err)
-	}
-
-	root := s.musicSandbox.Root()
-
-	// Add root and all subdirectories to watcher
-	_ = safefs.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err == nil && d.IsDir() {
-			name := d.Name()
-			if path == root || (!strings.HasPrefix(name, ".") && name != "tmp" && name != "tmp_downloads") {
-				_ = watcher.Add(path)
-			}
-		}
-		return nil
-	})
-
-	go func() {
-		defer watcher.Close()
-		debounceTimer := time.NewTimer(time.Hour)
-		debounceTimer.Stop()
-		pendingPaths := make(map[string]fsnotify.Op)
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-
-				if strings.HasPrefix(filepath.Base(event.Name), ".") {
-					continue
-				}
-
-				// If directory created, add to watcher
-				if event.Op&fsnotify.Create != 0 {
-					if fi, err := safefs.Stat(event.Name); err == nil && fi.IsDir() {
-						_ = watcher.Add(event.Name)
-					}
-				}
-
-				if strings.EqualFold(filepath.Ext(event.Name), ".mp3") {
-					pendingPaths[event.Name] = event.Op
-					debounceTimer.Reset(500 * time.Millisecond)
-				}
-
-			case <-debounceTimer.C:
-				tasks := pendingPaths
-				pendingPaths = make(map[string]fsnotify.Op)
-
-				for path, op := range tasks {
-					rel, err := s.musicSandbox.ToRelative(path)
-					if err != nil {
-						continue
-					}
-
-					if op&(fsnotify.Remove|fsnotify.Rename) != 0 {
-						err = s.removeMissingPath(ctx, rel)
-					} else if op&(fsnotify.Create|fsnotify.Write) != 0 {
-						err = s.indexPath(ctx, rel)
-					}
-					if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errIndexPending) {
-						log.Printf("[Scanner Watcher] %q: %v", rel, err)
-					}
-				}
-
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				log.Printf("[Scanner Watcher] Error: %v", err)
-			}
-		}
-	}()
-
-	return nil
 }
